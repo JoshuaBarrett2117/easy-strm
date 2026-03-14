@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Trae
+.trae
+.agent
+
+# Node modules
+**/node_modules
+
+# Build artifacts
+**/dist
+**/build
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test files
+*_test.go
+*.test
+
+# Logs
+**/logs
+*.log
+
+# Environment files
+.env
+.env.local
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+*.md
+!README.md
+
+# Docker files (不需要复制到构建上下文)
+docker-compose*.yml
+.dockerignore
+
+# Config files with sensitive data
+config.yaml
+login.json
