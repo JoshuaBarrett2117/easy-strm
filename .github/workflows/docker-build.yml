@@ -23,6 +23,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout repository
@@ -68,8 +70,9 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Generate artifact attestation
+        if: github.event_name != 'pull_request'
         uses: actions/attest-build-provenance@v1
         with:
           subject-name: ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/easy-strm
           subject-digest: ${{ steps.build-and-push.outputs.digest }}
-          push-to-registry: ${{ github.event_name != 'pull_request' }}
+          push-to-registry: true
