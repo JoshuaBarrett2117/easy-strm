@@ -18,8 +18,11 @@ WORKDIR /app/backend
 
 RUN apk add --no-cache git gcc musl-dev
 
+COPY easy-strm/go.mod ./
+RUN go mod download github.com/SheltonZhu/115driver && go mod download github.com/gin-gonic/gin && go mod download github.com/go-redis/redis/v8 && go mod download github.com/lib/pq
+
 COPY easy-strm/ ./
-RUN go mod tidy
+RUN rm -f go.sum && go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easy-strm .
 
 # ==================== 运行阶段 ====================
