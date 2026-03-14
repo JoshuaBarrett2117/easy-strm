@@ -55,6 +55,11 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable={{is_default_branch}}
+          labels: |
+            org.opencontainers.image.title=Easy-STRM
+            org.opencontainers.image.description=115网盘文件直链获取工具 - 支持STRM文件生成
+            org.opencontainers.image.vendor=Easy-STRM
+            org.opencontainers.image.usage=初始账号: admin / admin123
 
       - name: Build and push Docker image
         id: build-and-push
