@@ -22,6 +22,7 @@ COPY easy-strm/go.mod easy-strm/go.sum* ./
 RUN go mod download || go mod tidy
 
 COPY easy-strm/ ./
+ENV GOTOOLCHAIN=auto
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easy-strm .
 
 # ==================== 运行阶段 ====================
