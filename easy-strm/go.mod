@@ -1,6 +1,6 @@
 module easy-strm
 
-go 1.25.0
+go 1.23
 
 require (
 	github.com/SheltonZhu/115driver v1.2.3
