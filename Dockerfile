@@ -75,7 +75,7 @@ ENV SERVER_URL="http://localhost:80" \
     REDIS_PORT="6379" \
     REDIS_PASSWORD="" \
     REDIS_DB="0" \
-    LOG_OUTPUT_TYPE="console" \
+    LOG_OUTPUT_TYPE="file" \
     LOG_LEVEL="INFO"
 
 # 启动supervisor管理进程
