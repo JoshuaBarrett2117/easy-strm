@@ -16,13 +16,12 @@ FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app/backend
 
-RUN apk add --no-cache git gcc musl-dev
+RUN apk add --no-cache git
 
-COPY easy-strm/go.mod ./
-RUN go mod download github.com/SheltonZhu/115driver && go mod download github.com/gin-gonic/gin && go mod download github.com/go-redis/redis/v8 && go mod download github.com/lib/pq
+COPY easy-strm/go.mod easy-strm/go.sum* ./
+RUN go mod download || go mod tidy
 
 COPY easy-strm/ ./
-RUN rm -f go.sum && go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easy-strm .
 
 # ==================== 运行阶段 ====================
