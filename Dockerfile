@@ -12,7 +12,7 @@ COPY easy-strm-front/ ./
 RUN npm run build
 
 # 阶段2: 构建后端
-FROM golang:1.24-alpine AS backend-builder
+FROM golang:1.23-alpine AS backend-builder
 
 WORKDIR /app/backend
 
