@@ -58,7 +58,7 @@ COPY docker/start.sh /app/start.sh
 RUN chmod +x /app/start.sh
 
 # 创建日志目录
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs /var/log/supervisor /var/log/nginx
 
 # 暴露端口（前端端口）
 EXPOSE 80
@@ -73,7 +73,8 @@ ENV SERVER_URL="http://localhost:80" \
     PG_PASSWORD="postgres" \
     REDIS_HOST="redis" \
     REDIS_PORT="6379" \
-    REDIS_PASSWORD=""
+    REDIS_PASSWORD="" \
+    REDIS_DB="0"
 
 # 启动supervisor管理进程
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
