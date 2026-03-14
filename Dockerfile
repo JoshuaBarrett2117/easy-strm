@@ -74,7 +74,9 @@ ENV SERVER_URL="http://localhost:80" \
     REDIS_HOST="redis" \
     REDIS_PORT="6379" \
     REDIS_PASSWORD="" \
-    REDIS_DB="0"
+    REDIS_DB="0" \
+    LOG_OUTPUT_TYPE="console" \
+    LOG_LEVEL="INFO"
 
 # 启动supervisor管理进程
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

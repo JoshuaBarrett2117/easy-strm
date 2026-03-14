@@ -113,6 +113,12 @@ func LoadConfig() *Config {
 	if redisPassword := os.Getenv("REDIS_PASSWORD"); redisPassword != "" {
 		config.Redis.Password = redisPassword
 	}
+	if logOutputType := os.Getenv("LOG_OUTPUT_TYPE"); logOutputType != "" {
+		config.Log.OutputType = logOutputType
+	}
+	if logLevel := os.Getenv("LOG_LEVEL"); logLevel != "" {
+		config.Log.LogLevel = logLevel
+	}
 
 	return config
 }
