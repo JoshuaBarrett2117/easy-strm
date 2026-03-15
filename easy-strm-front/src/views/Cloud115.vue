@@ -20,9 +20,9 @@
         </div>
       </template>
       
-      <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table">
-        <el-table-column prop="id" label="ID" width="60" align="center" />
-        <el-table-column prop="name" label="名称" min-width="120" />
+      <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
+        <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
+        <el-table-column prop="name" label="名称" min-width="120" sortable="custom" />
         <el-table-column label="Cookie" min-width="180">
           <template #default="scope">
             <div class="sensitive-cell">
@@ -58,8 +58,8 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" />
-        <el-table-column prop="update_time" label="更新时间" width="160" align="center" />
+        <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
+        <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
         <el-table-column label="操作" min-width="340" fixed="right" align="center">
           <template #default="scope">
             <div class="action-buttons">
@@ -246,6 +246,10 @@ const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(10)
 
+// 排序状态
+const sortField = ref('id')
+const sortOrder = ref('asc')
+
 // 对话框
 const dialogVisible = ref(false)
 const dialogTitle = ref('新增115云账号')
@@ -352,12 +356,32 @@ const formatExpireTime = (seconds) => {
  */
 const fetchCloud115List = async () => {
   try {
-    const response = await request('/cloud115')
+    const params = new URLSearchParams()
+    params.append('sort_field', sortField.value)
+    params.append('sort_order', sortOrder.value)
+    const response = await request(`/cloud115?${params.toString()}`)
     cloud115List.value = response.data.data || []
     total.value = response.data.data ? response.data.data.length : 0
   } catch (error) {
     ElMessage.error('获取115云账号列表失败')
   }
+}
+
+/**
+ * 处理表格排序变化
+ * @param {Object} column - 列信息
+ * @param {string} prop - 排序字段
+ * @param {string} order - 排序方式
+ */
+const handleSortChange = ({ prop, order }) => {
+  if (prop && order) {
+    sortField.value = prop
+    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    sortField.value = 'id'
+    sortOrder.value = 'asc'
+  }
+  fetchCloud115List()
 }
 
 /**

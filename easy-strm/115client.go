@@ -367,12 +367,12 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 		form.Set("filesize", fileSizeStr)
 		form.Set("fileid", sourceFile.Sha1)
 		form.Set("target", target)
-		
+
 		// 计算签名
 		innerData := userID + sourceFile.Sha1 + target + cfg.AppID
 		innerHash := sha1.Sum([]byte(innerData))
 		innerHashHex := hex.EncodeToString(innerHash[:])
-		
+
 		sigStr := targetDriver.Userkey + innerHashHex + "000000"
 		sigHash := sha1.Sum([]byte(sigStr))
 		sig := strings.ToUpper(hex.EncodeToString(sigHash[:]))
@@ -380,7 +380,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 		form.Set("topupload", "true")
 
 		signKey, signVal := "", ""
-		
+
 		// 重试机制：115 接口有签名超时机制（bug），有时正确的签名也会返回 sig invalid。
 		// 解决方案：检测到 sig invalid 时，延迟 1.5 秒后使用新的时间戳重新请求，最多重试 3 次。
 		maxSigRetries := 3
@@ -397,7 +397,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 			token := generateToken(sourceFile.Sha1, fileSizeStr, userID, t.String(), signKey, signVal, cfg.AppVersion)
 			form.Set("t", t.String())
 			form.Set("token", token)
-			
+
 			if signKey != "" && signVal != "" {
 				form.Set("sign_key", signKey)
 				form.Set("sign_val", signVal)
@@ -417,7 +417,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 				SetBody(encrypted).
 				SetHeaderVerbatim("Content-Type", "application/x-www-form-urlencoded").
 				SetDoNotParseResponse(true)
-			
+
 			// 根据 appid 动态调整 UA
 			if cfg.AppID == "1" {
 				req.SetHeader("User-Agent", driver.UA115Disk)
@@ -463,7 +463,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 				// 需要文件内容校验，跨账号场景无法满足
 				return fmt.Errorf("server requires file content verification (status=7), cross-account transfer not supported")
 			}
-			
+
 			if result.Status == 2 {
 				Info("Rapid transfer successful with AppID=%s: file %s", cfg.AppID, fileName)
 				return nil
@@ -472,7 +472,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 			// 其他状态直接报错
 			return fmt.Errorf("rapid transfer failed with status: %d, errorcode: %d", result.Status, result.ErrorCode)
 		}
-		
+
 		// 如果不是 sig invalid，说明配置可能对，但有其他问题，直接返回
 		if lastErr != nil && !strings.Contains(lastErr.Error(), "sig invalid") {
 			return lastErr
@@ -927,31 +927,35 @@ func (c *Client) ExportDirectoryTree(tree *DirectoryNode, filePath string) error
 	return nil
 }
 
-func (c *Client) DownloadDirectoryTreeFile(pickCode string, cookie string) ([]byte, error) {
-	Debug("Downloading directory tree file with pick_code: %s", pickCode)
+func (c *Client) DownloadDirectoryTreeFile(pickCode string, cloud115ID int, cookie string) ([]byte, error) {
+	Debug("Downloading directory tree file with pick_code: %s, cloud115_id: %d", pickCode, cloud115ID)
 
-	if err := c.ImportCredential(cookie); err != nil {
+	// 使用 getOrCreateDriver 获取独立的 driver 实例，避免并发时 cookie 混淆
+	d, err := getOrCreateDriver(cloud115ID, cookie)
+	if err != nil {
 		return nil, err
 	}
 
-	downloadInfo, err := c.driver.Download(pickCode)
+	downloadInfo, err := d.Download(pickCode)
 	if err != nil {
 		Error("Failed to get download info: %v", err)
 		return nil, fmt.Errorf("get download info failed: %v", err)
 	}
 
-	Debug("Download info - Size: %d, Name: %s", downloadInfo.FileSize, downloadInfo.FileName)
+	Debug("Download info - Size: %d, Name: %s, URL: %s", downloadInfo.FileSize, downloadInfo.FileName, downloadInfo.Url.Url)
 
-	reader, err := downloadInfo.Get()
+	// 使用 d 客户端来下载文件（它会自动带上 Cookie，且 User-Agent 与获取下载链接时一致）
+	resp, err := d.NewRequest().Get(downloadInfo.Url.Url)
 	if err != nil {
-		Error("Failed to get download reader: %v", err)
-		return nil, fmt.Errorf("get download reader failed: %v", err)
+		Error("Failed to download file: %v", err)
+		return nil, fmt.Errorf("download file failed: %v", err)
 	}
 
-	fileData, err := io.ReadAll(reader)
-	if err != nil {
-		Error("Failed to read file data: %v", err)
-		return nil, fmt.Errorf("read file data failed: %v", err)
+	fileData := resp.Body()
+
+	if resp.StatusCode() != http.StatusOK {
+		Error("Download failed with status %d: %s", resp.StatusCode(), string(fileData))
+		return nil, fmt.Errorf("download failed with status %d: %s", resp.StatusCode(), string(fileData))
 	}
 
 	// 保存目录树文件到本地用于调试

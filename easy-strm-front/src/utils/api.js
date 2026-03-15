@@ -206,3 +206,12 @@ export const getLogConfig = () => {
 export const updateLogConfig = (value) => {
   return api.put('/logs/config', { value })
 }
+
+// 任务相关API
+export const getTaskList = () => {
+  return api.get('/tasks')
+}
+
+export const getTaskDetail = (taskId) => {
+  return api.get(`/strm/task/${taskId}`)
+}

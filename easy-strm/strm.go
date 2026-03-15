@@ -407,3 +407,42 @@ func (sg *StrmGenerator) generateStrmFileWithDirectLink(video VideoFile, netDisk
 
 	return nil
 }
+
+// GenerateSingleStrmFile 为单个视频生成STRM文件并返回本地路径
+func (sg *StrmGenerator) GenerateSingleStrmFile(video VideoFile, netDiskBasePath string) (string, error) {
+	strmPath := filepath.Join(sg.OutputDir, video.Path)
+
+	if err := os.MkdirAll(strmPath, 0755); err != nil {
+		Error("Failed to create directory %s for STRM file: %v", strmPath, err)
+		return "", fmt.Errorf("create directory failed: %v", err)
+	}
+
+	strmFilename := video.Filename
+	if ext := filepath.Ext(video.Filename); ext != "" {
+		strmFilename = strings.TrimSuffix(video.Filename, ext) + sg.Extension
+	} else {
+		strmFilename = video.Filename + sg.Extension
+	}
+	strmFilepath := filepath.Join(strmPath, strmFilename)
+
+	netDiskFullPath := video.Sha1
+	if netDiskFullPath == "" {
+		netDiskFullPath = filepath.Join(netDiskBasePath, video.Path, video.Filename)
+	}
+
+	netDiskFullPath = strings.ReplaceAll(netDiskFullPath, "\\", "/")
+
+	encodedPath := url.QueryEscape(netDiskFullPath)
+	strmContent := fmt.Sprintf("%s/direct-link?path=%s", sg.ServerURL, encodedPath)
+	if video.Cloud115ID > 0 {
+		strmContent = fmt.Sprintf("%s&cloud115_id=%d", strmContent, video.Cloud115ID)
+	}
+	Debug("Using path for STRM content: %s, cloud115_id: %d", netDiskFullPath, video.Cloud115ID)
+
+	if err := os.WriteFile(strmFilepath, []byte(strmContent), 0644); err != nil {
+		Error("Failed to write STRM file %s: %v", strmFilepath, err)
+		return "", fmt.Errorf("write STRM file failed: %v", err)
+	}
+
+	return strmFilepath, nil
+}

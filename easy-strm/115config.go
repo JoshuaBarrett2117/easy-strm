@@ -33,6 +33,8 @@ type Config struct {
 	} `yaml:"log"`
 }
 
+var globalConfig *Config
+
 func LoadConfig() *Config {
 	// 默认配置
 	config := &Config{
@@ -120,7 +122,16 @@ func LoadConfig() *Config {
 		config.Log.LogLevel = logLevel
 	}
 
+	globalConfig = config
 	return config
+}
+
+// GetConfig 获取全局配置
+func GetConfig() *Config {
+	if globalConfig == nil {
+		return LoadConfig()
+	}
+	return globalConfig
 }
 
 func parseInt(s string) int {

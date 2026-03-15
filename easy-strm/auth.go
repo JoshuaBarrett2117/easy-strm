@@ -1458,9 +1458,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			}
 			Info("Using cloud115 account ID %d: %s", cloud115.ID, cloud115.Name)
 
-			// 创建任务ID
+			// 创建任务ID和任务名称
 			taskID := uuid.New().String()
-			_, err = CreateTask(taskID)
+			taskName := fmt.Sprintf("STRM生成 - %s", strmConfig.NetDiskPath)
+			_, err = CreateTask(taskID, TaskTypeStrmGenerate, taskName)
 			if err != nil {
 				Error("Failed to create task: %v", err)
 				JSON(c, 500, gin.H{
@@ -1578,7 +1579,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 				// 3. 下载目录树文本文件
 				Info("Downloading directory tree file with PickCode: %s", pickCode)
-				fileData, err := client.DownloadDirectoryTreeFile(pickCode, cloud115Cookie)
+				fileData, err := client.DownloadDirectoryTreeFile(pickCode, cloud115ID, cloud115Cookie)
 				if err != nil {
 					Error("Failed to download directory tree file: %v", err)
 					SetTaskError(taskID, fmt.Sprintf("Failed to download directory tree file: %v", err))
@@ -1976,6 +1977,290 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				},
 			})
 		})
+
+		// 任务管理相关路由
+		// 获取所有任务
+		auth.GET("/tasks", func(c *gin.Context) {
+			Debug("Get all tasks API called from %s", c.ClientIP())
+			tasks, err := GetAllTasks()
+			if err != nil {
+				Error("Failed to get all tasks: %v", err)
+				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to get tasks"})
+				return
+			}
+			JSON(c, http.StatusOK, gin.H{"data": tasks})
+		})
+
+		// 获取所有定时任务
+		auth.GET("/scheduled-tasks", func(c *gin.Context) {
+			Debug("Get all scheduled tasks API called from %s", c.ClientIP())
+			tasks, err := GetAllCronTasks()
+			if err != nil {
+				JSON(c, http.StatusOK, gin.H{"data": []interface{}{}})
+				return
+			}
+			JSON(c, http.StatusOK, gin.H{"data": tasks})
+		})
+
+		// ========== Cron任务管理API ==========
+
+		// 获取所有cron定时任务
+		auth.GET("/cron/tasks", func(c *gin.Context) {
+			Debug("Get all cron tasks API called from %s", c.ClientIP())
+			tasks, err := GetAllCronTasks()
+			if err != nil {
+				Error("Failed to get all cron tasks: %v", err)
+				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to get cron tasks"})
+				return
+			}
+
+			// 为每个任务添加下次执行时间
+			result := make([]gin.H, 0)
+			for _, task := range tasks {
+				taskData := gin.H{
+					"id":               task.ID,
+					"task_name":        task.TaskName,
+					"task_type":        task.TaskType,
+					"cloud115_id":      task.Cloud115ID,
+					"strm_config_id":   task.StrmConfigID,
+					"cron_expr":        task.CronExpr,
+					"status":           task.Status,
+					"last_run_time":    task.LastRunTime,
+					"next_run_time":    task.NextRunTime,
+					"last_run_status":  task.LastRunStatus,
+					"last_run_message": task.LastRunMessage,
+					"create_time":      task.CreateTime,
+					"update_time":      task.UpdateTime,
+				}
+
+				// 从调度器获取下次执行时间
+				if scheduler != nil {
+					nextRun := scheduler.GetNextRunTime(task.ID)
+					if nextRun != nil {
+						taskData["next_run_time"] = nextRun
+					}
+				}
+
+				result = append(result, taskData)
+			}
+
+			JSON(c, http.StatusOK, gin.H{"data": result})
+		})
+
+		// 创建cron定时任务
+		auth.POST("/cron/task", func(c *gin.Context) {
+			Debug("Create cron task API called from %s", c.ClientIP())
+
+			var req struct {
+				Cloud115ID   int    `json:"cloud115_id" binding:"required"`
+				StrmConfigID int    `json:"strm_config_id" binding:"required"`
+				CronExpr     string `json:"cron_expr" binding:"required"`
+			}
+
+			if err := c.ShouldBindJSON(&req); err != nil {
+				Warn("Invalid cron task request body from %s: %v", c.ClientIP(), err)
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+				return
+			}
+
+			// 验证STRM配置存在
+			strmConfig, err := GetStrmConfigByID(req.StrmConfigID)
+			if err != nil {
+				Error("Failed to get strm config: %v", err)
+				JSON(c, http.StatusNotFound, gin.H{"error": "STRM config not found"})
+				return
+			}
+
+			// 验证STRM配置属于该115账号
+			if strmConfig.Cloud115Id != req.Cloud115ID {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "STRM config does not belong to this 115 account"})
+				return
+			}
+
+			// 生成任务名称
+			taskName := fmt.Sprintf("%d增量更新任务", req.Cloud115ID)
+
+			// 检查任务是否已存在
+			existingTask, _ := GetCronTaskByName(taskName)
+			if existingTask != nil {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Cron task already exists for this account"})
+				return
+			}
+
+			// 创建定时任务
+			task, err := CreateCronTask(taskName, "incremental_sync", req.Cloud115ID, req.StrmConfigID, req.CronExpr)
+			if err != nil {
+				Error("Failed to create cron task: %v", err)
+				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to create cron task"})
+				return
+			}
+
+			// 添加到调度器
+			if scheduler != nil {
+				if err := scheduler.AddTask(task); err != nil {
+					Warn("Failed to add cron task to scheduler: %v", err)
+				}
+			}
+
+			Info("Created cron task: %s (ID: %d)", taskName, task.ID)
+			JSON(c, http.StatusOK, gin.H{
+				"message": "Cron task created successfully",
+				"data":    task,
+			})
+		})
+
+		// 更新cron定时任务
+		auth.PUT("/cron/task/:id", func(c *gin.Context) {
+			Debug("Update cron task API called from %s", c.ClientIP())
+
+			taskID := 0
+			fmt.Sscanf(c.Param("id"), "%d", &taskID)
+			if taskID == 0 {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+				return
+			}
+
+			var req struct {
+				CronExpr string `json:"cron_expr" binding:"required"`
+				Status   string `json:"status"`
+			}
+
+			if err := c.ShouldBindJSON(&req); err != nil {
+				Warn("Invalid cron task update request body from %s: %v", c.ClientIP(), err)
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+				return
+			}
+
+			// 获取现有任务
+			task, err := GetCronTaskByID(taskID)
+			if err != nil {
+				Error("Failed to get cron task: %v", err)
+				JSON(c, http.StatusNotFound, gin.H{"error": "Cron task not found"})
+				return
+			}
+
+			// 更新状态
+			status := task.Status
+			if req.Status != "" {
+				status = req.Status
+			}
+
+			// 更新数据库
+			task, err = UpdateCronTask(taskID, req.CronExpr, status)
+			if err != nil {
+				Error("Failed to update cron task: %v", err)
+				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to update cron task"})
+				return
+			}
+
+			// 更新调度器
+			if scheduler != nil {
+				if err := scheduler.UpdateTask(task); err != nil {
+					Warn("Failed to update cron task in scheduler: %v", err)
+				}
+			}
+
+			Info("Updated cron task ID: %d", taskID)
+			JSON(c, http.StatusOK, gin.H{
+				"message": "Cron task updated successfully",
+				"data":    task,
+			})
+		})
+
+		// 删除cron定时任务
+		auth.DELETE("/cron/task/:id", func(c *gin.Context) {
+			Debug("Delete cron task API called from %s", c.ClientIP())
+
+			taskID := 0
+			fmt.Sscanf(c.Param("id"), "%d", &taskID)
+			if taskID == 0 {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+				return
+			}
+
+			// 从调度器移除
+			if scheduler != nil {
+				scheduler.RemoveTask(taskID)
+			}
+
+			// 从数据库删除
+			if err := DeleteCronTask(taskID); err != nil {
+				Error("Failed to delete cron task: %v", err)
+				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to delete cron task"})
+				return
+			}
+
+			Info("Deleted cron task ID: %d", taskID)
+			JSON(c, http.StatusOK, gin.H{"message": "Cron task deleted successfully"})
+		})
+
+		// 立即执行cron任务
+		auth.POST("/cron/task/:id/run", func(c *gin.Context) {
+			Debug("Run cron task immediately API called from %s", c.ClientIP())
+
+			taskID := 0
+			fmt.Sscanf(c.Param("id"), "%d", &taskID)
+			if taskID == 0 {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+				return
+			}
+
+			// 获取任务
+			task, err := GetCronTaskByID(taskID)
+			if err != nil {
+				Error("Failed to get cron task: %v", err)
+				JSON(c, http.StatusNotFound, gin.H{"error": "Cron task not found"})
+				return
+			}
+
+			// 异步执行任务
+			go ExecuteCronTask(task)
+
+			Info("Triggered cron task ID: %d to run immediately", taskID)
+			JSON(c, http.StatusOK, gin.H{
+				"message": "Cron task triggered successfully",
+				"task_id": taskID,
+			})
+		})
+
+		// 获取cron任务执行状态
+		auth.GET("/cron/task/:id/status", func(c *gin.Context) {
+			Debug("Get cron task status API called from %s", c.ClientIP())
+
+			taskID := 0
+			fmt.Sscanf(c.Param("id"), "%d", &taskID)
+			if taskID == 0 {
+				JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+				return
+			}
+
+			task, err := GetCronTaskByID(taskID)
+			if err != nil {
+				Error("Failed to get cron task: %v", err)
+				JSON(c, http.StatusNotFound, gin.H{"error": "Cron task not found"})
+				return
+			}
+
+			// 从调度器获取下次执行时间
+			nextRun := task.NextRunTime
+			if scheduler != nil {
+				if nr := scheduler.GetNextRunTime(taskID); nr != nil {
+					nextRun = nr
+				}
+			}
+
+			JSON(c, http.StatusOK, gin.H{
+				"data": gin.H{
+					"id":               task.ID,
+					"task_name":        task.TaskName,
+					"status":           task.Status,
+					"last_run_time":    task.LastRunTime,
+					"next_run_time":    nextRun,
+					"last_run_status":  task.LastRunStatus,
+					"last_run_message": task.LastRunMessage,
+				},
+			})
+		})
 	}
 }
 
@@ -2085,15 +2370,26 @@ func extractVideoFiles(node *DirectoryNode, currentPath string, netDiskPath stri
 				filePickCode = file.FileID
 			}
 
+			// 计算相对路径
+			relativePath := currentPath
+			if relativePath == "" {
+				relativePath = file.Name
+			} else {
+				relativePath = filepath.Join(currentPath, file.Name)
+			}
+
 			videoFile := VideoFile{
-				Path:       currentPath,
-				Filename:   file.Name,
-				CID:        cid,
-				FID:        filePickCode,
-				Size:       int(file.Size),
-				Extension:  filepath.Ext(file.Name),
-				Sha1:       netDiskFullPath,
-				Cloud115ID: cloud115Id,
+				Path:         currentPath,
+				Filename:     file.Name,
+				CID:          cid,
+				FID:          filePickCode,
+				Size:         int(file.Size),
+				Extension:    filepath.Ext(file.Name),
+				Sha1:         netDiskFullPath,
+				Cloud115ID:   cloud115Id,
+				RelativePath: relativePath,
+				PickCode:     filePickCode,
+				Name:         file.Name,
 			}
 
 			collection.Videos = append(collection.Videos, videoFile)

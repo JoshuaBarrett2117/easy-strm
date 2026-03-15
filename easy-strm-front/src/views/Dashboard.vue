@@ -55,6 +55,10 @@
           <h1>{{ currentTitle }}</h1>
         </div>
         <div class="header-right">
+          <el-button v-if="isAdmin" class="task-btn" @click="showTaskDialog">
+            <el-icon><List /></el-icon>
+            查看任务
+          </el-button>
           <el-button v-if="isAdmin" class="log-btn" @click="showLogDialog">
             <el-icon><Document /></el-icon>
             查看日志
@@ -119,15 +123,42 @@
         <el-button @click="logDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <!-- 任务列表弹窗 -->
+    <el-dialog
+      v-model="taskDialogVisible"
+      title="任务列表"
+      width="70%"
+      top="5vh"
+      :close-on-click-modal="false"
+      destroy-on-close
+    >
+      <div class="task-dialog-container">
+        <div class="task-toolbar">
+          <el-button :icon="Refresh" @click="loadTaskList" :loading="taskLoading">刷新</el-button>
+          <el-checkbox v-model="autoRefreshTasks" @change="toggleTaskAutoRefresh" style="margin-left: 15px;">自动刷新</el-checkbox>
+        </div>
+        <div class="task-list" v-loading="taskLoading">
+          <div v-if="taskList.length > 0" class="task-items">
+            <TaskCard v-for="task in taskList" :key="task.task_id" :task="task" />
+          </div>
+          <el-empty v-else description="暂无运行中的任务" />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="taskDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup>
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Cloudy, Setting, SwitchButton, Document, Refresh } from '@element-plus/icons-vue'
+import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig } from '../utils/api'
+import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList } from '../utils/api'
+import TaskCard from '../components/TaskCard.vue'
 
 const router = useRouter()
 
@@ -292,10 +323,60 @@ const handleLogout = () => {
   }).catch(() => {})
 }
 
+// 任务相关状态
+const taskDialogVisible = ref(false)
+const taskList = ref([])
+const taskLoading = ref(false)
+const autoRefreshTasks = ref(false)
+let taskRefreshTimer = null
+
+/**
+ * 显示任务弹窗
+ */
+const showTaskDialog = async () => {
+  taskDialogVisible.value = true
+  await loadTaskList()
+}
+
+/**
+ * 加载任务列表
+ */
+const loadTaskList = async () => {
+  taskLoading.value = true
+  try {
+    const response = await getTaskList()
+    taskList.value = response.data.data || []
+  } catch (error) {
+    console.error('加载任务列表失败:', error)
+    ElMessage.error('加载任务列表失败')
+  } finally {
+    taskLoading.value = false
+  }
+}
+
+/**
+ * 切换任务自动刷新
+ */
+const toggleTaskAutoRefresh = (value) => {
+  if (value) {
+    taskRefreshTimer = setInterval(() => {
+      loadTaskList()
+    }, 3000)
+  } else {
+    if (taskRefreshTimer) {
+      clearInterval(taskRefreshTimer)
+      taskRefreshTimer = null
+    }
+  }
+}
+
 // 组件卸载时清理定时器
 onUnmounted(() => {
   if (autoRefreshTimer) {
     clearInterval(autoRefreshTimer)
+  }
+  if (taskRefreshTimer) {
+    clearInterval(taskRefreshTimer)
   }
 })
 
@@ -309,6 +390,19 @@ watch(logDialogVisible, (newVal) => {
     if (autoRefreshTimer) {
       clearInterval(autoRefreshTimer)
       autoRefreshTimer = null
+    }
+  }
+})
+
+/**
+ * 监听任务弹窗关闭，停止自动刷新
+ */
+watch(taskDialogVisible, (newVal) => {
+  if (!newVal) {
+    autoRefreshTasks.value = false
+    if (taskRefreshTimer) {
+      clearInterval(taskRefreshTimer)
+      taskRefreshTimer = null
     }
   }
 })
@@ -494,5 +588,44 @@ watch(logDialogVisible, (newVal) => {
   line-height: 1.5;
   white-space: pre-wrap;
   word-wrap: break-word;
+}
+
+.task-btn {
+  color: #67c23a;
+  border: 1px solid #67c23a;
+  background-color: transparent;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.task-btn:hover {
+  color: #fff;
+  background-color: #67c23a;
+  border-color: #67c23a;
+}
+
+.task-dialog-container {
+  height: 60vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.task-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.task-items {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

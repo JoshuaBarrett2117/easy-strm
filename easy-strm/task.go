@@ -3,23 +3,40 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 )
 
+// TaskType 任务类型
+type TaskType string
+
+const (
+	TaskTypeStrmGenerate    TaskType = "strm_generate"    // STRM文件生成（全量）
+	TaskTypeIncrementalSync TaskType = "incremental_sync" // STRM文件增量同步
+)
+
+// TaskTypeNames 任务类型中文名称
+var TaskTypeNames = map[TaskType]string{
+	TaskTypeStrmGenerate:    "STRM文件生成",
+	TaskTypeIncrementalSync: "增量同步",
+}
+
 // TaskStatus 任务状态
 type TaskStatus struct {
-	TaskID         string `json:"task_id"`
-	Status         string `json:"status"` // pending, running, completed, failed
-	Progress       int    `json:"progress"`
-	TotalFiles     int    `json:"total_files"`
-	ProcessedFiles int    `json:"processed_files"`
-	SuccessFiles   int    `json:"success_files"`
-	FailedFiles    int    `json:"failed_files"`
-	ErrorMessage   string `json:"error_message"`
-	CreateTime     string `json:"create_time"`
-	UpdateTime     string `json:"update_time"`
+	TaskID         string   `json:"task_id"`
+	TaskType       TaskType `json:"task_type"`       // 任务类型
+	TaskName       string   `json:"task_name"`       // 任务名称
+	Status         string   `json:"status"`          // pending, running, completed, failed
+	Progress       int      `json:"progress"`        // 进度百分比
+	TotalFiles     int      `json:"total_files"`     // 待生成文件总数
+	ProcessedFiles int      `json:"processed_files"` // 已处理文件数
+	SuccessFiles   int      `json:"success_files"`   // 成功文件数
+	FailedFiles    int      `json:"failed_files"`    // 失败文件数
+	ErrorMessage   string   `json:"error_message"`   // 错误信息
+	CreateTime     string   `json:"create_time"`     // 创建时间
+	UpdateTime     string   `json:"update_time"`     // 更新时间
 }
 
 // 任务状态常量
@@ -32,12 +49,15 @@ const (
 
 // 任务Redis key前缀
 const taskKeyPrefix = "easy_strm:task:"
+const taskListKey = "easy_strm:task:list"
 
 // CreateTask 创建新任务
-func CreateTask(taskID string) (*TaskStatus, error) {
+func CreateTask(taskID string, taskType TaskType, taskName string) (*TaskStatus, error) {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	task := &TaskStatus{
 		TaskID:     taskID,
+		TaskType:   taskType,
+		TaskName:   taskName,
 		Status:     TaskStatusPending,
 		Progress:   0,
 		CreateTime: now,
@@ -50,7 +70,8 @@ func CreateTask(taskID string) (*TaskStatus, error) {
 		return nil, err
 	}
 
-	Debug("Created task: %s", taskID)
+	AddTaskToList(taskID)
+	Debug("Created task: %s, type: %s, name: %s", taskID, taskType, taskName)
 	return task, nil
 }
 
@@ -165,6 +186,59 @@ func DeleteTask(taskID string) error {
 		return err
 	}
 
+	RemoveTaskFromList(taskID)
 	Debug("Deleted task %s from Redis", taskID)
+	return nil
+}
+
+// GetAllTasks 获取所有任务
+func GetAllTasks() ([]*TaskStatus, error) {
+	ctx := context.Background()
+	taskIDs, err := redisClient.LRange(ctx, taskListKey, 0, -1).Result()
+	if err != nil && err != redis.Nil {
+		Error("Failed to get task list from Redis: %v", err)
+		return nil, err
+	}
+
+	tasks := make([]*TaskStatus, 0)
+	for _, taskID := range taskIDs {
+		task, err := GetTask(taskID)
+		if err != nil {
+			Warn("Failed to get task %s: %v", taskID, err)
+			continue
+		}
+		if task != nil {
+			tasks = append(tasks, task)
+		}
+	}
+
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].CreateTime > tasks[j].CreateTime
+	})
+
+	return tasks, nil
+}
+
+// AddTaskToList 将任务ID添加到任务列表
+func AddTaskToList(taskID string) error {
+	ctx := context.Background()
+	err := redisClient.RPush(ctx, taskListKey, taskID).Err()
+	if err != nil {
+		Error("Failed to add task %s to list: %v", taskID, err)
+		return err
+	}
+	Debug("Added task %s to list", taskID)
+	return nil
+}
+
+// RemoveTaskFromList 从任务列表中移除任务ID
+func RemoveTaskFromList(taskID string) error {
+	ctx := context.Background()
+	err := redisClient.LRem(ctx, taskListKey, 0, taskID).Err()
+	if err != nil {
+		Error("Failed to remove task %s from list: %v", taskID, err)
+		return err
+	}
+	Debug("Removed task %s from list", taskID)
 	return nil
 }

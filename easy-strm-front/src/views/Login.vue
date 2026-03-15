@@ -200,8 +200,8 @@ const handleLogin = () => {
 }
 
 .logo-svg {
-  width: 100%;
-  height: 100%;
+  width: 70px;
+  height: 70px;
 }
 
 .login-header h2 {

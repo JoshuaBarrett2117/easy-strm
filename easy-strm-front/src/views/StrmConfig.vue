@@ -14,9 +14,9 @@
         </div>
       </template>
       
-      <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table">
-        <el-table-column prop="id" label="ID" width="60" align="center" />
-        <el-table-column label="115账号" min-width="120" align="center">
+      <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
+        <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
+        <el-table-column label="115账号" min-width="120" align="center" sortable="custom" prop="cloud115_id">
           <template #default="scope">
             <el-tag type="info">{{ getCloud115Name(scope.row.cloud115_id) }}</el-tag>
           </template>
@@ -33,9 +33,9 @@
             <span class="extension-text">{{ scope.row.extension || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" />
-        <el-table-column prop="update_time" label="更新时间" width="160" align="center" />
-        <el-table-column label="操作" min-width="320" fixed="right" align="center">
+        <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
+        <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
+        <el-table-column label="操作" min-width="260" fixed="right" align="center">
           <template #default="scope">
             <div class="action-buttons">
               <el-button size="small" type="primary" @click="handleEdit(scope.row)">
@@ -49,11 +49,7 @@
               <el-button size="small" type="warning" @click="handleFullGenerate(scope.row.id)"
                 :loading="isGenerating(scope.row.id)" :disabled="isGenerating(scope.row.id)">
                 <el-icon v-if="!isGenerating(scope.row.id)"><Refresh /></el-icon>
-                {{ isGenerating(scope.row.id) ? '生成中...' : '全量' }}
-              </el-button>
-              <el-button size="small" type="success" @click="handleIncrementalGenerate(scope.row.id)">
-                <el-icon><Plus /></el-icon>
-                增量
+                {{ isGenerating(scope.row.id) ? '生成中...' : '全量生成' }}
               </el-button>
             </div>
           </template>
@@ -72,7 +68,7 @@
               </el-icon>
               <span>{{ taskInfo.status === 'running' ? '正在生成 STRM 文件...' : taskStatusLabel }}</span>
             </div>
-            <el-button v-if="taskInfo.status !== 'running'" circle text @click="clearTask">
+            <el-button circle text @click="clearTask">
               <el-icon><Close /></el-icon>
             </el-button>
           </div>
@@ -193,6 +189,10 @@ const strmConfigList = ref([])
 // 115账号列表
 const cloud115List = ref([])
 
+// 排序状态
+const sortField = ref('id')
+const sortOrder = ref('asc')
+
 // 对话框状态
 const dialogVisible = ref(false)
 const dialogTitle = ref('新增配置')
@@ -278,7 +278,12 @@ const startPolling = (taskId) => {
         stopPolling()
       }
     } catch (e) {
-      // 静默忽略轮询错误，避免刷爆弹窗
+      // 如果任务不存在，自动关闭进度条
+      const errorMsg = e.response?.data?.error || e.message || ''
+      if (errorMsg.includes('Task not found')) {
+        clearTask()
+        generatingConfigId.value = null
+      }
     }
   }, 2000)
 }
@@ -337,11 +342,31 @@ const fetchCloud115List = async () => {
 // 获取STRM配置列表
 const fetchStrmConfigList = async () => {
   try {
-    const response = await request('/strm/config')
+    const params = new URLSearchParams()
+    params.append('sort_field', sortField.value)
+    params.append('sort_order', sortOrder.value)
+    const response = await request(`/strm/config?${params.toString()}`)
     strmConfigList.value = response.data.data || []
   } catch (error) {
     ElMessage.error('获取STRM配置列表失败')
   }
+}
+
+/**
+ * 处理表格排序变化
+ * @param {Object} column - 列信息
+ * @param {string} prop - 排序字段
+ * @param {string} order - 排序方式
+ */
+const handleSortChange = ({ prop, order }) => {
+  if (prop && order) {
+    sortField.value = prop
+    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+  } else {
+    sortField.value = 'id'
+    sortOrder.value = 'asc'
+  }
+  fetchStrmConfigList()
 }
 
 // 根据ID获取115账号名称
@@ -461,22 +486,6 @@ const handleFullGenerate = (id) => {
     }).catch(() => {
       ElMessage.error('全量生成STRM文件失败')
       clearTask()
-    })
-  }).catch(() => {})
-}
-
-// 增量生成STRM文件
-const handleIncrementalGenerate = (id) => {
-  ElMessageBox.confirm('确定要增量生成STRM文件吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消'
-  }).then(() => {
-    request(`/strm/config/${id}/generate/incremental`, {
-      method: 'POST'
-    }).then(() => {
-      ElMessage.success('增量生成STRM文件成功')
-    }).catch(() => {
-      ElMessage.error('增量生成STRM文件失败')
     })
   }).catch(() => {})
 }

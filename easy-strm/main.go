@@ -88,6 +88,11 @@ func main() {
 		Error("Failed to seed admin user: %v", err)
 	}
 
+	// 初始化cron调度器
+	if err := InitCronScheduler(); err != nil {
+		Error("Failed to initialize cron scheduler: %v", err)
+	}
+
 	// 设置认证相关路由
 	SetupAuthRoutes(r, config, client)
 
