@@ -71,7 +71,14 @@ func (s *CronScheduler) AddTask(task *CronTask) error {
 		delete(s.entrys, task.ID)
 	}
 
-	entryID, err := s.cron.AddFunc(task.CronExpr, func() {
+	cronExpr := task.CronExpr
+	fields := strings.Fields(cronExpr)
+	if len(fields) == 5 {
+		cronExpr = "0 " + cronExpr
+		Debug("Converting 5-field cron expression to 6-field: %s -> %s", task.CronExpr, cronExpr)
+	}
+
+	entryID, err := s.cron.AddFunc(cronExpr, func() {
 		ExecuteCronTask(task)
 	})
 	if err != nil {
@@ -131,14 +138,21 @@ func StopScheduler() {
 
 // ExecuteCronTask 执行定时任务
 func ExecuteCronTask(task *CronTask) {
-	Info("Executing cron task: %s (ID: %d)", task.TaskName, task.ID)
+	Info("[cron] Executing cron task: %s (ID: %d), type: %s", task.TaskName, task.ID, task.TaskType)
 
 	now := time.Now()
 	task.LastRunTime = &now
 
-	taskStatus, err := CreateTask(fmt.Sprintf("cron_%d_%d", task.ID, now.Unix()), TaskTypeIncrementalSync, task.TaskName)
+	var taskType TaskType
+	if task.TaskType == "full_generate" {
+		taskType = TaskTypeStrmGenerate
+	} else {
+		taskType = TaskTypeIncrementalSync
+	}
+
+	taskStatus, err := CreateTask(fmt.Sprintf("cron_%d_%d", task.ID, now.Unix()), taskType, task.TaskName)
 	if err != nil {
-		Error("Failed to create task for cron job: %v", err)
+		Error("[cron] Failed to create task for cron job: %v", err)
 		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("创建任务失败: %v", err))
 		return
 	}
@@ -147,7 +161,7 @@ func ExecuteCronTask(task *CronTask) {
 
 	strmConfig, err := GetStrmConfigByID(task.StrmConfigID)
 	if err != nil {
-		Error("Failed to get strm config: %v", err)
+		Error("[cron] Failed to get strm config: %v", err)
 		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("获取STRM配置失败: %v", err))
 		SetTaskError(taskStatus.TaskID, fmt.Sprintf("获取STRM配置失败: %v", err))
 		return
@@ -155,28 +169,40 @@ func ExecuteCronTask(task *CronTask) {
 
 	cloud115, err := GetCloud115ByID(task.Cloud115ID)
 	if err != nil {
-		Error("Failed to get cloud115 account: %v", err)
+		Error("[cron] Failed to get cloud115 account: %v", err)
 		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("获取115账号失败: %v", err))
 		SetTaskError(taskStatus.TaskID, fmt.Sprintf("获取115账号失败: %v", err))
 		return
 	}
 
-	result, err := RunIncrementalSync(strmConfig, cloud115, taskStatus.TaskID)
-	if err != nil {
-		Error("Incremental sync failed: %v", err)
-		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", err.Error())
-		SetTaskError(taskStatus.TaskID, err.Error())
-		return
+	var successMsg string
+	if task.TaskType == "full_generate" {
+		result, err := RunFullStrmGenerate(strmConfig, cloud115, taskStatus.TaskID)
+		if err != nil {
+			Error("[cron] Full STRM generate failed: %v", err)
+			UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", err.Error())
+			SetTaskError(taskStatus.TaskID, err.Error())
+			return
+		}
+		successMsg = fmt.Sprintf("成功: 生成 %d 个STRM文件", result.Total)
+	} else {
+		result, err := RunIncrementalSync(strmConfig, cloud115, taskStatus.TaskID)
+		if err != nil {
+			Error("[cron] Incremental sync failed: %v", err)
+			UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", err.Error())
+			SetTaskError(taskStatus.TaskID, err.Error())
+			return
+		}
+		successMsg = fmt.Sprintf("成功: 新增 %d, 删除 %d, 跳过 %d", result.Added, result.Deleted, result.Skipped)
 	}
 
 	nextRun := scheduler.GetNextRunTime(task.ID)
 	task.NextRunTime = nextRun
 
-	successMsg := fmt.Sprintf("成功: 新增 %d, 删除 %d, 跳过 %d", result.Added, result.Deleted, result.Skipped)
 	UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "success", successMsg)
 	UpdateTaskStatus(taskStatus.TaskID, TaskStatusCompleted)
 
-	Info("Cron task completed: %s (ID: %d), %s", task.TaskName, task.ID, successMsg)
+	Info("[cron] Cron task completed: %s (ID: %d), %s", task.TaskName, task.ID, successMsg)
 }
 
 // IncrementalSyncResult 增量同步结果
@@ -184,6 +210,11 @@ type IncrementalSyncResult struct {
 	Added   int
 	Deleted int
 	Skipped int
+}
+
+// FullGenerateResult 全量生成结果
+type FullGenerateResult struct {
+	Total int
 }
 
 // RunIncrementalSync 执行增量同步
@@ -265,10 +296,7 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	for _, ext := range extensions {
 		ext = strings.TrimSpace(ext)
 		if ext != "" {
-			if !strings.HasPrefix(ext, ".") {
-				ext = "." + ext
-			}
-			targetExts = append(targetExts, strings.ToLower(ext))
+			targetExts = append(targetExts, strings.ToLower(strings.TrimPrefix(ext, ".")))
 		}
 	}
 
@@ -329,5 +357,128 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	}
 
 	Info("增量同步完成: 新增 %d, 删除 %d, 跳过 %d", result.Added, result.Deleted, result.Skipped)
+	return result, nil
+}
+
+// RunFullStrmGenerate 执行全量生成STRM文件
+func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID string) (*FullGenerateResult, error) {
+	Info("[cron] Running full STRM generate for config ID: %d", strmConfig.ID)
+
+	result := &FullGenerateResult{}
+
+	client := NewClient(&Config{ServerURL: "http://localhost:8082"})
+
+	cid, err := client.GetCIDByPath(strmConfig.NetDiskPath, cloud115.ID, cloud115.Cookie)
+	if err != nil {
+		return nil, fmt.Errorf("获取网盘目录CID失败: %v", err)
+	}
+
+	cidInt := 0
+	fmt.Sscanf(cid, "%d", &cidInt)
+
+	rootName := filepath.Base(strmConfig.NetDiskPath)
+	if rootName == "" || rootName == "." || rootName == "/" {
+		rootName = "根目录"
+	}
+
+	exportResp, err := client.ExportDirectoryTree115(fmt.Sprintf("%d", cidInt), fmt.Sprintf("U_1_%d", cidInt), cloud115.Cookie)
+	if err != nil {
+		return nil, fmt.Errorf("导出目录树失败: %v", err)
+	}
+
+	if !exportResp.State {
+		return nil, fmt.Errorf("导出目录树失败: %s", exportResp.Message)
+	}
+
+	exportId := exportResp.Data.ExportID.String()
+	Info("[cron] Directory tree export triggered, export_id: %s", exportId)
+
+	var pickCode string
+	maxRetries := 60
+	for i := 0; i < maxRetries; i++ {
+		statusResp, err := client.GetExportDirectoryTreeStatus(exportId, cloud115.Cookie)
+		if err != nil {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		data := statusResp.GetFirstData()
+		if data == nil {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		if data.Status == 2 && data.PickCode != "" {
+			pickCode = data.PickCode
+			break
+		} else if data.Status == 3 || data.Status == -1 {
+			return nil, fmt.Errorf("目录树导出失败，状态: %d", data.Status)
+		}
+
+		time.Sleep(5 * time.Second)
+	}
+
+	if pickCode == "" {
+		return nil, fmt.Errorf("等待目录树导出超时")
+	}
+
+	fileData, err := client.DownloadDirectoryTreeFile(pickCode, cloud115.ID, cloud115.Cookie)
+	if err != nil {
+		return nil, fmt.Errorf("下载目录树文件失败: %v", err)
+	}
+
+	entries, err := Parse115DirTreeFile(fileData)
+	if err != nil {
+		return nil, fmt.Errorf("解析目录树文件失败: %v", err)
+	}
+
+	dirTree := BuildTreeFromExport(entries, cid, rootName)
+
+	extensions := strings.Split(strmConfig.Extension, ",")
+	targetExts := make([]string, 0)
+	for _, ext := range extensions {
+		ext = strings.TrimSpace(ext)
+		if ext != "" {
+			targetExts = append(targetExts, strings.ToLower(strings.TrimPrefix(ext, ".")))
+		}
+	}
+
+	collection := &VideoCollection{
+		Videos: []VideoFile{},
+	}
+	extractVideoFiles(dirTree, "", strmConfig.NetDiskPath, cid, targetExts, collection, strmConfig.Cloud115Id, true)
+
+	result.Total = len(collection.Videos)
+	Info("[cron] Found %d files for full STRM generation", result.Total)
+
+	if result.Total == 0 {
+		return result, nil
+	}
+
+	if err := DeleteStrmFilesByConfigID(strmConfig.ID); err != nil {
+		Warn("[cron] Failed to delete existing STRM file records: %v", err)
+	}
+
+	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	generator.ProgressCallback = func(totalFiles, processedFiles, successFiles, failedFiles int) {
+		UpdateTaskProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles)
+	}
+
+	for i, video := range collection.Videos {
+		localStrmPath, err := generator.GenerateSingleStrmFile(video, strmConfig.NetDiskPath)
+		if err != nil {
+			Warn("[cron] 生成STRM文件失败 %s: %v", video.Name, err)
+			continue
+		}
+
+		UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath)
+		Debug("[cron] 生成STRM文件: %s", localStrmPath)
+
+		if (i+1)%10 == 0 {
+			Info("[cron] Full STRM generation progress: %d/%d", i+1, result.Total)
+		}
+	}
+
+	Info("[cron] Full STRM generation completed: %d files", result.Total)
 	return result, nil
 }

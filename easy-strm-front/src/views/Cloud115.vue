@@ -473,10 +473,14 @@ const handleSubmit = async () => {
  */
 const handleEdit = (row) => {
   dialogTitle.value = '编辑115云账号'
-  form.value = { 
-    ...row,
-    // 将 0 转换为 null，以便在下拉框中正确显示
-    transfer_account_id: row.transfer_account_id || null
+  form.value = {
+    id: row.id,
+    name: row.name || '',
+    cookie: row.cookie || '',
+    access_token: row.access_token || '',
+    refresh_token: row.refresh_token || '',
+    transfer_account_id: row.transfer_account_id || null,
+    transfer_directory: row.transfer_directory || ''
   }
   dialogVisible.value = true
 }

@@ -208,7 +208,7 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 				return
 			}
 		} else {
-			cloud115List, err := GetAllCloud115()
+			cloud115List, err := GetAllCloud115("", "")
 			if err != nil {
 				Error("Failed to get cloud115 accounts: %v", err)
 				JSON(c, 500, gin.H{
@@ -708,7 +708,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		// 获取所有115云账号
 		auth.GET("/cloud115", func(c *gin.Context) {
 			Debug("Get all cloud115 accounts API called from %s", c.ClientIP())
-			cloud115List, err := GetAllCloud115()
+
+			sortField := c.DefaultQuery("sort_field", "id")
+			sortOrder := c.DefaultQuery("sort_order", "asc")
+
+			cloud115List, err := GetAllCloud115(sortField, sortOrder)
 			if err != nil {
 				Error("Failed to get all cloud115 accounts: %v", err)
 				JSON(c, 500, gin.H{
@@ -934,7 +938,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					return
 				}
 			} else {
-				cloud115List, err := GetAllCloud115()
+				cloud115List, err := GetAllCloud115("", "")
 				if err != nil {
 					Error("Failed to get cloud115 accounts: %v", err)
 					JSON(c, 500, gin.H{
@@ -1054,7 +1058,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				}
 			} else {
 				// 使用第一个115云账号
-				cloud115List, err := GetAllCloud115()
+				cloud115List, err := GetAllCloud115("", "")
 				if err != nil {
 					Error("Failed to get cloud115 accounts: %v", err)
 					JSON(c, 500, gin.H{
@@ -1148,7 +1152,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					return
 				}
 			} else {
-				cloud115List, err := GetAllCloud115()
+				cloud115List, err := GetAllCloud115("", "")
 				if err != nil {
 					Error("Failed to get cloud115 accounts: %v", err)
 					JSON(c, 500, gin.H{
@@ -1218,7 +1222,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					return
 				}
 			} else {
-				cloud115List, err := GetAllCloud115()
+				cloud115List, err := GetAllCloud115("", "")
 				if err != nil {
 					Error("Failed to get cloud115 accounts: %v", err)
 					JSON(c, 500, gin.H{
@@ -1257,7 +1261,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		// 获取所有STRM配置
 		auth.GET("/strm/config", func(c *gin.Context) {
 			Debug("Get all strm config API called from %s", c.ClientIP())
-			strmConfigList, err := GetAllStrmConfig()
+
+			sortField := c.DefaultQuery("sort_field", "id")
+			sortOrder := c.DefaultQuery("sort_order", "asc")
+
+			strmConfigList, err := GetAllStrmConfig(sortField, sortOrder)
 			if err != nil {
 				Error("Failed to get all strm config: %v", err)
 				JSON(c, 500, gin.H{
@@ -2146,7 +2154,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			}
 
 			// 更新数据库
-			task, err = UpdateCronTask(taskID, req.CronExpr, status)
+			task, err = UpdateCronTask(taskID, task.TaskName, task.TaskType, req.CronExpr, status)
 			if err != nil {
 				Error("Failed to update cron task: %v", err)
 				JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to update cron task"})

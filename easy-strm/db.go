@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -428,6 +429,12 @@ END $$;
 		return err
 	}
 
+	// 修改 sha1 字段长度以存储完整路径
+	_, err = db.Exec(`ALTER TABLE t_strm_file ALTER COLUMN sha1 TYPE VARCHAR(1000)`)
+	if err != nil {
+		Warn("Failed to alter sha1 column length: %v", err)
+	}
+
 	// 创建STRM文件记录表的唯一索引（strm_config_id + file_path）
 	_, err = db.Exec(`
 		DO $$ BEGIN
@@ -593,9 +600,18 @@ func GetCloud115ByName(name string) (*Cloud115, error) {
 }
 
 // GetAllCloud115 获取所有115云账号
-func GetAllCloud115() ([]*Cloud115, error) {
-	Debug("Getting all cloud_115 accounts")
-	rows, err := db.Query("SELECT id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time FROM t_cloud_115")
+func GetAllCloud115(sortField, sortOrder string) ([]*Cloud115, error) {
+	Debug("Getting all cloud_115 accounts with sort: %s %s", sortField, sortOrder)
+
+	if sortField == "" {
+		sortField = "id"
+	}
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+
+	query := fmt.Sprintf("SELECT id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time FROM t_cloud_115 ORDER BY %s %s", sortField, sortOrder)
+	rows, err := db.Query(query)
 	if err != nil {
 		Error("Failed to get all cloud_115 accounts: %v", err)
 		return nil, err
@@ -693,9 +709,18 @@ func GetStrmConfigByID(id int) (*StrmConfig, error) {
 }
 
 // GetAllStrmConfig 获取所有STRM配置
-func GetAllStrmConfig() ([]*StrmConfig, error) {
-	Debug("Getting all strm configs")
-	rows, err := db.Query("SELECT id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), create_time, update_time FROM t_strm_config")
+func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
+	Debug("Getting all strm configs with sort: %s %s", sortField, sortOrder)
+
+	if sortField == "" {
+		sortField = "id"
+	}
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+
+	query := fmt.Sprintf("SELECT id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), create_time, update_time FROM t_strm_config ORDER BY %s %s", sortField, sortOrder)
+	rows, err := db.Query(query)
 	if err != nil {
 		Error("Failed to get all strm configs: %v", err)
 		return nil, err
@@ -736,6 +761,22 @@ func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension st
 		return nil, err
 	}
 	Info("Created new strm config (ID: %d)", strmConfig.ID)
+
+	if cron != "" {
+		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		cronTask, err := CreateCronTask(taskName, "full_generate", cloud115Id, strmConfig.ID, cron)
+		if err != nil {
+			Warn("Failed to create cron task for strm config: %v", err)
+		} else {
+			Info("Created cron task (ID: %d) for strm config (ID: %d)", cronTask.ID, strmConfig.ID)
+			if scheduler != nil {
+				if err := scheduler.AddTask(cronTask); err != nil {
+					Warn("Failed to add cron task to scheduler: %v", err)
+				}
+			}
+		}
+	}
+
 	return strmConfig, nil
 }
 
@@ -753,12 +794,73 @@ func UpdateStrmConfig(id, cloud115Id int, netDiskPath, localPath, cron, extensio
 		return nil, err
 	}
 	Info("Updated strm config (ID: %d)", strmConfig.ID)
+
+	existingTask, _ := GetCronTaskByStrmConfigID(strmConfig.ID)
+
+	if cron != "" {
+		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		if existingTask != nil {
+			_, err = UpdateCronTask(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
+			if err != nil {
+				Warn("Failed to update cron task: %v", err)
+			} else {
+				if scheduler != nil {
+					updatedTask, _ := GetCronTaskByID(existingTask.ID)
+					if updatedTask != nil {
+						if err := scheduler.UpdateTask(updatedTask); err != nil {
+							Warn("Failed to update cron task in scheduler: %v", err)
+						} else {
+							// 重新获取任务数据，因为 scheduler.UpdateTask 会更新 next_run_time
+							if finalTask, err := GetCronTaskByID(existingTask.ID); err == nil {
+								Debug("Cron task next run time updated: %v", finalTask.NextRunTime)
+							}
+						}
+					}
+				}
+			}
+		} else {
+			cronTask, err := CreateCronTask(taskName, "full_generate", cloud115Id, strmConfig.ID, cron)
+			if err != nil {
+				Warn("Failed to create cron task: %v", err)
+			} else {
+				Info("Created cron task (ID: %d) for strm config(ID: %d)", cronTask.ID, strmConfig.ID)
+				if scheduler != nil {
+					if err := scheduler.AddTask(cronTask); err != nil {
+						Warn("Failed to add cron task to scheduler: %v", err)
+					}
+				}
+			}
+		}
+	} else {
+		if existingTask != nil {
+			if scheduler != nil {
+				scheduler.RemoveTask(existingTask.ID)
+			}
+			err := DeleteCronTaskByName(existingTask.TaskName)
+			if err != nil {
+				Warn("Failed to delete cron task: %v", err)
+			}
+		}
+	}
+
 	return strmConfig, nil
 }
 
 // DeleteStrmConfig 删除STRM配置
 func DeleteStrmConfig(id int) error {
 	Debug("Deleting strm config with ID: %d", id)
+
+	existingTask, _ := GetCronTaskByStrmConfigID(id)
+	if existingTask != nil {
+		if scheduler != nil {
+			scheduler.RemoveTask(existingTask.ID)
+		}
+		err := DeleteCronTaskByName(existingTask.TaskName)
+		if err != nil {
+			Warn("Failed to delete cron task: %v", err)
+		}
+	}
+
 	result, err := db.Exec("DELETE FROM t_strm_config WHERE id = $1", id)
 	if err != nil {
 		Error("Failed to delete strm config with ID %d: %v", id, err)
@@ -996,6 +1098,18 @@ func GetCronTaskByName(taskName string) (*CronTask, error) {
 	return task, nil
 }
 
+// GetCronTaskByStrmConfigID 根据STRM配置ID获取定时任务
+func GetCronTaskByStrmConfigID(strmConfigID int) (*CronTask, error) {
+	Debug("Getting cron task by strm config ID: %d", strmConfigID)
+	task := &CronTask{}
+	err := db.QueryRow("SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status, last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''), create_time, update_time FROM t_cron_task WHERE strm_config_id = $1", strmConfigID).Scan(
+		&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID, &task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime, &task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
+	if err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
 // GetAllCronTasks 获取所有定时任务
 func GetAllCronTasks() ([]*CronTask, error) {
 	Debug("Getting all cron tasks")
@@ -1061,12 +1175,12 @@ func CreateCronTask(taskName, taskType string, cloud115ID, strmConfigID int, cro
 }
 
 // UpdateCronTask 更新定时任务
-func UpdateCronTask(id int, cronExpr, status string) (*CronTask, error) {
+func UpdateCronTask(id int, taskName, taskType, cronExpr, status string) (*CronTask, error) {
 	Debug("Updating cron task with ID: %d", id)
 	task := &CronTask{}
 	err := db.QueryRow(
-		"UPDATE t_cron_task SET cron_expr = $1, status = $2 WHERE id = $3 RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status, last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time",
-		cronExpr, status, id,
+		"UPDATE t_cron_task SET task_name = $1, task_type = $2, cron_expr = $3, status = $4 WHERE id = $5 RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status, last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time",
+		taskName, taskType, cronExpr, status, id,
 	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID, &task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime, &task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
 	if err != nil {
 		Error("Failed to update cron task with ID %d: %v", id, err)

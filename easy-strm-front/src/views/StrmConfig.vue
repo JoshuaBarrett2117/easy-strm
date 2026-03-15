@@ -25,7 +25,24 @@
         <el-table-column prop="local_path" label="本地目录" min-width="180" show-overflow-tooltip />
         <el-table-column prop="cron" label="Cron配置" width="120" align="center">
           <template #default="scope">
-            <el-tag type="warning">{{ scope.row.cron }}</el-tag>
+            <el-tag v-if="scope.row.cron" type="warning">{{ scope.row.cron }}</el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="定时任务" width="100" align="center">
+          <template #default="scope">
+            <el-tag v-if="getCronTask(scope.row.id)" :type="getCronTask(scope.row.id).status === 'enabled' ? 'success' : 'info'">
+              {{ getCronTask(scope.row.id).status === 'enabled' ? '已启用' : '已禁用' }}
+            </el-tag>
+            <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="下次执行" width="160" align="center">
+          <template #default="scope">
+            <span v-if="getCronTask(scope.row.id) && getCronTask(scope.row.id).next_run_time">
+              {{ formatTime(getCronTask(scope.row.id).next_run_time) }}
+            </span>
+            <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="extension" label="后缀名" min-width="200" show-overflow-tooltip>
@@ -35,7 +52,7 @@
         </el-table-column>
         <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
         <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
-        <el-table-column label="操作" min-width="260" fixed="right" align="center">
+        <el-table-column label="操作" min-width="320" fixed="right" align="center">
           <template #default="scope">
             <div class="action-buttons">
               <el-button size="small" type="primary" @click="handleEdit(scope.row)">
@@ -51,6 +68,26 @@
                 <el-icon v-if="!isGenerating(scope.row.id)"><Refresh /></el-icon>
                 {{ isGenerating(scope.row.id) ? '生成中...' : '全量生成' }}
               </el-button>
+              <el-dropdown v-if="getCronTask(scope.row.id)" trigger="click" @command="(cmd) => handleCronCommand(cmd, scope.row)">
+                <el-button size="small" type="info">
+                  <el-icon><Timer /></el-icon>
+                  定时任务
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :command="'toggle'" :disabled="cronTaskLoading">
+                      {{ getCronTask(scope.row.id).status === 'enabled' ? '禁用定时任务' : '启用定时任务' }}
+                    </el-dropdown-item>
+                    <el-dropdown-item :command="'run'" :disabled="cronTaskLoading">
+                      立即执行
+                    </el-dropdown-item>
+                    <el-dropdown-item :command="'status'" divided>
+                      查看详情
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </template>
         </el-table-column>
@@ -178,7 +215,7 @@
 <script setup>
 import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Setting, Plus, Edit, Delete, Refresh, Close, CircleCheck, CircleClose, Loading } from '@element-plus/icons-vue'
+import { Setting, Plus, Edit, Delete, Refresh, Close, CircleCheck, CircleClose, Loading, Timer, ArrowDown } from '@element-plus/icons-vue'
 import { request } from '../utils/api'
 
 const DEFAULT_EXTENSION = '.mp4,.avi,.mkv,.mov,.wmv,.flv,.webm,.m4v,.mpeg,.mpg,.3gp,.rmvb,.rm,.vob,.ts,.m2ts,.divx,.asf'
@@ -188,6 +225,10 @@ const strmConfigList = ref([])
 
 // 115账号列表
 const cloud115List = ref([])
+
+// Cron任务列表
+const cronTaskList = ref([])
+const cronTaskLoading = ref(false)
 
 // 排序状态
 const sortField = ref('id')
@@ -352,6 +393,34 @@ const fetchStrmConfigList = async () => {
   }
 }
 
+// 获取Cron任务列表
+const fetchCronTaskList = async () => {
+  try {
+    const response = await request('/cron/tasks')
+    cronTaskList.value = response.data.data || []
+  } catch (error) {
+    console.error('获取Cron任务列表失败', error)
+  }
+}
+
+// 根据配置ID获取对应的Cron任务
+const getCronTask = (configId) => {
+  return cronTaskList.value.find(task => task.strm_config_id === configId)
+}
+
+// 格式化时间
+const formatTime = (time) => {
+  if (!time) return '-'
+  const date = new Date(time)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 /**
  * 处理表格排序变化
  * @param {Object} column - 列信息
@@ -423,6 +492,7 @@ const handleSubmit = () => {
           ElMessage.success('配置更新成功')
           dialogVisible.value = false
           fetchStrmConfigList()
+          fetchCronTaskList()
         }).catch(() => {
           ElMessage.error('配置更新失败')
         })
@@ -434,6 +504,7 @@ const handleSubmit = () => {
           ElMessage.success('配置创建成功')
           dialogVisible.value = false
           fetchStrmConfigList()
+          fetchCronTaskList()
         }).catch(() => {
           ElMessage.error('配置创建失败')
         })
@@ -454,6 +525,7 @@ const handleDelete = (id) => {
     }).then(() => {
       ElMessage.success('配置删除成功')
       fetchStrmConfigList()
+      fetchCronTaskList()
     }).catch(() => {
       ElMessage.error('配置删除失败')
     })
@@ -488,6 +560,90 @@ const handleFullGenerate = (id) => {
       clearTask()
     })
   }).catch(() => {})
+}
+
+// 处理定时任务下拉菜单命令
+const handleCronCommand = (command, row) => {
+  const task = getCronTask(row.id)
+  if (!task) return
+
+  switch (command) {
+    case 'toggle':
+      handleToggleCronTask(task)
+      break
+    case 'run':
+      handleRunCronTask(task)
+      break
+    case 'status':
+      showCronTaskStatus(task)
+      break
+  }
+}
+
+// 切换定时任务状态
+const handleToggleCronTask = async (task) => {
+  const newStatus = task.status === 'enabled' ? 'disabled' : 'enabled'
+  const actionText = newStatus === 'enabled' ? '启用' : '禁用'
+  
+  try {
+    cronTaskLoading.value = true
+    await request(`/cron/task/${task.id}`, {
+      method: 'PUT',
+      data: {
+        cron_expr: task.cron_expr,
+        status: newStatus
+      }
+    })
+    ElMessage.success(`定时任务已${actionText}`)
+    fetchCronTaskList()
+  } catch (error) {
+    ElMessage.error(`${actionText}定时任务失败`)
+  } finally {
+    cronTaskLoading.value = false
+  }
+}
+
+// 立即执行定时任务
+const handleRunCronTask = async (task) => {
+  try {
+    cronTaskLoading.value = true
+    await request(`/cron/task/${task.id}/run`, {
+      method: 'POST'
+    })
+    ElMessage.success('定时任务已触发执行，请查看任务进度')
+    // 刷新任务列表
+    fetchCronTaskList()
+  } catch (error) {
+    ElMessage.error('执行定时任务失败')
+  } finally {
+    cronTaskLoading.value = false
+  }
+}
+
+// 显示定时任务详情
+const showCronTaskStatus = (task) => {
+  const statusText = task.status === 'enabled' ? '已启用' : '已禁用'
+  const lastRunTime = task.last_run_time ? formatTime(task.last_run_time) : '从未执行'
+  const nextRunTime = task.next_run_time ? formatTime(task.next_run_time) : '-'
+  const lastRunStatus = task.last_run_status || '-'
+  const lastRunMessage = task.last_run_message || '-'
+  
+  ElMessageBox.alert(
+    `<div style="line-height: 2;">
+      <p><strong>任务名称：</strong>${task.task_name}</p>
+      <p><strong>任务状态：</strong>${statusText}</p>
+      <p><strong>Cron表达式：</strong>${task.cron_expr}</p>
+      <p><strong>上次执行时间：</strong>${lastRunTime}</p>
+      <p><strong>上次执行状态：</strong>${lastRunStatus}</p>
+      <p><strong>上次执行结果：</strong>${lastRunMessage}</p>
+      <p><strong>下次执行时间：</strong>${nextRunTime}</p>
+    </div>`,
+    '定时任务详情',
+    {
+      dangerouslyUseHTMLString: true,
+      confirmButtonText: '关闭'
+    }
+  )
 }
 
 // 生成cron表达式
@@ -534,6 +690,7 @@ const generateCronExpression = () => {
 onMounted(() => {
   fetchCloud115List()
   fetchStrmConfigList()
+  fetchCronTaskList()
 })
 
 // 销毁时清理定时器
