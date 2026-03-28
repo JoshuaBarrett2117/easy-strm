@@ -93,13 +93,32 @@ func main() {
 		Error("Failed to initialize cron scheduler: %v", err)
 	}
 
-	// 设置认证相关路由
+	// 设置认证相关路由（登录等）
 	SetupAuthRoutes(r, config, client)
 
-	// 设置需要认证的路由组
+	// 设置需要认证的路由（所有业务API）
 	SetupAuthProtectedRoutes(r, config, client)
+
+	// 使用RouterSetup注册需要认证的路由（包含正确的transfer实现和所有业务API）
+	// rs := router.NewRouterSetup(r)
+	// rs.InitDAO(GetDB(), GetRedisClient())
+	// authService, _, _, _ := rs.InitServices(config.JWTSecret)
+	// rs.SetupRoutes(authService)
 
 	// 启动服务器
 	Info("Gin server starting on http://localhost:8082")
 	r.Run(":8082")
 }
+
+// GetDB 获取全局数据库连接（供 router 使用）
+func GetDB() interface{} {
+	return getDBInstance()
+}
+
+// GetRedisClient 获取全局Redis客户端（供 router 使用）
+func GetRedisClient() interface{} {
+	return getRedisClientInstance()
+}
+
+// 需要在 db.go 或 redis.go 中实现这些函数
+// 由于 router 包需要 interface{} 类型，需要提供适配

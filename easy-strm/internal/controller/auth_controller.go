@@ -1,13 +1,13 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
-	"easy-strm/internal/service"
 	"easy-strm/internal/pkg/logger"
+	"easy-strm/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
 
 type AuthController struct {
@@ -53,7 +53,7 @@ func (c *AuthController) Login(ctx *gin.Context) {
 	}
 
 	if c.redisClient != nil {
-		if err := c.redisClient.Set(user.ID, token, 0); err != nil {
+		if err := c.redisClient.Set(fmt.Sprintf("user:token:%d", user.ID), token, 0); err != nil {
 			logger.Errorf("AuthController[Login] 保存token到Redis失败: %v", err)
 		}
 	}
@@ -75,9 +75,31 @@ func (c *AuthController) GetUserInfo(ctx *gin.Context) {
 		return
 	}
 
-	user, err := c.authService.GetUserByID(userID.(int))
-	if err != nil || user == nil {
+	typedUserID, ok := userID.(int64)
+	if !ok {
+		logger.Errorf("AuthController[GetUserInfo] userID类型错误: %T, value: %v", userID, userID)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("userID类型错误: %T", userID)})
+		return
+	}
+
+	logger.Warnf("AuthController[GetUserInfo] 开始获取用户信息, typedUserID: %d", typedUserID)
+
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf("AuthController[GetUserInfo] 发生panic: %v", r)
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("内部错误: %v", r)})
+		}
+	}()
+
+	user, err := c.authService.GetUserByID(int(typedUserID))
+	logger.Warnf("AuthController[GetUserInfo] GetUserByID返回, user: %v, err: %v", user, err)
+	if err != nil {
 		logger.Errorf("AuthController[GetUserInfo] 获取用户信息失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取用户信息失败: %v", err)})
+		return
+	}
+	if user == nil {
+		logger.Errorf("AuthController[GetUserInfo] 用户不存在, typedUserID: %d", typedUserID)
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
 		return
 	}
@@ -115,7 +137,7 @@ func (c *AuthController) JWTMiddleware(secret string) gin.HandlerFunc {
 		}
 
 		if c.redisClient != nil {
-			tokenInRedis, err := c.redisClient.Get(claims.UserID)
+			tokenInRedis, err := c.redisClient.Get(fmt.Sprintf("user:token:%d", claims.UserID))
 			if err != nil || tokenInRedis != tokenString {
 				logger.Warnf("AuthController[JWTMiddleware] Redis中token不匹配")
 				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "无效的token"})
@@ -151,4 +173,24 @@ func SuccessResp(ctx *gin.Context, data interface{}) {
 
 func ErrorResp(ctx *gin.Context, httpStatus int, errMsg string) {
 	ctx.JSON(httpStatus, gin.H{"error": errMsg})
+}
+
+func (c *AuthController) UpdatePassword(ctx *gin.Context) {
+var data struct {
+Name    string `json:"name"`
+NewPass string `json:"new_password"`
+}
+if err := ctx.ShouldBindJSON(&data); err != nil {
+ctx.JSON(400, gin.H{"error": "参数错误"})
+return
+}
+if data.Name == "" || data.NewPass == "" {
+ctx.JSON(400, gin.H{"error": "用户名和新密码不能为空"})
+return
+}
+if err := c.authService.UpdatePassword(data.Name, data.NewPass); err != nil {
+ctx.JSON(500, gin.H{"error": err.Error()})
+return
+}
+ctx.JSON(200, gin.H{"message": "密码更新成功"})
 }

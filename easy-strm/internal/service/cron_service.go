@@ -16,6 +16,7 @@ type CronService struct {
 		UpdateTask(task *domain.CronTask) error
 		GetNextRunTime(taskID int) *time.Time
 	}
+	cloud115Service *Cloud115Service
 }
 
 func NewCronService(cronTaskDAO *dao.CronTaskDAO) *CronService {
@@ -31,6 +32,27 @@ func (s *CronService) SetScheduler(scheduler interface {
 	GetNextRunTime(taskID int) *time.Time
 }) {
 	s.scheduler = scheduler
+}
+
+// SetCloud115Service 设置Cloud115Service实例，用于账号冷却恢复
+func (s *CronService) SetCloud115Service(cloud115Service *Cloud115Service) {
+	s.cloud115Service = cloud115Service
+}
+
+// RecoverCoolingAccounts 检查并恢复超过冷却时间的账号
+// 由定时任务调用，每分钟执行一次
+func (s *CronService) RecoverCoolingAccounts() {
+	if s.cloud115Service == nil {
+		logger.Errorf("CronService[RecoverCoolingAccounts] Cloud115Service未初始化，无法恢复冷却账号")
+		return
+	}
+
+	logger.Infof("CronService[RecoverCoolingAccounts] 开始检查冷却账号...")
+	if err := s.cloud115Service.CheckAndRecoverCoolingAccounts(); err != nil {
+		logger.Errorf("CronService[RecoverCoolingAccounts] 恢复冷却账号失败: %v", err)
+	} else {
+		logger.Infof("CronService[RecoverCoolingAccounts] 冷却账号检查完成")
+	}
 }
 
 // GetByID 根据ID获取定时任务

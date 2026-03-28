@@ -20,9 +20,30 @@
         </div>
       </template>
       
-      <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
+      <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
         <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
         <el-table-column prop="name" label="名称" min-width="120" sortable="custom" />
+        <el-table-column prop="account_type" label="账号类型" width="100" align="center">
+          <template #default="scope">
+            <el-tag :type="getAccountTypeTag(scope.row.account_type)" size="small">
+              {{ getAccountTypeName(scope.row.account_type) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="90" align="center">
+          <template #default="scope">
+            <el-tag :type="getStatusTag(scope.row.status)" size="small">
+              {{ getStatusName(scope.row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="80" align="center" sortable="custom">
+          <template #default="scope">
+            <el-tag :type="getPriorityTag(scope.row.priority)" size="small">
+              {{ scope.row.priority || 5 }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="Cookie" min-width="180">
           <template #default="scope">
             <div class="sensitive-cell">
@@ -56,6 +77,14 @@
               {{ scope.row.transfer_directory || '根目录' }}
             </span>
             <span v-else class="text-muted">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="秒传方式" width="110" align="center">
+          <template #default="scope">
+            <el-tag v-if="scope.row.transfer_method" :type="getTransferMethodTag(scope.row.transfer_method)" size="small">
+              {{ getTransferMethodName(scope.row.transfer_method) }}
+            </el-tag>
+            <span v-else style="color: #909399">-</span>
           </template>
         </el-table-column>
         <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
@@ -110,6 +139,25 @@
         <el-form-item label="Cookie" prop="cookie">
           <el-input v-model="form.cookie" type="textarea" placeholder="请输入115云账号Cookie" :rows="3" />
         </el-form-item>
+        <el-form-item label="账号类型" prop="account_type">
+          <el-radio-group v-model="form.account_type">
+            <el-radio label="resource">资源号</el-radio>
+            <el-radio label="vip">VIP观影号</el-radio>
+            <el-radio label="both">兼顾</el-radio>
+          </el-radio-group>
+          <div class="form-tip">设置账号在同步任务中的角色类型</div>
+        </el-form-item>
+        <el-form-item label="状态" prop="status">
+          <el-radio-group v-model="form.status">
+            <el-radio label="active">正常</el-radio>
+            <el-radio label="cooling">冷却中</el-radio>
+            <el-radio label="disabled">禁用</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="优先级" prop="priority">
+          <el-input-number v-model="form.priority" :min="1" :max="10" :step="1" />
+          <div class="form-tip">1-10，数字越大优先级越高，用于同步调度排序</div>
+        </el-form-item>
         <el-divider content-position="left">文件转存配置</el-divider>
         <el-form-item label="转存账号" prop="transfer_account_id">
           <el-select v-model="form.transfer_account_id" placeholder="请选择转存目标账号" clearable style="width: 100%">
@@ -122,9 +170,17 @@
           </el-select>
           <div class="form-tip">选择后将文件转存到该账号下获取直链</div>
         </el-form-item>
-        <el-form-item label="转存目录" prop="transfer_directory">
-          <el-input v-model="form.transfer_directory" placeholder="留空则转存到根目录" />
+        <el-form-item label="转存目录" prop="transfer_directory" :disabled="transferDisabled">
+          <el-input v-model="form.transfer_directory" placeholder="留空则转存到根目录" :disabled="transferDisabled" />
           <div class="form-tip">文件转存的目标目录路径，如：/视频/转存文件</div>
+        </el-form-item>
+        <el-form-item label="秒传方式" prop="transfer_method" :disabled="transferDisabled">
+          <el-select v-model="form.transfer_method" placeholder="请选择秒传方式" style="width: 100%" :disabled="transferDisabled">
+            <el-option label="115driver" value="115driver" />
+            <el-option label="go115" value="go115" />
+            <el-option label="alist" value="alist" />
+          </el-select>
+          <div class="form-tip">选择失败时自动回退到直链获取</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -200,7 +256,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { Plus, Edit, Delete, RefreshRight, Key, Loading, WarningFilled, View, Hide, Cloudy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { request, get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api'
@@ -240,6 +296,99 @@ const toggleShowRefreshToken = (row) => {
   row._showRefreshToken = !row._showRefreshToken
 }
 
+// 账号类型映射
+const accountTypeMap = {
+  'resource': { name: '资源号', type: 'primary' },
+  'vip': { name: 'VIP观影号', type: 'success' },
+  'both': { name: '兼顾', type: 'warning' }
+}
+
+// 状态映射
+const statusMap = {
+  'active': { name: '正常', type: 'success' },
+  'cooling': { name: '冷却中', type: 'warning' },
+  'disabled': { name: '禁用', type: 'danger' }
+}
+
+/**
+ * 获取账号类型显示名称
+ * @param {string} type - 账号类型
+ * @returns {string} 显示名称
+ */
+const getAccountTypeName = (type) => {
+  return accountTypeMap[type]?.name || '资源号'
+}
+
+/**
+ * 获取账号类型标签类型
+ * @param {string} type - 账号类型
+ * @returns {string} 标签类型
+ */
+const getAccountTypeTag = (type) => {
+  return accountTypeMap[type]?.type || 'primary'
+}
+
+/**
+ * 获取状态显示名称
+ * @param {string} status - 状态
+ * @returns {string} 显示名称
+ */
+const getStatusName = (status) => {
+  return statusMap[status]?.name || '正常'
+}
+
+/**
+ * 获取状态标签类型
+ * @param {string} status - 状态
+ * @returns {string} 标签类型
+ */
+const getStatusTag = (status) => {
+  return statusMap[status]?.type || 'success'
+}
+
+/**
+ * 获取优先级标签类型
+ * @param {number} priority - 优先级
+ * @returns {string} 标签类型
+ */
+const getPriorityTag = (priority) => {
+  if (priority >= 8) return 'danger'
+  if (priority >= 6) return 'warning'
+  if (priority >= 4) return 'info'
+  return 'success'
+}
+
+// 秒传方式映射
+const transferMethodMap = {
+  '115driver': { name: '115driver', type: 'primary' },
+  'go115': { name: 'go115', type: 'success' },
+  'alist': { name: 'alist', type: 'warning' }
+}
+
+/**
+ * 获取秒传方式显示名称
+ * @param {string} method - 秒传方式
+ * @returns {string} 显示名称
+ */
+const getTransferMethodName = (method) => {
+  if (!method || method === '') {
+    return ''
+  }
+  return transferMethodMap[method]?.name || ''
+}
+
+/**
+ * 获取秒传方式标签类型
+ * @param {string} method - 秒传方式
+ * @returns {string} 标签类型
+ */
+const getTransferMethodTag = (method) => {
+  if (!method || method === '') {
+    return 'info'
+  }
+  return transferMethodMap[method]?.type || 'info'
+}
+
 // 表格数据
 const cloud115List = ref([])
 const total = ref(0)
@@ -256,6 +405,9 @@ const dialogTitle = ref('新增115云账号')
 const formRef = ref(null)
 const loading = ref(false)
 
+// 转存相关字段禁用状态
+const transferDisabled = ref(false)
+
 // 表单数据
 const form = ref({
   id: null,
@@ -264,7 +416,11 @@ const form = ref({
   access_token: '',
   refresh_token: '',
   transfer_account_id: null,
-  transfer_directory: ''
+  transfer_directory: '',
+  account_type: 'resource',
+  status: 'active',
+  priority: 5,
+  transfer_method: ''
 })
 
 // 表单验证规则
@@ -360,8 +516,9 @@ const fetchCloud115List = async () => {
     params.append('sort_field', sortField.value)
     params.append('sort_order', sortOrder.value)
     const response = await request(`/cloud115?${params.toString()}`)
-    cloud115List.value = response.data.data || []
-    total.value = response.data.data ? response.data.data.length : 0
+    const apiData = response.data.data
+    cloud115List.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
+    total.value = apiData?.total || cloud115List.value.length
   } catch (error) {
     ElMessage.error('获取115云账号列表失败')
   }
@@ -480,8 +637,14 @@ const handleEdit = (row) => {
     access_token: row.access_token || '',
     refresh_token: row.refresh_token || '',
     transfer_account_id: row.transfer_account_id || null,
-    transfer_directory: row.transfer_directory || ''
+    transfer_directory: row.transfer_directory || '',
+    account_type: row.account_type || 'resource',
+    status: row.status || 'active',
+    priority: row.priority || 5,
+    transfer_method: row.transfer_method || ''
   }
+  // 根据转存账号是否配置来设置禁用状态
+  transferDisabled.value = !row.transfer_account_id
   dialogVisible.value = true
 }
 
@@ -516,17 +679,13 @@ const handleDelete = (row) => {
  */
 const handleTest = (row) => {
   ElMessage.info('正在测试115云账号连接...')
-  request('/api/115/test', {
-    data: {
-      id: row.id
-    }
-  }).then((response) => {
+  request(`/auth/cloud115/${row.id}`).then((response) => {
     console.log('115云账号测试结果:', response)
     const data = response.data
-    if (data.success) {
-      ElMessage.success(`测试成功！账号: ${data.account_name}，根目录文件数: ${data.file_count}`)
+    if (data.state && data.data) {
+      ElMessage.success(`测试成功！账号: ${data.data.name}`)
     } else {
-      ElMessage.error(`测试失败: ${data.error}`)
+      ElMessage.error(`测试失败: ${data.message || data.error || '未知错误'}`)
     }
   }).catch((error) => {
     console.error('115云账号测试失败:', error)
@@ -545,8 +704,13 @@ const resetForm = () => {
     access_token: '',
     refresh_token: '',
     transfer_account_id: null,
-    transfer_directory: ''
+    transfer_directory: '',
+    account_type: 'resource',
+    status: 'active',
+    priority: 5,
+    transfer_method: ''
   }
+  transferDisabled.value = false
   if (formRef.value) {
     formRef.value.resetFields()
   }
@@ -779,6 +943,17 @@ const handleQRCodeDialogClose = () => {
   qrcodeExpireTime.value = 0
   updateCloudId.value = null
 }
+
+// 监听转存账号变化，控制秒传方式和转存目录的禁用状态
+watch(() => form.value.transfer_account_id, (newVal) => {
+  if (!newVal || newVal === 0) {
+    transferDisabled.value = true
+    form.value.transfer_method = ''
+    form.value.transfer_directory = ''
+  } else {
+    transferDisabled.value = false
+  }
+})
 
 // 组件挂载
 onMounted(() => {

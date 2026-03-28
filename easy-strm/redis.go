@@ -173,3 +173,8 @@ func MigrateRedisKeys() error {
 
 	return nil
 }
+
+// getRedisClientInstance 获取全局Redis客户端实例
+func getRedisClientInstance() *redis.Client {
+	return redisClient
+}

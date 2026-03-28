@@ -43,6 +43,10 @@
           <el-icon><Setting /></el-icon>
           <span>STRM配置管理</span>
         </el-menu-item>
+        <el-menu-item index="/dashboard/settings" class="menu-item">
+          <el-icon><Tools /></el-icon>
+          <span>系统配置</span>
+        </el-menu-item>
       </el-menu>
       <div class="sidebar-footer">
         <div class="version-info">v1.0.0</div>
@@ -70,7 +74,7 @@
         </div>
       </el-header>
       <el-main class="content-body">
-        <router-view />
+        <router-view :key="$route.fullPath" />
       </el-main>
     </el-container>
 
@@ -81,7 +85,7 @@
       width="80%"
       top="5vh"
       :close-on-click-modal="false"
-      destroy-on-close
+      :destroy-on-close="true"
     >
       <div class="log-container">
         <div class="log-toolbar">
@@ -131,7 +135,7 @@
       width="70%"
       top="5vh"
       :close-on-click-modal="false"
-      destroy-on-close
+      :destroy-on-close="true"
     >
       <div class="task-dialog-container">
         <div class="task-toolbar">
@@ -155,7 +159,7 @@
 <script setup>
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List } from '@element-plus/icons-vue'
+import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList } from '../utils/api'
 import TaskCard from '../components/TaskCard.vue'
@@ -176,6 +180,8 @@ const currentTitle = computed(() => {
     return '115云账号管理'
   } else if (path === '/dashboard/strm-config') {
     return 'STRM配置管理'
+  } else if (path === '/dashboard/settings') {
+    return '系统配置'
   }
   return '后台管理'
 })

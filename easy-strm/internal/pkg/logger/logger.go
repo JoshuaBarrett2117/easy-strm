@@ -3,7 +3,7 @@ package logger
 import (
 	"fmt"
 	"log"
-	"os"
+	"runtime"
 	"time"
 )
 
@@ -35,10 +35,18 @@ func Debug(format string, v ...interface{}) {
 	}
 }
 
+func Debugf(format string, v ...interface{}) {
+	Debug(format, v...)
+}
+
 func Info(format string, v ...interface{}) {
 	if currentLevel <= INFO {
 		log.Printf("[%s] [INFO] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
 	}
+}
+
+func Infof(format string, v ...interface{}) {
+	Info(format, v...)
 }
 
 func Warn(format string, v ...interface{}) {
@@ -47,14 +55,22 @@ func Warn(format string, v ...interface{}) {
 	}
 }
 
+func Warnf(format string, v ...interface{}) {
+	Warn(format, v...)
+}
+
 func Error(format string, v ...interface{}) {
 	if currentLevel <= ERROR {
 		log.Printf("[%s] [ERROR] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
 	}
 }
 
+func Errorf(format string, v ...interface{}) {
+	Error(format, v...)
+}
+
 func formatCaller() string {
-	_, file, line, ok := os.Caller(2)
+	_, file, line, ok := runtime.Caller(2)
 	if !ok {
 		return "unknown:0"
 	}

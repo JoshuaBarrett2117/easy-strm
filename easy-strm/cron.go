@@ -32,12 +32,80 @@ func InitCronScheduler() error {
 	scheduler.cron.Start()
 	Info("Cron scheduler started")
 
+	// 添加账号冷却恢复定时任务，每分钟执行一次
+	_, err := scheduler.cron.AddFunc("0 * * * * *", func() {
+		RecoverCoolingAccounts()
+	})
+	if err != nil {
+		Warn("Failed to add cooling account recovery task: %v", err)
+	} else {
+		Info("账号冷却恢复定时任务已添加 (每分钟执行)")
+	}
+
 	if err := LoadCronTasksFromDB(); err != nil {
 		Error("Failed to load cron tasks from database: %v", err)
 		return err
 	}
 
 	return nil
+}
+
+// RecoverCoolingAccounts 恢复超过冷却时间的账号（由定时任务调用）
+func RecoverCoolingAccounts() {
+	const coolingDuration = 5 * time.Minute
+
+	Debug("[cooling] 开始检查冷却账号...")
+
+	// 获取所有cooling状态的账号
+	rows, err := db.Query("SELECT id, name, status, cooling_start_time FROM t_cloud_115 WHERE status = 'cooling'")
+	if err != nil {
+		Error("[cooling] 查询冷却账号失败: %v", err)
+		return
+	}
+	defer rows.Close()
+
+	now := time.Now()
+	recoveredCount := 0
+
+	for rows.Next() {
+		var id int
+		var name string
+		var status string
+		var coolingStartTime *time.Time
+
+		if err := rows.Scan(&id, &name, &status, &coolingStartTime); err != nil {
+			Error("[cooling] 扫描账号行失败: %v", err)
+			continue
+		}
+
+		if coolingStartTime == nil {
+			// 如果没有冷却开始时间，视为已超过冷却时间，直接恢复
+			if _, err := db.Exec("UPDATE t_cloud_115 SET status = 'active', cooling_start_time = NULL WHERE id = $1", id); err != nil {
+				Error("[cooling] 恢复账号 %d 失败: %v", id, err)
+				continue
+			}
+			recoveredCount++
+			Info("[cooling] 恢复账号 %s (ID: %d) - 无冷却开始时间", name, id)
+			continue
+		}
+
+		// 检查冷却时间是否已超过5分钟
+		coolingElapsed := now.Sub(*coolingStartTime)
+		if coolingElapsed >= coolingDuration {
+			if _, err := db.Exec("UPDATE t_cloud_115 SET status = 'active', cooling_start_time = NULL WHERE id = $1", id); err != nil {
+				Error("[cooling] 恢复账号 %d 失败: %v", id, err)
+				continue
+			}
+			recoveredCount++
+			Info("[cooling] 恢复账号 %s (ID: %d) - 冷却时间 %.0f 分钟", name, id, coolingElapsed.Minutes())
+		}
+	}
+
+	if recoveredCount > 0 {
+		Info("[cooling] 本次共恢复 %d 个账号", recoveredCount)
+	} else {
+		Debug("[cooling] 没有需要恢复的冷却账号")
+	}
 }
 
 // LoadCronTasksFromDB 从数据库加载定时任务

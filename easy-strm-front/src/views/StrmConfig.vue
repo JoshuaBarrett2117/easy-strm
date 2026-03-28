@@ -14,7 +14,7 @@
         </div>
       </template>
       
-      <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
+      <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
         <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
         <el-table-column label="115账号" min-width="120" align="center" sortable="custom" prop="cloud115_id">
           <template #default="scope">
@@ -387,7 +387,8 @@ const fetchStrmConfigList = async () => {
     params.append('sort_field', sortField.value)
     params.append('sort_order', sortOrder.value)
     const response = await request(`/strm/config?${params.toString()}`)
-    strmConfigList.value = response.data.data || []
+    const apiData = response.data.data
+    strmConfigList.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
   } catch (error) {
     ElMessage.error('获取STRM配置列表失败')
   }

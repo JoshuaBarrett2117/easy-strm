@@ -1,5 +1,5 @@
 <template>
-  <el-card class="task-card" shadow="hover" :class="['task-type-' + task.task_type]">
+  <el-card v-if="task" class="task-card" shadow="hover" :class="['task-type-' + (task.task_type || 'unknown')]">
     <template #header>
       <div class="task-header">
         <div class="task-title">
@@ -11,7 +11,7 @@
             {{ taskStatusText }}
           </el-tag>
         </div>
-        <span class="task-time">{{ task.create_time }}</span>
+        <span class="task-time">{{ task.create_time || '' }}</span>
       </div>
     </template>
 
@@ -69,7 +69,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, toRef } from 'vue'
 import {
   Clock,
   Loading,
@@ -83,9 +83,11 @@ import {
 const props = defineProps({
   task: {
     type: Object,
-    required: true
+    default: () => ({})
   }
 })
+
+const task = toRef(props, 'task')
 
 const taskTypeNames = {
   'strm_generate': 'STRM文件生成',
@@ -102,30 +104,38 @@ const taskTypeIcons = {
 }
 
 const taskTypeName = computed(() => {
-  return taskTypeNames[props.task.task_type] || '未知任务'
+  const t = task.value
+  if (!t) return '未知任务'
+  return taskTypeNames[t.task_type] || '未知任务'
 })
 
 const taskDisplayName = computed(() => {
-  if (props.task.task_name) {
-    return props.task.task_name
+  const t = task.value
+  if (!t) return '任务'
+  if (t.task_name) {
+    return t.task_name
   }
-  if (props.task.task_type) {
-    return taskTypeNames[props.task.task_type] || '未知任务'
+  if (t.task_type) {
+    return taskTypeNames[t.task_type] || '未知任务'
   }
   return '任务'
 })
 
 const taskTypeTagType = computed(() => {
+  const t = task.value
+  if (!t) return 'info'
   const types = {
     'strm_generate': 'primary',
     'incremental_sync': 'success',
     'log_clean': 'warning',
     'sync_files': 'info'
   }
-  return types[props.task.task_type] || 'info'
+  return types[t.task_type] || 'info'
 })
 
 const taskStatusType = computed(() => {
+  const t = task.value
+  if (!t) return 'info'
   const types = {
     'pending': 'info',
     'running': 'warning',
@@ -133,10 +143,12 @@ const taskStatusType = computed(() => {
     'failed': 'danger',
     'scheduled': ''
   }
-  return types[props.task.status] || 'info'
+  return types[t.status] || 'info'
 })
 
 const taskStatusText = computed(() => {
+  const t = task.value
+  if (!t) return '未知'
   const texts = {
     'pending': '待执行',
     'running': '执行中',
@@ -144,47 +156,59 @@ const taskStatusText = computed(() => {
     'failed': '失败',
     'scheduled': '已调度'
   }
-  return texts[props.task.status] || '未知'
+  return texts[t.status] || '未知'
 })
 
 const taskStatusIcon = computed(() => {
-  if (props.task.status === 'running') return Loading
-  if (props.task.status === 'completed') return CircleCheck
-  if (props.task.status === 'failed') return CircleClose
-  if (props.task.status === 'scheduled') return Clock
+  const t = task.value
+  if (!t) return Timer
+  if (t.status === 'running') return Loading
+  if (t.status === 'completed') return CircleCheck
+  if (t.status === 'failed') return CircleClose
+  if (t.status === 'scheduled') return Clock
   return Timer
 })
 
 const showProgress = computed(() => {
-  const taskType = props.task.task_type || 'strm_generate'
-  return ['running', 'completed', 'failed'].includes(props.task.status) &&
+  const t = task.value
+  if (!t) return false
+  const taskType = t.task_type || 'strm_generate'
+  return ['running', 'completed', 'failed'].includes(t.status) &&
     taskType === 'strm_generate'
 })
 
 const showFileStats = computed(() => {
-  const taskType = props.task.task_type || 'strm_generate'
+  const t = task.value
+  if (!t) return false
+  const taskType = t.task_type || 'strm_generate'
   return taskType === 'strm_generate' &&
-    (props.task.total_files > 0 || props.task.success_files > 0 || props.task.failed_files > 0)
+    ((t.total_files > 0) || (t.success_files > 0) || (t.failed_files > 0))
 })
 
 const progressStatus = computed(() => {
-  if (props.task.status === 'completed') return 'success'
-  if (props.task.status === 'failed') return 'exception'
+  const t = task.value
+  if (!t) return ''
+  if (t.status === 'completed') return 'success'
+  if (t.status === 'failed') return 'exception'
   return ''
 })
 
-const pendingCount = computed(() => {
-  const total = props.task.total_files || 0
-  const success = props.task.success_files || 0
-  const failed = props.task.failed_files || 0
-  return Math.max(0, total - success - failed)
-})
-
 const progressFormat = (percentage) => {
-  if (props.task.status === 'completed') return '完成'
-  if (props.task.status === 'running' && props.task.total_files === 0) return '准备中...'
+  const t = task.value
+  if (!t) return ''
+  if (t.status === 'completed') return '完成'
+  if (t.status === 'running' && t.total_files === 0) return '准备中...'
   return `${percentage}%`
 }
+
+const pendingCount = computed(() => {
+  const t = task.value
+  if (!t) return 0
+  const total = t.total_files || 0
+  const success = t.success_files || 0
+  const failed = t.failed_files || 0
+  return Math.max(0, total - success - failed)
+})
 </script>
 
 <style scoped>
@@ -210,6 +234,14 @@ const progressFormat = (percentage) => {
   border-left: 4px solid #909399;
 }
 
+.task-type-incremental_sync {
+  border-left: 4px solid #67c23a;
+}
+
+.task-type-unknown {
+  border-left: 4px solid #909399;
+}
+
 .task-header {
   display: flex;
   justify-content: space-between;
@@ -219,7 +251,7 @@ const progressFormat = (percentage) => {
 .task-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
 
 .task-icon {
@@ -237,7 +269,8 @@ const progressFormat = (percentage) => {
 
 .task-name {
   font-weight: 600;
-  font-size: 14px;
+  font-size: 15px;
+  color: #303133;
 }
 
 .status-tag {
@@ -250,19 +283,19 @@ const progressFormat = (percentage) => {
 }
 
 .task-body {
-  padding-top: 10px;
+  padding: 10px 0;
 }
 
 .task-type-info {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 12px;
+  margin-bottom: 15px;
 }
 
 .config-name {
-  font-size: 13px;
   color: #606266;
+  font-size: 14px;
 }
 
 .task-progress {
@@ -270,12 +303,12 @@ const progressFormat = (percentage) => {
 }
 
 .task-stats {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  padding: 12px;
-  background-color: #f5f7fa;
-  border-radius: 6px;
+  display: flex;
+  justify-content: space-around;
+  padding: 15px 0;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 15px;
 }
 
 .stat-item {
@@ -283,9 +316,9 @@ const progressFormat = (percentage) => {
 }
 
 .stat-value {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 600;
-  color: #303133;
+  margin-bottom: 5px;
 }
 
 .stat-value.total {
@@ -307,22 +340,18 @@ const progressFormat = (percentage) => {
 .stat-label {
   font-size: 12px;
   color: #909399;
-  margin-top: 4px;
 }
 
 .scheduled-info {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background-color: #fdf6ec;
-  border-radius: 4px;
-  color: #e6a23c;
-  font-size: 13px;
-  margin-bottom: 10px;
+  gap: 8px;
+  color: #606266;
+  font-size: 14px;
+  margin-top: 10px;
 }
 
 .task-error {
-  margin-top: 10px;
+  margin-top: 15px;
 }
 </style>

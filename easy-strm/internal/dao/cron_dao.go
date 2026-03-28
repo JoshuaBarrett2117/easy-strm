@@ -142,7 +142,7 @@ func (c *CronTaskDAO) Create(taskName, taskType string, cloud115ID, strmConfigID
 	if err != nil {
 		return nil, fmt.Errorf("CronTaskDAO[Create] 创建失败: %v", err)
 	}
-	Info("CronTaskDAO[Create] 创建定时任务成功: %s (ID: %d)", taskName, task.ID)
+	logger.Infof("CronTaskDAO[Create] 创建定时任务成功: %s (ID: %d)", taskName, task.ID)
 	return task, nil
 }
 

@@ -162,9 +162,9 @@ export const get115QRCode = () => {
   return api.get('/115/qrcode')
 }
 
-// 检查扫码登录状态
+// 检查扫码登录状态（使用较长超时，因为扫码可能需要较长时间）
 export const check115LoginStatus = (params) => {
-  return api.get('/115/login/status', { params })
+  return api.get('/115/login/status', { params, timeout: 60000 })
 }
 
 // 确认登录并保存凭据
@@ -214,4 +214,21 @@ export const getTaskList = () => {
 
 export const getTaskDetail = (taskId) => {
   return api.get(`/strm/task/${taskId}`)
+}
+
+// 系统配置API
+export const getSettings = () => {
+  return api.get('/settings')
+}
+
+export const getSetting = (key) => {
+  return api.get(`/settings/${key}`)
+}
+
+export const updateSetting = (key, value) => {
+  return api.put(`/settings/${key}`, { value })
+}
+
+export const updateSettings = (settings) => {
+  return api.put('/settings', settings)
 }

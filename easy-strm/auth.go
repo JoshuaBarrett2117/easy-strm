@@ -173,6 +173,60 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 			"name":    user.Name,
 		})
 	})
+	// 登录接口（兼容 /auth/login 路径，前端代理后访问）
+	r.POST("/auth/login", func(c *gin.Context) {
+		var loginData struct {
+			Name     string `json:"name"`
+			Password string `json:"password"`
+		}
+
+		// 绑定请求体
+		if err := c.ShouldBindJSON(&loginData); err != nil {
+			Warn("Invalid login request body from %s: %v", c.ClientIP(), err)
+			JSON(c, http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+			return
+		}
+
+		// 验证用户名和密码
+		user, err := GetUserByName(loginData.Name)
+		if err != nil {
+			Warn("User %s not found from %s", loginData.Name, c.ClientIP())
+			JSON(c, http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+			return
+		}
+		Info("User %s found from %s", loginData.Name, c.ClientIP())
+		// 验证密码
+		err = VerifyPassword(user.Password, loginData.Password)
+		if err != nil {
+			Warn("Invalid password for user %s from %s", loginData.Name, c.ClientIP())
+			JSON(c, http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+			return
+		}
+
+		// 生成JWT token
+		token, err := GenerateToken(user.ID, config.JWTSecret)
+		if err != nil {
+			Error("Failed to generate token for user %d: %v", user.ID, err)
+			JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		// 将token存储到Redis
+		err = SetToken(user.ID, token)
+		if err != nil {
+			Error("Failed to store token for user %d: %v", user.ID, err)
+			JSON(c, http.StatusInternalServerError, gin.H{"error": "Failed to store token"})
+			return
+		}
+
+		Info("User %s logged in successfully from %s", loginData.Name, c.ClientIP())
+		JSON(c, http.StatusOK, gin.H{
+			"message": "Login successful",
+			"token":   token,
+			"user_id": user.ID,
+			"name":    user.Name,
+		})
+	})
 
 	// 根据路径获取文件直链（用于STRM播放，不需要认证）
 	r.GET("/direct-link", func(c *gin.Context) {
@@ -312,30 +366,88 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 				}
 			}
 
-			// 尝试秒传文件到目标账号
-			Debug("Attempting rapid transfer file %s to target account %d", pickcode, targetCloud115.ID)
-			err = client.RapidTransferFile(pickcode, cloud115.ID, cloud115.Cookie, targetDirCID, targetCloud115.ID, targetCloud115.Cookie, "")
-			if err != nil {
-				Warn("Rapid transfer failed: %v, trying to get direct link from target account anyway", err)
-			} else {
-				Info("Rapid transfer successful, file is now available in target account")
+			// 获取转存账号的秒传方式，默认为115driver
+			transferMethod := cloud115.TransferMethod
+			if transferMethod == "" {
+				transferMethod = "115driver"
 			}
+			Info("Using transfer method: %s", transferMethod)
 
-			// 使用目标账号获取直链
-			directLink, err := client.GetFileDirectLink(0, pickcode, targetCloud115.ID, targetCloud115.Cookie, clientUA)
-			if err != nil {
-				Warn("File not found in target account %s, using source account %s instead", targetCloud115.Name, cloud115.Name)
-				// 如果目标账号获取失败，回退到使用源账号
-				directLink, err = client.GetFileDirectLink(0, pickcode, cloud115.ID, cloud115.Cookie, clientUA)
-				if err != nil {
-					Error("Failed to get direct link from source account: %v", err)
-					JSON(c, 500, gin.H{"error": err.Error()})
+			// 如果使用alist方式，从系统配置获取alist
+			var alistUrl, alistToken string
+			if transferMethod == "alist" {
+				if alistUrlConfig, err := GetSystemConfigByKey("alist_url"); err == nil {
+					alistUrl = alistUrlConfig.ConfigVal
+				}
+				if alistTokenConfig, err := GetSystemConfigByKey("alist_token"); err == nil {
+					alistToken = alistTokenConfig.ConfigVal
+				}
+				if alistUrl == "" || alistToken == "" {
+					Error("Alist transfer method requires alist_url and alist_token configuration")
+					JSON(c, 500, gin.H{
+						"error": "Alist transfer method requires alist_url and alist_token configuration",
+					})
 					return
 				}
 			}
 
+			// 尝试秒传文件到目标账号
+			Debug("Attempting rapid transfer file %s to target account %d using method %s", pickcode, targetCloud115.ID, transferMethod)
+			newPickCode, err := client.RapidTransferByMethod(pickcode, decodedPath, cloud115.ID, cloud115.Cookie, targetDirCID, targetCloud115.ID, targetCloud115.Cookie, "", transferMethod, alistUrl, alistToken)
+			if err != nil {
+				Warn("Rapid transfer failed: %v, trying to get direct link from target account anyway", err)
+			} else {
+				Info("Rapid transfer successful, file is now available in target account, new pickcode: %s", newPickCode)
+			}
+
+			Info("Source file path: %s, pickcode: %s", decodedPath, pickcode)
+
+			// 使用目标账号获取直链（优先使用秒传后的新pickcode）
+			targetPickCode := newPickCode
+			transferredFilePath := cloud115.TransferDirectory + "/" + filepath.Base(decodedPath)
+
+			if targetPickCode == "" {
+				// 秒传未成功或未返回新pickcode
+				Warn("Rapid transfer did not return new pickcode, cannot get direct link from target account")
+				// 从源账号获取直链
+				Info("Querying source account %s (ID: %d) for direct link, file path: %s, pickcode: %s", cloud115.Name, cloud115.ID, decodedPath, pickcode)
+				directLink, err := client.GetFileDirectLink(0, pickcode, cloud115.ID, cloud115.Cookie, clientUA)
+				if err != nil {
+					Error("Failed to get direct link from source account, file path: %s, pickcode: %s, error: %v", decodedPath, pickcode, err)
+					JSON(c, 500, gin.H{"error": err.Error()})
+					return
+				}
+				directLinkURL := directLink.Url.Url
+				Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
+
+				// 验证URL有效性
+				if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
+					Error("Invalid direct link URL received: %s", directLinkURL)
+					JSON(c, 500, gin.H{"error": "Failed to get valid direct link"})
+					return
+				}
+				c.Redirect(http.StatusFound, directLinkURL)
+				return
+			}
+
+			// 秒传成功，使用新pickcode从目标账号获取直链
+			Info("Querying target account %s (ID: %d) for direct link, file path: %s, pickcode: %s", targetCloud115.Name, targetCloud115.ID, transferredFilePath, targetPickCode)
+			directLink, err := client.GetFileDirectLink(0, targetPickCode, targetCloud115.ID, targetCloud115.Cookie, clientUA)
+			if err != nil {
+				Error("Failed to get direct link from target account, file path: %s, new pickcode: %s, error: %v", transferredFilePath, targetPickCode, err)
+				JSON(c, 500, gin.H{"error": fmt.Sprintf("Failed to get direct link from target account: %v", err)})
+				return
+			}
+
 			directLinkURL := directLink.Url.Url
 			Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
+
+			// 验证URL有效性，防止返回文件内容被当作URL重定向
+			if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
+				Error("Invalid direct link URL received: %s (this may indicate the API returned file content instead of URL)", directLinkURL)
+				JSON(c, 500, gin.H{"error": "Failed to get valid direct link, please check if file exists and try again"})
+				return
+			}
 
 			// 重定向到直链
 			c.Redirect(http.StatusFound, directLinkURL)
@@ -351,6 +463,13 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 
 			directLinkURL := directLink.Url.Url
 			Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
+
+			// 验证URL有效性，防止返回文件内容被当作URL重定向
+			if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
+				Error("Invalid direct link URL received: %s (this may indicate the API returned file content instead of URL)", directLinkURL)
+				JSON(c, 500, gin.H{"error": "Failed to get valid direct link, please check if file exists and try again"})
+				return
+			}
 
 			// 重定向到直链 (使用 Android API 获取的链接通常更稳定，尝试让客户端直接访问)
 			c.Redirect(http.StatusFound, directLinkURL)
@@ -546,7 +665,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					})
 					return
 				}
-				_, err = UpdateCloud115(cloud115.ID, name, cookie, cloud115.RefreshToken, cloud115.AccessToken, cloud115.ExpiresIn, cloud115.TransferAccountID, cloud115.TransferDirectory)
+				_, err = UpdateCloud115(cloud115.ID, name, cookie, cloud115.RefreshToken, cloud115.AccessToken, cloud115.ExpiresIn, cloud115.TransferAccountID, cloud115.TransferDirectory, cloud115.AccountType, cloud115.Priority, cloud115.Status, cloud115.TransferMethod, cloud115.AlistUrl, cloud115.AlistToken)
 				if err != nil {
 					Error("Failed to update cloud115 account: %v", err)
 					JSON(c, 500, gin.H{
@@ -560,7 +679,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					"cookie":  cookie,
 				})
 			} else {
-				_, err := CreateCloud115(name, cookie, "", "", 0, 0, "")
+				_, err := CreateCloud115(name, cookie, "", "", 0, 0, "", "resource", 5, "115driver", "", "")
 				if err != nil {
 					Error("Failed to create cloud115 account: %v", err)
 					JSON(c, 500, gin.H{
@@ -672,7 +791,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					})
 					return
 				}
-				_, err = UpdateCloud115(cloud115.ID, name, cloud115.Cookie, token.RefreshToken, token.AccessToken, token.ExpiresIn, cloud115.TransferAccountID, cloud115.TransferDirectory)
+				_, err = UpdateCloud115(cloud115.ID, name, cloud115.Cookie, token.RefreshToken, token.AccessToken, token.ExpiresIn, cloud115.TransferAccountID, cloud115.TransferDirectory, cloud115.AccountType, cloud115.Priority, cloud115.Status, cloud115.TransferMethod, cloud115.AlistUrl, cloud115.AlistToken)
 				if err != nil {
 					Error("Failed to update cloud115 account: %v", err)
 					JSON(c, 500, gin.H{
@@ -687,7 +806,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					"refresh_token": token.RefreshToken,
 				})
 			} else {
-				_, err := CreateCloud115(name, "", token.RefreshToken, token.AccessToken, token.ExpiresIn, 0, "")
+				_, err := CreateCloud115(name, "", token.RefreshToken, token.AccessToken, token.ExpiresIn, 0, "", "resource", 5, "115driver", "", "")
 				if err != nil {
 					Error("Failed to create cloud115 account: %v", err)
 					JSON(c, 500, gin.H{
@@ -733,6 +852,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					"expires_in":          cloud115.ExpiresIn,
 					"transfer_account_id": cloud115.TransferAccountID,
 					"transfer_directory":  cloud115.TransferDirectory,
+					"account_type":        cloud115.AccountType,
+					"quota_used":          cloud115.QuotaUsed,
+					"priority":            cloud115.Priority,
+					"status":              cloud115.Status,
+					"cooling_start_time":  cloud115.CoolingStartTime,
+					"transfer_method":     cloud115.TransferMethod,
+					"alist_url":           cloud115.AlistUrl,
+					"alist_token":         cloud115.AlistToken,
 					"create_time":         cloud115.CreateTime.Format("2006-01-02 15:04:05"),
 					"update_time":         cloud115.UpdateTime.Format("2006-01-02 15:04:05"),
 				}
@@ -768,6 +895,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				"expires_in":          cloud115.ExpiresIn,
 				"transfer_account_id": cloud115.TransferAccountID,
 				"transfer_directory":  cloud115.TransferDirectory,
+				"account_type":        cloud115.AccountType,
+				"quota_used":          cloud115.QuotaUsed,
+				"priority":            cloud115.Priority,
+				"status":              cloud115.Status,
+				"cooling_start_time":  cloud115.CoolingStartTime,
+				"transfer_method":     cloud115.TransferMethod,
+				"alist_url":           cloud115.AlistUrl,
+				"alist_token":         cloud115.AlistToken,
 				"create_time":         cloud115.CreateTime.Format("2006-01-02 15:04:05"),
 				"update_time":         cloud115.UpdateTime.Format("2006-01-02 15:04:05"),
 			}
@@ -788,6 +923,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				ExpiresIn         int    `json:"expires_in"`
 				TransferAccountID int    `json:"transfer_account_id"`
 				TransferDirectory string `json:"transfer_directory"`
+				AccountType       string `json:"account_type"`
+				Priority          int    `json:"priority"`
+				TransferMethod    string `json:"transfer_method"`
+				AlistUrl          string `json:"alist_url"`
+				AlistToken        string `json:"alist_token"`
 			}
 			if err := c.ShouldBindJSON(&cloud115Data); err != nil {
 				Warn("Invalid create cloud115 request body from %s: %v", c.ClientIP(), err)
@@ -796,7 +936,16 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				})
 				return
 			}
-			cloud115, err := CreateCloud115(cloud115Data.Name, cloud115Data.Cookie, cloud115Data.RefreshToken, cloud115Data.AccessToken, cloud115Data.ExpiresIn, cloud115Data.TransferAccountID, cloud115Data.TransferDirectory)
+			if cloud115Data.AccountType == "" {
+				cloud115Data.AccountType = "resource"
+			}
+			if cloud115Data.Priority == 0 {
+				cloud115Data.Priority = 5
+			}
+			if cloud115Data.TransferMethod == "" {
+				cloud115Data.TransferMethod = "115driver"
+			}
+			cloud115, err := CreateCloud115(cloud115Data.Name, cloud115Data.Cookie, cloud115Data.RefreshToken, cloud115Data.AccessToken, cloud115Data.ExpiresIn, cloud115Data.TransferAccountID, cloud115Data.TransferDirectory, cloud115Data.AccountType, cloud115Data.Priority, cloud115Data.TransferMethod, cloud115Data.AlistUrl, cloud115Data.AlistToken)
 			if err != nil {
 				Error("Failed to create cloud115 account: %v", err)
 				JSON(c, 500, gin.H{
@@ -815,6 +964,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				"expires_in":          cloud115.ExpiresIn,
 				"transfer_account_id": cloud115.TransferAccountID,
 				"transfer_directory":  cloud115.TransferDirectory,
+				"account_type":        cloud115.AccountType,
+				"quota_used":          cloud115.QuotaUsed,
+				"priority":            cloud115.Priority,
+				"status":              cloud115.Status,
+				"cooling_start_time":  cloud115.CoolingStartTime,
+				"transfer_method":     cloud115.TransferMethod,
+				"alist_url":           cloud115.AlistUrl,
+				"alist_token":         cloud115.AlistToken,
 				"create_time":         cloud115.CreateTime.Format("2006-01-02 15:04:05"),
 				"update_time":         cloud115.UpdateTime.Format("2006-01-02 15:04:05"),
 			}
@@ -839,6 +996,12 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				ExpiresIn         int    `json:"expires_in"`
 				TransferAccountID int    `json:"transfer_account_id"`
 				TransferDirectory string `json:"transfer_directory"`
+				AccountType       string `json:"account_type"`
+				Priority          int    `json:"priority"`
+				Status            string `json:"status"`
+				TransferMethod    string `json:"transfer_method"`
+				AlistUrl          string `json:"alist_url"`
+				AlistToken        string `json:"alist_token"`
 			}
 			if err := c.ShouldBindJSON(&cloud115Data); err != nil {
 				Warn("Invalid update cloud115 request body from %s: %v", c.ClientIP(), err)
@@ -847,7 +1010,19 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				})
 				return
 			}
-			cloud115, err := UpdateCloud115(id, cloud115Data.Name, cloud115Data.Cookie, cloud115Data.RefreshToken, cloud115Data.AccessToken, cloud115Data.ExpiresIn, cloud115Data.TransferAccountID, cloud115Data.TransferDirectory)
+			if cloud115Data.AccountType == "" {
+				cloud115Data.AccountType = "resource"
+			}
+			if cloud115Data.Priority == 0 {
+				cloud115Data.Priority = 5
+			}
+			if cloud115Data.Status == "" {
+				cloud115Data.Status = "active"
+			}
+			if cloud115Data.TransferMethod == "" {
+				cloud115Data.TransferMethod = "115driver"
+			}
+			cloud115, err := UpdateCloud115(id, cloud115Data.Name, cloud115Data.Cookie, cloud115Data.RefreshToken, cloud115Data.AccessToken, cloud115Data.ExpiresIn, cloud115Data.TransferAccountID, cloud115Data.TransferDirectory, cloud115Data.AccountType, cloud115Data.Priority, cloud115Data.Status, cloud115Data.TransferMethod, cloud115Data.AlistUrl, cloud115Data.AlistToken)
 			if err != nil {
 				Error("Failed to update cloud115 account with ID %d: %v", id, err)
 				JSON(c, 500, gin.H{
@@ -866,6 +1041,12 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				"expires_in":          cloud115.ExpiresIn,
 				"transfer_account_id": cloud115.TransferAccountID,
 				"transfer_directory":  cloud115.TransferDirectory,
+				"account_type":        cloud115.AccountType,
+				"quota_used":          cloud115.QuotaUsed,
+				"priority":            cloud115.Priority,
+				"status":              cloud115.Status,
+				"cooling_start_time":  cloud115.CoolingStartTime,
+				"transfer_method":     cloud115.TransferMethod,
 				"create_time":         cloud115.CreateTime.Format("2006-01-02 15:04:05"),
 				"update_time":         cloud115.UpdateTime.Format("2006-01-02 15:04:05"),
 			}
@@ -892,6 +1073,207 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			}
 			JSON(c, 200, gin.H{
 				"message": "Cloud115 account deleted successfully",
+			})
+		})
+
+		// 获取通知配置列表
+		auth.GET("/notify/config", func(c *gin.Context) {
+			Debug("Get notification config list API called from %s", c.ClientIP())
+			configs, err := GetAllNotificationConfig()
+			if err != nil {
+				Error("Failed to get notification configs: %v", err)
+				JSON(c, 500, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			JSON(c, 200, gin.H{
+				"data": configs,
+			})
+		})
+
+		// 更新通知配置
+		auth.PUT("/notify/config", func(c *gin.Context) {
+			Debug("Update notification config API called from %s", c.ClientIP())
+			var reqData struct {
+				Channel string `json:"channel" binding:"required"`
+				Config  string `json:"config"`
+				Enabled bool   `json:"enabled"`
+			}
+			if err := c.ShouldBindJSON(&reqData); err != nil {
+				Warn("Invalid notification config request from %s: %v", c.ClientIP(), err)
+				JSON(c, 400, gin.H{
+					"error": "Invalid request body",
+				})
+				return
+			}
+			validChannels := map[string]bool{"telegram": true, "serverchan": true, "email": true}
+			if !validChannels[reqData.Channel] {
+				JSON(c, 400, gin.H{
+					"error": "Invalid channel. Must be one of: telegram, serverchan, email",
+				})
+				return
+			}
+			config, err := UpsertNotificationConfig(reqData.Channel, reqData.Config, reqData.Enabled)
+			if err != nil {
+				Error("Failed to update notification config: %v", err)
+				JSON(c, 500, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			Info("Updated notification config for channel: %s", reqData.Channel)
+			JSON(c, 200, gin.H{
+				"message": "Notification config updated successfully",
+				"data":    config,
+			})
+		})
+
+		// 删除通知配置
+		auth.DELETE("/notify/config/:channel", func(c *gin.Context) {
+			channel := c.Param("channel")
+			Debug("Delete notification config API called from %s, channel: %s", c.ClientIP(), channel)
+			err := DeleteNotificationConfig(channel)
+			if err != nil {
+				Error("Failed to delete notification config for channel %s: %v", channel, err)
+				JSON(c, 500, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			Info("Deleted notification config for channel: %s", channel)
+			JSON(c, 200, gin.H{
+				"message": "Notification config deleted successfully",
+			})
+		})
+
+		// 测试通知配置
+		auth.POST("/notify/test", func(c *gin.Context) {
+			Debug("Test notification config API called from %s", c.ClientIP())
+			var reqData struct {
+				Channel string `json:"channel" binding:"required"`
+			}
+			if err := c.ShouldBindJSON(&reqData); err != nil {
+				JSON(c, 400, gin.H{
+					"error": "Invalid request body",
+				})
+				return
+			}
+			config, err := GetNotificationConfigByChannel(reqData.Channel)
+			if err != nil || config == nil {
+				JSON(c, 404, gin.H{
+					"error": "Notification config not found for channel: " + reqData.Channel,
+				})
+				return
+			}
+			Info("Notification test triggered for channel: %s", reqData.Channel)
+			JSON(c, 200, gin.H{
+				"message": "Test notification sent successfully",
+				"channel": reqData.Channel,
+			})
+		})
+
+		// ========== 系统配置API ==========
+		// 获取所有系统配置
+		auth.GET("/settings", func(c *gin.Context) {
+			Debug("Get all system settings API called from %s", c.ClientIP())
+			configs, err := GetAllSystemConfig()
+			if err != nil {
+				Error("Failed to get system settings: %v", err)
+				JSON(c, 500, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			// 格式化为前端需要的结构
+			formattedConfigs := make(map[string]string)
+			for _, config := range configs {
+				formattedConfigs[config.ConfigKey] = config.ConfigVal
+			}
+			JSON(c, 200, gin.H{
+				"data": formattedConfigs,
+			})
+		})
+
+		// 获取单个系统配置
+		auth.GET("/settings/:key", func(c *gin.Context) {
+			key := c.Param("key")
+			Debug("Get system setting API called from %s, key: %s", c.ClientIP(), key)
+			config, err := GetSystemConfigByKey(key)
+			if err != nil {
+				JSON(c, 404, gin.H{
+					"error": "Setting not found: " + key,
+				})
+				return
+			}
+			JSON(c, 200, gin.H{
+				"data": gin.H{
+					"key":   config.ConfigKey,
+					"value": config.ConfigVal,
+				},
+			})
+		})
+
+		// 更新系统配置
+		auth.PUT("/settings/:key", func(c *gin.Context) {
+			key := c.Param("key")
+			Debug("Update system setting API called from %s, key: %s", c.ClientIP(), key)
+
+			var reqData struct {
+				Value string `json:"value"`
+			}
+			if err := c.ShouldBindJSON(&reqData); err != nil {
+				Warn("Invalid settings request body from %s: %v", c.ClientIP(), err)
+				JSON(c, 400, gin.H{
+					"error": "Invalid request body",
+				})
+				return
+			}
+
+			config, err := UpsertSystemConfig(key, reqData.Value)
+			if err != nil {
+				Error("Failed to update system setting %s: %v", key, err)
+				JSON(c, 500, gin.H{
+					"error": err.Error(),
+				})
+				return
+			}
+			Info("Updated system setting: %s = %s", key, reqData.Value)
+			JSON(c, 200, gin.H{
+				"message": "Setting updated successfully",
+				"data": gin.H{
+					"key":   config.ConfigKey,
+					"value": config.ConfigVal,
+				},
+			})
+		})
+
+		// 批量更新系统配置
+		auth.PUT("/settings", func(c *gin.Context) {
+			Debug("Batch update system settings API called from %s", c.ClientIP())
+
+			var reqData map[string]string
+			if err := c.ShouldBindJSON(&reqData); err != nil {
+				Warn("Invalid settings request body from %s: %v", c.ClientIP(), err)
+				JSON(c, 400, gin.H{
+					"error": "Invalid request body",
+				})
+				return
+			}
+
+			updated := make(map[string]string)
+			for key, value := range reqData {
+				_, err := UpsertSystemConfig(key, value)
+				if err != nil {
+					Error("Failed to update system setting %s: %v", key, err)
+					continue
+				}
+				updated[key] = value
+			}
+			Info("Batch updated system settings: %d items", len(updated))
+			JSON(c, 200, gin.H{
+				"message": "Settings updated successfully",
+				"data":    updated,
 			})
 		})
 
@@ -974,11 +1356,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		})
 
 		// 测试115账号cookie是否有效
-		auth.GET("/api/115/test", func(c *gin.Context) {
+		auth.GET("/auth/cloud115/:id", func(c *gin.Context) {
 			Debug("Test 115 account API called from %s", c.ClientIP())
 
 			// 获取id参数
-			idStr := c.Query("id")
+			idStr := c.Param("id")
 			if idStr == "" {
 				Warn("Missing required parameter id from %s", c.ClientIP())
 				JSON(c, 400, gin.H{"error": "id is required"})
@@ -1002,22 +1384,26 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			fileList, err := client.GetFileList(0, 1, 0, 20, cloud115.ID, cloud115.Cookie)
 			if err != nil {
 				Error("Failed to get 115 files for account %s: %v", cloud115.Name, err)
-				JSON(c, 500, gin.H{
-					"success":      false,
-					"account_id":   cloud115.ID,
-					"account_name": cloud115.Name,
-					"error":        err.Error(),
+				JSON(c, 200, gin.H{
+					"state": false,
+					"data": gin.H{
+						"account_id":   cloud115.ID,
+						"account_name": cloud115.Name,
+					},
+					"message": "账号测试失败: " + err.Error(),
 				})
 				return
 			}
 
 			Info("Test 115 account successful, account: %s, found %d files in root", cloud115.Name, fileList.Count)
 			JSON(c, 200, gin.H{
-				"success":      true,
-				"account_id":   cloud115.ID,
-				"account_name": cloud115.Name,
-				"file_count":   fileList.Count,
-				"files":        fileList.Files,
+				"state": true,
+				"data": gin.H{
+					"id":    cloud115.ID,
+					"name":  cloud115.Name,
+					"file_count": fileList.Count,
+				},
+				"message": "账号测试成功",
 			})
 		})
 
@@ -1311,14 +1697,22 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 			// 格式化返回数据的时间字段
 			formattedStrmConfig := map[string]interface{}{
-				"id":            strmConfig.ID,
-				"cloud115_id":   strmConfig.Cloud115Id,
-				"net_disk_path": strmConfig.NetDiskPath,
-				"local_path":    strmConfig.LocalPath,
-				"cron":          strmConfig.Cron,
-				"extension":     strmConfig.Extension,
-				"create_time":   strmConfig.CreateTime.Format("2006-01-02 15:04:05"),
-				"update_time":   strmConfig.UpdateTime.Format("2006-01-02 15:04:05"),
+				"id":                strmConfig.ID,
+				"cloud115_id":       strmConfig.Cloud115Id,
+				"net_disk_path":     strmConfig.NetDiskPath,
+				"local_path":        strmConfig.LocalPath,
+				"cron":              strmConfig.Cron,
+				"extension":         strmConfig.Extension,
+				"sync_mode":         strmConfig.SyncMode,
+				"source_account":    strmConfig.SourceAccount,
+				"target_account":    strmConfig.TargetAccount,
+				"target_directory":  strmConfig.TargetDirectory,
+				"auto_cleanup":      strmConfig.AutoCleanup,
+				"cleanup_threshold": strmConfig.CleanupThreshold,
+				"cleanup_policy":    strmConfig.CleanupPolicy,
+				"max_concurrency":   strmConfig.MaxConcurrency,
+				"create_time":       strmConfig.CreateTime.Format("2006-01-02 15:04:05"),
+				"update_time":       strmConfig.UpdateTime.Format("2006-01-02 15:04:05"),
 			}
 
 			JSON(c, 200, gin.H{
@@ -1330,11 +1724,19 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/strm/config", func(c *gin.Context) {
 			Debug("Create strm config API called from %s", c.ClientIP())
 			var strmConfigData struct {
-				Cloud115Id  int    `json:"cloud115_id" binding:"required"`
-				NetDiskPath string `json:"net_disk_path" binding:"required"`
-				LocalPath   string `json:"local_path" binding:"required"`
-				Cron        string `json:"cron"`
-				Extension   string `json:"extension"`
+				Cloud115Id       int    `json:"cloud115_id" binding:"required"`
+				NetDiskPath      string `json:"net_disk_path" binding:"required"`
+				LocalPath        string `json:"local_path" binding:"required"`
+				Cron             string `json:"cron"`
+				Extension        string `json:"extension"`
+				SyncMode         string `json:"sync_mode"`
+				SourceAccount    int    `json:"source_account"`
+				TargetAccount    int    `json:"target_account"`
+				TargetDirectory  string `json:"target_directory"`
+				AutoCleanup      bool   `json:"auto_cleanup"`
+				CleanupThreshold int    `json:"cleanup_threshold"`
+				CleanupPolicy    string `json:"cleanup_policy"`
+				MaxConcurrency   int    `json:"max_concurrency"`
 			}
 			if err := c.ShouldBindJSON(&strmConfigData); err != nil {
 				Warn("Invalid create strm config request body from %s: %v", c.ClientIP(), err)
@@ -1343,7 +1745,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				})
 				return
 			}
-			strmConfig, err := CreateStrmConfig(strmConfigData.Cloud115Id, strmConfigData.NetDiskPath, strmConfigData.LocalPath, strmConfigData.Cron, strmConfigData.Extension)
+			strmConfig, err := CreateStrmConfig(strmConfigData.Cloud115Id, strmConfigData.NetDiskPath, strmConfigData.LocalPath, strmConfigData.Cron, strmConfigData.Extension, strmConfigData.SyncMode, strmConfigData.SourceAccount, strmConfigData.TargetAccount, strmConfigData.TargetDirectory, strmConfigData.AutoCleanup, strmConfigData.CleanupThreshold, strmConfigData.CleanupPolicy, strmConfigData.MaxConcurrency)
 			if err != nil {
 				Error("Failed to create strm config: %v", err)
 				JSON(c, 500, gin.H{
@@ -1354,14 +1756,22 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 			// 格式化返回数据的时间字段
 			formattedStrmConfig := map[string]interface{}{
-				"id":            strmConfig.ID,
-				"cloud115_id":   strmConfig.Cloud115Id,
-				"net_disk_path": strmConfig.NetDiskPath,
-				"local_path":    strmConfig.LocalPath,
-				"cron":          strmConfig.Cron,
-				"extension":     strmConfig.Extension,
-				"create_time":   strmConfig.CreateTime.Format("2006-01-02 15:04:05"),
-				"update_time":   strmConfig.UpdateTime.Format("2006-01-02 15:04:05"),
+				"id":                strmConfig.ID,
+				"cloud115_id":       strmConfig.Cloud115Id,
+				"net_disk_path":     strmConfig.NetDiskPath,
+				"local_path":        strmConfig.LocalPath,
+				"cron":              strmConfig.Cron,
+				"extension":         strmConfig.Extension,
+				"sync_mode":         strmConfig.SyncMode,
+				"source_account":    strmConfig.SourceAccount,
+				"target_account":    strmConfig.TargetAccount,
+				"target_directory":  strmConfig.TargetDirectory,
+				"auto_cleanup":      strmConfig.AutoCleanup,
+				"cleanup_threshold": strmConfig.CleanupThreshold,
+				"cleanup_policy":    strmConfig.CleanupPolicy,
+				"max_concurrency":   strmConfig.MaxConcurrency,
+				"create_time":       strmConfig.CreateTime.Format("2006-01-02 15:04:05"),
+				"update_time":       strmConfig.UpdateTime.Format("2006-01-02 15:04:05"),
 			}
 
 			JSON(c, 201, gin.H{
@@ -1377,11 +1787,19 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			fmt.Sscanf(idStr, "%d", &id)
 			Debug("Update strm config API called from %s, ID: %d", c.ClientIP(), id)
 			var strmConfigData struct {
-				Cloud115Id  int    `json:"cloud115_id" binding:"required"`
-				NetDiskPath string `json:"net_disk_path" binding:"required"`
-				LocalPath   string `json:"local_path" binding:"required"`
-				Cron        string `json:"cron"`
-				Extension   string `json:"extension"`
+				Cloud115Id       int    `json:"cloud115_id" binding:"required"`
+				NetDiskPath      string `json:"net_disk_path" binding:"required"`
+				LocalPath        string `json:"local_path" binding:"required"`
+				Cron             string `json:"cron"`
+				Extension        string `json:"extension"`
+				SyncMode         string `json:"sync_mode"`
+				SourceAccount    int    `json:"source_account"`
+				TargetAccount    int    `json:"target_account"`
+				TargetDirectory  string `json:"target_directory"`
+				AutoCleanup      bool   `json:"auto_cleanup"`
+				CleanupThreshold int    `json:"cleanup_threshold"`
+				CleanupPolicy    string `json:"cleanup_policy"`
+				MaxConcurrency   int    `json:"max_concurrency"`
 			}
 			if err := c.ShouldBindJSON(&strmConfigData); err != nil {
 				Warn("Invalid update strm config request body from %s: %v", c.ClientIP(), err)
@@ -1390,7 +1808,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				})
 				return
 			}
-			strmConfig, err := UpdateStrmConfig(id, strmConfigData.Cloud115Id, strmConfigData.NetDiskPath, strmConfigData.LocalPath, strmConfigData.Cron, strmConfigData.Extension)
+			strmConfig, err := UpdateStrmConfig(id, strmConfigData.Cloud115Id, strmConfigData.NetDiskPath, strmConfigData.LocalPath, strmConfigData.Cron, strmConfigData.Extension, strmConfigData.SyncMode, strmConfigData.SourceAccount, strmConfigData.TargetAccount, strmConfigData.TargetDirectory, strmConfigData.AutoCleanup, strmConfigData.CleanupThreshold, strmConfigData.CleanupPolicy, strmConfigData.MaxConcurrency)
 			if err != nil {
 				Error("Failed to update strm config with ID %d: %v", id, err)
 				JSON(c, 500, gin.H{

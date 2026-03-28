@@ -20,6 +20,10 @@ func NewStrmController(strmService *service.StrmService) *StrmController {
 	}
 }
 
+func (c *StrmController) GetService() *service.StrmService {
+	return c.strmService
+}
+
 // GetConfigList 获取所有STRM配置
 func (c *StrmController) GetConfigList(ctx *gin.Context) {
 	sortField := ctx.DefaultQuery("sort_field", "id")
@@ -82,11 +86,19 @@ func (c *StrmController) GetConfigByID(ctx *gin.Context) {
 // CreateConfig 创建STRM配置
 func (c *StrmController) CreateConfig(ctx *gin.Context) {
 	var cfgData struct {
-		Cloud115Id  int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath string `json:"net_disk_path" binding:"required"`
-		LocalPath   string `json:"local_path" binding:"required"`
-		Cron        string `json:"cron"`
-		Extension   string `json:"extension"`
+		Cloud115Id      int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath     string `json:"net_disk_path" binding:"required"`
+		LocalPath       string `json:"local_path" binding:"required"`
+		Cron            string `json:"cron"`
+		Extension       string `json:"extension"`
+		SyncMode        string `json:"sync_mode"`
+		SourceAccount   int    `json:"source_account"`
+		TargetAccount   int    `json:"target_account"`
+		TargetDirectory string `json:"target_directory"`
+		AutoCleanup     bool   `json:"auto_cleanup"`
+		CleanupThreshold int   `json:"cleanup_threshold"`
+		CleanupPolicy   string `json:"cleanup_policy"`
+		MaxConcurrency  int    `json:"max_concurrency"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {
@@ -95,7 +107,7 @@ func (c *StrmController) CreateConfig(ctx *gin.Context) {
 		return
 	}
 
-	cfg, err := c.strmService.CreateConfig(cfgData.Cloud115Id, cfgData.NetDiskPath, cfgData.LocalPath, cfgData.Cron, cfgData.Extension)
+	cfg, err := c.strmService.CreateConfigExt(cfgData.Cloud115Id, cfgData.NetDiskPath, cfgData.LocalPath, cfgData.Cron, cfgData.Extension, cfgData.SyncMode, cfgData.SourceAccount, cfgData.TargetAccount, cfgData.TargetDirectory, cfgData.AutoCleanup, cfgData.CleanupThreshold, cfgData.CleanupPolicy, cfgData.MaxConcurrency)
 	if err != nil {
 		logger.Errorf("StrmController[CreateConfig] 创建配置失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
@@ -106,14 +118,22 @@ func (c *StrmController) CreateConfig(ctx *gin.Context) {
 	SuccessResp(ctx, gin.H{
 		"message": "创建成功",
 		"data": map[string]interface{}{
-			"id":            cfg.ID,
-			"cloud115_id":   cfg.Cloud115Id,
-			"net_disk_path": cfg.NetDiskPath,
-			"local_path":    cfg.LocalPath,
-			"cron":          cfg.Cron,
-			"extension":     cfg.Extension,
-			"create_time":   cfg.CreateTime.Format("2006-01-02 15:04:05"),
-			"update_time":   cfg.UpdateTime.Format("2006-01-02 15:04:05"),
+			"id":                cfg.ID,
+			"cloud115_id":       cfg.Cloud115Id,
+			"net_disk_path":     cfg.NetDiskPath,
+			"local_path":        cfg.LocalPath,
+			"cron":              cfg.Cron,
+			"extension":         cfg.Extension,
+			"sync_mode":         cfg.SyncMode,
+			"source_account":    cfg.SourceAccount,
+			"target_account":    cfg.TargetAccount,
+			"target_directory":   cfg.TargetDirectory,
+			"auto_cleanup":      cfg.AutoCleanup,
+			"cleanup_threshold":  cfg.CleanupThreshold,
+			"cleanup_policy":    cfg.CleanupPolicy,
+			"max_concurrency":   cfg.MaxConcurrency,
+			"create_time":       cfg.CreateTime.Format("2006-01-02 15:04:05"),
+			"update_time":       cfg.UpdateTime.Format("2006-01-02 15:04:05"),
 		},
 	})
 }
@@ -125,11 +145,19 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 	fmt.Sscanf(idStr, "%d", &id)
 
 	var cfgData struct {
-		Cloud115Id  int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath string `json:"net_disk_path" binding:"required"`
-		LocalPath   string `json:"local_path" binding:"required"`
-		Cron        string `json:"cron"`
-		Extension   string `json:"extension"`
+		Cloud115Id      int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath     string `json:"net_disk_path" binding:"required"`
+		LocalPath       string `json:"local_path" binding:"required"`
+		Cron            string `json:"cron"`
+		Extension       string `json:"extension"`
+		SyncMode        string `json:"sync_mode"`
+		SourceAccount   int    `json:"source_account"`
+		TargetAccount   int    `json:"target_account"`
+		TargetDirectory string `json:"target_directory"`
+		AutoCleanup     bool   `json:"auto_cleanup"`
+		CleanupThreshold int   `json:"cleanup_threshold"`
+		CleanupPolicy   string `json:"cleanup_policy"`
+		MaxConcurrency  int    `json:"max_concurrency"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {
@@ -138,7 +166,7 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 		return
 	}
 
-	cfg, err := c.strmService.UpdateConfig(id, cfgData.Cloud115Id, cfgData.NetDiskPath, cfgData.LocalPath, cfgData.Cron, cfgData.Extension)
+	cfg, err := c.strmService.UpdateConfigExt(id, cfgData.Cloud115Id, cfgData.NetDiskPath, cfgData.LocalPath, cfgData.Cron, cfgData.Extension, cfgData.SyncMode, cfgData.SourceAccount, cfgData.TargetAccount, cfgData.TargetDirectory, cfgData.AutoCleanup, cfgData.CleanupThreshold, cfgData.CleanupPolicy, cfgData.MaxConcurrency)
 	if err != nil {
 		logger.Errorf("StrmController[UpdateConfig] 更新配置失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
@@ -149,14 +177,22 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 	SuccessResp(ctx, gin.H{
 		"message": "更新成功",
 		"data": map[string]interface{}{
-			"id":            cfg.ID,
-			"cloud115_id":   cfg.Cloud115Id,
-			"net_disk_path": cfg.NetDiskPath,
-			"local_path":    cfg.LocalPath,
-			"cron":          cfg.Cron,
-			"extension":     cfg.Extension,
-			"create_time":   cfg.CreateTime.Format("2006-01-02 15:04:05"),
-			"update_time":   cfg.UpdateTime.Format("2006-01-02 15:04:05"),
+			"id":                cfg.ID,
+			"cloud115_id":       cfg.Cloud115Id,
+			"net_disk_path":     cfg.NetDiskPath,
+			"local_path":        cfg.LocalPath,
+			"cron":              cfg.Cron,
+			"extension":         cfg.Extension,
+			"sync_mode":         cfg.SyncMode,
+			"source_account":    cfg.SourceAccount,
+			"target_account":    cfg.TargetAccount,
+			"target_directory":   cfg.TargetDirectory,
+			"auto_cleanup":      cfg.AutoCleanup,
+			"cleanup_threshold":  cfg.CleanupThreshold,
+			"cleanup_policy":    cfg.CleanupPolicy,
+			"max_concurrency":   cfg.MaxConcurrency,
+			"create_time":       cfg.CreateTime.Format("2006-01-02 15:04:05"),
+			"update_time":       cfg.UpdateTime.Format("2006-01-02 15:04:05"),
 		},
 	})
 }

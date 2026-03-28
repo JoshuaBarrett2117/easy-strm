@@ -8,6 +8,7 @@ import Dashboard from './views/Dashboard.vue'
 import UserInfo from './views/UserInfo.vue'
 import Cloud115 from './views/Cloud115.vue'
 import StrmConfig from './views/StrmConfig.vue'
+import Settings from './views/Settings.vue'
 import './style.css'
 
 const routes = [
@@ -16,7 +17,8 @@ const routes = [
   { path: '/dashboard', component: Dashboard, children: [
     { path: 'user-info', component: UserInfo },
     { path: 'cloud115', component: Cloud115 },
-    { path: 'strm-config', component: StrmConfig }
+    { path: 'strm-config', component: StrmConfig },
+    { path: 'settings', component: Settings }
   ] }
 ]
 

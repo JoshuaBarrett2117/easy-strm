@@ -19,29 +19,45 @@ type User struct {
 
 // Cloud115 115云账号信息
 type Cloud115 struct {
-	ID                int       `json:"id"`
-	Name              string    `json:"name"`
-	Cookie            string    `json:"cookie"`
-	RefreshToken      string    `json:"refresh_token"`
-	AccessToken       string    `json:"access_token"`
-	ExpiresIn         int       `json:"expires_in"`
-	TransferAccountID int       `json:"transfer_account_id"` // 转存目标账号ID
-	TransferDirectory string    `json:"transfer_directory"`  // 转存目录路径
-	CreateTime        time.Time `json:"create_time"`
-	UpdateTime        time.Time `json:"update_time"`
+	ID                int        `json:"id"`
+	Name              string     `json:"name"`
+	Cookie            string     `json:"cookie"`
+	RefreshToken      string     `json:"refresh_token"`
+	AccessToken       string     `json:"access_token"`
+	ExpiresIn         int        `json:"expires_in"`
+	TransferAccountID int        `json:"transfer_account_id"`
+	TransferDirectory string     `json:"transfer_directory"`
+	AccountType       string     `json:"account_type"`
+	QuotaUsed         int64      `json:"quota_used"`
+	Priority          int        `json:"priority"`
+	Status            string     `json:"status"`
+	CoolingStartTime  *time.Time `json:"cooling_start_time"`
+	TransferMethod    string     `json:"transfer_method"`
+	AlistUrl          string     `json:"alist_url"`
+	AlistToken        string     `json:"alist_token"`
+	CreateTime        time.Time  `json:"create_time"`
+	UpdateTime        time.Time  `json:"update_time"`
 }
 
 // StrmConfig STRM文件配置信息
 type StrmConfig struct {
-	ID          int       `json:"id"`
-	Cloud115Id  int       `json:"cloud115_id"`   // 115账号ID
-	NetDiskPath string    `json:"net_disk_path"` // 网盘目录
-	LocalPath   string    `json:"local_path"`    // 本地目录
-	Cron        string    `json:"cron"`          // cron表达式
-	Extension   string    `json:"extension"`     // STRM文件后缀名
-	DirTreeFile string    `json:"dir_tree_file"` // 本地目录树文件路径（可选，如果指定则不从API获取）
-	CreateTime  time.Time `json:"create_time"`
-	UpdateTime  time.Time `json:"update_time"`
+	ID               int       `json:"id"`
+	Cloud115Id       int       `json:"cloud115_id"`       // 115账号ID
+	NetDiskPath      string    `json:"net_disk_path"`     // 网盘目录
+	LocalPath        string    `json:"local_path"`        // 本地目录
+	Cron             string    `json:"cron"`              // cron表达式
+	Extension        string    `json:"extension"`         // STRM文件后缀名
+	DirTreeFile      string    `json:"dir_tree_file"`     // 本地目录树文件路径
+	SyncMode         string    `json:"sync_mode"`         // 同步模式: manual/instant/cron
+	SourceAccount    int       `json:"source_account"`    // 源账号ID
+	TargetAccount    int       `json:"target_account"`    // 目标账号ID
+	TargetDirectory  string    `json:"target_directory"`  // 目标目录
+	AutoCleanup      bool      `json:"auto_cleanup"`      // 自动清理
+	CleanupThreshold int       `json:"cleanup_threshold"` // 清理阈值
+	CleanupPolicy    string    `json:"cleanup_policy"`    // 清理策略
+	MaxConcurrency   int       `json:"max_concurrency"`   // 最大并发数
+	CreateTime       time.Time `json:"create_time"`
+	UpdateTime       time.Time `json:"update_time"`
 }
 
 // SystemConfig 系统配置信息
@@ -88,7 +104,7 @@ var db *sql.DB
 
 func InitDB(config *Config) error {
 	// 构建数据库连接字符串
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
+	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=disable client_encoding=UTF8",
 		config.PostgreSQL.Host,
 		config.PostgreSQL.Port,
 		config.PostgreSQL.User,
@@ -208,6 +224,30 @@ func InitDB(config *Config) error {
 		END IF;
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'transfer_directory') THEN
 			ALTER TABLE t_cloud_115 ADD COLUMN transfer_directory VARCHAR(500) DEFAULT '';
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'account_type') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN account_type VARCHAR(20) DEFAULT 'resource';
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'quota_used') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN quota_used BIGINT DEFAULT 0;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'priority') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN priority INTEGER DEFAULT 5;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'status') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN status VARCHAR(20) DEFAULT 'active';
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'cooling_start_time') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN cooling_start_time TIMESTAMP;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'transfer_method') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN transfer_method VARCHAR(50) DEFAULT '';
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'alist_url') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN alist_url VARCHAR(500);
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'alist_token') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN alist_token VARCHAR(255);
 		END IF;
 	END $$;
 	`
@@ -562,10 +602,10 @@ func CreateUser(name, password string) (*User, error) {
 	return user, nil
 }
 
-// VerifyPassword 验证密码
+// VerifyPassword 验证密码（前端已发送MD5哈希值，直接比较）
 func VerifyPassword(hashedPassword, password string) error {
 	if hashedPassword != password {
-		Debug("Password verification failed: passwords don't match")
+		Debug("Password verification failed: hashedPassword=%s, inputPassword=%s", hashedPassword, password)
 		return fmt.Errorf("invalid password")
 	}
 	return nil
@@ -575,8 +615,19 @@ func VerifyPassword(hashedPassword, password string) error {
 func GetCloud115ByID(id int) (*Cloud115, error) {
 	Debug("Getting cloud_115 by ID: %d", id)
 	cloud115 := &Cloud115{}
-	err := db.QueryRow("SELECT id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time FROM t_cloud_115 WHERE id = $1", id).Scan(
-		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.CreateTime, &cloud115.UpdateTime)
+	err := db.QueryRow(`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
+		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
+		COALESCE(status, 'active'), cooling_start_time,
+		COALESCE(transfer_method, ''),
+		COALESCE(alist_url, ''), COALESCE(alist_token, ''),
+		create_time, update_time FROM t_cloud_115 WHERE id = $1`, id).Scan(
+		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+		&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
+		&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
+		&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
+		&cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken,
+		&cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
 		Error("Failed to get cloud_115 by ID %d: %v", id, err)
 		return nil, err
@@ -589,8 +640,19 @@ func GetCloud115ByID(id int) (*Cloud115, error) {
 func GetCloud115ByName(name string) (*Cloud115, error) {
 	Debug("Getting cloud_115 by name: %s", name)
 	cloud115 := &Cloud115{}
-	err := db.QueryRow("SELECT id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time FROM t_cloud_115 WHERE name = $1", name).Scan(
-		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.CreateTime, &cloud115.UpdateTime)
+	err := db.QueryRow(`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
+		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
+		COALESCE(status, 'active'), cooling_start_time,
+		COALESCE(transfer_method, ''),
+		COALESCE(alist_url, ''), COALESCE(alist_token, ''),
+		create_time, update_time FROM t_cloud_115 WHERE name = $1`, name).Scan(
+		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+		&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
+		&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
+		&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
+		&cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken,
+		&cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
 		Debug("Cloud_115 not found by name: %s", name)
 		return nil, err
@@ -610,7 +672,13 @@ func GetAllCloud115(sortField, sortOrder string) ([]*Cloud115, error) {
 		sortOrder = "asc"
 	}
 
-	query := fmt.Sprintf("SELECT id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time FROM t_cloud_115 ORDER BY %s %s", sortField, sortOrder)
+	query := fmt.Sprintf(`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
+		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
+		COALESCE(status, 'active'), cooling_start_time,
+		COALESCE(transfer_method, ''),
+		COALESCE(alist_url, ''), COALESCE(alist_token, ''),
+		create_time, update_time FROM t_cloud_115 ORDER BY %s %s`, sortField, sortOrder)
 	rows, err := db.Query(query)
 	if err != nil {
 		Error("Failed to get all cloud_115 accounts: %v", err)
@@ -621,7 +689,12 @@ func GetAllCloud115(sortField, sortOrder string) ([]*Cloud115, error) {
 	var cloud115List []*Cloud115
 	for rows.Next() {
 		cloud115 := &Cloud115{}
-		err := rows.Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.CreateTime, &cloud115.UpdateTime)
+		err := rows.Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+			&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
+			&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
+			&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
+			&cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken,
+			&cloud115.CreateTime, &cloud115.UpdateTime)
 		if err != nil {
 			Error("Failed to scan cloud_115 row: %v", err)
 			return nil, err
@@ -639,13 +712,29 @@ func GetAllCloud115(sortField, sortOrder string) ([]*Cloud115, error) {
 }
 
 // CreateCloud115 创建115云账号
-func CreateCloud115(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string) (*Cloud115, error) {
+func CreateCloud115(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115, error) {
 	Debug("Creating new cloud_115 account: %s", name)
+	if accountType == "" {
+		accountType = "resource"
+	}
+	if priority == 0 {
+		priority = 5
+	}
+	if transferMethod == "" {
+		transferMethod = "115driver"
+	}
 	cloud115 := &Cloud115{}
 	err := db.QueryRow(
-		"INSERT INTO t_cloud_115 (name, cookie, refresh_token, access_token, expires_in, transfer_account_id, transfer_directory) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time",
-		name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory,
-	).Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.CreateTime, &cloud115.UpdateTime)
+		`INSERT INTO t_cloud_115 (name, cookie, refresh_token, access_token, expires_in, transfer_account_id, transfer_directory, account_type, priority, status, transfer_method, alist_url, alist_token)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $11, $12)
+		RETURNING id, name, cookie, refresh_token, access_token, expires_in,
+		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
+		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
+		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),
+		COALESCE(alist_url, ''), COALESCE(alist_token, ''),
+		create_time, update_time`,
+		name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken,
+	).Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed, &cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime, &cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken, &cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
 		Error("Failed to create cloud_115 account %s: %v", name, err)
 		return nil, err
@@ -655,13 +744,19 @@ func CreateCloud115(name, cookie, refreshToken, accessToken string, expiresIn, t
 }
 
 // UpdateCloud115 更新115云账号
-func UpdateCloud115(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string) (*Cloud115, error) {
+func UpdateCloud115(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*Cloud115, error) {
 	Debug("Updating cloud_115 account with ID: %d", id)
 	cloud115 := &Cloud115{}
 	err := db.QueryRow(
-		"UPDATE t_cloud_115 SET name = $1, cookie = $2, refresh_token = $3, access_token = $4, expires_in = $5, transfer_account_id = $6, transfer_directory = $7 WHERE id = $8 RETURNING id, name, cookie, refresh_token, access_token, expires_in, COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''), create_time, update_time",
-		name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, id,
-	).Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.CreateTime, &cloud115.UpdateTime)
+		`UPDATE t_cloud_115 SET name = $1, cookie = $2, refresh_token = $3, access_token = $4, expires_in = $5, transfer_account_id = $6, transfer_directory = $7, account_type = $8, priority = $9, status = $10, transfer_method = $11, alist_url = $12, alist_token = $13 WHERE id = $14
+		RETURNING id, name, cookie, refresh_token, access_token, expires_in,
+		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
+		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
+		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),
+		COALESCE(alist_url, ''), COALESCE(alist_token, ''),
+		create_time, update_time`,
+		name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken, id,
+	).Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed, &cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime, &cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken, &cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
 		Error("Failed to update cloud_115 account with ID %d: %v", id, err)
 		return nil, err
@@ -698,8 +793,16 @@ func DeleteCloud115(id int) error {
 func GetStrmConfigByID(id int) (*StrmConfig, error) {
 	Debug("Getting strm config by ID: %d", id)
 	strmConfig := &StrmConfig{}
-	err := db.QueryRow("SELECT id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), create_time, update_time FROM t_strm_config WHERE id = $1", id).Scan(
-		&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+	err := db.QueryRow(`SELECT id, cloud115_id, net_disk_path, local_path, cron, extension,
+		COALESCE(dir_tree_file, ''), COALESCE(sync_mode, 'manual'), COALESCE(source_account, 0),
+		COALESCE(target_account, 0), COALESCE(target_directory, ''), auto_cleanup,
+		COALESCE(cleanup_threshold, 0), COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 1),
+		create_time, update_time FROM t_strm_config WHERE id = $1`, id).Scan(
+		&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath,
+		&strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode,
+		&strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory,
+		&strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy,
+		&strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
 	if err != nil {
 		Error("Failed to get strm config by ID %d: %v", id, err)
 		return nil, err
@@ -719,7 +822,11 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 		sortOrder = "asc"
 	}
 
-	query := fmt.Sprintf("SELECT id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), create_time, update_time FROM t_strm_config ORDER BY %s %s", sortField, sortOrder)
+	query := fmt.Sprintf(`SELECT id, cloud115_id, net_disk_path, local_path, cron, extension,
+		COALESCE(dir_tree_file, ''), COALESCE(sync_mode, 'manual'), COALESCE(source_account, 0),
+		COALESCE(target_account, 0), COALESCE(target_directory, ''), auto_cleanup,
+		COALESCE(cleanup_threshold, 0), COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 1),
+		create_time, update_time FROM t_strm_config ORDER BY %s %s`, sortField, sortOrder)
 	rows, err := db.Query(query)
 	if err != nil {
 		Error("Failed to get all strm configs: %v", err)
@@ -730,7 +837,11 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 	var strmConfigList []*StrmConfig
 	for rows.Next() {
 		strmConfig := &StrmConfig{}
-		err := rows.Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+		err := rows.Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath,
+			&strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode,
+			&strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory,
+			&strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy,
+			&strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
 		if err != nil {
 			Error("Failed to scan strm config row: %v", err)
 			return nil, err
@@ -748,14 +859,22 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 }
 
 // CreateStrmConfig 创建STRM配置
-func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension string) (*StrmConfig, error) {
+func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension string, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfig, error) {
 	Debug("Creating new strm config")
 	strmConfig := &StrmConfig{}
-
+	if syncMode == "" {
+		syncMode = "manual"
+	}
+	if maxConcurrency == 0 {
+		maxConcurrency = 1
+	}
 	err := db.QueryRow(
-		"INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension) VALUES ($1, $2, $3, $4, $5) RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time",
-		cloud115Id, netDiskPath, localPath, cron, extension,
-	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), sync_mode,
+		source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
+		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency,
+	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode, &strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory, &strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy, &strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
 	if err != nil {
 		Error("Failed to create strm config: %v", err)
 		return nil, err
@@ -781,14 +900,20 @@ func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension st
 }
 
 // UpdateStrmConfig 更新STRM配置
-func UpdateStrmConfig(id, cloud115Id int, netDiskPath, localPath, cron, extension string) (*StrmConfig, error) {
+func UpdateStrmConfig(id, cloud115Id int, netDiskPath, localPath, cron, extension string, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfig, error) {
 	Debug("Updating strm config with ID: %d", id)
 	strmConfig := &StrmConfig{}
-
+	if syncMode == "" {
+		syncMode = "manual"
+	}
+	if maxConcurrency == 0 {
+		maxConcurrency = 1
+	}
 	err := db.QueryRow(
-		"UPDATE t_strm_config SET cloud115_id = $1, net_disk_path = $2, local_path = $3, cron = $4, extension = $5 WHERE id = $6 RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time",
-		cloud115Id, netDiskPath, localPath, cron, extension, id,
-	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+		`UPDATE t_strm_config SET cloud115_id = $1, net_disk_path = $2, local_path = $3, cron = $4, extension = $5, sync_mode = $6, source_account = $7, target_account = $8, target_directory = $9, auto_cleanup = $10, cleanup_threshold = $11, cleanup_policy = $12, max_concurrency = $13 WHERE id = $14
+		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
+		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, id,
+	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode, &strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory, &strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy, &strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
 	if err != nil {
 		Error("Failed to update strm config with ID %d: %v", id, err)
 		return nil, err
@@ -1235,4 +1360,91 @@ func DeleteCronTaskByName(taskName string) error {
 		return err
 	}
 	return nil
+}
+
+// NotificationConfig 通知配置信息
+type NotificationConfig struct {
+	ID        int       `json:"id"`
+	Channel   string    `json:"channel"` // 通知渠道: telegram, serverchan, email
+	Config    string    `json:"config"`  // JSON配置
+	Enabled   bool      `json:"enabled"` // 是否启用
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GetAllNotificationConfig 获取所有通知配置
+func GetAllNotificationConfig() ([]*NotificationConfig, error) {
+	Debug("Getting all notification configs")
+	rows, err := db.Query("SELECT id, channel, config, enabled, created_at, updated_at FROM t_notification_config ORDER BY id")
+	if err != nil {
+		Error("Failed to query notification configs: %v", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var configs []*NotificationConfig
+	for rows.Next() {
+		config := &NotificationConfig{}
+		err := rows.Scan(&config.ID, &config.Channel, &config.Config, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
+		if err != nil {
+			Error("Failed to scan notification config: %v", err)
+			return nil, err
+		}
+		configs = append(configs, config)
+	}
+	Debug("Found %d notification configs", len(configs))
+	return configs, nil
+}
+
+// GetNotificationConfigByChannel 根据渠道获取通知配置
+func GetNotificationConfigByChannel(channel string) (*NotificationConfig, error) {
+	Debug("Getting notification config by channel: %s", channel)
+	config := &NotificationConfig{}
+	err := db.QueryRow("SELECT id, channel, config, enabled, created_at, updated_at FROM t_notification_config WHERE channel = $1", channel).Scan(
+		&config.ID, &config.Channel, &config.Config, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			Debug("No notification config found for channel: %s", channel)
+			return nil, nil
+		}
+		Error("Failed to get notification config for channel %s: %v", channel, err)
+		return nil, err
+	}
+	return config, nil
+}
+
+// UpsertNotificationConfig 创建或更新通知配置
+func UpsertNotificationConfig(channel, configJSON string, enabled bool) (*NotificationConfig, error) {
+	Debug("Upserting notification config for channel: %s", channel)
+	result := &NotificationConfig{}
+	err := db.QueryRow(
+		`INSERT INTO t_notification_config (channel, config, enabled) VALUES ($1, $2, $3)
+		ON CONFLICT (channel) DO UPDATE SET config = $2, enabled = $3, updated_at = CURRENT_TIMESTAMP
+		RETURNING id, channel, config, enabled, created_at, updated_at`,
+		channel, configJSON, enabled,
+	).Scan(&result.ID, &result.Channel, &result.Config, &result.Enabled, &result.CreatedAt, &result.UpdatedAt)
+	if err != nil {
+		Error("Failed to upsert notification config for channel %s: %v", channel, err)
+		return nil, err
+	}
+	Info("Upserted notification config for channel: %s", channel)
+	return result, nil
+}
+
+// DeleteNotificationConfig 删除通知配置
+func DeleteNotificationConfig(channel string) error {
+	Debug("Deleting notification config for channel: %s", channel)
+	result, err := db.Exec("DELETE FROM t_notification_config WHERE channel = $1", channel)
+	if err != nil {
+		Error("Failed to delete notification config for channel %s: %v", channel, err)
+		return err
+	}
+	rowsAffected, _ := result.RowsAffected()
+	Debug("Deleted %d notification config(s) for channel: %s", rowsAffected, channel)
+	return nil
+}
+
+// getDBInstance 获取全局数据库连接实例
+func getDBInstance() *sql.DB {
+	return db
 }

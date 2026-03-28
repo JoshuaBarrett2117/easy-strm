@@ -27,11 +27,21 @@ func NewTaskRedisDAO(client *redis.Client) *TaskRedisDAO {
 	return &TaskRedisDAO{client: client}
 }
 
+// NewTaskRedisDAOWithGlobal 使用全局Redis客户端创建实例
+func NewTaskRedisDAOWithGlobal() *TaskRedisDAO {
+	return &TaskRedisDAO{client: redisClient}
+}
+
 var redisClient *redis.Client
 
 // InitTaskRedisDAO 初始化全局Redis客户端
 func InitTaskRedisDAO(client *redis.Client) {
 	redisClient = client
+}
+
+// GetGlobalRedisClient 获取全局Redis客户端实例
+func GetGlobalRedisClient() *redis.Client {
+	return redisClient
 }
 
 // Create 创建新任务
@@ -67,7 +77,7 @@ func (t *TaskRedisDAO) Create(taskID string, taskType, taskName string) error {
 		return fmt.Errorf("TaskRedisDAO[Create] 添加到列表失败: %v", err)
 	}
 
-	Info("TaskRedisDAO[Create] 创建任务成功: %s, type: %s, name: %s", taskID, taskType, taskName)
+	logger.Infof("TaskRedisDAO[Create] 创建任务成功: %s, type: %s, name: %s", taskID, taskType, taskName)
 	return nil
 }
 
