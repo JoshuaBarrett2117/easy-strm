@@ -332,6 +332,31 @@ DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'dir_tree_file') THEN
 			ALTER TABLE t_strm_config ADD COLUMN dir_tree_file TEXT DEFAULT '';
 		END IF;
+		-- V3.0 新增字段
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'sync_mode') THEN
+			ALTER TABLE t_strm_config ADD COLUMN sync_mode VARCHAR(20) DEFAULT 'manual';
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'source_account') THEN
+			ALTER TABLE t_strm_config ADD COLUMN source_account INT DEFAULT 0;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'target_account') THEN
+			ALTER TABLE t_strm_config ADD COLUMN target_account INT DEFAULT 0;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'target_directory') THEN
+			ALTER TABLE t_strm_config ADD COLUMN target_directory VARCHAR(500);
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'auto_cleanup') THEN
+			ALTER TABLE t_strm_config ADD COLUMN auto_cleanup BOOLEAN DEFAULT FALSE;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'cleanup_threshold') THEN
+			ALTER TABLE t_strm_config ADD COLUMN cleanup_threshold INT DEFAULT 0;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'cleanup_policy') THEN
+			ALTER TABLE t_strm_config ADD COLUMN cleanup_policy VARCHAR(50);
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'max_concurrency') THEN
+			ALTER TABLE t_strm_config ADD COLUMN max_concurrency INT DEFAULT 1;
+		END IF;
 		-- 删除不需要的字段
 		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'name') THEN
 			ALTER TABLE t_strm_config DROP COLUMN name;
