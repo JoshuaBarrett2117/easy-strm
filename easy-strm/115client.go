@@ -171,13 +171,22 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 		Files: make([]driver.FileInfo, 0),
 	}
 	for _, f := range *files {
-		fileListResp.Files = append(fileListResp.Files, driver.FileInfo{
-			FileID:     f.GetID(),
-			CategoryID: driver.IntString(f.GetID()),
-			Name:       f.GetName(),
-			Size:       driver.StringInt64(f.GetSize()),
-			PickCode:   f.GetID(),
-		})
+		fileInfo := driver.FileInfo{
+			Name:     f.GetName(),
+			Size:     driver.StringInt64(f.GetSize()),
+			PickCode: f.GetID(),
+			Sha1:     f.Sha1,
+		}
+		
+		if f.IsDir() {
+			fileInfo.CategoryID = driver.IntString(f.GetID())
+			fileInfo.Type = "folder"
+		} else {
+			fileInfo.FileID = f.GetID()
+			fileInfo.CategoryID = driver.IntString(f.ParentID)
+		}
+		
+		fileListResp.Files = append(fileListResp.Files, fileInfo)
 	}
 
 	return fileListResp, nil
@@ -645,6 +654,136 @@ func (c *Client) GetPickCodeByPath(filePath string, cloud115ID int, cookie strin
 
 	Error("File not found: %s in directory %s (CID: %s), checked %d files", fileName, dirPath, cid, len(*files))
 	return "", fmt.Errorf("file not found: %s", fileName)
+}
+
+// RenameFile 重命名115云盘文件
+// 参数:
+//   - fileID: 文件ID
+//   - newName: 新文件名
+//   - cloud115ID: 115账号ID
+//   - cookie: 115账号Cookie
+// 返回:
+//   - error: 错误信息
+func (c *Client) RenameFile(fileID, newName string, cloud115ID int, cookie string) error {
+	Debug("Renaming file %s to %s for cloud115_id: %d", fileID, newName, cloud115ID)
+
+	// 使用 elevengo API 进行重命名
+	cr := parseCookieToCredential(cookie)
+	agent := elevengo.New()
+	if err := agent.CredentialImport(cr); err != nil {
+		return fmt.Errorf("import credential failed: %v", err)
+	}
+
+	// 调用 elevengo 的 FileRename 方法
+	if err := agent.FileRename(fileID, newName); err != nil {
+		Error("Failed to rename file %s to %s: %v", fileID, newName, err)
+		return fmt.Errorf("rename file failed: %v", err)
+	}
+
+	Info("Successfully renamed file %s to %s", fileID, newName)
+	return nil
+}
+
+// MoveFile115 移动文件或目录
+// 参数:
+//   - fileID: 需要移动的文件或目录ID
+//   - targetDirID: 目标目录ID
+//   - cloud115ID: 115账号ID
+//   - cookie: 115账号cookie
+// 返回:
+//   - error: 错误信息
+func (c *Client) MoveFile115(fileID, targetDirID string, cloud115ID int, cookie string) error {
+	Debug("Moving file %s to dir %s for cloud115_id: %d", fileID, targetDirID, cloud115ID)
+
+	d, err := getOrCreateDriver(cloud115ID, cookie)
+	if err != nil {
+		return err
+	}
+
+	if targetDirID == "" {
+		targetDirID = "0"
+	}
+
+	err = d.Move(targetDirID, fileID)
+	if err != nil {
+		Error("Failed to move file %s to dir %s: %v", fileID, targetDirID, err)
+		return fmt.Errorf("move file failed: %v", err)
+	}
+
+	Info("Successfully moved file %s to dir %s", fileID, targetDirID)
+	return nil
+}
+
+// MkdirAll115 递归创建目录树并返回最终 CID
+func (c *Client) MkdirAll115(path string, cloud115ID int, cookie string) (string, error) {
+	Debug("MkdirAll for path: %s", path)
+
+	d, err := getOrCreateDriver(cloud115ID, cookie)
+	if err != nil {
+		return "", err
+	}
+
+	path = strings.ReplaceAll(path, "\\", "/")
+	path = strings.TrimPrefix(path, "/")
+	path = strings.TrimSuffix(path, "/")
+
+	if path == "" {
+		return "0", nil
+	}
+
+	parts := strings.Split(path, "/")
+	currentCID := "0"
+
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+
+		// 检查目录是否存在
+		var allFiles []driver.File
+		offset := 0
+		limit := 1000
+		for {
+			files, err := d.ListPage(currentCID, int64(offset), int64(limit))
+			if err != nil {
+				return "", fmt.Errorf("list directory failed at %s: %v", currentCID, err)
+			}
+			if files == nil || len(*files) == 0 {
+				break
+			}
+			allFiles = append(allFiles, *files...)
+			if len(*files) < limit {
+				break
+			}
+			offset += limit
+		}
+
+		found := false
+		for _, f := range allFiles {
+			if f.IsDir() && f.Name == part {
+				currentCID = f.FileID
+				found = true
+				break
+			}
+		}
+
+		if !found {
+			// 未找到，需用 Mkdir 添加该级目录 (Mkdir 返回新目录的 JSON 结果但可能没有强封装返回子 CID。115driver 的 Mkdir 返回 string 类型的分类 ID)
+			newDirID, err := d.Mkdir(currentCID, part)
+			if err != nil {
+				Error("Failed to create dir %s under %s: %v", part, currentCID, err)
+				return "", fmt.Errorf("mkdir %s failed: %v", part, err)
+			}
+			
+			// 为了防止 115 并发风控导致限流
+			time.Sleep(200 * time.Millisecond)
+
+			currentCID = newDirID
+			Info("Created new directory %s with CID %s", part, currentCID)
+		}
+	}
+
+	return currentCID, nil
 }
 
 func (c *Client) GetUser(cookie string) (*driver.UserInfo, error) {

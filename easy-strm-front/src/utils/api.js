@@ -124,69 +124,7 @@ export const getUserInfo = () => {
   return api.get('/user/info')
 }
 
-// 115云相关API
-export const getCloud115List = () => {
-  return api.get('/cloud115')
-}
-
-export const createCloud115 = (data) => {
-  return api.post('/cloud115', data)
-}
-
-export const updateCloud115 = (id, data) => {
-  return api.put(`/cloud115/${id}`, data)
-}
-
-export const deleteCloud115 = (id) => {
-  return api.delete(`/cloud115/${id}`)
-}
-
-// 115文件直链生成API
-export const get115DirectLink = (params) => {
-  return api.get('/115/direct-link', { params })
-}
-
-// 115文件列表API
-export const get115Files = (params) => {
-  return api.get('/115/files', { params })
-}
-
-// 115扫码登录相关API
-// 获取支持的登录渠道列表
-export const get115LoginChannels = () => {
-  return api.get('/115/login/channels')
-}
-
-// 获取登录二维码
-export const get115QRCode = () => {
-  return api.get('/115/qrcode')
-}
-
-// 检查扫码登录状态（使用较长超时，因为扫码可能需要较长时间）
-export const check115LoginStatus = (params) => {
-  return api.get('/115/login/status', { params, timeout: 60000 })
-}
-
-// 确认登录并保存凭据
-export const confirm115Login = (data) => {
-  return api.post('/115/login/confirm', data)
-}
-
-// 115 Open API扫码登录相关API（预留接口）
-// 获取Open API登录二维码
-export const get115OpenQRCode = () => {
-  return api.get('/115/open/qrcode')
-}
-
-// 检查Open API扫码登录状态
-export const check115OpenLoginStatus = (params) => {
-  return api.get('/115/open/login/status', { params })
-}
-
-// 确认Open API登录并保存凭据
-export const confirm115OpenLogin = (data) => {
-  return api.post('/115/open/login/confirm', data)
-}
+// 115云相关API已移动到 utils/api/cloud115.js
 
 export { cookieUtils }
 

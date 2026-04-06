@@ -1,0 +1,228 @@
+{
+  "ok": true,
+  "settings": {
+    "alist_token": "alist-20909143-3444-4a11-a2ea-5d176c8ef18fzblNwtd3bdSlmyq02MT4TMF5mZkMxoK55PpMa2jEoFwhoRjGHqJwEeltpRVUfcZ4",
+    "alist_url": "http://192.168.31.12:5244",
+    "log_save_day_limit": "1",
+    "movie_naming_template": "{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}{% if videoFormat %}.{{ videoFormat }}{% endif %}{{ fileExt }}",
+    "tmdb_api_key": "f6a479d8273f97e2fc866a50be8bfea4",
+    "tv_naming_template": "{{ title }}{% if year %} ({{ year }}){% endif %}/Season{{\"%2d\"|format(season|int) }}/{{ title }}{% if en_title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}.S{{ \"%02d\"|format(season|int) }}E{{ \"%02d\"|format(episode|int) }}{% if videoFormat %}.{{ videoFormat }}{% endif %}{{ fileExt }}"
+  },
+  "renamePreview": {
+    "file_id": "Inception.2010.1080p.mkv",
+    "original_name": "Inception.2010.1080p.mkv",
+    "new_name": "Inception.2010./Inception.2010..1080p.mkv",
+    "original_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-input\\Inception.2010.1080p.mkv",
+    "new_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-input\\Inception.2010.\\Inception.2010..1080p.mkv",
+    "tmdb_id": 27205,
+    "title": "Inception.2010.",
+    "year": 0,
+    "media_type": "movie",
+    "season": 0,
+    "episode": 0,
+    "quality": "1080p"
+  },
+  "movie": {
+    "source": {
+      "id": 32,
+      "name": "Jinja2 movie 1775487685962",
+      "source_type": "local",
+      "path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-input",
+      "cloud115_id": null,
+      "priority": 1,
+      "enabled": true,
+      "create_time": "2026-04-06T15:01:26.446086Z",
+      "update_time": "2026-04-06T15:01:26.446086Z"
+    },
+    "file": {
+      "id": "Inception.2010.1080p.mkv",
+      "name": "Inception.2010.1080p.mkv",
+      "path": "Inception.2010.1080p.mkv",
+      "size": 5,
+      "type": "video",
+      "is_directory": false,
+      "extension": "",
+      "modify_time": "0001-01-01T00:00:00Z",
+      "modified_time": "2026-04-06T23:01:19.1219227+08:00",
+      "source_id": 0,
+      "source_type": "",
+      "pick_code": "",
+      "cid": "",
+      "sha1": "",
+      "tmdb_title": "盗梦空间"
+    },
+    "preview": {
+      "state": true,
+      "code": 0,
+      "message": "success",
+      "data": {
+        "data": [
+          {
+            "file_id": "Inception.2010.1080p.mkv",
+            "cloud_id": "",
+            "file_name": "Inception.2010.1080p.mkv",
+            "file_path": "Inception.2010.1080p.mkv",
+            "media_type": "movie",
+            "tmdb_id": 27205,
+            "title": "盗梦空间",
+            "year": 2010,
+            "season": 0,
+            "episode": 0,
+            "new_name": "盗梦空间.Inception.2010.1080p.mkv",
+            "new_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-output\\盗梦空间 (2010)\\盗梦空间.Inception.2010.1080p.mkv",
+            "target_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-output\\盗梦空间 (2010)",
+            "source_path": "",
+            "conflict": false
+          }
+        ],
+        "summary": {
+          "conflicts": 0,
+          "failed": 0,
+          "processable": 1,
+          "total": 1
+        },
+        "total": 1
+      },
+      "error": "",
+      "errno": 0
+    },
+    "execute": {
+      "state": true,
+      "code": 0,
+      "message": "success",
+      "data": {
+        "data": [
+          {
+            "file_id": "Inception.2010.1080p.mkv",
+            "file_name": "Inception.2010.1080p.mkv",
+            "success": true,
+            "skipped": false,
+            "message": "整理并移动成功",
+            "old_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-input\\Inception.2010.1080p.mkv",
+            "new_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-movie-output\\盗梦空间 (2010)\\盗梦空间.Inception.2010.1080p.mkv"
+          }
+        ],
+        "failed": 0,
+        "skipped": 0,
+        "success": 1,
+        "summary": {
+          "failed": 0,
+          "skipped": 0,
+          "success": 1,
+          "total": 1
+        },
+        "total": 1
+      },
+      "error": "",
+      "errno": 0
+    },
+    "outputFiles": [
+      "C:/Users/a3875/Documents/code/easy-strm/debug/jinja-browser-movie-output/盗梦空间 (2010)/盗梦空间.Inception.2010.1080p.mkv"
+    ],
+    "sourceFiles": []
+  },
+  "tv": {
+    "source": {
+      "id": 33,
+      "name": "Jinja2 tv 1775487687014",
+      "source_type": "local",
+      "path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-tv-input",
+      "cloud115_id": null,
+      "priority": 1,
+      "enabled": true,
+      "create_time": "2026-04-06T15:01:27.49733Z",
+      "update_time": "2026-04-06T15:01:27.49733Z"
+    },
+    "file": {
+      "id": "Breaking.Bad.S01E02.1080p.mkv",
+      "name": "Breaking.Bad.S01E02.1080p.mkv",
+      "path": "Breaking.Bad.S01E02.1080p.mkv",
+      "size": 2,
+      "type": "video",
+      "is_directory": false,
+      "extension": "",
+      "modify_time": "0001-01-01T00:00:00Z",
+      "modified_time": "2026-04-06T23:01:19.1234249+08:00",
+      "source_id": 0,
+      "source_type": "",
+      "pick_code": "",
+      "cid": "",
+      "sha1": "",
+      "tmdb_title": ""
+    },
+    "preview": {
+      "state": true,
+      "code": 0,
+      "message": "success",
+      "data": {
+        "data": [
+          {
+            "file_id": "Breaking.Bad.S01E02.1080p.mkv",
+            "cloud_id": "",
+            "file_name": "Breaking.Bad.S01E02.1080p.mkv",
+            "file_path": "Breaking.Bad.S01E02.1080p.mkv",
+            "media_type": "tv",
+            "tmdb_id": 1396,
+            "title": "绝命毒师",
+            "year": 2008,
+            "season": 1,
+            "episode": 2,
+            "new_name": "绝命毒师.Breaking Bad.2008.S01E02.1080p.mkv",
+            "new_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-tv-output\\绝命毒师 (2008)\\Season 1\\绝命毒师.Breaking Bad.2008.S01E02.1080p.mkv",
+            "target_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-tv-output\\绝命毒师 (2008)\\Season 1",
+            "source_path": "",
+            "conflict": false
+          }
+        ],
+        "summary": {
+          "conflicts": 0,
+          "failed": 0,
+          "processable": 1,
+          "total": 1
+        },
+        "total": 1
+      },
+      "error": "",
+      "errno": 0
+    },
+    "execute": {
+      "state": true,
+      "code": 0,
+      "message": "success",
+      "data": {
+        "data": [
+          {
+            "file_id": "Breaking.Bad.S01E02.1080p.mkv",
+            "file_name": "Breaking.Bad.S01E02.1080p.mkv",
+            "success": true,
+            "skipped": false,
+            "message": "整理并移动成功",
+            "old_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-tv-input\\Breaking.Bad.S01E02.1080p.mkv",
+            "new_path": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-browser-tv-output\\绝命毒师 (2008)\\Season 1\\绝命毒师.Breaking Bad.2008.S01E02.1080p.mkv"
+          }
+        ],
+        "failed": 0,
+        "skipped": 0,
+        "success": 1,
+        "summary": {
+          "failed": 0,
+          "skipped": 0,
+          "success": 1,
+          "total": 1
+        },
+        "total": 1
+      },
+      "error": "",
+      "errno": 0
+    },
+    "outputFiles": [
+      "C:/Users/a3875/Documents/code/easy-strm/debug/jinja-browser-tv-output/绝命毒师 (2008)/Season 1/绝命毒师.Breaking Bad.2008.S01E02.1080p.mkv"
+    ],
+    "sourceFiles": []
+  },
+  "consoleMessages": [],
+  "screenshots": {
+    "settings": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-settings-page.png",
+    "media": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\debug\\jinja-media-manager-page.png"
+  }
+}

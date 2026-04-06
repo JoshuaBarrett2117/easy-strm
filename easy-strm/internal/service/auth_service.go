@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 "crypto/md5"
@@ -78,20 +78,20 @@ return nil, fmt.Errorf("AuthService[VerifyToken] 无效的token")
 }
 
 func (s *AuthService) Login(name, password string) (*domain.User, string, error) {
-user, err := s.userDAO.GetByName(name)
-if err != nil {
-logger.Errorf("AuthService[Login] 获取用户失败: %v", err)
-return nil, "", fmt.Errorf("用户不存在")
-}
-if user == nil {
-return nil, "", fmt.Errorf("用户不存在")
-}
+	user, err := s.userDAO.GetByName(name)
+	if err != nil {
+		logger.Errorf("AuthService[Login] 获取用户失败: %v", err)
+		return nil, "", fmt.Errorf("用户不存在")
+	}
+	if user == nil {
+		return nil, "", fmt.Errorf("用户不存在")
+	}
 
-inputPasswordHash := md5Hash(password)
-if user.Password != inputPasswordHash {
-logger.Warnf("AuthService[Login] 密码不匹配: 输入=%s, 数据库=%s", inputPasswordHash, user.Password)
-return nil, "", fmt.Errorf("密码错误")
-}
+	// 前端已经对密码进行了MD5哈希，直接比较即可，避免双重哈希
+	if user.Password != password {
+		logger.Warnf("AuthService[Login] 密码不匹配: 输入=%s, 数据库=%s", password, user.Password)
+		return nil, "", fmt.Errorf("密码错误")
+	}
 
 token, err := s.GenerateToken(user.ID)
 if err != nil {

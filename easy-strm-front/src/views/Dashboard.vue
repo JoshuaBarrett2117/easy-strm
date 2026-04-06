@@ -43,6 +43,14 @@
           <el-icon><Setting /></el-icon>
           <span>STRM配置管理</span>
         </el-menu-item>
+        <el-menu-item index="/dashboard/media-manager" class="menu-item">
+          <el-icon><FolderOpened /></el-icon>
+          <span>媒体管理</span>
+        </el-menu-item>
+        <el-menu-item index="/dashboard/category-strategy" class="menu-item">
+          <el-icon><CollectionTag /></el-icon>
+          <span>分类策略</span>
+        </el-menu-item>
         <el-menu-item index="/dashboard/settings" class="menu-item">
           <el-icon><Tools /></el-icon>
           <span>系统配置</span>
@@ -159,7 +167,7 @@
 <script setup>
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools } from '@element-plus/icons-vue'
+import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools, FolderOpened, CollectionTag } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
 import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList } from '../utils/api'
 import TaskCard from '../components/TaskCard.vue'
@@ -180,6 +188,10 @@ const currentTitle = computed(() => {
     return '115云账号管理'
   } else if (path === '/dashboard/strm-config') {
     return 'STRM配置管理'
+  } else if (path === '/dashboard/media-manager') {
+    return '媒体管理'
+  } else if (path === '/dashboard/category-strategy') {
+    return '分类策略'
   } else if (path === '/dashboard/settings') {
     return '系统配置'
   }

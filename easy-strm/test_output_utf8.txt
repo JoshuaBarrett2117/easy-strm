@@ -1,0 +1,46 @@
+﻿2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] FileOperationService[RenameFile] 閲嶅懡鍚嶆垚鍔? old.mkv -> renamed.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] FileOperationService[DeleteFile] 鍒犻櫎鏂囦欢鎴愬姛: delete.mp4
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] MediaSourceService[Create] 鍒涘缓濯掍綋婧愭垚鍔? movies (ID: 1)
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [WARN] MediaSourceService[getLocalFiles] 鏌ヨTMDB缂撳瓨澶辫触: TmdbCacheDAO[GetByQueryKeys] 鏌ヨ澶辫触: Query: could not match actual sql: "SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path, overview, vote_average, release_date, first_air_date, season_number, episode_number, raw_data, expire_at, create_time, update_time FROM t_tmdb_cache WHERE query_key IN ($1, $2, $3, $4) AND expire_at > NOW()" with expected regexp "SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path,\s+overview, vote_average, release_date, first_air_date, season_number, episode_number,\s+raw_data, expire_at, create_time, update_time\s+FROM t_tmdb_cache\s+WHERE query_key IN \(\$1, \$2, \$3\) AND expire_at > NOW\(\)"
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] MediaSourceService[getLocalFiles] 鑾峰彇鏈湴鏂囦欢鍒楄〃鎴愬姛: path=, total=3
+--- FAIL: TestMediaSourceServiceGetFilesLocal (0.00s)
+    media_source_service_test.go:97: unmet expectations: there is a remaining expectation which was not matched: ExpectedQuery => expecting Query, QueryContext or QueryRow which:
+          - matches sql: 'SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path,\s+overview, vote_average, release_date, first_air_date, season_number, episode_number,\s+raw_data, expire_at, create_time, update_time\s+FROM t_tmdb_cache\s+WHERE query_key IN \(\$1, \$2, \$3\) AND expire_at > NOW\(\)'
+          - is with arguments:
+            0 - Season1
+            1 - movie.mp4
+            2 - note.txt
+          - with empty rows
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[PreviewRename] 寮€濮嬮瑙? source_id=1, file_id=Movie.2020.1080p.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[PreviewRename] 棰勮瀹屾垚: Movie.2020.1080p.mkv -> Movie.2020. (0).mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=old_name.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[executeLocalRename] 閲嶅懡鍚嶆垚鍔? C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鏈湴鏂囦欢_鎴愬姛1102346686\001\old_name.mkv -> C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鏈湴鏂囦欢_鎴愬姛1102346686\001\New Name.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=movie.mp4
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[executeLocalRename] 閲嶅懡鍚嶆垚鍔? C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鏈湴鏂囦欢_鑷姩琛ユ墿灞曞悕1444486712\001\movie.mp4 -> C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鏈湴鏂囦欢_鑷姩琛ユ墿灞曞悕1444486712\001\renamed_movie.mp4
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=source.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=source.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[executeLocalRename] 閲嶅懡鍚嶆垚鍔? C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鐩爣宸插瓨鍦╛瑕嗙洊169967200\001\source.mkv -> C:\Users\a3875\AppData\Local\Temp\TestExecuteRename_鐩爣宸插瓨鍦╛瑕嗙洊169967200\001\target.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=test.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] RenameService[ExecuteRename] 寮€濮嬫墽琛? source_id=1, file_id=nonexistent.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchMovie] 鎼滅储瀹屾垚: query=test, results=3
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchTV] 鎼滅储瀹屾垚: query=test, results=2
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchMovie] 鎼滅储瀹屾垚: query=涓嶅瓨鍦ㄧ殑鐢靛奖, results=0
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 寮€濮嬭瘑鍒枃浠? Inception.2010.1080p.BluRay.x264.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchMovie] 鎼滅储瀹屾垚: query=Inception, results=1
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [WARN] TmdbService[cacheResult] 缂撳瓨澶辫触: TmdbCacheDAO[Create] 鍒涘缓澶辫触: sql: Scan error on column index 1, name "create_time": unsupported Scan, storing driver.Value type string into type *time.Time
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 璇嗗埆鎴愬姛: title=鐩楁ⅵ绌洪棿, tmdb_id=27205, type=movie
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 寮€濮嬭瘑鍒枃浠? Breaking.Bad.S01E02.1080p.BluRay.mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchTV] 鎼滅储瀹屾垚: query=Breaking Bad, results=1
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [WARN] TmdbService[cacheResult] 缂撳瓨澶辫触: TmdbCacheDAO[Create] 鍒涘缓澶辫触: sql: Scan error on column index 1, name "create_time": unsupported Scan, storing driver.Value type string into type *time.Time
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 璇嗗埆鎴愬姛: title=缁濆懡姣掑笀, tmdb_id=1396, type=tv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 寮€濮嬭瘑鍒枃浠? .mkv
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 寮€濮嬭瘑鍒枃浠? 娴佹氮鍦扮悆 The Wandering Earth 1080p.mp4
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchMovie] 鎼滅储瀹屾垚: query=娴佹氮鍦扮悆 The Wandering Earth, results=0
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 鏁翠綋鎼滅储鏃犵粨鏋滐紝灏濊瘯鍒嗚瘝鍥為€€鎼滅储: 娴佹氮鍦扮悆 The Wandering Earth
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[SearchMovie] 鎼滅储瀹屾垚: query=娴佹氮鍦扮悆, results=1
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[fallbackTokenizeSearch] 涓枃鍒嗚瘝鎼滅储鎴愬姛: 娴佹氮鍦扮悆
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [WARN] TmdbService[cacheResult] 缂撳瓨澶辫触: TmdbCacheDAO[Create] 鍒涘缓澶辫触: sql: Scan error on column index 1, name "create_time": unsupported Scan, storing driver.Value type string into type *time.Time
+2026/04/06 21:01:38 [2026-04-06 21:01:38] [INFO] TmdbService[IdentifyFile] 璇嗗埆鎴愬姛: title=娴佹氮鍦扮悆, tmdb_id=12345, type=movie
+FAIL
+FAIL	easy-strm/internal/service	0.787s
+FAIL

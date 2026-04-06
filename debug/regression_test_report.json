@@ -1,0 +1,36 @@
+{
+  "test_time": "2026-04-02 10:41:38",
+  "total_tests": 4,
+  "passed": 0,
+  "failed": 4,
+  "test_cases": [
+    {
+      "name": "登录错误提示",
+      "status": "Fail",
+      "expected": "应显示具体错误信息，而非通用提示",
+      "actual": "未显示任何错误提示",
+      "screenshot": "c:/Users/a3875/Documents/code/easy-strm/debug/regression_test_screenshots\\test_login_error.png"
+    },
+    {
+      "name": "115数据源浏览 - 非数字路径错误提示",
+      "status": "Fail",
+      "expected": "应显示'目录ID格式错误'，而非'获取文件列表失败'",
+      "actual": "测试异常: Page.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for locator(\"button:has-text(\\\"新增媒体源\\\")\")\n",
+      "screenshot": "c:/Users/a3875/Documents/code/easy-strm/debug/regression_test_screenshots\\test_115_browse_invalid_path_error.png"
+    },
+    {
+      "name": "删除媒体源错误提示",
+      "status": "Fail",
+      "expected": "应显示具体错误信息",
+      "actual": "测试异常: Page.wait_for_selector: Timeout 5000ms exceeded.\nCall log:\n  - waiting for locator(\".el-table\") to be visible\n",
+      "screenshot": "c:/Users/a3875/Documents/code/easy-strm/debug/regression_test_screenshots\\test_delete_media_source_error.png"
+    },
+    {
+      "name": "批量识别错误提示",
+      "status": "Fail",
+      "expected": "应显示具体错误信息",
+      "actual": "测试异常: Page.wait_for_selector: Timeout 5000ms exceeded.\nCall log:\n  - waiting for locator(\".el-table\") to be visible\n",
+      "screenshot": "c:/Users/a3875/Documents/code/easy-strm/debug/regression_test_screenshots\\test_batch_identify_error.png"
+    }
+  ]
+}

@@ -455,6 +455,18 @@ END $$;
 		return err
 	}
 
+	// 初始化 TMDB API Key 配置（如果不存在）
+	// 业务背景：TMDB 识别功能需要 API Key，默认为空，用户需自行配置
+	_, err = db.Exec(`
+		INSERT INTO t_system_config (config_key, config_val)
+		VALUES ('tmdb_api_key', '')
+		ON CONFLICT (config_key) DO NOTHING
+	`)
+	if err != nil {
+		Error("Failed to initialize tmdb_api_key config: %v", err)
+		return err
+	}
+
 	// 创建STRM文件记录表（如果不存在）
 	createStrmFileTableSQL := `
 	CREATE TABLE IF NOT EXISTS t_strm_file (
@@ -581,6 +593,240 @@ END $$;
 	if err != nil {
 		Error("Failed to add cron_task update trigger: %v", err)
 		return err
+	}
+
+	// ============================================
+	// MediaManager 模块表（v6）
+	// ============================================
+
+	// 创建媒体源配置表
+	createMediaSourceTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_media_source (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(100) NOT NULL,
+		source_type VARCHAR(20) NOT NULL,
+		path VARCHAR(500) NOT NULL,
+		cloud115_id INTEGER,
+		priority INT DEFAULT 10,
+		enabled BOOLEAN DEFAULT TRUE,
+		create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (cloud115_id) REFERENCES t_cloud_115(id) ON DELETE SET NULL
+	);
+	`
+	_, err = db.Exec(createMediaSourceTableSQL)
+	if err != nil {
+		Error("Failed to create t_media_source table: %v", err)
+		return err
+	}
+
+	// 创建媒体源表索引
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_source_type ON t_media_source(source_type)`)
+	if err != nil {
+		Warn("Failed to create idx_media_source_type: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_source_enabled ON t_media_source(enabled)`)
+	if err != nil {
+		Warn("Failed to create idx_media_source_enabled: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_source_priority ON t_media_source(priority)`)
+	if err != nil {
+		Warn("Failed to create idx_media_source_priority: %v", err)
+	}
+
+	// 创建 TMDB 缓存表
+	createTmdbCacheTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_tmdb_cache (
+		id SERIAL PRIMARY KEY,
+		query_key VARCHAR(500) NOT NULL,
+		media_type VARCHAR(20) NOT NULL,
+		tmdb_id INTEGER NOT NULL,
+		title VARCHAR(500),
+		original_title VARCHAR(500),
+		year INTEGER,
+		poster_path VARCHAR(500),
+		overview TEXT,
+		vote_average DECIMAL(3,1),
+		release_date VARCHAR(20),
+		first_air_date VARCHAR(20),
+		season_number INTEGER,
+		episode_number INTEGER,
+		raw_data JSONB,
+		expire_at TIMESTAMP NOT NULL,
+		create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE (query_key, media_type)
+	);
+	`
+	_, err = db.Exec(createTmdbCacheTableSQL)
+	if err != nil {
+		Error("Failed to create t_tmdb_cache table: %v", err)
+		return err
+	}
+
+	// 创建 TMDB 缓存表索引
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_tmdb_cache_query_key ON t_tmdb_cache(query_key)`)
+	if err != nil {
+		Warn("Failed to create idx_tmdb_cache_query_key: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_tmdb_cache_tmdb_id ON t_tmdb_cache(tmdb_id)`)
+	if err != nil {
+		Warn("Failed to create idx_tmdb_cache_tmdb_id: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_tmdb_cache_expire_at ON t_tmdb_cache(expire_at)`)
+	if err != nil {
+		Warn("Failed to create idx_tmdb_cache_expire_at: %v", err)
+	}
+
+	// 创建更名预设表
+	createRenamePresetTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_rename_preset (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(100) NOT NULL,
+		media_type VARCHAR(20) NOT NULL,
+		template VARCHAR(500) NOT NULL,
+		enabled BOOLEAN DEFAULT TRUE,
+		create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	_, err = db.Exec(createRenamePresetTableSQL)
+	if err != nil {
+		Error("Failed to create t_rename_preset table: %v", err)
+		return err
+	}
+
+	// 创建更名预设表索引
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_rename_preset_media_type ON t_rename_preset(media_type)`)
+	if err != nil {
+		Warn("Failed to create idx_rename_preset_media_type: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_rename_preset_enabled ON t_rename_preset(enabled)`)
+	if err != nil {
+		Warn("Failed to create idx_rename_preset_enabled: %v", err)
+	}
+
+	// 插入默认更名预设（如果不存在）
+	_, err = db.Exec(`
+		INSERT INTO t_rename_preset (name, media_type, template, enabled)
+		SELECT * FROM (VALUES
+			('电影（官方）', 'movie', '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('电影（简洁）', 'movie', '{{ title }}{{ fileExt }}', true),
+			('剧集（官方）', 'tv', '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('剧集（简洁）', 'tv', '{{ title }}/S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{{ fileExt }}', true)
+		) AS v(name, media_type, template, enabled)
+		WHERE NOT EXISTS (SELECT 1 FROM t_rename_preset WHERE name = v.name)
+	`)
+	if err != nil {
+		Warn("Failed to insert default rename presets: %v", err)
+	}
+
+	// 创建媒体分类策略表
+	createMediaCategoryTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_media_category (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(100) NOT NULL,
+		media_type VARCHAR(20) NOT NULL,
+		target_path VARCHAR(1000) NOT NULL,
+		match_rules JSONB,
+		enabled BOOLEAN DEFAULT TRUE,
+		create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+	_, err = db.Exec(createMediaCategoryTableSQL)
+	if err != nil {
+		Error("Failed to create t_media_category table: %v", err)
+		return err
+	}
+
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_category_type ON t_media_category(media_type)`)
+	if err != nil {
+		Warn("Failed to create idx_media_category_type: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_category_enabled ON t_media_category(enabled)`)
+	if err != nil {
+		Warn("Failed to create idx_media_category_enabled: %v", err)
+	}
+
+	// 初始化图中分类策略；default=true 的未分类只在其他规则未命中后兜底。
+	_, err = db.Exec(`
+		WITH defaults(name, media_type, target_path, match_rules, enabled) AS (
+			VALUES
+			('动画电影', 'movie', '/电影/动画电影', '{"genre_ids":[16]}'::jsonb, true),
+			('华语电影', 'movie', '/电影/华语电影', '{"languages":["zh","cn"]}'::jsonb, true),
+			('外语电影', 'movie', '/电影/外语电影', '{"languages":["en","ja","ko","fr","de","es","it","ru","nl","pt","th","hi"]}'::jsonb, true),
+			('未分类', 'movie', '/电影/未分类', '{"default":true}'::jsonb, true),
+			('国漫', 'tv', '/电视剧/国漫', '{"genre_ids":[16],"countries":["CN","TW","HK"]}'::jsonb, true),
+			('日番', 'tv', '/电视剧/日番', '{"genre_ids":[16],"countries":["JP"]}'::jsonb, true),
+			('纪录片', 'tv', '/电视剧/纪录片', '{"genre_ids":[99]}'::jsonb, true),
+			('儿童', 'tv', '/电视剧/儿童', '{"genre_ids":[10762]}'::jsonb, true),
+			('综艺', 'tv', '/电视剧/综艺', '{"genre_ids":[10764,10767]}'::jsonb, true),
+			('国产剧', 'tv', '/电视剧/国产剧', '{"countries":["CN","TW","HK"]}'::jsonb, true),
+			('欧美剧', 'tv', '/电视剧/欧美剧', '{"countries":["US","FR","GB","UK","DE","ES","IT","NL","PT","RU"]}'::jsonb, true),
+			('日韩剧', 'tv', '/电视剧/日韩剧', '{"countries":["JP","KP","KR","TH","IN","SG"]}'::jsonb, true),
+			('未分类', 'tv', '/电视剧/未分类', '{"default":true}'::jsonb, true)
+		),
+		updated AS (
+			UPDATE t_media_category c
+			SET target_path = d.target_path,
+				match_rules = d.match_rules,
+				enabled = d.enabled,
+				update_time = NOW()
+			FROM defaults d
+			WHERE c.name = d.name AND c.media_type = d.media_type
+			RETURNING c.name, c.media_type
+		)
+		INSERT INTO t_media_category (name, media_type, target_path, match_rules, enabled)
+		SELECT name, media_type, target_path, match_rules, enabled FROM defaults v
+		WHERE NOT EXISTS (
+			SELECT 1 FROM t_media_category
+			WHERE name = v.name AND media_type = v.media_type
+		)
+	`)
+	if err != nil {
+		Warn("Failed to insert default media categories: %v", err)
+	}
+
+	// 创建媒体文件缓存表
+	createMediaFileCacheTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_media_file_cache (
+		id SERIAL PRIMARY KEY,
+		source_id INTEGER NOT NULL,
+		file_path VARCHAR(1000) NOT NULL,
+		file_name VARCHAR(500) NOT NULL,
+		file_size BIGINT,
+		sha1 VARCHAR(40),
+		tmdb_id INTEGER,
+		media_type VARCHAR(20),
+		season_number INTEGER,
+		episode_number INTEGER,
+		tmdb_data JSONB,
+		identified_at TIMESTAMP,
+		create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (source_id) REFERENCES t_media_source(id) ON DELETE CASCADE,
+		UNIQUE (source_id, file_path)
+	);
+	`
+	_, err = db.Exec(createMediaFileCacheTableSQL)
+	if err != nil {
+		Error("Failed to create t_media_file_cache table: %v", err)
+		return err
+	}
+
+	// 创建媒体文件缓存表索引
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_file_cache_source_id ON t_media_file_cache(source_id)`)
+	if err != nil {
+		Warn("Failed to create idx_media_file_cache_source_id: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_file_cache_tmdb_id ON t_media_file_cache(tmdb_id)`)
+	if err != nil {
+		Warn("Failed to create idx_media_file_cache_tmdb_id: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_file_cache_media_type ON t_media_file_cache(media_type)`)
+	if err != nil {
+		Warn("Failed to create idx_media_file_cache_media_type: %v", err)
 	}
 
 	Info("Database initialized successfully")

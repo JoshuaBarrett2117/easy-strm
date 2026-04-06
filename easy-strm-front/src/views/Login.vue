@@ -86,8 +86,9 @@ const handleLogin = () => {
       login({
         name: form.value.name,
         password: md5Password
-      }).catch(() => {
-        ElMessage.error('登录失败，请检查用户名和密码')
+      }).catch((error) => {
+        const errorMsg = error.response?.data?.error || error.message || '登录失败，请检查用户名和密码'
+        ElMessage.error(errorMsg)
       }).finally(() => {
         loading.value = false
       })

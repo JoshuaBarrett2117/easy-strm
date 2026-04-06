@@ -176,8 +176,6 @@
         </el-form-item>
         <el-form-item label="秒传方式" prop="transfer_method" :disabled="transferDisabled">
           <el-select v-model="form.transfer_method" placeholder="请选择秒传方式" style="width: 100%" :disabled="transferDisabled">
-            <el-option label="115driver" value="115driver" />
-            <el-option label="go115" value="go115" />
             <el-option label="alist" value="alist" />
           </el-select>
           <div class="form-tip">选择失败时自动回退到直链获取</div>
@@ -259,7 +257,8 @@
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { Plus, Edit, Delete, RefreshRight, Key, Loading, WarningFilled, View, Hide, Cloudy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { request, get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api'
+import { request } from '../utils/api'
+import { get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api/cloud115'
 
 /**
  * 敏感信息脱敏处理

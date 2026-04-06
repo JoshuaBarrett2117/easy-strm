@@ -14,6 +14,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
+
+	"easy-strm/internal/controller"
+	"easy-strm/internal/dao"
+	"easy-strm/internal/service"
 )
 
 // JWTClaims 定义JWT声明
@@ -308,7 +312,7 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 		// 如果没有提供 pickcode，则尝试从缓存或路径获取 pickcode
 		if pickcode == "" {
 			// 尝试从 Redis 缓存获取 pickcode
-			pickcodeCacheKey := fmt.Sprintf("pickcode:%d:%s", cloud115Id, decodedPath)
+			pickcodeCacheKey := fmt.Sprintf("easy_strm:pickcode:%d:%s", cloud115Id, decodedPath)
 			cachedPickcode, err := redisClient.Get(ctx, pickcodeCacheKey).Result()
 			if err == nil && cachedPickcode != "" {
 				pickcode = cachedPickcode
@@ -366,57 +370,110 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 				}
 			}
 
-			// 获取转存账号的秒传方式，默认为115driver
+			// 获取转存账号的秒传方式，默认为空（不执行秒传）
 			transferMethod := cloud115.TransferMethod
 			if transferMethod == "" {
-				transferMethod = "115driver"
+				transferMethod = ""
 			}
 			Info("Using transfer method: %s", transferMethod)
 
-			// 如果使用alist方式，从系统配置获取alist
+			// alist方式不需要系统配置，直接使用elevengo库实现秒传
 			var alistUrl, alistToken string
-			if transferMethod == "alist" {
-				if alistUrlConfig, err := GetSystemConfigByKey("alist_url"); err == nil {
-					alistUrl = alistUrlConfig.ConfigVal
+
+			// 只有在明确配置了transfer_method时才执行秒传
+			if transferMethod != "" {
+
+				// 尝试从缓存获取秒传后的新pickcode
+				transferCacheKey := fmt.Sprintf("easy_strm:transfer_pickcode:%d:%s", cloud115.ID, decodedPath)
+				var newPickCode string
+				Info("[TransferCache] Checking cache with key: %s", transferCacheKey)
+				cachedPickcode, err := redisClient.Get(ctx, transferCacheKey).Result()
+				if err == nil && cachedPickcode != "" {
+					newPickCode = cachedPickcode
+					Info("[TransferCache] ✅ Hit cache: source_account=%d, path=%s, cached_pickcode=%s", cloud115.ID, decodedPath, newPickCode)
+				} else {
+					// 缓存未命中，执行秒传
+					Info("[TransferCache] ❌ Miss cache: source_account=%d, path=%s, error=%v, executing rapid transfer", cloud115.ID, decodedPath, err)
+					Debug("Attempting rapid transfer file %s to target account %d using method %s", pickcode, targetCloud115.ID, transferMethod)
+					newPickCode, err = client.RapidTransferByMethod(pickcode, decodedPath, cloud115.ID, cloud115.Cookie, targetDirCID, targetCloud115.ID, targetCloud115.Cookie, "", transferMethod, alistUrl, alistToken)
+					if err != nil {
+						Warn("Rapid transfer failed: %v, trying to get direct link from target account anyway", err)
+					} else {
+						Info("Rapid transfer successful, file is now available in target account, new pickcode: %s", newPickCode)
+						// 秒传成功，缓存新的pickcode（30分钟）
+						if newPickCode != "" {
+							err := redisClient.Set(ctx, transferCacheKey, newPickCode, 30*time.Minute).Err()
+							if err != nil {
+								Warn("[TransferCache] Failed to cache pickcode: %v", err)
+							} else {
+								Info("[TransferCache] ✅ Cached pickcode: key=%s, value=%s, expiration=30m", transferCacheKey, newPickCode)
+							}
+						}
+					}
 				}
-				if alistTokenConfig, err := GetSystemConfigByKey("alist_token"); err == nil {
-					alistToken = alistTokenConfig.ConfigVal
-				}
-				if alistUrl == "" || alistToken == "" {
-					Error("Alist transfer method requires alist_url and alist_token configuration")
-					JSON(c, 500, gin.H{
-						"error": "Alist transfer method requires alist_url and alist_token configuration",
-					})
+
+				Info("Source file path: %s, pickcode: %s", decodedPath, pickcode)
+
+				// 使用目标账号获取直链（优先使用秒传后的新pickcode）
+				targetPickCode := newPickCode
+				transferredFilePath := cloud115.TransferDirectory + "/" + filepath.Base(decodedPath)
+
+				if targetPickCode == "" {
+					// 秒传未成功或未返回新pickcode
+					Warn("Rapid transfer did not return new pickcode, cannot get direct link from target account")
+					// 从源账号获取直链
+					Info("Querying source account %s (ID: %d) for direct link, file path: %s, pickcode: %s", cloud115.Name, cloud115.ID, decodedPath, pickcode)
+					directLink, err := client.GetFileDirectLink(0, pickcode, cloud115.ID, cloud115.Cookie, clientUA)
+					if err != nil {
+						Error("Failed to get direct link from source account, file path: %s, pickcode: %s, error: %v", decodedPath, pickcode, err)
+						JSON(c, 500, gin.H{"error": err.Error()})
+						return
+					}
+					directLinkURL := directLink.Url.Url
+					Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
+
+					// 验证URL有效性
+					if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
+						Error("Invalid direct link URL received: %s", directLinkURL)
+						JSON(c, 500, gin.H{"error": "Failed to get valid direct link"})
+						return
+					}
+					c.Redirect(http.StatusFound, directLinkURL)
 					return
 				}
-			}
 
-			// 尝试秒传文件到目标账号
-			Debug("Attempting rapid transfer file %s to target account %d using method %s", pickcode, targetCloud115.ID, transferMethod)
-			newPickCode, err := client.RapidTransferByMethod(pickcode, decodedPath, cloud115.ID, cloud115.Cookie, targetDirCID, targetCloud115.ID, targetCloud115.Cookie, "", transferMethod, alistUrl, alistToken)
-			if err != nil {
-				Warn("Rapid transfer failed: %v, trying to get direct link from target account anyway", err)
+				// 秒传成功，使用新pickcode从目标账号获取直链
+				Info("Querying target account %s (ID: %d) for direct link, file path: %s, pickcode: %s", targetCloud115.Name, targetCloud115.ID, transferredFilePath, targetPickCode)
+				directLink, err := client.GetFileDirectLink(0, targetPickCode, targetCloud115.ID, targetCloud115.Cookie, clientUA)
+				if err != nil {
+					Error("Failed to get direct link from target account, file path: %s, new pickcode: %s, error: %v", transferredFilePath, targetPickCode, err)
+					JSON(c, 500, gin.H{"error": fmt.Sprintf("Failed to get direct link from target account: %v", err)})
+					return
+				}
+
+				directLinkURL := directLink.Url.Url
+				Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
+
+				// 验证URL有效性，防止返回文件内容被当作URL重定向
+				if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
+					Error("Invalid direct link URL received: %s (this may indicate the API returned file content instead of URL)", directLinkURL)
+					JSON(c, 500, gin.H{"error": "Failed to get valid direct link, please check if file exists and try again"})
+					return
+				}
+
+				// 重定向到直链
+				c.Redirect(http.StatusFound, directLinkURL)
+				Info("Redirected to direct link: %s", directLinkURL)
 			} else {
-				Info("Rapid transfer successful, file is now available in target account, new pickcode: %s", newPickCode)
-			}
-
-			Info("Source file path: %s, pickcode: %s", decodedPath, pickcode)
-
-			// 使用目标账号获取直链（优先使用秒传后的新pickcode）
-			targetPickCode := newPickCode
-			transferredFilePath := cloud115.TransferDirectory + "/" + filepath.Base(decodedPath)
-
-			if targetPickCode == "" {
-				// 秒传未成功或未返回新pickcode
-				Warn("Rapid transfer did not return new pickcode, cannot get direct link from target account")
-				// 从源账号获取直链
-				Info("Querying source account %s (ID: %d) for direct link, file path: %s, pickcode: %s", cloud115.Name, cloud115.ID, decodedPath, pickcode)
+				// 没有配置秒传方式，直接从源账号获取直链
+				Info("No transfer method configured, getting direct link from source account")
 				directLink, err := client.GetFileDirectLink(0, pickcode, cloud115.ID, cloud115.Cookie, clientUA)
 				if err != nil {
-					Error("Failed to get direct link from source account, file path: %s, pickcode: %s, error: %v", decodedPath, pickcode, err)
+					Error("Failed to get direct link: %v", err)
 					JSON(c, 500, gin.H{"error": err.Error()})
 					return
 				}
+
 				directLinkURL := directLink.Url.Url
 				Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
 
@@ -427,31 +484,8 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 					return
 				}
 				c.Redirect(http.StatusFound, directLinkURL)
-				return
+				Info("Redirected to direct link (no transfer): %s", directLinkURL)
 			}
-
-			// 秒传成功，使用新pickcode从目标账号获取直链
-			Info("Querying target account %s (ID: %d) for direct link, file path: %s, pickcode: %s", targetCloud115.Name, targetCloud115.ID, transferredFilePath, targetPickCode)
-			directLink, err := client.GetFileDirectLink(0, targetPickCode, targetCloud115.ID, targetCloud115.Cookie, clientUA)
-			if err != nil {
-				Error("Failed to get direct link from target account, file path: %s, new pickcode: %s, error: %v", transferredFilePath, targetPickCode, err)
-				JSON(c, 500, gin.H{"error": fmt.Sprintf("Failed to get direct link from target account: %v", err)})
-				return
-			}
-
-			directLinkURL := directLink.Url.Url
-			Info("Got direct link for file: %s, URL: %s", directLink.FileName, directLinkURL)
-
-			// 验证URL有效性，防止返回文件内容被当作URL重定向
-			if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
-				Error("Invalid direct link URL received: %s (this may indicate the API returned file content instead of URL)", directLinkURL)
-				JSON(c, 500, gin.H{"error": "Failed to get valid direct link, please check if file exists and try again"})
-				return
-			}
-
-			// 重定向到直链
-			c.Redirect(http.StatusFound, directLinkURL)
-			Info("Redirected to direct link: %s", directLinkURL)
 		} else {
 			// 没有配置转存，直接获取直链
 			directLink, err := client.GetFileDirectLink(0, pickcode, cloud115.ID, cloud115.Cookie, clientUA)
@@ -480,6 +514,40 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 
 // SetupAuthProtectedRoutes 设置需要认证的路由组
 func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
+	// 初始化 DAO 层的数据库连接
+	// BUG FIX: 必须先初始化 dao 包的全局 DB 变量，否则 DAO 层查询会失败
+	dao.Init(db, getRedisClientInstance())
+
+	// 初始化 DAO
+	mediaSourceDAO := dao.NewMediaSourceDAO()
+	cloud115DAO := dao.NewCloud115DAO()
+	notificationConfigDAO := dao.NewNotificationConfigDAO()
+	tmdbCacheDAO := dao.NewTmdbCacheDAO()
+	renamePresetDAO := dao.NewRenamePresetDAO()
+	mediaCategoryDAO := dao.NewMediaCategoryDAO()
+	systemConfigDAO := dao.NewSystemConfigDAO()
+
+	// 初始化 Service
+	mediaSourceService := service.NewMediaSourceService(mediaSourceDAO, cloud115DAO)
+	cloud115Service := service.NewCloud115Service(cloud115DAO, notificationConfigDAO)
+	fileOperationService := service.NewFileOperationService(mediaSourceService, cloud115DAO)
+
+	// 获取 TMDB API Key（从系统配置）
+	tmdbAPIKey := ""
+	if apiKeyConfig, err := GetSystemConfigByKey("tmdb_api_key"); err == nil {
+		tmdbAPIKey = apiKeyConfig.ConfigVal
+	}
+	tmdbService := service.NewTmdbService(tmdbAPIKey, tmdbCacheDAO)
+	renameService := service.NewRenameService(mediaSourceService, tmdbService, renamePresetDAO, systemConfigDAO)
+	organizeService := service.NewOrganizeService(mediaSourceService, tmdbService, renameService, fileOperationService, mediaCategoryDAO, cloud115DAO, client)
+
+	// 初始化 Controller
+	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, client)
+	fileOperationController := controller.NewFileOperationController(fileOperationService, mediaSourceService)
+	organizeController := controller.NewOrganizeController(organizeService)
+	tmdbController := controller.NewTmdbController(tmdbService)
+	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryDAO)
+	
 	// 需要验证token的路由组
 	auth := r.Group("/")
 	auth.Use(JWTMiddleware(config))
@@ -512,6 +580,12 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 				},
 			})
 		})
+
+		// 媒体分类管理路由
+		auth.GET("/media/categories", mediaCategoryController.GetAll)
+		auth.POST("/media/categories", mediaCategoryController.Create)
+		auth.PUT("/media/categories/:id", mediaCategoryController.Update)
+		auth.DELETE("/media/categories/:id", mediaCategoryController.Delete)
 
 		// 115 open扫码登录相关路由
 		// 获取支持的登录渠道列表
@@ -1399,8 +1473,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			JSON(c, 200, gin.H{
 				"state": true,
 				"data": gin.H{
-					"id":    cloud115.ID,
-					"name":  cloud115.Name,
+					"id":         cloud115.ID,
+					"name":       cloud115.Name,
 					"file_count": fileList.Count,
 				},
 				"message": "账号测试成功",
@@ -2686,6 +2760,210 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 					"last_run_message": task.LastRunMessage,
 				},
 			})
+		})
+
+		// ========== 媒体源管理API ==========
+		// 获取所有媒体源
+		auth.GET("/media/sources", func(c *gin.Context) {
+			Debug("Get all media sources API called from %s", c.ClientIP())
+			mediaSourceController.GetList(c)
+		})
+
+		// 根据ID获取媒体源
+		auth.GET("/media/sources/:id", func(c *gin.Context) {
+			Debug("Get media source by ID API called from %s", c.ClientIP())
+			mediaSourceController.GetByID(c)
+		})
+
+		// 创建媒体源
+		auth.POST("/media/sources", func(c *gin.Context) {
+			Debug("Create media source API called from %s", c.ClientIP())
+			mediaSourceController.Create(c)
+		})
+
+		// 更新媒体源
+		auth.PUT("/media/sources/:id", func(c *gin.Context) {
+			Debug("Update media source API called from %s", c.ClientIP())
+			mediaSourceController.Update(c)
+		})
+
+		// 删除媒体源
+		auth.DELETE("/media/sources/:id", func(c *gin.Context) {
+			Debug("Delete media source API called from %s", c.ClientIP())
+			mediaSourceController.Delete(c)
+		})
+
+		// 获取媒体源文件列表
+		auth.GET("/media/files", func(c *gin.Context) {
+			Debug("Get media files API called from %s", c.ClientIP())
+			mediaSourceController.GetFiles(c)
+		})
+
+		// 搜索媒体文件
+		auth.GET("/media/files/search", func(c *gin.Context) {
+			Debug("Search media files API called from %s", c.ClientIP())
+			mediaSourceController.SearchFiles(c)
+		})
+
+		// ========== 文件操作API ==========
+		// 移动文件
+		auth.POST("/media/files/move", func(c *gin.Context) {
+			Debug("Move file API called from %s", c.ClientIP())
+			fileOperationController.MoveFile(c)
+		})
+
+		// 复制文件
+		auth.POST("/media/files/copy", func(c *gin.Context) {
+			Debug("Copy file API called from %s", c.ClientIP())
+			fileOperationController.CopyFile(c)
+		})
+
+		// 删除文件
+		auth.POST("/media/files/delete", func(c *gin.Context) {
+			Debug("Delete file API called from %s", c.ClientIP())
+			fileOperationController.DeleteFile(c)
+		})
+
+		// 重命名文件
+		auth.POST("/media/files/rename", func(c *gin.Context) {
+			Debug("Rename file API called from %s", c.ClientIP())
+			fileOperationController.RenameFile(c)
+		})
+
+		// 批量操作
+		auth.POST("/media/files/batch", func(c *gin.Context) {
+			Debug("Batch operation API called from %s", c.ClientIP())
+			fileOperationController.BatchOperation(c)
+		})
+
+		// 获取文件预览
+		auth.GET("/media/files/preview", func(c *gin.Context) {
+			Debug("Get file preview API called from %s", c.ClientIP())
+			fileOperationController.GetFilePreview(c)
+		})
+
+		// ========== 自动整理API（Phase 3）==========
+		// 预览整理结果
+		auth.POST("/media/organize/preview", func(c *gin.Context) {
+			Debug("Preview organize API called from %s", c.ClientIP())
+			organizeController.PreviewOrganize(c)
+		})
+
+		// 执行整理
+		auth.POST("/media/organize/execute", func(c *gin.Context) {
+			Debug("Execute organize API called from %s", c.ClientIP())
+			organizeController.ExecuteOrganize(c)
+		})
+
+		// 批量识别文件
+		auth.POST("/media/organize/batch-identify", func(c *gin.Context) {
+			Debug("Batch identify files API called from %s", c.ClientIP())
+			organizeController.BatchIdentify(c)
+		})
+
+		// 批量更名预览
+		auth.POST("/media/organize/batch-rename-preview", func(c *gin.Context) {
+			Debug("Batch rename preview API called from %s", c.ClientIP())
+			organizeController.BatchRenamePreview(c)
+		})
+
+		// 批量执行更名
+		auth.POST("/media/organize/batch-rename-execute", func(c *gin.Context) {
+			Debug("Batch execute rename API called from %s", c.ClientIP())
+			organizeController.BatchRenameExecute(c)
+		})
+
+		// 识别单个文件
+		auth.POST("/media/organize/identify", func(c *gin.Context) {
+			Debug("Identify single file API called from %s", c.ClientIP())
+			organizeController.IdentifyFile(c)
+		})
+
+		// 预览更名
+		auth.POST("/media/organize/rename-preview", func(c *gin.Context) {
+			Debug("Preview rename API called from %s", c.ClientIP())
+			organizeController.PreviewRename(c)
+		})
+
+		// 执行更名
+		auth.POST("/media/organize/rename-execute", func(c *gin.Context) {
+			Debug("Execute rename API called from %s", c.ClientIP())
+			organizeController.ExecuteRename(c)
+		})
+
+		// 获取更名预设列表
+		auth.GET("/media/organize/presets", func(c *gin.Context) {
+			Debug("Get rename presets API called from %s", c.ClientIP())
+			organizeController.GetRenamePresets(c)
+		})
+
+		// ========== TMDB API（Phase 3）==========
+		// 搜索 TMDB
+		auth.GET("/media/tmdb/search", func(c *gin.Context) {
+			Debug("Search TMDB API called from %s", c.ClientIP())
+			tmdbController.Search(c)
+		})
+
+		// 识别文件
+		auth.POST("/media/tmdb/identify", func(c *gin.Context) {
+			Debug("Identify file API called from %s", c.ClientIP())
+			tmdbController.Identify(c)
+		})
+
+		// 批量识别文件
+		auth.POST("/media/tmdb/batch-identify", func(c *gin.Context) {
+			Debug("Batch identify files API called from %s", c.ClientIP())
+			tmdbController.BatchIdentify(c)
+		})
+
+		// 获取电影详情
+		auth.GET("/media/tmdb/movie/:id", func(c *gin.Context) {
+			Debug("Get movie detail API called from %s", c.ClientIP())
+			tmdbController.GetMovieDetail(c)
+		})
+
+		// 获取剧集详情
+		auth.GET("/media/tmdb/tv/:id", func(c *gin.Context) {
+			Debug("Get TV detail API called from %s", c.ClientIP())
+			tmdbController.GetTVDetail(c)
+		})
+
+		// 获取 TMDB 配置
+		auth.GET("/media/tmdb/config", func(c *gin.Context) {
+			Debug("Get TMDB config API called from %s", c.ClientIP())
+			tmdbController.GetConfig(c)
+		})
+
+		// 更新 TMDB API Key
+		auth.POST("/media/tmdb/config", func(c *gin.Context) {
+			Debug("Update TMDB API Key API called from %s", c.ClientIP())
+
+			var req struct {
+				APIKey   string `json:"api_key" binding:"required"`
+				Language string `json:"language"`
+			}
+
+			if err := c.ShouldBindJSON(&req); err != nil {
+				JSON(c, 400, gin.H{"error": "无效的请求体"})
+				return
+			}
+
+			// 保存到数据库
+			_, err := UpsertSystemConfig("tmdb_api_key", req.APIKey)
+			if err != nil {
+				Error("Failed to save tmdb_api_key to database: %v", err)
+				JSON(c, 500, gin.H{"error": "保存配置失败"})
+				return
+			}
+
+			// 更新内存中的值
+			tmdbService.SetAPIKey(req.APIKey)
+			if req.Language != "" {
+				tmdbService.SetLanguage(req.Language)
+			}
+
+			Info("TMDB API Key updated successfully")
+			JSON(c, 200, gin.H{"message": "API Key 更新成功"})
 		})
 	}
 }

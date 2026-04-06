@@ -9,6 +9,8 @@ import UserInfo from './views/UserInfo.vue'
 import Cloud115 from './views/Cloud115.vue'
 import StrmConfig from './views/StrmConfig.vue'
 import Settings from './views/Settings.vue'
+import MediaManager from './views/MediaManager.vue'
+import CategoryStrategy from './views/CategoryStrategy.vue'
 import './style.css'
 
 const routes = [
@@ -18,7 +20,9 @@ const routes = [
     { path: 'user-info', component: UserInfo },
     { path: 'cloud115', component: Cloud115 },
     { path: 'strm-config', component: StrmConfig },
-    { path: 'settings', component: Settings }
+    { path: 'settings', component: Settings },
+    { path: 'media-manager', component: MediaManager },
+    { path: 'category-strategy', component: CategoryStrategy }
   ] }
 ]
 

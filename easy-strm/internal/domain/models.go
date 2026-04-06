@@ -181,3 +181,27 @@ const (
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
 )
+
+// FileListRequest 文件列表请求
+type FileListRequest struct {
+	SourceID   int    `json:"source_id"`
+	Path       string `json:"path"`       // 当前目录路径
+	Page       int    `json:"page"`       // 页码
+	PageSize   int    `json:"page_size"`  // 每页数量
+	SortField  string `json:"sort_field"` // 排序字段
+	SortOrder  string `json:"sort_order"` // asc | desc
+	Filter     string `json:"filter"`     // 过滤条件
+	Search     string `json:"search"`     // 搜索关键词
+}
+
+// FileItem 文件项
+type FileItem struct {
+	Name         string    `json:"name"`
+	Path         string    `json:"path"`
+	IsDirectory  bool      `json:"is_directory"`
+	Size         int64     `json:"size"`
+	ModifiedTime time.Time `json:"modified_time"`
+	FileType     string    `json:"file_type"` // video | audio | image | other
+	SourceID     int       `json:"source_id"`
+	SourceName   string    `json:"source_name"`
+}
