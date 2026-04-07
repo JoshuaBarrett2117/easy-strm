@@ -3,6 +3,7 @@ package service
 import (
 	"easy-strm/internal/domain"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -180,5 +181,69 @@ func TestOrganizeService_动画电影分类目录前缀(t *testing.T) {
 	want := "C:/debug/test/动画电影"
 	if filepath.ToSlash(got) != want {
 		t.Fatalf("动画电影分类目录前缀不匹配: got=%q, want=%q", filepath.ToSlash(got), want)
+	}
+}
+
+func TestOrganizeService_更具体的分类规则优先(t *testing.T) {
+	svc := &OrganizeService{}
+
+	identifyResult := &domain.TmdbIdentifyResult{
+		Title:         "药屋少女的呢喃",
+		OriginalTitle: "薬屋のひとりごと",
+		MediaType:     "tv",
+		GenreIDs:      []int{16, 18},
+		Countries:     []string{"JP"},
+		Language:      "ja",
+	}
+
+	categories := []*domain.MediaCategory{
+		{
+			Name:       "日韩剧",
+			MediaType:  "tv",
+			Enabled:    true,
+			MatchRules: []byte(`{"countries":["JP","KR"],"languages":["ja","ko"]}`),
+			TargetPath: "/电视剧/日韩剧",
+		},
+		{
+			Name:       "日番",
+			MediaType:  "tv",
+			Enabled:    true,
+			MatchRules: []byte(`{"genre_ids":[16],"countries":["JP"]}`),
+			TargetPath: "/电视剧/日番",
+		},
+		{
+			Name:       "未分类",
+			MediaType:  "tv",
+			Enabled:    true,
+			MatchRules: []byte(`{"default":true}`),
+			TargetPath: "/电视剧/未分类",
+		},
+	}
+
+	targetPath := svc.matchCategoryPath(identifyResult, categories)
+	if targetPath != "/电视剧/日番" {
+		t.Fatalf("更具体的分类规则应优先命中日番: got=%q", targetPath)
+	}
+}
+
+func TestOrganizeService_关键词规则仍需满足其他条件(t *testing.T) {
+	svc := &OrganizeService{}
+
+	identifyResult := &domain.TmdbIdentifyResult{
+		Title:         "药屋少女的呢喃",
+		OriginalTitle: "薬屋のひとりごと",
+		MediaType:     "tv",
+		GenreIDs:      []int{16},
+		Countries:     []string{"JP"},
+		Language:      "ja",
+	}
+
+	rule := &domain.CategoryMatchRule{
+		Keywords:  []string{"药屋"},
+		Countries: []string{"KR"},
+	}
+
+	if svc.matchCategoryRule(identifyResult, strings.ToLower(identifyResult.Title+" "+identifyResult.OriginalTitle), rule) {
+		t.Fatal("关键词命中后仍应继续校验其它条件，国家不匹配时不应命中")
 	}
 }

@@ -640,6 +640,8 @@ func (s *OrganizeService) matchCategoryPath(identifyResult *domain.TmdbIdentifyR
 	targetTitleStr := fmt.Sprintf("%s %s", identifyResult.Title, identifyResult.OriginalTitle)
 	targetTitleStr = strings.ToLower(targetTitleStr)
 	defaultPath := ""
+	bestPath := ""
+	bestScore := -1
 
 	for _, cat := range categories {
 		if !cat.Enabled || cat.MediaType != identifyResult.MediaType {
@@ -654,70 +656,105 @@ func (s *OrganizeService) matchCategoryPath(identifyResult *domain.TmdbIdentifyR
 			continue
 		}
 
-		if s.matchCategoryRule(identifyResult, targetTitleStr, rule) {
-			return cat.TargetPath
+		matched, score := s.matchCategoryRuleScore(identifyResult, targetTitleStr, rule)
+		if matched && score > bestScore {
+			bestScore = score
+			bestPath = cat.TargetPath
 		}
 	}
 
+	if bestPath != "" {
+		return bestPath
+	}
 	return defaultPath
 }
 
 func (s *OrganizeService) matchCategoryRule(identifyResult *domain.TmdbIdentifyResult, targetTitleStr string, rule *domain.CategoryMatchRule) bool {
+	matched, _ := s.matchCategoryRuleScore(identifyResult, targetTitleStr, rule)
+	return matched
+}
+
+func (s *OrganizeService) matchCategoryRuleScore(identifyResult *domain.TmdbIdentifyResult, targetTitleStr string, rule *domain.CategoryMatchRule) (bool, int) {
 	hasCondition := false
+	score := 0
 
 	if len(rule.Keywords) > 0 {
 		hasCondition = true
-		// Keyword匹配
+		keywordMatched := false
 		for _, kw := range rule.Keywords {
 			if kw == "" {
 				continue
 			}
 			if strings.Contains(targetTitleStr, strings.ToLower(kw)) {
-				return true
+				keywordMatched = true
+				break
 			}
 		}
-		return false
+		if !keywordMatched {
+			return false, 0
+		}
+		score += s.categoryRuleGroupScore(len(rule.Keywords), 60)
 	}
 
 	if len(rule.GenreIDs) > 0 {
 		hasCondition = true
 		if !hasAnyInt(identifyResult.GenreIDs, rule.GenreIDs) {
-			return false
+			return false, 0
 		}
+		score += s.categoryRuleGroupScore(len(rule.GenreIDs), 50)
 	}
 
 	if len(rule.Countries) > 0 {
 		hasCondition = true
 		if !hasAnyString(normalizeCategoryCodes(identifyResult.Countries), normalizeCategoryCodes(rule.Countries)) {
-			return false
+			return false, 0
 		}
+		score += s.categoryRuleGroupScore(len(rule.Countries), 40)
 	}
 
 	if len(rule.Languages) > 0 {
 		hasCondition = true
 		if !hasAnyString([]string{strings.ToLower(identifyResult.Language)}, normalizeLanguageCodes(rule.Languages)) {
-			return false
+			return false, 0
 		}
+		score += s.categoryRuleGroupScore(len(rule.Languages), 35)
 	}
 
 	if len(rule.Years) > 0 {
 		hasCondition = true
 		if !hasAnyInt([]int{identifyResult.Year}, rule.Years) {
-			return false
+			return false, 0
 		}
+		score += s.categoryRuleGroupScore(len(rule.Years), 20)
 	}
 
 	if len(rule.Genres) > 0 {
 		hasCondition = true
+		genreMatched := false
 		for _, genre := range rule.Genres {
 			if strings.Contains(targetTitleStr, strings.ToLower(genre)) {
-				return true
+				genreMatched = true
+				break
 			}
 		}
-		return false
+		if !genreMatched {
+			return false, 0
+		}
+		score += s.categoryRuleGroupScore(len(rule.Genres), 10)
 	}
 
-	return hasCondition
+	return hasCondition, score
+}
+
+func (s *OrganizeService) categoryRuleGroupScore(valueCount int, weight int) int {
+	if valueCount <= 0 {
+		return 0
+	}
+	specificityBonus := 100 - valueCount
+	if specificityBonus < 1 {
+		specificityBonus = 1
+	}
+	return weight*1000 + specificityBonus
 }
 
 func hasAnyInt(values []int, candidates []int) bool {
