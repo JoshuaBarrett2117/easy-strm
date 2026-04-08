@@ -710,15 +710,47 @@ END $$;
 	_, err = db.Exec(`
 		INSERT INTO t_rename_preset (name, media_type, template, enabled)
 		SELECT * FROM (VALUES
-			('电影（官方）', 'movie', '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('电影（官方）', 'movie', '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
 			('电影（简洁）', 'movie', '{{ title }}{{ fileExt }}', true),
-			('剧集（官方）', 'tv', '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('剧集（官方）', 'tv', '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
 			('剧集（简洁）', 'tv', '{{ title }}/S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{{ fileExt }}', true)
 		) AS v(name, media_type, template, enabled)
 		WHERE NOT EXISTS (SELECT 1 FROM t_rename_preset WHERE name = v.name)
 	`)
 	if err != nil {
 		Warn("Failed to insert default rename presets: %v", err)
+	}
+
+	_, err = db.Exec(`
+		UPDATE t_system_config
+		SET config_val = CASE
+			WHEN config_key = 'movie_naming_template' AND config_val = '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			WHEN config_key = 'tv_naming_template' AND config_val = '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			ELSE config_val
+		END,
+		update_time = CURRENT_TIMESTAMP
+		WHERE config_key IN ('movie_naming_template', 'tv_naming_template')
+	`)
+	if err != nil {
+		Warn("Failed to migrate legacy naming templates in system config: %v", err)
+	}
+
+	_, err = db.Exec(`
+		UPDATE t_rename_preset
+		SET template = CASE
+			WHEN media_type = 'movie' AND template = '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			WHEN media_type = 'tv' AND template = '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			ELSE template
+		END,
+		update_time = CURRENT_TIMESTAMP
+		WHERE name IN ('电影（官方）', '剧集（官方）')
+	`)
+	if err != nil {
+		Warn("Failed to migrate legacy naming templates in presets: %v", err)
 	}
 
 	// 创建媒体分类策略表

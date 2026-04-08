@@ -75,6 +75,10 @@
             <el-icon><Document /></el-icon>
             查看日志
           </el-button>
+          <el-button v-if="isAdmin" class="network-btn" @click="showNetworkDialog">
+            <el-icon><Connection /></el-icon>
+            网络测试
+          </el-button>
           <el-button class="logout-btn" @click="handleLogout">
             <el-icon><SwitchButton /></el-icon>
             退出登录
@@ -161,15 +165,52 @@
         <el-button @click="taskDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="networkDialogVisible"
+      title="网络连通性测试"
+      width="72%"
+      top="8vh"
+      :close-on-click-modal="false"
+      :destroy-on-close="true"
+    >
+      <div class="network-toolbar">
+        <el-button :icon="Refresh" @click="loadNetworkResults" :loading="networkLoading">刷新</el-button>
+      </div>
+      <el-table :data="networkResults" v-loading="networkLoading" stripe border>
+        <el-table-column prop="name" label="站点" min-width="130" />
+        <el-table-column prop="url" label="地址" min-width="220" />
+        <el-table-column label="连通状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.ok ? 'success' : 'danger'">
+              {{ row.ok ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="代理路径" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.via_proxy ? 'warning' : 'info'">
+              {{ row.via_proxy ? '代理' : '直连' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status_code" label="HTTP" width="90" />
+        <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
+        <el-table-column prop="error" label="错误信息" min-width="200" />
+      </el-table>
+      <template #footer>
+        <el-button @click="networkDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </el-container>
 </template>
 
 <script setup>
 import { computed, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools, FolderOpened, CollectionTag } from '@element-plus/icons-vue'
+import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools, FolderOpened, CollectionTag, Connection } from '@element-plus/icons-vue'
 import { ElMessageBox, ElMessage } from 'element-plus'
-import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList } from '../utils/api'
+import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList, testNetworkConnectivity } from '../utils/api'
 import TaskCard from '../components/TaskCard.vue'
 
 const router = useRouter()
@@ -348,6 +389,10 @@ const taskLoading = ref(false)
 const autoRefreshTasks = ref(false)
 let taskRefreshTimer = null
 
+const networkDialogVisible = ref(false)
+const networkLoading = ref(false)
+const networkResults = ref([])
+
 /**
  * 显示任务弹窗
  */
@@ -385,6 +430,25 @@ const toggleTaskAutoRefresh = (value) => {
       clearInterval(taskRefreshTimer)
       taskRefreshTimer = null
     }
+  }
+}
+
+const showNetworkDialog = async () => {
+  networkDialogVisible.value = true
+  await loadNetworkResults()
+}
+
+const loadNetworkResults = async () => {
+  networkLoading.value = true
+  try {
+    const response = await testNetworkConnectivity()
+    networkResults.value = response.data.data || []
+  } catch (error) {
+    console.error('加载网络测试结果失败:', error)
+    ElMessage.error('加载网络测试结果失败')
+    networkResults.value = []
+  } finally {
+    networkLoading.value = false
   }
 }
 
@@ -556,6 +620,20 @@ watch(taskDialogVisible, (newVal) => {
   border-color: #409eff;
 }
 
+.network-btn {
+  color: #e6a23c;
+  border: 1px solid #e6a23c;
+  background-color: transparent;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.network-btn:hover {
+  color: #fff;
+  background-color: #e6a23c;
+  border-color: #e6a23c;
+}
+
 .log-container {
   height: 60vh;
   display: flex;
@@ -646,4 +724,11 @@ watch(taskDialogVisible, (newVal) => {
   flex-direction: column;
   gap: 12px;
 }
+
+.network-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
 </style>
+

@@ -547,7 +547,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	organizeController := controller.NewOrganizeController(organizeService)
 	tmdbController := controller.NewTmdbController(tmdbService)
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryDAO)
-	
+
 	// 需要验证token的路由组
 	auth := r.Group("/")
 	auth.Use(JWTMiddleware(config))
@@ -1352,6 +1352,24 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		})
 
 		// 获取115云文件列表
+		// 网络连通性测试（按代理规则自动判断是否走代理）
+		auth.GET("/network/test", func(c *gin.Context) {
+			Debug("Network test API called from %s", c.ClientIP())
+
+			sites := []NetworkProbeSite{
+				{Name: "Telegram API", URL: "https://api.telegram.org"},
+				{Name: "Telegram Web", URL: "https://t.me"},
+				{Name: "GitHub", URL: "https://github.com"},
+				{Name: "GitHub API", URL: "https://api.github.com"},
+				{Name: "TMDB API", URL: "https://api.themoviedb.org/3/configuration"},
+			}
+
+			results := RunNetworkProbe(sites, 8*time.Second)
+			JSON(c, 200, gin.H{
+				"data": results,
+			})
+		})
+
 		auth.GET("/115/files", func(c *gin.Context) {
 			Debug("Get 115 files API called from %s", c.ClientIP())
 
@@ -2844,6 +2862,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== 自动整理API（Phase 3）==========
 		// 预览整理结果
+		auth.POST("/media/organize/candidates", func(c *gin.Context) {
+			Debug("List organize candidates API called from %s", c.ClientIP())
+			organizeController.ListOrganizeCandidates(c)
+		})
+
 		auth.POST("/media/organize/preview", func(c *gin.Context) {
 			Debug("Preview organize API called from %s", c.ClientIP())
 			organizeController.PreviewOrganize(c)

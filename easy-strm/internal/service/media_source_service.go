@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -25,6 +26,7 @@ type MediaSourceService struct {
 // 参数:
 //   - mediaSourceDAO: 媒体源DAO
 //   - cloud115DAO: 115账号DAO
+//
 // 返回:
 //   - *MediaSourceService: 媒体源服务实例
 func NewMediaSourceService(mediaSourceDAO *dao.MediaSourceDAO, cloud115DAO *dao.Cloud115DAO) *MediaSourceService {
@@ -38,6 +40,7 @@ func NewMediaSourceService(mediaSourceDAO *dao.MediaSourceDAO, cloud115DAO *dao.
 // GetByID 根据ID获取媒体源
 // 参数:
 //   - id: 媒体源ID
+//
 // 返回:
 //   - *domain.MediaSource: 媒体源信息
 //   - error: 错误信息
@@ -49,6 +52,7 @@ func (s *MediaSourceService) GetByID(id int) (*domain.MediaSource, error) {
 // 参数:
 //   - sortField: 排序字段
 //   - sortOrder: 排序方向 (asc/desc)
+//
 // 返回:
 //   - []*domain.MediaSource: 媒体源列表
 //   - error: 错误信息
@@ -59,6 +63,7 @@ func (s *MediaSourceService) GetAll(sortField, sortOrder string) ([]*domain.Medi
 // GetByType 根据类型获取媒体源
 // 参数:
 //   - sourceType: 媒体源类型
+//
 // 返回:
 //   - []*domain.MediaSource: 媒体源列表
 //   - error: 错误信息
@@ -82,6 +87,7 @@ func (s *MediaSourceService) GetEnabled() ([]*domain.MediaSource, error) {
 //   - cloud115ID: 115账号ID（可选）
 //   - priority: 优先级
 //   - enabled: 是否启用
+//
 // 返回:
 //   - *domain.MediaSource: 创建的媒体源
 //   - error: 错误信息
@@ -141,6 +147,7 @@ func (s *MediaSourceService) Create(name, sourceType, path string, cloud115ID *i
 //   - cloud115ID: 115账号ID（可选）
 //   - priority: 优先级
 //   - enabled: 是否启用
+//
 // 返回:
 //   - *domain.MediaSource: 更新后的媒体源
 //   - error: 错误信息
@@ -186,6 +193,7 @@ func (s *MediaSourceService) Update(id int, name, sourceType, path string, cloud
 // Delete 删除媒体源
 // 参数:
 //   - id: 媒体源ID
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) Delete(id int) error {
@@ -202,6 +210,7 @@ func (s *MediaSourceService) Delete(id int) error {
 // 参数:
 //   - id: 媒体源ID
 //   - enabled: 是否启用
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) UpdateEnabled(id int, enabled bool) error {
@@ -224,6 +233,7 @@ func (s *MediaSourceService) UpdateEnabled(id int, enabled bool) error {
 //   - sortOrder: 排序方向
 //   - filter: 过滤条件
 //   - search: 搜索关键词
+//
 // 返回:
 //   - *domain.FileListResult: 文件列表结果
 //   - error: 错误信息
@@ -261,6 +271,7 @@ func (s *MediaSourceService) GetFiles(sourceID int, path string, page, pageSize 
 //   - sortOrder: 排序方向
 //   - filter: 过滤条件
 //   - search: 搜索关键词
+//
 // 返回:
 //   - *domain.FileListResult: 文件列表结果
 //   - error: 错误信息
@@ -392,6 +403,7 @@ func (s *MediaSourceService) joinRelativePath(basePath, name string) string {
 //   - sortOrder: 排序方向
 //   - filter: 过滤条件
 //   - search: 搜索关键词
+//
 // 返回:
 //   - *domain.FileListResult: 文件列表结果
 //   - error: 错误信息
@@ -428,6 +440,7 @@ func (s *MediaSourceService) getCloud115Files(source *domain.MediaSource, path s
 // fileTypeFromLocal 从本地文件判断文件类型
 // 参数:
 //   - entry: 目录项
+//
 // 返回:
 //   - string: 文件类型
 func (s *MediaSourceService) fileTypeFromLocal(entry os.DirEntry) string {
@@ -453,6 +466,7 @@ func (s *MediaSourceService) fileTypeFromLocal(entry os.DirEntry) string {
 // 参数:
 //   - name: 文件名
 //   - isDir: 是否为目录
+//
 // 返回:
 //   - string: 文件类型
 func (s *MediaSourceService) fileTypeFrom115(name string, isDir bool) string {
@@ -479,6 +493,7 @@ func (s *MediaSourceService) fileTypeFrom115(name string, isDir bool) string {
 //   - files: 文件列表
 //   - filter: 过滤条件
 //   - search: 搜索关键词
+//
 // 返回:
 //   - []domain.MediaFile: 过滤后的文件列表
 func (s *MediaSourceService) filterFiles(files []domain.MediaFile, filter, search string) []domain.MediaFile {
@@ -504,6 +519,7 @@ func (s *MediaSourceService) filterFiles(files []domain.MediaFile, filter, searc
 //   - files: 文件列表
 //   - sortField: 排序字段
 //   - sortOrder: 排序方向
+//
 // 返回:
 //   - []domain.MediaFile: 排序后的文件列表
 func (s *MediaSourceService) sortFiles(files []domain.MediaFile, sortField, sortOrder string) []domain.MediaFile {
@@ -550,6 +566,7 @@ func (s *MediaSourceService) sortFiles(files []domain.MediaFile, sortField, sort
 // buildBreadcrumb 构建面包屑导航
 // 参数:
 //   - path: 当前路径
+//
 // 返回:
 //   - []domain.PathItem: 面包屑导航
 func (s *MediaSourceService) buildBreadcrumb(path string) []domain.PathItem {
@@ -581,6 +598,7 @@ func (s *MediaSourceService) buildBreadcrumb(path string) []domain.PathItem {
 // ValidateLocalPath 验证本地路径是否存在且可访问
 // 参数:
 //   - path: 本地路径
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) ValidateLocalPath(path string) error {
@@ -608,6 +626,7 @@ func (s *MediaSourceService) ValidateLocalPath(path string) error {
 // FormatFileSize 格式化文件大小显示
 // 参数:
 //   - size: 文件大小（字节）
+//
 // 返回:
 //   - string: 格式化后的文件大小
 func (s *MediaSourceService) FormatFileSize(size int64) string {
@@ -628,6 +647,7 @@ func (s *MediaSourceService) FormatFileSize(size int64) string {
 // 参数:
 //   - src: 源文件路径
 //   - dst: 目标文件路径
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) CopyFile(src, dst string) error {
@@ -664,6 +684,7 @@ func (s *MediaSourceService) CopyFile(src, dst string) error {
 // 参数:
 //   - src: 源文件路径
 //   - dst: 目标文件路径
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) MoveFile(src, dst string) error {
@@ -691,6 +712,7 @@ func (s *MediaSourceService) MoveFile(src, dst string) error {
 // DeleteFile 删除文件
 // 参数:
 //   - path: 文件路径
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) DeleteFile(path string) error {
@@ -701,6 +723,7 @@ func (s *MediaSourceService) DeleteFile(path string) error {
 // 参数:
 //   - oldPath: 旧文件路径
 //   - newPath: 新文件路径
+//
 // 返回:
 //   - error: 错误信息
 func (s *MediaSourceService) RenameFile(oldPath, newPath string) error {
@@ -710,23 +733,58 @@ func (s *MediaSourceService) RenameFile(oldPath, newPath string) error {
 // CreateDirectory 创建目录
 // 参数:
 //   - path: 目录路径
+//
 // 返回:
 //   - error: 错误信息
+//
+// CreateHardLink 创建硬链接
+func (s *MediaSourceService) CreateHardLink(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	if err := os.Link(src, dst); err != nil {
+		return fmt.Errorf("创建硬链接失败: %w", err)
+	}
+	return nil
+}
+
+// CreateSymbolicLink 创建软链接
+func (s *MediaSourceService) CreateSymbolicLink(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return err
+	}
+	absSrc, err := filepath.Abs(src)
+	if err != nil {
+		return err
+	}
+	if err := os.Symlink(absSrc, dst); err != nil {
+		if runtime.GOOS == "windows" {
+			return fmt.Errorf("Windows 创建软链接需要管理员权限或启用开发者模式: %w", err)
+		}
+		return fmt.Errorf("创建软链接失败: %w", err)
+	}
+	return nil
+}
+
 func (s *MediaSourceService) CreateDirectory(path string) error {
 	return os.MkdirAll(path, 0755)
 }
+
 // FileExists 检查文件是否存在
 // 参数:
 //   - path: 文件路径
+//
 // 返回:
 //   - bool: 是否存在
 func (s *MediaSourceService) FileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
 }
+
 // IsDirectory 检查是否为目录
 // 参数:
 //   - path: 文件路径
+//
 // 返回:
 //   - bool: 是否为目录
 func (s *MediaSourceService) IsDirectory(path string) bool {

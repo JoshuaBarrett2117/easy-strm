@@ -647,6 +647,12 @@ func (s *TmdbService) enrichIdentifyMetadata(result *domain.TmdbIdentifyResult, 
 		return
 	}
 
+	preferredTitle, preferredOriginalTitle := s.extractPreferredTitles(detail, result.MediaType, result.Title, result.OriginalTitle)
+	result.Title = preferredTitle
+	result.OriginalTitle = preferredOriginalTitle
+	best.Title = preferredTitle
+	best.OriginalTitle = preferredOriginalTitle
+
 	if genreIDs := parseGenreIDs(detail["genres"]); len(genreIDs) > 0 {
 		result.GenreIDs = genreIDs
 		best.GenreIDs = genreIDs
@@ -659,6 +665,80 @@ func (s *TmdbService) enrichIdentifyMetadata(result *domain.TmdbIdentifyResult, 
 		result.Language = strings.ToLower(language)
 		best.Language = result.Language
 	}
+}
+
+func (s *TmdbService) extractPreferredTitles(detail map[string]interface{}, mediaType, fallbackTitle, fallbackOriginalTitle string) (string, string) {
+	title := strings.TrimSpace(fallbackTitle)
+	originalTitle := strings.TrimSpace(fallbackOriginalTitle)
+
+	switch mediaType {
+	case "tv":
+		if value, ok := detail["name"].(string); ok && strings.TrimSpace(value) != "" {
+			title = strings.TrimSpace(value)
+		}
+		if value, ok := detail["original_name"].(string); ok && strings.TrimSpace(value) != "" {
+			originalTitle = strings.TrimSpace(value)
+		}
+	default:
+		if value, ok := detail["title"].(string); ok && strings.TrimSpace(value) != "" {
+			title = strings.TrimSpace(value)
+		}
+		if value, ok := detail["original_title"].(string); ok && strings.TrimSpace(value) != "" {
+			originalTitle = strings.TrimSpace(value)
+		}
+	}
+
+	if localized := extractChineseTitleFromTranslations(detail, mediaType); localized != "" {
+		title = localized
+	}
+	if title == "" {
+		title = originalTitle
+	}
+	if originalTitle == "" {
+		originalTitle = title
+	}
+
+	return title, originalTitle
+}
+
+func extractChineseTitleFromTranslations(detail map[string]interface{}, mediaType string) string {
+	translations, ok := detail["translations"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+
+	items, ok := translations["translations"].([]interface{})
+	if !ok {
+		return ""
+	}
+
+	for _, item := range items {
+		entry, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		lang, _ := entry["iso_639_1"].(string)
+		if lang != "zh" {
+			continue
+		}
+		data, ok := entry["data"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		var title string
+		if mediaType == "tv" {
+			title, _ = data["name"].(string)
+		} else {
+			title, _ = data["title"].(string)
+		}
+		title = strings.TrimSpace(title)
+		if title != "" {
+			return title
+		}
+	}
+
+	return ""
 }
 
 func parseGenreIDs(raw interface{}) []int {
@@ -749,7 +829,7 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 
-	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s",
+	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s&append_to_response=translations",
 		s.baseURL, tmdbID, s.apiKey, s.language)
 
 	resp, err := s.httpClient.Get(apiURL)
@@ -782,7 +862,7 @@ func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 
-	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s",
+	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s&append_to_response=translations",
 		s.baseURL, tmdbID, s.apiKey, s.language)
 
 	resp, err := s.httpClient.Get(apiURL)

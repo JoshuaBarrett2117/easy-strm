@@ -21,3 +21,7 @@ export const updateSettings = (settings) => {
     data: settings
   })
 }
+
+export const testNetworkConnectivity = () => {
+  return request('/network/test')
+}

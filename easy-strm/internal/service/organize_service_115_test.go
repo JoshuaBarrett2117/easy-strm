@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"path/filepath"
 	"regexp"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 type fakeOrganizeCloud115Client struct {
 	fileList   *driver.FileListResp
+	fileLists  map[int]*driver.FileListResp
 	renameFile string
 	renameName string
 	moveFile   string
@@ -25,6 +27,11 @@ type fakeOrganizeCloud115Client struct {
 }
 
 func (f *fakeOrganizeCloud115Client) GetFileList(cid int, showDir int, offset int, limit int, cloud115ID int, cookie string) (*driver.FileListResp, error) {
+	if f.fileLists != nil {
+		if resp, ok := f.fileLists[cid]; ok {
+			return resp, nil
+		}
+	}
 	if f.fileList == nil {
 		return &driver.FileListResp{}, nil
 	}
@@ -83,6 +90,19 @@ func expectCloud115Account(t *testing.T, mock sqlmock.Sqlmock) {
 		WillReturnRows(rows)
 }
 
+func expectCloud115MediaSourceByID(t *testing.T, mock sqlmock.Sqlmock, sourceID int, cloud115ID int, root string) {
+	t.Helper()
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
+		AddRow(sourceID, "cloud", domain.SourceTypeCloud115, root, &cloud115ID, 10, true, now, now)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
+		FROM t_media_source WHERE id = $1`)).
+		WithArgs(sourceID).
+		WillReturnRows(rows)
+}
+
 func TestOrganizeService_BuildTargetPathDoesNotCreateSameNameFolder(t *testing.T) {
 	svc := &OrganizeService{}
 
@@ -113,6 +133,37 @@ func TestOrganizeService_BuildTargetPathUsesTemplateDirectory(t *testing.T) {
 	}
 }
 
+func TestOrganizeService_BuildCloud115TargetPathUsesSlashAndTemplateDirectory(t *testing.T) {
+	svc := &OrganizeService{}
+
+	finalTargetPath, newName, newPath := svc.buildCloud115OrganizeTargetPath("0", "Movies/BROWSER-Title.mp4")
+	if finalTargetPath != "0/Movies" {
+		t.Fatalf("expected cloud target path to keep slash format, got %q", finalTargetPath)
+	}
+	if newName != "BROWSER-Title.mp4" {
+		t.Fatalf("expected cloud file name without template directory, got %q", newName)
+	}
+	if newPath != "0/Movies/BROWSER-Title.mp4" {
+		t.Fatalf("expected cloud file path to use slash format, got %q", newPath)
+	}
+}
+
+func TestOrganizeService_Resolve115CIDSupportsNumericCID(t *testing.T) {
+	client := &fakeOrganizeCloud115Client{}
+	svc := &OrganizeService{client: client}
+
+	cid, err := svc.resolve115CID("12345", 1, "cookie")
+	if err != nil {
+		t.Fatalf("expected numeric cid to resolve without error: %v", err)
+	}
+	if cid != "12345" {
+		t.Fatalf("expected numeric cid to stay unchanged, got %q", cid)
+	}
+	if client.mkdirPath != "" {
+		t.Fatalf("expected numeric cid not to trigger mkdir, got %q", client.mkdirPath)
+	}
+}
+
 func TestOrganizeService_ScanCloud115MatchesSelectedFileID(t *testing.T) {
 	client := &fakeOrganizeCloud115Client{
 		fileList: &driver.FileListResp{
@@ -140,6 +191,150 @@ func TestOrganizeService_ScanCloud115MatchesSelectedFileID(t *testing.T) {
 	}
 }
 
+func TestOrganizeService_FilterFilesByIDsMatchesCloudFileID(t *testing.T) {
+	svc := &OrganizeService{}
+	files := []domain.MediaFile{
+		{
+			ID:   "movies/Doraemon.mp4",
+			CID:  "fid-1",
+			Name: "Doraemon.mp4",
+			Path: "movies/Doraemon.mp4",
+		},
+	}
+
+	filtered := svc.filterFilesByIDs(files, []string{"fid-1"})
+	if len(filtered) != 1 {
+		t.Fatalf("expected cloud file id filter to keep the file, got %d", len(filtered))
+	}
+}
+
+func TestOrganizeService_ListOrganizeCandidatesCloud115SelectedDirectoryIncludesChildren(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	expectCloud115MediaSourceByID(t, mock, 1, 1, "0")
+	expectCloud115Account(t, mock)
+
+	client := &fakeOrganizeCloud115Client{
+		fileLists: map[int]*driver.FileListResp{
+			0: {
+				Files: []driver.FileInfo{
+					{
+						CategoryID: driver.IntString("1001"),
+						Name:       "Movies",
+						Type:       "folder",
+					},
+				},
+			},
+			1001: {
+				Files: []driver.FileInfo{
+					{
+						CategoryID: driver.IntString("1001"),
+						FileID:     "fid-1",
+						Name:       "Movie.mp4",
+						Type:       "mp4",
+					},
+				},
+			},
+		},
+	}
+	svc := &OrganizeService{
+		mediaSourceService: NewMediaSourceService(dao.NewMediaSourceDAO(), nil),
+		cloud115DAO:        dao.NewCloud115DAO(),
+		client:             client,
+	}
+
+	candidates, err := svc.ListOrganizeCandidates(1, "0", "all", []string{"1001"})
+	if err != nil {
+		t.Fatalf("expected 115 directory candidate listing to succeed: %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("expected 1 candidate from selected 115 directory, got %d", len(candidates))
+	}
+	if candidates[0].CloudID != "fid-1" {
+		t.Fatalf("expected selected child file cloud id to be preserved, got %q", candidates[0].CloudID)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestOrganizeService_GetCachedIdentifyResultPrefersManualCloudIDCache(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	rawData, err := json.Marshal(domain.TmdbSearchResult{
+		TmdbID:    1148677,
+		Title:     "哆啦A梦：大雄的地球交响乐",
+		MediaType: "movie",
+		GenreIDs:  []int{16},
+		Countries: []string{"JP"},
+		Language:  "ja",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal raw data: %v", err)
+	}
+
+	now := time.Now()
+	cacheRows := sqlmock.NewRows([]string{
+		"id", "query_key", "media_type", "tmdb_id", "title", "original_title", "year", "poster_path",
+		"overview", "vote_average", "release_date", "first_air_date", "season_number", "episode_number",
+		"raw_data", "expire_at", "create_time", "update_time",
+	}).AddRow(1, "2979491657162553316", "movie", 1148677, "哆啦A梦：大雄的地球交响乐", "映画ドラえもん のび太の地球交響楽", 2024, nil, nil, 0, "2024-03-01", nil, nil, nil, rawData, now.Add(24*time.Hour), now, now)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path, 
+		        overview, vote_average, release_date, first_air_date, season_number, episode_number, 
+		        raw_data, expire_at, create_time, update_time
+		 FROM t_tmdb_cache 
+		 WHERE query_key = $1 AND media_type = $2 AND expire_at > NOW()`)).
+		WithArgs("movie.mp4", "movie").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "query_key", "media_type", "tmdb_id", "title", "original_title", "year", "poster_path",
+			"overview", "vote_average", "release_date", "first_air_date", "season_number", "episode_number",
+			"raw_data", "expire_at", "create_time", "update_time",
+		}))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path, 
+		        overview, vote_average, release_date, first_air_date, season_number, episode_number, 
+		        raw_data, expire_at, create_time, update_time
+		 FROM t_tmdb_cache 
+		 WHERE query_key = $1 AND media_type = $2 AND expire_at > NOW()`)).
+		WithArgs("movie.mp4", "tv").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "query_key", "media_type", "tmdb_id", "title", "original_title", "year", "poster_path",
+			"overview", "vote_average", "release_date", "first_air_date", "season_number", "episode_number",
+			"raw_data", "expire_at", "create_time", "update_time",
+		}))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path, 
+		        overview, vote_average, release_date, first_air_date, season_number, episode_number, 
+		        raw_data, expire_at, create_time, update_time
+		 FROM t_tmdb_cache 
+		 WHERE query_key = $1 AND media_type = $2 AND expire_at > NOW()`)).
+		WithArgs("2979491657162553316", "movie").
+		WillReturnRows(cacheRows)
+
+	svc := &OrganizeService{
+		tmdbCacheDAO: dao.NewTmdbCacheDAO(),
+		tmdbService:  NewTmdbService("", dao.NewTmdbCacheDAO()),
+	}
+
+	result := svc.getCachedIdentifyResult(domain.MediaFile{
+		ID:   "movie.mp4",
+		CID:  "2979491657162553316",
+		Name: "movie.mp4",
+	})
+	if result == nil {
+		t.Fatal("expected cached identify result")
+	}
+	if result.TmdbID != 1148677 || result.Title != "哆啦A梦：大雄的地球交响乐" {
+		t.Fatalf("unexpected cached identify result: %+v", result)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestOrganizeService_OrganizeCloud115MovesFile(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
@@ -164,7 +359,7 @@ func TestOrganizeService_OrganizeCloud115MovesFile(t *testing.T) {
 		NewName:    "BROWSER-Movie.mkv",
 		NewPath:    "/library/movies/BROWSER-Movie.mkv",
 		TargetPath: "/library/movies",
-	}, "skip", true)
+	}, "skip", organizeOperationMove)
 	if err != nil {
 		t.Fatalf("expected 115 organize to succeed: %v", err)
 	}
@@ -185,5 +380,99 @@ func TestOrganizeService_OrganizeCloud115MovesFile(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestOrganizeService_OrganizeCloud115RejectsLinkModes(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+	expectCloud115Account(t, mock)
+
+	client := &fakeOrganizeCloud115Client{}
+	cloudID := 1
+	svc := &OrganizeService{
+		cloud115DAO: dao.NewCloud115DAO(),
+		client:      client,
+	}
+
+	_, err := svc.organizeCloud115File(&domain.MediaSource{
+		ID:         1,
+		SourceType: domain.SourceTypeCloud115,
+		Cloud115ID: &cloudID,
+	}, OrganizePreview{
+		FileID:     "Movie.mkv",
+		CloudID:    "fid-1",
+		FileName:   "Movie.mkv",
+		FilePath:   "Movie.mkv",
+		NewName:    "Movie.mkv",
+		NewPath:    "/library/movies/Movie.mkv",
+		TargetPath: "/library/movies",
+	}, "skip", organizeOperationHardLink)
+	if err == nil {
+		t.Fatal("expected hard link mode to be rejected for 115 cloud")
+	}
+	if client.moveFile != "" || client.copyFile != "" {
+		t.Fatalf("expected no 115 file operation on unsupported link mode, got move=%q copy=%q", client.moveFile, client.copyFile)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestOrganizeService_GetPreferredIdentifyResultPrefersManualOverride(t *testing.T) {
+	svc := &OrganizeService{}
+
+	result, err := svc.getPreferredIdentifyResult(domain.MediaFile{
+		ID:   "movie.mp4",
+		CID:  "fid-1",
+		Name: "movie.mp4",
+	}, &domain.OrganizeManualOverride{
+		FileID:    "movie.mp4",
+		CloudID:   "fid-1",
+		MediaType: "tv",
+		TmdbID:    95299,
+		Title:     "The Office",
+		Year:      2005,
+		Season:    1,
+		Episode:   2,
+	})
+	if err != nil {
+		t.Fatalf("expected manual override to succeed: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected manual override result, got %+v", result)
+	}
+	if result.MediaType != "tv" || result.TmdbID != 95299 || result.Title != "The Office" {
+		t.Fatalf("unexpected manual override result: %+v", result)
+	}
+	if result.SeasonNumber != 1 || result.EpisodeNumber != 2 {
+		t.Fatalf("expected season/episode from manual override, got %+v", result)
+	}
+}
+
+func TestOrganizeService_MatchOrganizeManualOverrideSupportsCloudID(t *testing.T) {
+	svc := &OrganizeService{}
+	overrideMap := svc.buildOrganizeManualOverrideMap([]domain.OrganizeManualOverride{
+		{
+			FileID:    "Movies/Movie.mp4",
+			CloudID:   "fid-1",
+			MediaType: "movie",
+			TmdbID:    603,
+			Title:     "The Matrix",
+			Year:      1999,
+		},
+	})
+
+	match := svc.matchOrganizeManualOverride(domain.MediaFile{
+		ID:   "Movies/Movie.mp4",
+		CID:  "fid-1",
+		Name: "Movie.mp4",
+	}, overrideMap)
+	if match == nil {
+		t.Fatal("expected to match manual override by cloud id")
+	}
+	if match.TmdbID != 603 || match.Title != "The Matrix" {
+		t.Fatalf("unexpected override match: %+v", match)
 	}
 }

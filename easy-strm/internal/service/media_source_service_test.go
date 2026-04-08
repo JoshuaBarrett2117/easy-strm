@@ -113,3 +113,47 @@ func TestMediaSourceServiceValidateLocalPath(t *testing.T) {
 		t.Fatal("expected missing path to fail")
 	}
 }
+
+func TestMediaSourceServiceCreateHardLink(t *testing.T) {
+	svc := NewMediaSourceService(nil, nil)
+	root := t.TempDir()
+	src := filepath.Join(root, "source.mkv")
+	dst := filepath.Join(root, "library", "target.mkv")
+
+	if err := os.WriteFile(src, []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to seed source file: %v", err)
+	}
+	if err := svc.CreateHardLink(src, dst); err != nil {
+		t.Fatalf("expected hard link creation to succeed: %v", err)
+	}
+
+	info, err := os.Stat(dst)
+	if err != nil {
+		t.Fatalf("expected hard link to exist: %v", err)
+	}
+	if info.Size() != int64(len("video")) {
+		t.Fatalf("unexpected hard link size: %d", info.Size())
+	}
+}
+
+func TestMediaSourceServiceCreateSymbolicLink(t *testing.T) {
+	svc := NewMediaSourceService(nil, nil)
+	root := t.TempDir()
+	src := filepath.Join(root, "source.mkv")
+	dst := filepath.Join(root, "library", "target.mkv")
+
+	if err := os.WriteFile(src, []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to seed source file: %v", err)
+	}
+	if err := svc.CreateSymbolicLink(src, dst); err != nil {
+		t.Skipf("symbolic link is unavailable in current environment: %v", err)
+	}
+
+	info, err := os.Lstat(dst)
+	if err != nil {
+		t.Fatalf("expected symbolic link to exist: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %q to be a symbolic link", dst)
+	}
+}

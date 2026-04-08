@@ -182,7 +182,12 @@
                 重命名
               </el-button>
             </el-tooltip>
-            <el-button type="success" size="small" @click="handleSingleOrganize(scope.row)" v-if="getFileType(scope.row.name) === 'video'">
+            <el-button
+              type="success"
+              size="small"
+              @click="handleSingleOrganize(scope.row)"
+              v-if="(scope.row.is_dir || scope.row.is_directory) || getFileType(scope.row.name) === 'video'"
+            >
               <el-icon><Files /></el-icon>
               整理
             </el-button>
@@ -369,17 +374,27 @@
               <el-option label="追加序号" value="suffix" />
             </el-select>
           </el-form-item>
-          <el-form-item label="执行方式">
-            <el-switch
-              v-model="organizeForm.move_files"
-              active-text="移动文件"
-              inactive-text="复制文件"
-            />
+          <el-form-item label="整理方式">
+            <el-select v-model="organizeForm.operation_mode" style="width: 100%">
+              <el-option label="移动文件" value="move" />
+              <el-option label="复制文件" value="copy" />
+              <el-option label="硬链接" value="hardlink" :disabled="isCloud115Source" />
+              <el-option label="软链接" value="symlink" :disabled="isCloud115Source" />
+            </el-select>
           </el-form-item>
         </el-form>
 
         <el-alert
-          v-if="organizeSummary"
+          v-if="!organizeHasPreview"
+          :title="`已收集 ${organizeCandidateList.length} 个视频文件，点击“刷新预览”后再执行整理`"
+          type="info"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+
+        <el-alert
+          v-if="organizeHasPreview && organizeSummary"
           :title="`共 ${organizeSummary.total} 项，可处理 ${organizeSummary.processable || 0} 项，冲突 ${organizeSummary.conflicts || 0} 项，识别失败 ${organizeSummary.failed || 0} 项`"
           type="info"
           show-icon
@@ -387,7 +402,16 @@
           style="margin-bottom: 16px"
         />
 
-        <el-table :data="organizePreviewList" border stripe max-height="420">
+        <el-alert
+          v-if="organizeHasPreview && organizeManualCount > 0"
+          :title="`已应用 ${organizeManualCount} 项手动修正的识别结果，执行整理时将优先使用。`"
+          type="warning"
+          show-icon
+          :closable="false"
+          style="margin-bottom: 16px"
+        />
+
+        <el-table v-if="organizeHasPreview" :data="organizePreviewList" border stripe max-height="420">
           <el-table-column prop="file_name" label="原文件名" min-width="220" />
           <el-table-column prop="title" label="识别结果" min-width="180" />
           <el-table-column prop="new_name" label="新文件名" min-width="220" />
@@ -399,6 +423,16 @@
               <el-tag v-else type="success">可执行</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="操作" width="120" align="center">
+            <template #default="scope">
+              <el-button size="small" @click="handleOrganizePreviewIdentify(scope.row)">手动识别</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-table v-else :data="organizeCandidateList" border stripe max-height="420">
+          <el-table-column prop="file_name" label="候选视频文件" min-width="240" />
+          <el-table-column prop="file_path" label="源路径" min-width="320" show-overflow-tooltip />
         </el-table>
       </div>
       <template #footer>
@@ -406,6 +440,47 @@
           <el-button @click="organizeDialogVisible = false">取消</el-button>
           <el-button @click="handlePreviewOrganize" :loading="organizeLoading">刷新预览</el-button>
           <el-button type="primary" @click="handleExecuteOrganize" :loading="organizeExecuting">执行整理</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-model="organizeIdentifyDialogVisible"
+      title="修改识别结果"
+      width="560px"
+    >
+      <el-form :model="organizeIdentifyForm" label-width="110px">
+        <el-form-item label="原文件名">
+          <el-input v-model="organizeIdentifyForm.file_name" disabled />
+        </el-form-item>
+        <el-form-item label="媒体类型">
+          <el-select v-model="organizeIdentifyForm.media_type" style="width: 100%">
+            <el-option label="电影" value="movie" />
+            <el-option label="剧集" value="tv" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="标题">
+          <el-input v-model="organizeIdentifyForm.title" placeholder="请输入标题" />
+        </el-form-item>
+        <el-form-item label="年份">
+          <el-input-number v-model="organizeIdentifyForm.year" :min="0" :max="9999" style="width: 100%" />
+        </el-form-item>
+        <el-form-item v-if="organizeIdentifyForm.media_type === 'tv'" label="季数">
+          <el-input-number v-model="organizeIdentifyForm.season" :min="0" :max="999" style="width: 100%" />
+        </el-form-item>
+        <el-form-item v-if="organizeIdentifyForm.media_type === 'tv'" label="集数">
+          <el-input-number v-model="organizeIdentifyForm.episode" :min="0" :max="9999" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="TMDB ID">
+          <el-input-number v-model="organizeIdentifyForm.tmdb_id" :min="0" :max="999999999" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="handleSearchTmdbForOrganizeEdit">从 TMDB 选择</el-button>
+          <el-button v-if="organizeIdentifyForm.override_key" @click="handleClearOrganizeIdentifyOverride">清除修改</el-button>
+          <el-button @click="organizeIdentifyDialogVisible = false">取消</el-button>
+          <el-button type="primary" @click="handleApplyOrganizeIdentifyOverride">应用到预览</el-button>
         </span>
       </template>
     </el-dialog>
@@ -475,6 +550,7 @@ import {
   batchPreviewRename,
   batchExecuteRename,
   batchIdentifyFiles,
+  listOrganizeCandidates,
   previewOrganize,
   executeOrganize,
   renameFile,
@@ -757,6 +833,12 @@ const sourceRootPath = computed(() => {
   return currentSource.value.path || '/'
 })
 
+const currentCloud115DisplayPath = computed(() => {
+  if (!isCloud115Source.value) return currentPath.value
+  if (directoryStack.value.length === 0) return '/'
+  return '/' + directoryStack.value.map(item => item.name).join('/')
+})
+
 /**
  * 当前目录名称（已废弃，面包屑统一使用 breadcrumbItems）
  */
@@ -1000,16 +1082,22 @@ const tmdbType = ref('movie')
 const tmdbResults = ref([])
 const tmdbLoading = ref(false)
 const currentIdentifyFile = ref(null)
+const tmdbSelectMode = ref('cache')
+
+const openTmdbIdentifyDialog = (row) => {
+  currentIdentifyFile.value = row
+  tmdbSelectMode.value = 'cache'
+  tmdbSearchKeyword.value = (row.name || row.file_name || '').replace(/\.[^/.]+$/, '')
+  tmdbResults.value = []
+  tmdbDialogVisible.value = true
+}
 
 /**
  * 识别单个文件
  * @param {Object} row - 文件数据
  */
 const handleIdentify = (row) => {
-  currentIdentifyFile.value = row
-  tmdbSearchKeyword.value = row.name.replace(/\.[^/.]+$/, '') // 移除扩展名
-  tmdbResults.value = []
-  tmdbDialogVisible.value = true
+  openTmdbIdentifyDialog(row)
 }
 
 /**
@@ -1084,9 +1172,24 @@ const handleTmdbSearch = async () => {
 const handleSelectTmdb = async (item) => {
   if (!currentIdentifyFile.value) return
 
+  if (tmdbSelectMode.value === 'organize') {
+    organizeIdentifyForm.value = {
+      ...organizeIdentifyForm.value,
+      media_type: tmdbType.value,
+      tmdb_id: item.tmdb_id || item.id || 0,
+      title: item.title || item.name || '',
+      year: item.year || 0
+    }
+    tmdbDialogVisible.value = false
+    if (!organizeIdentifyDialogVisible.value) {
+      organizeIdentifyDialogVisible.value = true
+    }
+    return
+  }
+
   try {
     await identifyFile({
-      file_id: currentIdentifyFile.value.id,
+      file_id: currentIdentifyFile.value.identify_cache_key || currentIdentifyFile.value.id,
       tmdb_id: item.tmdb_id || item.id,
       tmdb_type: tmdbType.value,
       title: item.title || item.name,
@@ -1096,11 +1199,28 @@ const handleSelectTmdb = async (item) => {
     ElMessage.success('识别成功')
     tmdbDialogVisible.value = false
     fetchFileList()
+    if (organizeDialogVisible.value) {
+      await handlePreviewOrganize()
+    }
   } catch (error) {
     console.error('[MediaManager] 识别失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '识别失败'
     ElMessage.error(errorMsg)
   }
+}
+
+const handleOrganizePreviewIdentify = (row) => {
+  openOrganizeIdentifyEditor({
+    file_id: row.file_id,
+    cloud_id: row.cloud_id || row.file_id,
+    file_name: row.file_name,
+    media_type: row.media_type,
+    tmdb_id: row.tmdb_id,
+    title: row.title,
+    year: row.year,
+    season: row.season,
+    episode: row.episode
+  })
 }
 
 // ==================== 重命名 ====================
@@ -1131,7 +1251,9 @@ const organizeDialogVisible = ref(false)
 const organizeResultDialogVisible = ref(false)
 const organizeLoading = ref(false)
 const organizeExecuting = ref(false)
+const organizeCandidateList = ref([])
 const organizePreviewList = ref([])
+const organizeHasPreview = ref(false)
 const organizeSummary = ref(null)
 const organizeResultList = ref([])
 const organizeExecuteSummary = ref(null)
@@ -1139,8 +1261,23 @@ const organizeForm = ref({
   target_path: '',
   media_type: 'all',
   conflict_policy: 'skip',
-  move_files: true
+  operation_mode: 'move'
 })
+const organizeManualOverrides = ref({})
+const organizeIdentifyDialogVisible = ref(false)
+const organizeIdentifyForm = ref({
+  file_id: '',
+  cloud_id: '',
+  file_name: '',
+  media_type: 'movie',
+  tmdb_id: 0,
+  title: '',
+  year: 0,
+  season: 0,
+  episode: 0,
+  override_key: ''
+})
+const organizeManualCount = computed(() => Object.keys(organizeManualOverrides.value).length)
 
 /**
  * 重命名单个文件
@@ -1251,25 +1388,167 @@ const handleOpenOrganize = async () => {
   }
 
   organizeForm.value = {
-    target_path: currentSource.value?.path || '',
+    target_path: isCloud115Source.value ? currentCloud115DisplayPath.value : (currentSource.value?.path || ''),
     media_type: 'all',
     conflict_policy: 'skip',
-    move_files: true
+    operation_mode: 'move'
   }
+  organizeCandidateList.value = []
+  organizePreviewList.value = []
+  organizeHasPreview.value = false
+  organizeSummary.value = null
   organizeResultList.value = []
   organizeExecuteSummary.value = null
+  organizeManualOverrides.value = {}
   organizeDialogVisible.value = true
-  await handlePreviewOrganize()
+  await handleLoadOrganizeCandidates()
 }
 
 /**
  * 单个文件整理
  */
 const handleSingleOrganize = (row) => {
-  // 如果当前没有任何选中，或者选中的不是当前行，则临时切换选中
   selectedFiles.value = [row]
-  // 注意：如果是单行点击，前端通常不需要勾选复选框，但后端预览依赖 selectedFiles
   handleOpenOrganize()
+}
+
+const getOrganizeOverrideKey = (row) => {
+  if (!row) return ''
+  return row.cloud_id || row.file_id || row.cloudID || row.fileID || row.id || ''
+}
+
+const buildOrganizeManualItems = () => Object.values(organizeManualOverrides.value)
+
+const buildOrganizePayload = () => ({
+  source_id: currentSource.value.id,
+  source_path: currentPath.value === '/' ? '' : currentPath.value,
+  target_path: organizeForm.value.target_path,
+  media_type: organizeForm.value.media_type,
+  conflict_policy: organizeForm.value.conflict_policy,
+  operation_mode: organizeForm.value.operation_mode,
+  use_category: true,
+  file_ids: selectedFiles.value.map(file => file.id),
+  manual_items: buildOrganizeManualItems()
+})
+
+const hasOrganizeManualOverride = (row) => {
+  const key = getOrganizeOverrideKey(row)
+  return Boolean(key && organizeManualOverrides.value[key])
+}
+
+const formatOrganizeIdentifyLabel = (row) => {
+  if (!row) return '-'
+  if (row.identify_error && !row.title) return row.identify_error
+
+  const parts = []
+  if (row.title) parts.push(row.title)
+  if (row.year) parts.push(String(row.year))
+  if (row.media_type === 'tv') {
+    if (Number.isInteger(row.season) && row.season > 0) parts.push(`S${String(row.season).padStart(2, '0')}`)
+    if (Number.isInteger(row.episode) && row.episode > 0) parts.push(`E${String(row.episode).padStart(2, '0')}`)
+  }
+  return parts.join(' / ') || '未识别'
+}
+
+const openOrganizeIdentifyEditor = (row) => {
+  const key = getOrganizeOverrideKey(row)
+  const existing = key ? organizeManualOverrides.value[key] : null
+  organizeIdentifyForm.value = {
+    file_id: row.file_id || row.id || '',
+    cloud_id: row.cloud_id || '',
+    file_name: row.file_name || row.name || '',
+    media_type: existing?.media_type || row.media_type || 'movie',
+    tmdb_id: existing?.tmdb_id || row.tmdb_id || 0,
+    title: existing?.title || row.title || '',
+    year: existing?.year || row.year || 0,
+    season: existing?.season || row.season || 0,
+    episode: existing?.episode || row.episode || 0,
+    override_key: key
+  }
+  organizeIdentifyDialogVisible.value = true
+}
+
+const handleEditOrganizeIdentify = (row) => {
+  openOrganizeIdentifyEditor(row)
+}
+
+const handleSearchTmdbForOrganizeEdit = () => {
+  currentIdentifyFile.value = {
+    file_id: organizeIdentifyForm.value.file_id,
+    cloud_id: organizeIdentifyForm.value.cloud_id,
+    file_name: organizeIdentifyForm.value.file_name
+  }
+  tmdbSelectMode.value = 'organize'
+  tmdbSearchKeyword.value = organizeIdentifyForm.value.title || organizeIdentifyForm.value.file_name.replace(/\.[^/.]+$/, '')
+  tmdbType.value = organizeIdentifyForm.value.media_type || 'movie'
+  tmdbResults.value = []
+  tmdbDialogVisible.value = true
+}
+
+const handleApplyOrganizeIdentifyOverride = async () => {
+  const form = organizeIdentifyForm.value
+  if (!form.title.trim()) {
+    ElMessage.warning('请输入识别标题')
+    return
+  }
+
+  const key = form.override_key || form.cloud_id || form.file_id
+  organizeManualOverrides.value = {
+    ...organizeManualOverrides.value,
+    [key]: {
+      file_id: form.file_id,
+      cloud_id: form.cloud_id,
+      media_type: form.media_type,
+      tmdb_id: Number(form.tmdb_id || 0),
+      title: form.title.trim(),
+      year: Number(form.year || 0),
+      season: Number(form.season || 0),
+      episode: Number(form.episode || 0)
+    }
+  }
+  organizeIdentifyDialogVisible.value = false
+  await handlePreviewOrganize()
+}
+
+const handleClearOrganizeIdentifyOverride = async () => {
+  const key = organizeIdentifyForm.value.override_key
+  if (!key) {
+    organizeIdentifyDialogVisible.value = false
+    return
+  }
+
+  const next = { ...organizeManualOverrides.value }
+  delete next[key]
+  organizeManualOverrides.value = next
+  organizeIdentifyDialogVisible.value = false
+  await handlePreviewOrganize()
+}
+
+/**
+ * 加载整理候选文件
+ */
+const handleLoadOrganizeCandidates = async () => {
+  organizeLoading.value = true
+  try {
+    const response = await listOrganizeCandidates({
+      source_id: currentSource.value.id,
+      source_path: currentPath.value === '/' ? '' : currentPath.value,
+      media_type: organizeForm.value.media_type,
+      file_ids: selectedFiles.value.map(file => file.id)
+    })
+    const payload = response.data.data || {}
+    organizeCandidateList.value = payload.data || []
+    organizeHasPreview.value = false
+    if (organizeCandidateList.value.length === 0) {
+      ElMessage.warning('当前选择范围内没有可整理的视频文件')
+    }
+  } catch (error) {
+    console.error('[MediaManager] 加载整理候选文件失败:', error)
+    const errorMsg = error.response?.data?.error || error.message || '加载整理候选文件失败'
+    ElMessage.error(errorMsg)
+  } finally {
+    organizeLoading.value = false
+  }
 }
 
 /**
@@ -1283,18 +1562,11 @@ const handlePreviewOrganize = async () => {
 
   organizeLoading.value = true
   try {
-    const response = await previewOrganize({
-      source_id: currentSource.value.id,
-      source_path: currentPath.value === '/' ? '' : currentPath.value,
-      target_path: organizeForm.value.target_path,
-      media_type: organizeForm.value.media_type,
-      conflict_policy: organizeForm.value.conflict_policy,
-      use_category: true,
-      file_ids: selectedFiles.value.map(file => file.id)
-    })
+    const response = await previewOrganize(buildOrganizePayload())
     const payload = response.data.data || {}
     organizePreviewList.value = payload.data || []
     organizeSummary.value = payload.summary || null
+    organizeHasPreview.value = true
   } catch (error) {
     console.error('[MediaManager] 预览整理失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '预览整理失败'
@@ -1312,19 +1584,14 @@ const handleExecuteOrganize = async () => {
     ElMessage.warning('请输入目标目录')
     return
   }
+  if (!organizeHasPreview.value) {
+    ElMessage.warning('请先刷新预览，确认识别结果后再执行整理')
+    return
+  }
 
   organizeExecuting.value = true
   try {
-    const response = await executeOrganize({
-      source_id: currentSource.value.id,
-      source_path: currentPath.value === '/' ? '' : currentPath.value,
-      target_path: organizeForm.value.target_path,
-      media_type: organizeForm.value.media_type,
-      conflict_policy: organizeForm.value.conflict_policy,
-      move_files: organizeForm.value.move_files,
-      use_category: true,
-      file_ids: selectedFiles.value.map(file => file.id)
-    })
+    const response = await executeOrganize(buildOrganizePayload())
     const payload = response.data.data || {}
     const summary = payload.summary || {}
     ElMessage.success(`整理完成：成功 ${summary.success || 0}，跳过 ${summary.skipped || 0}，失败 ${summary.failed || 0}`)
@@ -1683,5 +1950,11 @@ onMounted(() => {
 
 .organize-form {
   margin-bottom: 16px;
+}
+
+.organize-identify-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

@@ -170,3 +170,7 @@ export const updateSetting = (key, value) => {
 export const updateSettings = (settings) => {
   return api.put('/settings', settings)
 }
+
+export const testNetworkConnectivity = () => {
+  return api.get('/network/test')
+}

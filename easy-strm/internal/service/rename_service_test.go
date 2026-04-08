@@ -111,7 +111,7 @@ func TestApplyTemplate_剧集模板(t *testing.T) {
 func TestGetDefaultTemplate_电影(t *testing.T) {
 	svc := &RenameService{}
 	tmpl := svc.getDefaultTemplate("movie")
-	want := `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	want := defaultMovieTemplate
 	if tmpl != want {
 		t.Errorf("默认电影模板不匹配: got=%q", tmpl)
 	}
@@ -121,7 +121,7 @@ func TestGetDefaultTemplate_电影(t *testing.T) {
 func TestGetDefaultTemplate_剧集(t *testing.T) {
 	svc := &RenameService{}
 	tmpl := svc.getDefaultTemplate("tv")
-	want := `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	want := defaultTVTemplate
 	if tmpl != want {
 		t.Errorf("默认剧集模板不匹配: got=%q", tmpl)
 	}
@@ -136,7 +136,7 @@ func TestApplyTemplate_Jinja2默认电影模板完整渲染(t *testing.T) {
 		t.Fatalf("渲染 Jinja2 电影默认模板失败: %v", err)
 	}
 
-	want := "盗梦空间 (2010)/盗梦空间 - Inception (2010) [1080p].mkv"
+	want := "盗梦空间 (2010)/盗梦空间 (2010) [1080p].mkv"
 	if got != want {
 		t.Fatalf("Jinja2 电影默认模板渲染结果不匹配: got=%q, want=%q", got, want)
 	}
@@ -151,9 +151,21 @@ func TestApplyTemplate_Jinja2默认剧集模板完整渲染(t *testing.T) {
 		t.Fatalf("渲染 Jinja2 剧集默认模板失败: %v", err)
 	}
 
-	want := "绝命毒师 (2008)/Season 01/绝命毒师 - Breaking Bad - S01E02 [1080p].mkv"
+	want := "绝命毒师 (2008)/Season 01/绝命毒师 - S01E02 [1080p].mkv"
 	if got != want {
 		t.Fatalf("Jinja2 剧集默认模板渲染结果不匹配: got=%q, want=%q", got, want)
+	}
+}
+
+func TestNormalizeBuiltinTemplate_兼容旧官方模板(t *testing.T) {
+	svc := &RenameService{}
+
+	if got := svc.normalizeBuiltinTemplate(legacyDefaultMovieTemplate, "movie"); got != defaultMovieTemplate {
+		t.Fatalf("旧电影官方模板兼容失败: got=%q", got)
+	}
+
+	if got := svc.normalizeBuiltinTemplate(legacyDefaultTVTemplate, "tv"); got != defaultTVTemplate {
+		t.Fatalf("旧剧集官方模板兼容失败: got=%q", got)
 	}
 }
 

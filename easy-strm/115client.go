@@ -87,7 +87,7 @@ type Client struct {
 func NewClient(config *Config) *Client {
 	return &Client{
 		config:     config,
-		httpClient: &http.Client{},
+		httpClient: NewProxyAwareHTTPClient(30 * time.Second),
 		driver:     driver.Default(),
 	}
 }
@@ -177,7 +177,7 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 			PickCode: f.GetID(),
 			Sha1:     f.Sha1,
 		}
-		
+
 		if f.IsDir() {
 			fileInfo.CategoryID = driver.IntString(f.GetID())
 			fileInfo.Type = "folder"
@@ -185,7 +185,7 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 			fileInfo.FileID = f.GetID()
 			fileInfo.CategoryID = driver.IntString(f.ParentID)
 		}
-		
+
 		fileListResp.Files = append(fileListResp.Files, fileInfo)
 	}
 
@@ -662,6 +662,7 @@ func (c *Client) GetPickCodeByPath(filePath string, cloud115ID int, cookie strin
 //   - newName: 新文件名
 //   - cloud115ID: 115账号ID
 //   - cookie: 115账号Cookie
+//
 // 返回:
 //   - error: 错误信息
 func (c *Client) RenameFile(fileID, newName string, cloud115ID int, cookie string) error {
@@ -690,6 +691,7 @@ func (c *Client) RenameFile(fileID, newName string, cloud115ID int, cookie strin
 //   - targetDirID: 目标目录ID
 //   - cloud115ID: 115账号ID
 //   - cookie: 115账号cookie
+//
 // 返回:
 //   - error: 错误信息
 func (c *Client) MoveFile115(fileID, targetDirID string, cloud115ID int, cookie string) error {
@@ -774,7 +776,7 @@ func (c *Client) MkdirAll115(path string, cloud115ID int, cookie string) (string
 				Error("Failed to create dir %s under %s: %v", part, currentCID, err)
 				return "", fmt.Errorf("mkdir %s failed: %v", part, err)
 			}
-			
+
 			// 为了防止 115 并发风控导致限流
 			time.Sleep(200 * time.Millisecond)
 

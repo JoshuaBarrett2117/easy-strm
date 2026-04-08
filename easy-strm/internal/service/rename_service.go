@@ -24,6 +24,13 @@ type RenameService struct {
 	systemConfigDAO    *dao.SystemConfigDAO
 }
 
+const (
+	legacyDefaultMovieTemplate = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	legacyDefaultTVTemplate    = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	defaultMovieTemplate       = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	defaultTVTemplate          = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+)
+
 // NewRenameService 创建更名服务实例
 // 参数:
 //   - mediaSourceService: 媒体源服务
@@ -102,12 +109,7 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 		if req.MediaType == "tv" {
 			detail, err := s.tmdbService.GetTVDetail(req.TmdbID)
 			if err == nil {
-				if name, ok := detail["name"].(string); ok {
-					title = name
-				}
-				if originalName, ok := detail["original_name"].(string); ok {
-					enTitle = originalName
-				}
+				title, enTitle = pickRenameTitlesFromDetail(detail, req.MediaType, title, enTitle)
 				if firstAirDate, ok := detail["first_air_date"].(string); ok && len(firstAirDate) >= 4 {
 					year, _ = strconv.Atoi(firstAirDate[:4])
 				}
@@ -115,12 +117,7 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 		} else {
 			detail, err := s.tmdbService.GetMovieDetail(req.TmdbID)
 			if err == nil {
-				if t, ok := detail["title"].(string); ok {
-					title = t
-				}
-				if originalTitle, ok := detail["original_title"].(string); ok {
-					enTitle = originalTitle
-				}
+				title, enTitle = pickRenameTitlesFromDetail(detail, req.MediaType, title, enTitle)
 				if releaseDate, ok := detail["release_date"].(string); ok && len(releaseDate) >= 4 {
 					year, _ = strconv.Atoi(releaseDate[:4])
 				}
@@ -293,15 +290,29 @@ func (s *RenameService) getDefaultTemplate(mediaType string) string {
 
 	if s.systemConfigDAO != nil {
 		if config, err := s.systemConfigDAO.GetByKey(configKey); err == nil && config != nil && config.ConfigVal != "" {
-			return config.ConfigVal
+			return s.normalizeBuiltinTemplate(config.ConfigVal, mediaType)
 		}
 	}
 
 	// 回退到默认值
 	if mediaType == "tv" {
-		return `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+		return defaultTVTemplate
 	}
-	return `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	return defaultMovieTemplate
+}
+
+func (s *RenameService) normalizeBuiltinTemplate(template, mediaType string) string {
+	switch mediaType {
+	case "tv":
+		if template == legacyDefaultTVTemplate {
+			return defaultTVTemplate
+		}
+	default:
+		if template == legacyDefaultMovieTemplate {
+			return defaultMovieTemplate
+		}
+	}
+	return template
 }
 
 // applyTemplate 应用模板生成文件名
@@ -481,4 +492,63 @@ func (s *RenameService) cleanTitle(title string) string {
 	result = regexp.MustCompile(`\s+`).ReplaceAllString(result, " ")
 
 	return result
+}
+
+func pickRenameTitlesFromDetail(detail map[string]interface{}, mediaType, fallbackTitle, fallbackOriginalTitle string) (string, string) {
+	title := fallbackTitle
+	originalTitle := fallbackOriginalTitle
+
+	if mediaType == "tv" {
+		if value, ok := detail["name"].(string); ok && value != "" {
+			title = value
+		}
+		if value, ok := detail["original_name"].(string); ok && value != "" {
+			originalTitle = value
+		}
+	} else {
+		if value, ok := detail["title"].(string); ok && value != "" {
+			title = value
+		}
+		if value, ok := detail["original_title"].(string); ok && value != "" {
+			originalTitle = value
+		}
+	}
+
+	if translations, ok := detail["translations"].(map[string]interface{}); ok {
+		if items, ok := translations["translations"].([]interface{}); ok {
+			for _, item := range items {
+				entry, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				lang, _ := entry["iso_639_1"].(string)
+				if lang != "zh" {
+					continue
+				}
+				data, ok := entry["data"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if mediaType == "tv" {
+					if value, ok := data["name"].(string); ok && value != "" {
+						title = value
+						break
+					}
+				} else {
+					if value, ok := data["title"].(string); ok && value != "" {
+						title = value
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if title == "" {
+		title = originalTitle
+	}
+	if originalTitle == "" {
+		originalTitle = title
+	}
+	return title, originalTitle
 }

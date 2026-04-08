@@ -96,6 +96,9 @@ export const getRenamePresets = (params) => api.get('/media/organize/presets', {
  * 自动整理 API（Phase 3）
  */
 
+// 获取整理候选文件
+export const listOrganizeCandidates = (data) => api.post('/media/organize/candidates', data)
+
 // 预览整理结果
 export const previewOrganize = (data) => api.post('/media/organize/preview', data)
 
@@ -138,4 +141,3 @@ export const updateMediaCategory = (id, data) => api.put(`/media/categories/${id
 
 // 删除媒体分类
 export const deleteMediaCategory = (id) => api.delete(`/media/categories/${id}`)
-

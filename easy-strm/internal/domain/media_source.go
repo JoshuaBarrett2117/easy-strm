@@ -273,3 +273,16 @@ type RenamePreset struct {
 	CreateTime string `json:"create_time"`
 	UpdateTime string `json:"update_time"`
 }
+
+// OrganizeManualOverride 整理预览中的手动识别覆盖项
+type OrganizeManualOverride struct {
+	FileID        string `json:"file_id"`
+	CloudID       string `json:"cloud_id"`
+	MediaType     string `json:"media_type"`
+	TmdbID        int    `json:"tmdb_id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          int    `json:"year"`
+	Season        int    `json:"season"`
+	Episode       int    `json:"episode"`
+}

@@ -10,76 +10,41 @@
         </div>
       </template>
 
-      <el-form
-        ref="formRef"
-        :model="form"
-        label-width="140px"
-        class="settings-form"
-      >
-        <el-divider content-position="left">Alist配置</el-divider>
+      <el-form ref="formRef" :model="form" label-width="140px" class="settings-form">
+        <el-divider content-position="left">Alist 配置</el-divider>
 
-        <el-form-item label="Alist服务器地址">
-          <el-input
-            v-model="form.alist_url"
-            placeholder="例如：http://192.168.1.100:5244"
-            clearable
-          />
-          <div class="form-tip">
-            Alist服务器的地址，格式：http://your-alist-server:port
-          </div>
+        <el-form-item label="Alist 服务地址">
+          <el-input v-model="form.alist_url" placeholder="例如：http://192.168.1.100:5244" clearable />
+          <div class="form-tip">用于 Alist 秒传场景，格式示例：`http://your-alist-server:port`。</div>
         </el-form-item>
 
-        <el-form-item label="Alist访问令牌">
-          <el-input
-            v-model="form.alist_token"
-            type="password"
-            placeholder="请输入Alist访问令牌"
-            show-password
-            clearable
-          />
-          <div class="form-tip">
-            获取方式：登录Alist网页端 → 设置 → 左侧菜单"其他" → 查看"令牌"
-          </div>
+        <el-form-item label="Alist 访问令牌">
+          <el-input v-model="form.alist_token" type="password" placeholder="请输入 Alist 访问令牌" show-password clearable />
+          <div class="form-tip">可在 Alist 设置页面获取 Token。</div>
         </el-form-item>
 
-        <el-alert
-          v-if="alistHelpVisible"
-          type="info"
-          :closable="false"
-          show-icon
-          class="alist-help"
-        >
-          <template #title>
-            Alist秒传配置说明
-          </template>
+        <el-alert v-if="alistHelpVisible" type="info" :closable="false" show-icon class="alist-help">
+          <template #title>Alist 秒传配置说明</template>
           <ul class="alist-help-list">
-            <li>确保Alist服务器可以正常访问</li>
-            <li>确保Alist的"直链强度"设置为"弱"（允许获取直链）</li>
-            <li>在115云管理页面配置秒传方式为alist时使用此配置</li>
+            <li>确认 Alist 服务可被当前部署环境访问。</li>
+            <li>确认 Alist 已开启直链相关能力。</li>
+            <li>115 账号中选择 `alist` 秒传方式时会用到这里的配置。</li>
           </ul>
         </el-alert>
 
-        <el-divider content-position="left">TMDB配置</el-divider>
+        <el-divider content-position="left">TMDB 配置</el-divider>
 
         <el-form-item label="TMDB API Key">
-          <el-input
-            v-model="tmdbForm.api_key"
-            type="password"
-            placeholder="请输入 TMDB API Key"
-            show-password
-            clearable
-          />
+          <el-input v-model="tmdbForm.api_key" type="password" placeholder="请输入 TMDB API Key" show-password clearable />
           <div class="form-tip">
             <template v-if="hasTmdbKey">
               <el-tag type="success" size="small">已配置</el-tag>
-              输入新的 API Key 将覆盖原有配置
+              输入新的 API Key 将覆盖已有值。
             </template>
             <template v-else>
-              获取方式：访问 
-              <el-link type="primary" href="https://www.themoviedb.org/settings/api" target="_blank">
-                TMDB API 设置
-              </el-link>
-              创建应用获取 API Key
+              可前往
+              <el-link type="primary" href="https://www.themoviedb.org/settings/api" target="_blank">TMDB API 设置页</el-link>
+              创建并获取 API Key。
             </template>
           </div>
         </el-form-item>
@@ -92,9 +57,7 @@
             <el-option label="日语" value="ja" />
             <el-option label="韩语" value="ko" />
           </el-select>
-          <div class="form-tip">
-            设置 TMDB 搜索结果的默认语言
-          </div>
+          <div class="form-tip">用于 TMDB 检索结果的默认语言。</div>
         </el-form-item>
 
         <el-form-item class="form-actions">
@@ -108,24 +71,37 @@
           </el-button>
         </el-form-item>
 
-        <el-divider content-position="left">其他配置</el-divider>
+        <el-divider content-position="left">其它配置</el-divider>
 
         <el-form-item label="日志保留天数">
-          <el-input-number
-            v-model="form.log_save_day_limit"
-            :min="1"
-            :max="365"
-            :step="1"
-          />
-          <div class="form-tip">
-            设置日志文件保留的天数，范围：1-365天
-          </div>
+          <el-input-number v-model="form.log_save_day_limit" :min="1" :max="365" :step="1" />
+          <div class="form-tip">日志文件保留天数，范围 1-365 天。</div>
         </el-form-item>
 
-        <el-divider content-position="left">整理更名配置</el-divider>
+        <el-divider content-position="left">网络代理配置</el-divider>
 
-        <el-form-item label="电影命名模版">
-          <el-input v-model="form.movie_naming_template" placeholder="{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{{ fileExt }}" />
+        <el-form-item label="代理服务器地址">
+          <el-input v-model="form.proxy_url" placeholder="例如：http://127.0.0.1:7890" clearable />
+          <div class="form-tip">支持 `http://host:port` 或 `socks5://host:port`，留空表示不启用代理。</div>
+        </el-form-item>
+
+        <el-form-item label="代理站点列表">
+          <el-input
+            v-model="form.proxy_domains"
+            type="textarea"
+            :rows="3"
+            placeholder="支持逗号或换行，例如：tg,github"
+          />
+          <div class="form-tip">按域名匹配，可填 `tg`、`github` 或完整域名（如 `api.telegram.org`）。</div>
+        </el-form-item>
+
+        <el-divider content-position="left">整理命名配置</el-divider>
+
+        <el-form-item label="电影命名模板">
+          <el-input
+            v-model="form.movie_naming_template"
+            placeholder="{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{{ fileExt }}"
+          />
           <div class="template-tags">
             <el-tag size="small" class="tag-item" @click="addTag('movie', '{{ title }}')">&#123;&#123; title &#125;&#125;</el-tag>
             <el-tag size="small" class="tag-item" @click="addTag('movie', '{{ en_title }}')">&#123;&#123; en_title &#125;&#125;</el-tag>
@@ -133,13 +109,13 @@
             <el-tag size="small" class="tag-item" @click="addTag('movie', '{{ videoFormat }}')">&#123;&#123; videoFormat &#125;&#125;</el-tag>
             <el-tag size="small" class="tag-item" @click="addTag('movie', '{{ fileExt }}')">&#123;&#123; fileExt &#125;&#125;</el-tag>
           </div>
-          <div class="form-tip">
-            Jinja2: &#123;&#123; title &#125;&#125;{% if year %} (&#123;&#123; year &#125;&#125;){% endif %}/&#123;&#123; title &#125;&#125;{% if en_title and en_title != title %} - &#123;&#123; en_title &#125;&#125;{% endif %}{% if year %} (&#123;&#123; year &#125;&#125;){% endif %}{% if videoFormat %} [&#123;&#123; videoFormat &#125;&#125;]{% endif %}&#123;&#123; fileExt &#125;&#125;
-          </div>
         </el-form-item>
 
-        <el-form-item label="电视剧命名模版">
-          <el-input v-model="form.tv_naming_template" placeholder="{{ title }}/Season {{ &quot;%02d&quot;|format(season|int) }}/{{ title }} - S{{ &quot;%02d&quot;|format(season|int) }}E{{ &quot;%02d&quot;|format(episode|int) }}{{ fileExt }}" />
+        <el-form-item label="电视剧命名模板">
+          <el-input
+            v-model="form.tv_naming_template"
+            placeholder="{{ title }}/Season {{ '%02d'|format(season|int) }}/{{ title }} - S{{ '%02d'|format(season|int) }}E{{ '%02d'|format(episode|int) }}{{ fileExt }}"
+          />
           <div class="template-tags">
             <el-tag size="small" class="tag-item" @click="addTag('tv', '{{ title }}')">&#123;&#123; title &#125;&#125;</el-tag>
             <el-tag size="small" class="tag-item" @click="addTag('tv', '{{ en_title }}')">&#123;&#123; en_title &#125;&#125;</el-tag>
@@ -148,9 +124,6 @@
             <el-tag size="small" class="tag-item" @click="addTag('tv', '{{ year }}')">&#123;&#123; year &#125;&#125;</el-tag>
             <el-tag size="small" class="tag-item" @click="addTag('tv', '{{ videoFormat }}')">&#123;&#123; videoFormat &#125;&#125;</el-tag>
             <el-tag size="small" class="tag-item" @click="addTag('tv', '{{ fileExt }}')">&#123;&#123; fileExt &#125;&#125;</el-tag>
-          </div>
-          <div class="form-tip">
-            Jinja2: &#123;&#123; title &#125;&#125;{% if year %} (&#123;&#123; year &#125;&#125;){% endif %}/Season &#123;&#123; "%02d"|format(season|int) &#125;&#125;/&#123;&#123; title &#125;&#125;{% if en_title and en_title != title %} - &#123;&#123; en_title &#125;&#125;{% endif %} - S&#123;&#123; "%02d"|format(season|int) &#125;&#125;E&#123;&#123; "%02d"|format(episode|int) &#125;&#125;{% if videoFormat %} [&#123;&#123; videoFormat &#125;&#125;]{% endif %}&#123;&#123; fileExt &#125;&#125;
           </div>
         </el-form-item>
 
@@ -173,8 +146,8 @@
 import { ref, onMounted, computed } from 'vue'
 import { Setting, Check, RefreshRight } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getSettings, updateSettings } from '../utils/api.js'
-import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media.js'
+import { getSettings, updateSettings } from '../utils/api'
+import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media'
 
 const formRef = ref(null)
 const loading = ref(false)
@@ -185,6 +158,8 @@ const form = ref({
   alist_url: '',
   alist_token: '',
   log_save_day_limit: 1,
+  proxy_url: '',
+  proxy_domains: '',
   movie_naming_template: '',
   tv_naming_template: ''
 })
@@ -212,19 +187,24 @@ const fetchSettings = async () => {
     form.value = {
       alist_url: data.alist_url || '',
       alist_token: data.alist_token || '',
-      log_save_day_limit: parseInt(data.log_save_day_limit) || 1,
+      log_save_day_limit: parseInt(data.log_save_day_limit, 10) || 1,
+      proxy_url: data.proxy_url || '',
+      proxy_domains: data.proxy_domains || '',
       movie_naming_template: data.movie_naming_template || '',
       tv_naming_template: data.tv_naming_template || ''
     }
     initialForm.value = { ...form.value }
   } catch (error) {
     console.error('获取系统配置失败:', error)
-    // 如果是404（配置不存在），使用默认值
     if (error.response?.status === 404) {
       form.value = {
         alist_url: '',
         alist_token: '',
-        log_save_day_limit: 1
+        log_save_day_limit: 1,
+        proxy_url: '',
+        proxy_domains: '',
+        movie_naming_template: '',
+        tv_naming_template: ''
       }
       initialForm.value = { ...form.value }
     }
@@ -253,6 +233,8 @@ const handleSubmit = async () => {
       alist_url: form.value.alist_url,
       alist_token: form.value.alist_token,
       log_save_day_limit: String(form.value.log_save_day_limit),
+      proxy_url: form.value.proxy_url,
+      proxy_domains: form.value.proxy_domains,
       movie_naming_template: form.value.movie_naming_template,
       tv_naming_template: form.value.tv_naming_template
     }
@@ -320,7 +302,7 @@ onMounted(() => {
 .main-card {
   border-radius: 12px;
   overflow: hidden;
-  max-width: 800px;
+  max-width: 900px;
 }
 
 .main-card :deep(.el-card__header) {
@@ -387,7 +369,7 @@ onMounted(() => {
 
 .tag-item:hover {
   transform: translateY(-2px);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .form-actions {

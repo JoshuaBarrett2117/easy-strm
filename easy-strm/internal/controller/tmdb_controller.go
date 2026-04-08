@@ -131,9 +131,17 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 		Title:     req.Title,
 	}
 
+	if preferredTitle, preferredOriginalTitle := pickPreferredTitlesFromDetail(detail, req.TmdbType, req.Title); preferredTitle != "" {
+		cache.Title = preferredTitle
+		cache.OriginalTitle = preferredOriginalTitle
+	}
+
 	// 从详情中提取信息
-	if originalTitle, ok := detail["original_title"].(string); ok {
+	if originalTitle, ok := detail["original_title"].(string); ok && cache.OriginalTitle == "" {
 		cache.OriginalTitle = originalTitle
+	}
+	if originalName, ok := detail["original_name"].(string); ok && cache.OriginalTitle == "" {
+		cache.OriginalTitle = originalName
 	}
 	if posterPath, ok := detail["poster_path"].(string); ok {
 		cache.PosterPath = posterPath
@@ -180,12 +188,71 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 		"success": true,
 		"message": "识别成功",
 		"tmdb_id": req.TmdbID,
-		"title":   req.Title,
+		"title":   cache.Title,
 	})
 }
 
 // BatchIdentify 批量识别文件
 // POST /api/media/tmdb/batch-identify
+func pickPreferredTitlesFromDetail(detail map[string]interface{}, mediaType, fallbackTitle string) (string, string) {
+	title := fallbackTitle
+	originalTitle := ""
+
+	if mediaType == "tv" {
+		if value, ok := detail["name"].(string); ok && value != "" {
+			title = value
+		}
+		if value, ok := detail["original_name"].(string); ok && value != "" {
+			originalTitle = value
+		}
+	} else {
+		if value, ok := detail["title"].(string); ok && value != "" {
+			title = value
+		}
+		if value, ok := detail["original_title"].(string); ok && value != "" {
+			originalTitle = value
+		}
+	}
+
+	if translations, ok := detail["translations"].(map[string]interface{}); ok {
+		if items, ok := translations["translations"].([]interface{}); ok {
+			for _, item := range items {
+				entry, ok := item.(map[string]interface{})
+				if !ok {
+					continue
+				}
+				lang, _ := entry["iso_639_1"].(string)
+				if lang != "zh" {
+					continue
+				}
+				data, ok := entry["data"].(map[string]interface{})
+				if !ok {
+					continue
+				}
+				if mediaType == "tv" {
+					if value, ok := data["name"].(string); ok && value != "" {
+						title = value
+						break
+					}
+				} else {
+					if value, ok := data["title"].(string); ok && value != "" {
+						title = value
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if title == "" {
+		title = originalTitle
+	}
+	if originalTitle == "" {
+		originalTitle = title
+	}
+	return title, originalTitle
+}
+
 func (c *TmdbController) BatchIdentify(ctx *gin.Context) {
 	var req struct {
 		Filenames []string `json:"filenames" binding:"required"`

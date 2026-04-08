@@ -20,15 +20,46 @@ func NewOrganizeController(organizeService *service.OrganizeService) *OrganizeCo
 }
 
 // PreviewOrganize 预览整理结果
+// ListOrganizeCandidates 列出整理候选文件
+func (c *OrganizeController) ListOrganizeCandidates(ctx *gin.Context) {
+	var req struct {
+		SourceID   int      `json:"source_id" binding:"required"`
+		SourcePath string   `json:"source_path"`
+		MediaType  string   `json:"media_type"`
+		FileIDs    []string `json:"file_ids"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	if req.MediaType == "" {
+		req.MediaType = "all"
+	}
+
+	candidates, err := c.organizeService.ListOrganizeCandidates(req.SourceID, req.SourcePath, req.MediaType, req.FileIDs)
+	if err != nil {
+		logger.Errorf("OrganizeController[ListOrganizeCandidates] 获取候选文件失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SuccessResp(ctx, gin.H{
+		"data":  candidates,
+		"total": len(candidates),
+	})
+}
+
 func (c *OrganizeController) PreviewOrganize(ctx *gin.Context) {
 	var req struct {
-		SourceID    int      `json:"source_id" binding:"required"`
-		SourcePath  string   `json:"source_path"`
-		TargetPath  string   `json:"target_path"` // 可以不传，如果启用了 UseCategory
-		MediaType   string   `json:"media_type"`
-		Template    string   `json:"template"`
-		FileIDs     []string `json:"file_ids"`
-		UseCategory bool     `json:"use_category"`
+		SourceID    int                             `json:"source_id" binding:"required"`
+		SourcePath  string                          `json:"source_path"`
+		TargetPath  string                          `json:"target_path"` // 可以不传，如果启用了 UseCategory
+		MediaType   string                          `json:"media_type"`
+		Template    string                          `json:"template"`
+		FileIDs     []string                        `json:"file_ids"`
+		UseCategory bool                            `json:"use_category"`
+		ManualItems []domain.OrganizeManualOverride `json:"manual_items"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -44,7 +75,7 @@ func (c *OrganizeController) PreviewOrganize(ctx *gin.Context) {
 		return
 	}
 
-	previews, err := c.organizeService.PreviewOrganize(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.FileIDs, req.UseCategory)
+	previews, err := c.organizeService.PreviewOrganize(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.FileIDs, req.UseCategory, req.ManualItems)
 	if err != nil {
 		logger.Errorf("OrganizeController[PreviewOrganize] 预览失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
@@ -77,15 +108,17 @@ func (c *OrganizeController) PreviewOrganize(ctx *gin.Context) {
 // ExecuteOrganize 执行整理
 func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 	var req struct {
-		SourceID       int      `json:"source_id" binding:"required"`
-		SourcePath     string   `json:"source_path"`
-		TargetPath     string   `json:"target_path"` // 可以不传，如果启用了 UseCategory
-		MediaType      string   `json:"media_type"`
-		Template       string   `json:"template"`
-		ConflictPolicy string   `json:"conflict_policy"`
-		MoveFiles      *bool    `json:"move_files"`
-		FileIDs        []string `json:"file_ids"`
-		UseCategory    bool     `json:"use_category"`
+		SourceID       int                             `json:"source_id" binding:"required"`
+		SourcePath     string                          `json:"source_path"`
+		TargetPath     string                          `json:"target_path"` // 可以不传，如果启用了 UseCategory
+		MediaType      string                          `json:"media_type"`
+		Template       string                          `json:"template"`
+		ConflictPolicy string                          `json:"conflict_policy"`
+		OperationMode  string                          `json:"operation_mode"`
+		MoveFiles      *bool                           `json:"move_files"`
+		FileIDs        []string                        `json:"file_ids"`
+		UseCategory    bool                            `json:"use_category"`
+		ManualItems    []domain.OrganizeManualOverride `json:"manual_items"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -104,12 +137,15 @@ func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 		return
 	}
 
-	moveFiles := true
-	if req.MoveFiles != nil {
-		moveFiles = *req.MoveFiles
+	operationMode := req.OperationMode
+	if operationMode == "" {
+		operationMode = "move"
+		if req.MoveFiles != nil && !*req.MoveFiles {
+			operationMode = "copy"
+		}
 	}
 
-	results, err := c.organizeService.OrganizeDirectory(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.ConflictPolicy, moveFiles, req.FileIDs, req.UseCategory)
+	results, err := c.organizeService.OrganizeDirectory(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.ConflictPolicy, operationMode, req.FileIDs, req.UseCategory, req.ManualItems)
 	if err != nil {
 		logger.Errorf("OrganizeController[ExecuteOrganize] 执行失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())

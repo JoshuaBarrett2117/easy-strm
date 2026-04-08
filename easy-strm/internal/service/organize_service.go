@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ import (
 type OrganizeService struct {
 	mediaSourceService   *MediaSourceService
 	tmdbService          *TmdbService
+	tmdbCacheDAO         *dao.TmdbCacheDAO
 	renameService        *RenameService
 	fileOperationService *FileOperationService
 	categoryDAO          *dao.MediaCategoryDAO
@@ -46,6 +48,7 @@ func NewOrganizeService(
 	return &OrganizeService{
 		mediaSourceService:   mediaSourceService,
 		tmdbService:          tmdbService,
+		tmdbCacheDAO:         dao.NewTmdbCacheDAO(),
 		renameService:        renameService,
 		fileOperationService: fileOperationService,
 		categoryDAO:          categoryDAO,
@@ -86,6 +89,63 @@ type OrganizeResult struct {
 	NewPath  string `json:"new_path"`
 }
 
+// OrganizeCandidate 整理候选文件
+type OrganizeCandidate struct {
+	FileID     string `json:"file_id"`
+	CloudID    string `json:"cloud_id,omitempty"`
+	FileName   string `json:"file_name"`
+	FilePath   string `json:"file_path"`
+	SourcePath string `json:"source_path"`
+}
+
+const (
+	organizeOperationMove     = "move"
+	organizeOperationCopy     = "copy"
+	organizeOperationHardLink = "hardlink"
+	organizeOperationSymLink  = "symlink"
+)
+
+func normalizeOrganizeOperationMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", organizeOperationMove:
+		return organizeOperationMove
+	case organizeOperationCopy:
+		return organizeOperationCopy
+	case organizeOperationHardLink:
+		return organizeOperationHardLink
+	case organizeOperationSymLink:
+		return organizeOperationSymLink
+	default:
+		return ""
+	}
+}
+
+func organizeOperationSuccessMessage(mode string) string {
+	switch normalizeOrganizeOperationMode(mode) {
+	case organizeOperationCopy:
+		return "整理并复制成功"
+	case organizeOperationHardLink:
+		return "整理并创建硬链接成功"
+	case organizeOperationSymLink:
+		return "整理并创建软链接成功"
+	default:
+		return "整理并移动成功"
+	}
+}
+
+func organizeOperationActionName(mode string) string {
+	switch normalizeOrganizeOperationMode(mode) {
+	case organizeOperationCopy:
+		return "复制"
+	case organizeOperationHardLink:
+		return "创建硬链接"
+	case organizeOperationSymLink:
+		return "创建软链接"
+	default:
+		return "移动"
+	}
+}
+
 // PreviewOrganize 预览整理结果
 // 参数:
 //   - sourceID: 媒体源ID
@@ -99,7 +159,37 @@ type OrganizeResult struct {
 // 返回:
 //   - []OrganizePreview: 预览结果列表
 //   - error: 错误信息
-func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool) ([]OrganizePreview, error) {
+//
+// ListOrganizeCandidates 列出整理候选视频文件，不触发识别预览。
+func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, mediaType string, fileIDs []string) ([]OrganizeCandidate, error) {
+	source, err := s.mediaSourceService.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("获取媒体源失败: %v", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("媒体源不存在")
+	}
+
+	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs)
+	if err != nil {
+		return nil, fmt.Errorf("扫描文件失败: %v", err)
+	}
+	files = s.filterScannedFiles(source, files, fileIDs)
+
+	candidates := make([]OrganizeCandidate, 0, len(files))
+	for _, file := range files {
+		candidates = append(candidates, OrganizeCandidate{
+			FileID:     file.ID,
+			CloudID:    file.CID,
+			FileName:   file.Name,
+			FilePath:   file.Path,
+			SourcePath: sourcePath,
+		})
+	}
+	return candidates, nil
+}
+
+func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
 	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_id=%d, source_path=%s, target_path=%s", sourceID, sourcePath, targetPath)
 
 	// 获取媒体源
@@ -123,7 +213,7 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 	}
 
 	// 按用户选中的文件ID过滤
-	files = s.filterFilesByIDs(files, fileIDs)
+	files = s.filterScannedFiles(source, files, fileIDs)
 	logger.Infof("OrganizeService[PreviewOrganize] 过滤后剩余 %d 个文件, 目标待匹配数=%d", len(files), len(fileIDs))
 
 	// 如果启用了智能分类，预先加载分类规则
@@ -135,10 +225,12 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 		}
 	}
 
+	overrideMap := s.buildOrganizeManualOverrideMap(manualItems)
+
 	// 预览每个文件
 	previews := make([]OrganizePreview, 0, len(files))
 	for _, file := range files {
-		preview, err := s.previewFile(source, file, targetPath, template, categories)
+		preview, err := s.previewFile(source, file, targetPath, template, categories, overrideMap)
 		if err != nil {
 			logger.Warnf("OrganizeService[PreviewOrganize] 预览文件失败: %s, error: %v", file.Name, err)
 			previews = append(previews, OrganizePreview{
@@ -169,12 +261,17 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 // 返回:
 //   - []OrganizeResult: 整理结果列表
 //   - error: 错误信息
-func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy string, moveFiles bool, fileIDs []string, useCategory bool) ([]OrganizeResult, error) {
-	logger.Infof("OrganizeService[OrganizeDirectory] 开始整理: source_id=%d, source_path=%s, target_path=%s, move=%v",
-		sourceID, sourcePath, targetPath, moveFiles)
+func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizeResult, error) {
+	operationMode = normalizeOrganizeOperationMode(operationMode)
+	if operationMode == "" {
+		return nil, fmt.Errorf("不支持的整理方式")
+	}
+
+	logger.Infof("OrganizeService[OrganizeDirectory] 开始整理: source_id=%d, source_path=%s, target_path=%s, operation_mode=%s",
+		sourceID, sourcePath, targetPath, operationMode)
 
 	// 先预览
-	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory)
+	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +290,7 @@ func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath
 			continue
 		}
 
-		result, err := s.organizeFile(sourceID, preview, conflictPolicy, moveFiles)
+		result, err := s.organizeFile(sourceID, preview, conflictPolicy, operationMode)
 		if err != nil {
 			logger.Warnf("OrganizeService[OrganizeDirectory] 整理文件失败: %s, error: %v", preview.FileName, err)
 			results = append(results, OrganizeResult{
@@ -226,10 +323,16 @@ func (s *OrganizeService) filterFilesByIDs(files []domain.MediaFile, fileIDs []s
 	filtered := make([]domain.MediaFile, 0)
 	for _, file := range files {
 		fID := s.normalizePath(file.ID)
+		cloudID := s.normalizePath(file.CID)
 		match := false
 		for _, target := range targets {
 			// 直接匹配文件名或目录名
 			if fID == target {
+				match = true
+				break
+			}
+			// 115 云盘场景下，允许使用文件/目录内部 ID 精确匹配
+			if cloudID != "" && cloudID == target {
 				match = true
 				break
 			}
@@ -252,6 +355,13 @@ func (s *OrganizeService) filterFilesByIDs(files []domain.MediaFile, fileIDs []s
 	}
 
 	return filtered
+}
+
+func (s *OrganizeService) filterScannedFiles(source *domain.MediaSource, files []domain.MediaFile, fileIDs []string) []domain.MediaFile {
+	if source != nil && source.SourceType == domain.SourceTypeCloud115 {
+		return files
+	}
+	return s.filterFilesByIDs(files, fileIDs)
 }
 
 func (s *OrganizeService) normalizePath(p string) string {
@@ -360,7 +470,7 @@ func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType strin
 		} else {
 			// 检查文件类型
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
-			if !s.isMediaFile(ext) {
+			if !s.isOrganizeVideoFile(ext) {
 				continue
 			}
 
@@ -455,7 +565,7 @@ func (s *OrganizeService) scanCloud115Recursive(currentCID, relativePath string,
 			time.Sleep(200 * time.Millisecond) // 防风控
 		} else {
 			ext := strings.ToLower(filepath.Ext(f.Name))
-			if !s.isMediaFile(ext) {
+			if !s.isOrganizeVideoFile(ext) {
 				continue
 			}
 
@@ -480,8 +590,12 @@ func (s *OrganizeService) isNumeric(str string) bool {
 
 // resolve115CID 解析路径为 115 CID, 逻辑同 MkdirAll115 但包含缓存或业务验证
 func (s *OrganizeService) resolve115CID(path string, cloud115ID int, cookie string) (string, error) {
+	path = strings.TrimSpace(filepath.ToSlash(path))
 	if path == "" || path == "/" {
 		return "0", nil
+	}
+	if s.isNumeric(path) {
+		return path, nil
 	}
 	return s.client.MkdirAll115(path, cloud115ID, cookie)
 }
@@ -503,6 +617,27 @@ func (s *OrganizeService) buildOrganizeTargetPath(targetPath, generatedName stri
 		finalTargetPath = filepath.Join(targetPath, s.sanitizeFolderName(folderName))
 	}
 	return finalTargetPath, newName, filepath.Join(finalTargetPath, newName)
+}
+
+func (s *OrganizeService) buildCloud115OrganizeTargetPath(targetPath, generatedName string) (string, string, string) {
+	normalizedName := strings.ReplaceAll(generatedName, "\\", "/")
+	folderName := ""
+	newName := pathpkg.Base(normalizedName)
+	if strings.Contains(normalizedName, "/") {
+		folderName = pathpkg.Dir(normalizedName)
+		if folderName == "." {
+			folderName = ""
+		}
+	}
+
+	finalTargetPath := filepath.ToSlash(strings.TrimSpace(targetPath))
+	if finalTargetPath == "" {
+		finalTargetPath = "/"
+	}
+	if folderName != "" {
+		finalTargetPath = pathpkg.Join(finalTargetPath, s.sanitizeFolderName(folderName))
+	}
+	return finalTargetPath, newName, pathpkg.Join(finalTargetPath, newName)
 }
 
 // prependCategoryTargetPath 将分类目录作为用户目标目录下的前缀，避免分类配置覆盖本次选择的根目录。
@@ -530,15 +665,10 @@ func (s *OrganizeService) prependCategoryTargetPath(targetPath, categoryPath str
 	return targetPath
 }
 
-func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.MediaFile, targetPath, template string, categories []*domain.MediaCategory) (*OrganizePreview, error) {
-	// TMDB 识别
-	identifyResult, err := s.tmdbService.IdentifyFile(file.Name)
+func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.MediaFile, targetPath, template string, categories []*domain.MediaCategory, overrideMap map[string]domain.OrganizeManualOverride) (*OrganizePreview, error) {
+	identifyResult, err := s.getPreferredIdentifyResult(file, s.matchOrganizeManualOverride(file, overrideMap))
 	if err != nil {
-		return nil, fmt.Errorf("TMDB 识别失败: %v", err)
-	}
-
-	if !identifyResult.Success {
-		return nil, fmt.Errorf("识别失败: %s", identifyResult.Message)
+		return nil, err
 	}
 
 	// 如果启用了分类，则动态匹配出 targetPath
@@ -593,9 +723,15 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 	}
 
 	finalTargetPath, newName, newPath := s.buildOrganizeTargetPath(targetPath, generatedName)
+	if source.SourceType == domain.SourceTypeCloud115 {
+		finalTargetPath, newName, newPath = s.buildCloud115OrganizeTargetPath(targetPath, generatedName)
+	}
 	renameResult.NewName = newName
-	_, statErr := os.Stat(newPath)
-	conflict := statErr == nil
+	conflict := false
+	if source.SourceType == domain.SourceTypeLocal {
+		_, statErr := os.Stat(newPath)
+		conflict = statErr == nil
+	}
 
 	return &OrganizePreview{
 		FileID:     file.ID,
@@ -619,6 +755,131 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 			return ""
 		}(),
 	}, nil
+}
+
+func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manualOverride *domain.OrganizeManualOverride) (*domain.TmdbIdentifyResult, error) {
+	if manualOverride != nil {
+		return s.buildManualIdentifyResult(file, *manualOverride), nil
+	}
+
+	if cached := s.getCachedIdentifyResult(file); cached != nil {
+		return cached, nil
+	}
+
+	identifyResult, err := s.tmdbService.IdentifyFile(file.Name)
+	if err != nil {
+		return nil, fmt.Errorf("TMDB 识别失败: %v", err)
+	}
+	if !identifyResult.Success {
+		return nil, fmt.Errorf("识别失败: %s", identifyResult.Message)
+	}
+	return identifyResult, nil
+}
+
+func (s *OrganizeService) buildOrganizeManualOverrideMap(items []domain.OrganizeManualOverride) map[string]domain.OrganizeManualOverride {
+	if len(items) == 0 {
+		return nil
+	}
+
+	result := make(map[string]domain.OrganizeManualOverride, len(items)*2)
+	for _, item := range items {
+		if fileID := strings.TrimSpace(item.FileID); fileID != "" {
+			result["file:"+s.normalizePath(fileID)] = item
+		}
+		if cloudID := strings.TrimSpace(item.CloudID); cloudID != "" {
+			result["cloud:"+s.normalizePath(cloudID)] = item
+		}
+	}
+	return result
+}
+
+func (s *OrganizeService) matchOrganizeManualOverride(file domain.MediaFile, overrideMap map[string]domain.OrganizeManualOverride) *domain.OrganizeManualOverride {
+	if len(overrideMap) == 0 {
+		return nil
+	}
+
+	if fileID := strings.TrimSpace(file.ID); fileID != "" {
+		if item, ok := overrideMap["file:"+s.normalizePath(fileID)]; ok {
+			return &item
+		}
+	}
+	if cloudID := strings.TrimSpace(file.CID); cloudID != "" {
+		if item, ok := overrideMap["cloud:"+s.normalizePath(cloudID)]; ok {
+			return &item
+		}
+	}
+	return nil
+}
+
+func (s *OrganizeService) buildManualIdentifyResult(file domain.MediaFile, item domain.OrganizeManualOverride) *domain.TmdbIdentifyResult {
+	mediaType := strings.TrimSpace(item.MediaType)
+	if mediaType == "" {
+		mediaType = "movie"
+	}
+
+	return &domain.TmdbIdentifyResult{
+		Success:       true,
+		Message:       "使用手动修改的识别结果",
+		Filename:      file.Name,
+		MediaType:     mediaType,
+		TmdbID:        item.TmdbID,
+		Title:         strings.TrimSpace(item.Title),
+		OriginalTitle: strings.TrimSpace(item.OriginalTitle),
+		Year:          item.Year,
+		SeasonNumber:  item.Season,
+		EpisodeNumber: item.Episode,
+	}
+}
+
+func (s *OrganizeService) getCachedIdentifyResult(file domain.MediaFile) *domain.TmdbIdentifyResult {
+	if s.tmdbCacheDAO == nil || s.tmdbService == nil {
+		return nil
+	}
+
+	keys := make([]string, 0, 3)
+	for _, key := range []string{file.ID, file.CID, strings.ToLower(strings.TrimSpace(file.Name))} {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		seen := false
+		for _, existing := range keys {
+			if existing == key {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			keys = append(keys, key)
+		}
+	}
+
+	for _, key := range keys {
+		for _, mediaType := range []string{"movie", "tv"} {
+			cache, err := s.tmdbCacheDAO.GetByQueryKey(key, mediaType)
+			if err != nil || cache == nil {
+				continue
+			}
+
+			result := &domain.TmdbIdentifyResult{
+				Success:       true,
+				Message:       "使用已有识别结果",
+				Filename:      file.Name,
+				MediaType:     cache.MediaType,
+				TmdbID:        cache.TmdbID,
+				Title:         cache.Title,
+				OriginalTitle: cache.OriginalTitle,
+				Year:          cache.Year,
+				SeasonNumber:  cache.SeasonNumber,
+				EpisodeNumber: cache.EpisodeNumber,
+			}
+			applyCachedMetadata(result, cache.RawData)
+			s.tmdbService.enrichCachedIdentifyMetadata(result, cache)
+			return result
+		}
+	}
+
+	return nil
 }
 
 // sanitizeFolderName 移除文件名中不支持的特殊字符
@@ -802,7 +1063,8 @@ func normalizeLanguageCodes(values []string) []string {
 }
 
 // organizeCloud115File 整理 115云盘 单个文件
-func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, preview OrganizePreview, conflictPolicy string, moveFiles bool) (*OrganizeResult, error) {
+func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, preview OrganizePreview, conflictPolicy, operationMode string) (*OrganizeResult, error) {
+	operationMode = normalizeOrganizeOperationMode(operationMode)
 	if source.Cloud115ID == nil {
 		return nil, fmt.Errorf("未绑定115账号")
 	}
@@ -838,18 +1100,23 @@ func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, previ
 	}
 
 	// 2. 移动或复制
-	if moveFiles {
+	switch operationMode {
+	case organizeOperationMove:
 		err = s.client.MoveFile115(fileID, targetCID, *source.Cloud115ID, cloud115.Cookie)
 		if err != nil {
 			return nil, fmt.Errorf("115移动文件失败: %v", err)
 		}
 		logger.Infof("OrganizeService[organizeCloud115File] 移动成功 %s -> CID %s", preview.FileName, targetCID)
-	} else if targetCID != "" {
+	case organizeOperationCopy:
 		err = s.client.CopyFile(fileID, targetCID, *source.Cloud115ID, cloud115.Cookie)
 		if err != nil {
 			return nil, fmt.Errorf("115复制文件失败: %v", err)
 		}
 		logger.Infof("OrganizeService[organizeCloud115File] 复制成功 %s -> CID %s", preview.FileName, targetCID)
+	case organizeOperationHardLink, organizeOperationSymLink:
+		return nil, fmt.Errorf("115云盘暂不支持%s整理", organizeOperationActionName(operationMode))
+	default:
+		return nil, fmt.Errorf("不支持的整理方式: %s", operationMode)
 	}
 	time.Sleep(200 * time.Millisecond) // 防风控
 
@@ -858,14 +1125,15 @@ func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, previ
 		FileName: preview.NewName, // 最后使用的新名字
 		Success:  true,
 		Skipped:  false,
-		Message:  "云盘整理成功",
+		Message:  fmt.Sprintf("云盘整理并%s成功", organizeOperationActionName(operationMode)),
 		OldPath:  preview.FilePath,
 		NewPath:  preview.NewPath,
 	}, nil
 }
 
 // organizeFile 整理单个文件
-func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, conflictPolicy string, moveFiles bool) (*OrganizeResult, error) {
+func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, conflictPolicy, operationMode string) (*OrganizeResult, error) {
+	operationMode = normalizeOrganizeOperationMode(operationMode)
 	source, err := s.mediaSourceService.GetByID(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取媒体源失败: %v", err)
@@ -879,7 +1147,7 @@ func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, co
 
 	// 115云盘处理逻辑
 	if source.SourceType == domain.SourceTypeCloud115 {
-		return s.organizeCloud115File(source, preview, conflictPolicy, moveFiles)
+		return s.organizeCloud115File(source, preview, conflictPolicy, operationMode)
 	}
 
 	// 以下为本地源处理逻辑
@@ -921,19 +1189,25 @@ func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, co
 		}
 	}
 
-	if moveFiles {
+	switch operationMode {
+	case organizeOperationMove:
 		if err := s.mediaSourceService.MoveFile(sourcePath, targetPath); err != nil {
 			return nil, fmt.Errorf("移动文件失败: %v", err)
 		}
-	} else {
+	case organizeOperationCopy:
 		if err := s.mediaSourceService.CopyFile(sourcePath, targetPath); err != nil {
 			return nil, fmt.Errorf("复制文件失败: %v", err)
 		}
-	}
-
-	message := "整理成功"
-	if moveFiles {
-		message = "整理并移动成功"
+	case organizeOperationHardLink:
+		if err := s.mediaSourceService.CreateHardLink(sourcePath, targetPath); err != nil {
+			return nil, fmt.Errorf("创建硬链接失败: %v", err)
+		}
+	case organizeOperationSymLink:
+		if err := s.mediaSourceService.CreateSymbolicLink(sourcePath, targetPath); err != nil {
+			return nil, fmt.Errorf("创建软链接失败: %v", err)
+		}
+	default:
+		return nil, fmt.Errorf("不支持的整理方式: %s", operationMode)
 	}
 
 	return &OrganizeResult{
@@ -941,7 +1215,7 @@ func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, co
 		FileName: preview.FileName,
 		Success:  true,
 		Skipped:  false,
-		Message:  message,
+		Message:  organizeOperationSuccessMessage(operationMode),
 		OldPath:  sourcePath,
 		NewPath:  targetPath,
 	}, nil
@@ -982,6 +1256,10 @@ func (s *OrganizeService) isMediaFile(ext string) bool {
 		".m4a":  true,
 	}
 	return mediaExts[ext]
+}
+
+func (s *OrganizeService) isOrganizeVideoFile(ext string) bool {
+	return s.getFileType(ext) == "video"
 }
 
 // getFileType 获取文件类型

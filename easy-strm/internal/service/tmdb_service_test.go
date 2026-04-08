@@ -66,6 +66,33 @@ func TestParseFilename_电影_年份(t *testing.T) {
 	}
 }
 
+func TestExtractPreferredTitles_ChineseTranslationPreferred(t *testing.T) {
+	svc := NewTmdbService("key", nil)
+
+	detail := map[string]interface{}{
+		"title":          "薬屋のひとりごと",
+		"original_title": "薬屋のひとりごと",
+		"translations": map[string]interface{}{
+			"translations": []interface{}{
+				map[string]interface{}{
+					"iso_639_1": "zh",
+					"data": map[string]interface{}{
+						"title": "药屋少女的呢喃",
+					},
+				},
+			},
+		},
+	}
+
+	title, originalTitle := svc.extractPreferredTitles(detail, "movie", "薬屋のひとりごと", "薬屋のひとりごと")
+	if title != "药屋少女的呢喃" {
+		t.Fatalf("expected chinese title to be preferred, got %q", title)
+	}
+	if originalTitle != "薬屋のひとりごと" {
+		t.Fatalf("expected original title to be preserved, got %q", originalTitle)
+	}
+}
+
 // TestParseFilename_剧集_季集 测试从剧集文件名中解析出季集信息
 func TestParseFilename_剧集_季集(t *testing.T) {
 	svc := NewTmdbService("fake-key", nil)
