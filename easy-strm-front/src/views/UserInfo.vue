@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="user-info-container">
     <el-card shadow="hover" class="main-card">
       <template #header>
@@ -62,24 +62,6 @@
           <el-descriptions-item label-align="right">
             <template #label>
               <div class="label-content">
-                <el-icon><Message /></el-icon>
-                <span>邮箱</span>
-              </div>
-            </template>
-            {{ userInfo.email || '未设置' }}
-          </el-descriptions-item>
-          <el-descriptions-item label-align="right">
-            <template #label>
-              <div class="label-content">
-                <el-icon><Phone /></el-icon>
-                <span>手机号</span>
-              </div>
-            </template>
-            {{ userInfo.phone || '未设置' }}
-          </el-descriptions-item>
-          <el-descriptions-item label-align="right">
-            <template #label>
-              <div class="label-content">
                 <el-icon><Calendar /></el-icon>
                 <span>创建时间</span>
               </div>
@@ -104,9 +86,9 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { getUserInfo } from '../utils/api'
+import { getUserInfo } from '../utils/api/auth'
 import { ElMessage } from 'element-plus'
-import { User, Key, Message, Phone, Calendar, Timer, RefreshRight, Loading } from '@element-plus/icons-vue'
+import { User, Key, Calendar, Timer, RefreshRight, Loading } from '@element-plus/icons-vue'
 
 const userInfo = ref(null)
 const loading = ref(false)
@@ -115,7 +97,7 @@ let isMounted = true
 const fetchUserInfo = async () => {
   loading.value = true
   try {
-    const response = await getUserInfo()
+    const response = await getUserInfo({ skipGlobalErrorMessage: true })
     if (isMounted) {
       userInfo.value = response.data.data || {}
     }
@@ -246,3 +228,4 @@ onUnmounted(() => {
   color: #667eea;
 }
 </style>
+

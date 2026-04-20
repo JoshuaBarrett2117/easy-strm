@@ -1,0 +1,53 @@
+{
+  "runDir": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z",
+  "results": [
+    {
+      "id": "1-???????????????",
+      "ok": true,
+      "detail": "email/phone fields absent"
+    },
+    {
+      "id": "2-???????????????",
+      "ok": true,
+      "detail": "initial=测试中...,待测试,待测试,待测试,待测试 final=成功,成功,成功,成功,失败"
+    },
+    {
+      "id": "3-115?????????????",
+      "ok": true,
+      "detail": "测试成功：115账号，可访问 13 项 | 测试失败：账号测试失败: parse cookie failed: bad cookie"
+    },
+    {
+      "id": "4-???????????",
+      "ok": true,
+      "detail": "批量整理目标目录媒体类型全部冲突策略跳过重命名预设选择预设模板（可选）选择预设后会自动填充重命名模板；留空则使用系统默认模板。整理方式移动文件刮削 NFO整理后同时刮削 NFO整理完成后自动为成功的文件刮削 NFO 信息。已收集 1 个视频"
+    },
+    {
+      "id": "5-TMDB?????????",
+      "ok": true,
+      "detail": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\target\\动画电影\\哆啦A梦 大雄的恐龙\\哆啦A梦 大雄的恐龙.mp4"
+    },
+    {
+      "id": "6-??????????",
+      "ok": true,
+      "detail": "summary=1总计 | 1成功 | 0跳过 | 0失败 cells=[\"哆啦A梦 大雄的恐龙.mp4\",\"整理并移动成功\",\"C:\\\\Users\\\\a3875\\\\Documents\\\\code\\\\easy-strm\\\\.codex\\\\browser-fix-validation\\\\2026-04-18T02-32-09-402Z\\\\target\\\\动画电影\\\\哆啦A梦 大雄的恐龙\\\\哆啦A梦 大雄的恐龙.mp4\",\"成功\"]"
+    },
+    {
+      "id": "7-????????????",
+      "ok": true,
+      "detail": "哆啦A梦 大雄的恐龙.mp4"
+    },
+    {
+      "id": "7b-???????????????",
+      "ok": true,
+      "detail": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\target\\动画电影\\哆啦A梦 大雄的恐龙\\哆啦A梦 大雄的恐龙.mp4"
+    }
+  ],
+  "screenshots": {
+    "01-user-info": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\01-user-info.png",
+    "02-network-dialog": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\02-network-dialog.png",
+    "03-cloud115-test": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\03-cloud115-test.png",
+    "04-organize-dialog-open": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\04-organize-dialog-open.png",
+    "05-organize-preview": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\05-organize-preview.png",
+    "06-organize-result-dialog": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-32-09-402Z\\06-organize-result-dialog.png"
+  }
+}

@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -37,7 +38,7 @@ type TmdbService struct {
 //   - *TmdbService: TMDB 服务实例
 func NewTmdbService(apiKey string, cacheDAO *dao.TmdbCacheDAO) *TmdbService {
 	return &TmdbService{
-		apiKey:       apiKey,
+		apiKey:       strings.TrimSpace(apiKey),
 		baseURL:      "https://api.themoviedb.org/3",
 		imageBaseURL: "https://image.tmdb.org/t/p/w500",
 		language:     "zh-CN",
@@ -52,7 +53,7 @@ func NewTmdbService(apiKey string, cacheDAO *dao.TmdbCacheDAO) *TmdbService {
 // 参数:
 //   - apiKey: TMDB API Key
 func (s *TmdbService) SetAPIKey(apiKey string) {
-	s.apiKey = apiKey
+	s.apiKey = strings.TrimSpace(apiKey)
 }
 
 // SetLanguage 设置语言
@@ -67,6 +68,11 @@ func (s *TmdbService) SetLanguage(language string) {
 //   - string: API Key
 func (s *TmdbService) GetAPIKey() string {
 	return s.apiKey
+}
+
+// HasUsableAPIKey 判断当前 API Key 是否为可用的真实值
+func (s *TmdbService) HasUsableAPIKey() bool {
+	return !looksLikeMaskedAPIKey(s.apiKey)
 }
 
 // GetLanguage 获取语言
@@ -85,6 +91,9 @@ func (s *TmdbService) GetLanguage() string {
 //   - []domain.TmdbSearchResult: 搜索结果列表
 //   - error: 错误信息
 func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchResult, error) {
+	if !s.HasUsableAPIKey() {
+		return nil, fmt.Errorf("TMDB API Key 未配置或已失效，请重新填写真实的 API Key")
+	}
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
@@ -152,7 +161,7 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 			MediaType:     "movie",
 			ReleaseDate:   movie.ReleaseDate,
 			GenreIDs:      movie.GenreIDs,
-			Language:      strings.ToLower(movie.OriginalLanguage),
+			Language:      movie.OriginalLanguage,
 		})
 	}
 
@@ -169,6 +178,9 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 //   - []domain.TmdbSearchResult: 搜索结果列表
 //   - error: 错误信息
 func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResult, error) {
+	if !s.HasUsableAPIKey() {
+		return nil, fmt.Errorf("TMDB API Key 未配置或已失效，请重新填写真实的 API Key")
+	}
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
@@ -237,13 +249,72 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 			MediaType:     "tv",
 			FirstAirDate:  tv.FirstAirDate,
 			GenreIDs:      tv.GenreIDs,
-			Countries:     normalizeCodes(tv.OriginCountry),
-			Language:      strings.ToLower(tv.OriginalLanguage),
+			Countries:     tv.OriginCountry,
+			Language:      tv.OriginalLanguage,
 		})
 	}
 
 	logger.Infof("TmdbService[SearchTV] 搜索完成: query=%s, results=%d", query, len(results))
 	return results, nil
+}
+
+// GetCandidates 获取识别候选结果（不自动缓存）
+// 与 IdentifyFile 不同，此方法始终搜索 TMDB 并返回 Top 3 候选，
+// 不会写入缓存，由用户选择后再通过 Identify 端点绑定。
+// 参数:
+//   - filename: 文件名
+//
+// 返回:
+//   - *domain.TmdbIdentifyResult: 识别结果（含 Candidates）
+//   - error: 错误信息
+func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult, error) {
+	logger.Infof("TmdbService[GetCandidates] 开始获取候选: %s", filename)
+
+	parsed := s.parseFilename(filename)
+
+	result := &domain.TmdbIdentifyResult{
+		Filename:      filename,
+		MediaType:     parsed.MediaType,
+		Quality:       parsed.Quality,
+		Source:        parsed.Source,
+		Codec:         parsed.Codec,
+		SeasonNumber:  parsed.Season,
+		EpisodeNumber: parsed.Episode,
+	}
+
+	if parsed.Title == "" {
+		result.Success = false
+		result.Message = "无法从文件名中解析出标题"
+		return result, nil
+	}
+
+	// 始终搜索 TMDB，不读缓存，确保返回最新候选
+	candidates, err := s.searchCandidatesWithFallback(parsed)
+
+	if err != nil {
+		result.Success = false
+		result.Message = err.Error()
+		return result, nil
+	}
+
+	if len(candidates) == 0 {
+		result.Success = false
+		result.Message = "未找到匹配的媒体信息"
+		return result, nil
+	}
+
+	// 填充最佳匹配信息（第一个候选）和完整候选列表
+	best := candidates[0]
+	result.Success = true
+	result.TmdbID = best.TmdbID
+	result.Title = best.Title
+	result.OriginalTitle = best.OriginalTitle
+	result.Year = best.Year
+	result.Candidates = candidates
+
+	logger.Infof("TmdbService[GetCandidates] 获取候选成功: title=%s, candidates=%d, type=%s",
+		result.Title, len(candidates), result.MediaType)
+	return result, nil
 }
 
 // IdentifyFile 识别文件，自动判断是电影还是剧集
@@ -284,33 +355,18 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 		result.Title = cache.Title
 		result.OriginalTitle = cache.OriginalTitle
 		result.Year = cache.Year
-		applyCachedMetadata(result, cache.RawData)
 		if cache.SeasonNumber > 0 {
 			result.SeasonNumber = cache.SeasonNumber
 		}
 		if cache.EpisodeNumber > 0 {
 			result.EpisodeNumber = cache.EpisodeNumber
 		}
-		s.enrichCachedIdentifyMetadata(result, cache)
 		logger.Infof("TmdbService[IdentifyFile] 使用缓存: title=%s, tmdb_id=%d", result.Title, result.TmdbID)
 		return result, nil
 	}
 
 	// 搜索 TMDB
-	var candidates []domain.TmdbSearchResult
-	var err error
-
-	if parsed.MediaType == "tv" {
-		candidates, err = s.SearchTV(parsed.Title, parsed.Year)
-	} else {
-		candidates, err = s.SearchMovie(parsed.Title, parsed.Year)
-	}
-
-	// 智能分词降级搜索逻辑
-	if (err == nil && len(candidates) == 0) && parsed.Title != "" {
-		logger.Infof("TmdbService[IdentifyFile] 整体搜索无结果，尝试分词回退搜索: %s", parsed.Title)
-		candidates, err = s.fallbackTokenizeSearch(parsed.Title, parsed.Year, parsed.MediaType)
-	}
+	candidates, err := s.searchCandidatesWithFallback(parsed)
 
 	if err != nil {
 		result.Success = false
@@ -320,7 +376,7 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 
 	if len(candidates) == 0 {
 		result.Success = false
-		result.Message = "未找到匹配的媒体"
+		result.Message = "未找到匹配的媒体信息"
 		return result, nil
 	}
 
@@ -331,12 +387,7 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 	result.Title = best.Title
 	result.OriginalTitle = best.OriginalTitle
 	result.Year = best.Year
-	result.GenreIDs = best.GenreIDs
-	result.Countries = best.Countries
-	result.Language = best.Language
 	result.Candidates = candidates
-
-	s.enrichIdentifyMetadata(result, &best)
 
 	// 缓存结果
 	s.cacheResult(cacheKey, parsed.MediaType, best, parsed.Season, parsed.Episode)
@@ -344,6 +395,105 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 	logger.Infof("TmdbService[IdentifyFile] 识别成功: title=%s, tmdb_id=%d, type=%s",
 		result.Title, result.TmdbID, result.MediaType)
 	return result, nil
+}
+
+// searchCandidatesWithFallback 按多个标题变体搜索 TMDB，提升中文标题和标点差异的命中率。
+func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename) ([]domain.TmdbSearchResult, error) {
+	if parsed == nil || parsed.Title == "" {
+		return nil, nil
+	}
+
+	queries := buildSearchQueryVariants(parsed.Title)
+	for i, query := range queries {
+		if query == "" {
+			continue
+		}
+		if i > 0 {
+			logger.Infof("TmdbService[searchCandidatesWithFallback] 原始查询无结果，尝试回退查询: %s", query)
+		}
+
+		var (
+			candidates []domain.TmdbSearchResult
+			err        error
+		)
+		if parsed.MediaType == "tv" {
+			candidates, err = s.SearchTV(query, parsed.Year)
+		} else {
+			candidates, err = s.SearchMovie(query, parsed.Year)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(candidates) > 0 {
+			return candidates, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// buildSearchQueryVariants 生成搜索变体，兼容中文标点、空格和紧凑片名。
+func looksLikeMaskedAPIKey(apiKey string) bool {
+	trimmed := strings.TrimSpace(apiKey)
+	if trimmed == "" {
+		return true
+	}
+	return strings.Contains(trimmed, "****")
+}
+
+func buildSearchQueryVariants(title string) []string {
+	seen := make(map[string]struct{})
+	var queries []string
+
+	add := func(value string) {
+		value = strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(value, " "))
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		queries = append(queries, value)
+	}
+
+	add(title)
+
+	normalized := normalizeSearchTitle(title)
+	add(normalized)
+	add(compactSearchTitle(normalized))
+	add(compactSearchTitle(title))
+
+	return queries
+}
+
+// normalizeSearchTitle 将标点统一为单空格，方便 TMDB 搜索做词级匹配。
+func normalizeSearchTitle(title string) string {
+	var builder strings.Builder
+	for _, r := range title {
+		switch {
+		case unicode.IsSpace(r):
+			builder.WriteRune(' ')
+		case unicode.IsPunct(r), unicode.IsSymbol(r):
+			builder.WriteRune(' ')
+		default:
+			builder.WriteRune(r)
+		}
+	}
+
+	return strings.TrimSpace(regexp.MustCompile(`\s+`).ReplaceAllString(builder.String(), " "))
+}
+
+// compactSearchTitle 去掉空格和标点，适合中文片名的紧凑搜索回退。
+func compactSearchTitle(title string) string {
+	var builder strings.Builder
+	for _, r := range title {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
 }
 
 // parseFilename 解析文件名，提取媒体信息
@@ -466,64 +616,12 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 		name = re.ReplaceAllString(name, "")
 	}
 
-	// 移除括号及其包裹的附加信息（如压制组、分辨率说明）
-	bracketPattern := regexp.MustCompile(`\[.*?\]|【.*?】|\(.*?\)|（.*?）|<.*?>`)
-	name = bracketPattern.ReplaceAllString(name, " ")
-
-	// 移除剩余非字母数字汉字的特殊符号
-	nonWordPattern := regexp.MustCompile(`[^\p{L}\p{N}\s]+`)
-	name = nonWordPattern.ReplaceAllString(name, " ")
-
 	// 清理多余空格和特殊字符
 	title := strings.TrimSpace(name)
 	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
 	result.Title = title
 
 	return result
-}
-
-// fallbackTokenizeSearch 回退分词搜索：分离中文和英文，优先根据中文搜索
-func (s *TmdbService) fallbackTokenizeSearch(title string, year int, mediaType string) ([]domain.TmdbSearchResult, error) {
-	// 提取中文部分
-	hzReg := regexp.MustCompile(`[\p{Han}]+`)
-	hzMatches := hzReg.FindAllString(title, -1)
-	chineseTitle := strings.Join(hzMatches, " ")
-
-	// 提取英文部分
-	enReg := regexp.MustCompile(`[a-zA-Z0-9]+`)
-	enMatches := enReg.FindAllString(title, -1)
-	englishTitle := strings.Join(enMatches, " ")
-
-	var candidates []domain.TmdbSearchResult
-	var err error
-
-	// 1. 如果有中文，优先搜索中文部分
-	if strings.TrimSpace(chineseTitle) != "" {
-		if mediaType == "tv" {
-			candidates, err = s.SearchTV(chineseTitle, year)
-		} else {
-			candidates, err = s.SearchMovie(chineseTitle, year)
-		}
-		if err == nil && len(candidates) > 0 {
-			logger.Infof("TmdbService[fallbackTokenizeSearch] 中文分词搜索成功: %s", chineseTitle)
-			return candidates, nil
-		}
-	}
-
-	// 2. 如果中文无结果或无中文，且有英文，尝试搜索英文部分
-	if strings.TrimSpace(englishTitle) != "" {
-		if mediaType == "tv" {
-			candidates, err = s.SearchTV(englishTitle, year)
-		} else {
-			candidates, err = s.SearchMovie(englishTitle, year)
-		}
-		if err == nil && len(candidates) > 0 {
-			logger.Infof("TmdbService[fallbackTokenizeSearch] 英文分词搜索成功: %s", englishTitle)
-			return candidates, nil
-		}
-	}
-
-	return nil, err
 }
 
 // ParsedFilename 解析后的文件名信息
@@ -583,223 +681,57 @@ func (s *TmdbService) cacheResult(queryKey, mediaType string, result domain.Tmdb
 	}
 }
 
-func applyCachedMetadata(result *domain.TmdbIdentifyResult, rawData json.RawMessage) {
-	if len(rawData) == 0 {
-		return
-	}
-
-	var cached domain.TmdbSearchResult
-	if err := json.Unmarshal(rawData, &cached); err != nil {
-		return
-	}
-	result.GenreIDs = cached.GenreIDs
-	result.Countries = cached.Countries
-	result.Language = cached.Language
-}
-
+// enrichCachedIdentifyMetadata 从缓存补充识别结果的额外元数据
+// 参数:
+//   - result: 识别结果（会被原地修改）
+//   - cache: TMDB 缓存记录
 func (s *TmdbService) enrichCachedIdentifyMetadata(result *domain.TmdbIdentifyResult, cache *dao.TmdbCache) {
-	if result.TmdbID == 0 || len(result.GenreIDs) > 0 {
+	if cache == nil || result == nil {
 		return
 	}
-
-	best := domain.TmdbSearchResult{
-		TmdbID:        cache.TmdbID,
-		Title:         cache.Title,
-		OriginalTitle: cache.OriginalTitle,
-		Year:          cache.Year,
-		PosterPath:    cache.PosterPath,
-		Overview:      cache.Overview,
-		VoteAverage:   cache.VoteAverage,
-		MediaType:     cache.MediaType,
-		ReleaseDate:   cache.ReleaseDate,
-		FirstAirDate:  cache.FirstAirDate,
-		GenreIDs:      result.GenreIDs,
-		Countries:     result.Countries,
-		Language:      result.Language,
-	}
-	s.enrichIdentifyMetadata(result, &best)
-	if len(best.GenreIDs) == 0 {
+	// 从 RawData 中解析额外字段补充到结果
+	if len(cache.RawData) == 0 {
 		return
 	}
-
-	rawData, err := json.Marshal(best)
-	if err != nil {
-		logger.Warnf("TmdbService[enrichCachedIdentifyMetadata] 缓存元数据序列化失败: %v", err)
+	var raw map[string]interface{}
+	if err := json.Unmarshal(cache.RawData, &raw); err != nil {
 		return
 	}
-	cache.RawData = rawData
-	cache.ExpireAt = time.Now().AddDate(0, 0, 7)
-	if err := s.cacheDAO.Update(cache); err != nil {
-		logger.Warnf("TmdbService[enrichCachedIdentifyMetadata] 缓存元数据回写失败: %v", err)
-	}
-}
-
-func (s *TmdbService) enrichIdentifyMetadata(result *domain.TmdbIdentifyResult, best *domain.TmdbSearchResult) {
-	var detail map[string]interface{}
-	var err error
-	if result.MediaType == "tv" {
-		detail, err = s.GetTVDetail(result.TmdbID)
-	} else {
-		detail, err = s.GetMovieDetail(result.TmdbID)
-	}
-	if err != nil {
-		logger.Warnf("TmdbService[enrichIdentifyMetadata] 获取详情失败，使用搜索结果元数据: %v", err)
-		return
-	}
-
-	preferredTitle, preferredOriginalTitle := s.extractPreferredTitles(detail, result.MediaType, result.Title, result.OriginalTitle)
-	result.Title = preferredTitle
-	result.OriginalTitle = preferredOriginalTitle
-	best.Title = preferredTitle
-	best.OriginalTitle = preferredOriginalTitle
-
-	if genreIDs := parseGenreIDs(detail["genres"]); len(genreIDs) > 0 {
+	// 提取 genre_ids
+	if genreIDs := extractGenreIDsFromDetail(raw); len(genreIDs) > 0 {
 		result.GenreIDs = genreIDs
-		best.GenreIDs = genreIDs
 	}
-	if countries := parseCountries(detail); len(countries) > 0 {
+	// 提取 origin_country 作为 Countries
+	if countries := extractCountriesFromDetail(raw, result.MediaType); len(countries) > 0 {
 		result.Countries = countries
-		best.Countries = countries
 	}
-	if language, ok := detail["original_language"].(string); ok && language != "" {
-		result.Language = strings.ToLower(language)
-		best.Language = result.Language
+	// 提取 original_language
+	if lang, ok := raw["original_language"].(string); ok {
+		result.Language = lang
 	}
 }
 
-func (s *TmdbService) extractPreferredTitles(detail map[string]interface{}, mediaType, fallbackTitle, fallbackOriginalTitle string) (string, string) {
-	title := strings.TrimSpace(fallbackTitle)
-	originalTitle := strings.TrimSpace(fallbackOriginalTitle)
-
-	switch mediaType {
-	case "tv":
-		if value, ok := detail["name"].(string); ok && strings.TrimSpace(value) != "" {
-			title = strings.TrimSpace(value)
-		}
-		if value, ok := detail["original_name"].(string); ok && strings.TrimSpace(value) != "" {
-			originalTitle = strings.TrimSpace(value)
-		}
-	default:
-		if value, ok := detail["title"].(string); ok && strings.TrimSpace(value) != "" {
-			title = strings.TrimSpace(value)
-		}
-		if value, ok := detail["original_title"].(string); ok && strings.TrimSpace(value) != "" {
-			originalTitle = strings.TrimSpace(value)
-		}
+// applyCachedMetadata 从缓存的 RawData 中提取元数据应用到识别结果
+// 参数:
+//   - result: 识别结果（会被原地修改）
+//   - rawData: 缓存的原始 JSON 数据
+func applyCachedMetadata(result *domain.TmdbIdentifyResult, rawData json.RawMessage) {
+	if len(rawData) == 0 || result == nil {
+		return
 	}
-
-	if localized := extractChineseTitleFromTranslations(detail, mediaType); localized != "" {
-		title = localized
+	var raw map[string]interface{}
+	if err := json.Unmarshal(rawData, &raw); err != nil {
+		return
 	}
-	if title == "" {
-		title = originalTitle
+	if genreIDs := extractGenreIDsFromDetail(raw); len(genreIDs) > 0 {
+		result.GenreIDs = genreIDs
 	}
-	if originalTitle == "" {
-		originalTitle = title
+	if countries := extractCountriesFromDetail(raw, result.MediaType); len(countries) > 0 {
+		result.Countries = countries
 	}
-
-	return title, originalTitle
-}
-
-func extractChineseTitleFromTranslations(detail map[string]interface{}, mediaType string) string {
-	translations, ok := detail["translations"].(map[string]interface{})
-	if !ok {
-		return ""
+	if lang, ok := raw["original_language"].(string); ok {
+		result.Language = lang
 	}
-
-	items, ok := translations["translations"].([]interface{})
-	if !ok {
-		return ""
-	}
-
-	for _, item := range items {
-		entry, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		lang, _ := entry["iso_639_1"].(string)
-		if lang != "zh" {
-			continue
-		}
-		data, ok := entry["data"].(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		var title string
-		if mediaType == "tv" {
-			title, _ = data["name"].(string)
-		} else {
-			title, _ = data["title"].(string)
-		}
-		title = strings.TrimSpace(title)
-		if title != "" {
-			return title
-		}
-	}
-
-	return ""
-}
-
-func parseGenreIDs(raw interface{}) []int {
-	items, ok := raw.([]interface{})
-	if !ok {
-		return nil
-	}
-
-	ids := make([]int, 0, len(items))
-	for _, item := range items {
-		genre, ok := item.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		switch id := genre["id"].(type) {
-		case float64:
-			ids = append(ids, int(id))
-		case int:
-			ids = append(ids, id)
-		}
-	}
-	return ids
-}
-
-func parseCountries(detail map[string]interface{}) []string {
-	if raw, ok := detail["origin_country"].([]interface{}); ok {
-		values := make([]string, 0, len(raw))
-		for _, item := range raw {
-			if country, ok := item.(string); ok {
-				values = append(values, country)
-			}
-		}
-		return normalizeCodes(values)
-	}
-
-	if raw, ok := detail["production_countries"].([]interface{}); ok {
-		values := make([]string, 0, len(raw))
-		for _, item := range raw {
-			country, ok := item.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if code, ok := country["iso_3166_1"].(string); ok {
-				values = append(values, code)
-			}
-		}
-		return normalizeCodes(values)
-	}
-
-	return nil
-}
-
-func normalizeCodes(codes []string) []string {
-	normalized := make([]string, 0, len(codes))
-	for _, code := range codes {
-		code = strings.TrimSpace(strings.ToUpper(code))
-		if code != "" {
-			normalized = append(normalized, code)
-		}
-	}
-	return normalized
 }
 
 // getImageURL 获取完整图片 URL
@@ -812,8 +744,6 @@ func (s *TmdbService) getImageURL(path string) string {
 	if path == "" {
 		return ""
 	}
-	// 移除路径中的空格
-	path = strings.ReplaceAll(path, " ", "")
 	return s.imageBaseURL + path
 }
 
@@ -829,7 +759,7 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 
-	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s&append_to_response=translations",
+	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, s.apiKey, s.language)
 
 	resp, err := s.httpClient.Get(apiURL)
@@ -862,8 +792,35 @@ func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 
-	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s&append_to_response=translations",
+	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, s.apiKey, s.language)
+
+	resp, err := s.httpClient.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("TMDB API 返回错误: %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
+	}
+
+	return result, nil
+}
+
+// GetTVEpisodeDetail 获取剧集某一集的详情
+func (s *TmdbService) GetTVEpisodeDetail(tmdbID, season, episode int) (map[string]interface{}, error) {
+	if s.apiKey == "" {
+		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+
+	apiURL := fmt.Sprintf("%s/tv/%d/season/%d/episode/%d?api_key=%s&language=%s",
+		s.baseURL, tmdbID, season, episode, s.apiKey, s.language)
 
 	resp, err := s.httpClient.Get(apiURL)
 	if err != nil {

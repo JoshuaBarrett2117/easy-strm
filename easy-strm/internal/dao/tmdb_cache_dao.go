@@ -41,6 +41,7 @@ type TmdbCache struct {
 // 参数:
 //   - queryKey: 查询键（文件名或搜索词）
 //   - mediaType: 媒体类型（movie/tv）
+//
 // 返回:
 //   - *TmdbCache: 缓存数据
 //   - error: 错误信息
@@ -104,9 +105,71 @@ func (d *TmdbCacheDAO) GetByQueryKey(queryKey, mediaType string) (*TmdbCache, er
 	return cache, nil
 }
 
+func (d *TmdbCacheDAO) GetByTmdbID(tmdbID int, mediaType string) (*TmdbCache, error) {
+	cache := &TmdbCache{}
+	var year sql.NullInt32
+	var voteAverage sql.NullFloat64
+	var seasonNumber, episodeNumber sql.NullInt32
+	var posterPath, overview, releaseDate, firstAirDate sql.NullString
+	var rawData []byte
+
+	err := DB.QueryRow(
+		`SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path,
+		        overview, vote_average, release_date, first_air_date, season_number, episode_number,
+		        raw_data, expire_at, create_time, update_time
+		 FROM t_tmdb_cache
+		 WHERE tmdb_id = $1 AND media_type = $2 AND expire_at > NOW()
+		 ORDER BY update_time DESC, id DESC
+		 LIMIT 1`,
+		tmdbID, mediaType,
+	).Scan(
+		&cache.ID, &cache.QueryKey, &cache.MediaType, &cache.TmdbID, &cache.Title, &cache.OriginalTitle,
+		&year, &posterPath, &overview, &voteAverage, &releaseDate, &firstAirDate,
+		&seasonNumber, &episodeNumber, &rawData, &cache.ExpireAt, &cache.CreateTime, &cache.UpdateTime,
+	)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("TmdbCacheDAO[GetByTmdbID] query failed: %v", err)
+	}
+
+	if year.Valid {
+		cache.Year = int(year.Int32)
+	}
+	if voteAverage.Valid {
+		cache.VoteAverage = voteAverage.Float64
+	}
+	if seasonNumber.Valid {
+		cache.SeasonNumber = int(seasonNumber.Int32)
+	}
+	if episodeNumber.Valid {
+		cache.EpisodeNumber = int(episodeNumber.Int32)
+	}
+	if posterPath.Valid {
+		cache.PosterPath = posterPath.String
+	}
+	if overview.Valid {
+		cache.Overview = overview.String
+	}
+	if releaseDate.Valid {
+		cache.ReleaseDate = releaseDate.String
+	}
+	if firstAirDate.Valid {
+		cache.FirstAirDate = firstAirDate.String
+	}
+	if rawData != nil {
+		cache.RawData = rawData
+	}
+
+	return cache, nil
+}
+
 // Create 创建缓存
 // 参数:
 //   - cache: 缓存数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *TmdbCacheDAO) Create(cache *TmdbCache) error {
@@ -132,6 +195,7 @@ func (d *TmdbCacheDAO) Create(cache *TmdbCache) error {
 // Update 更新缓存
 // 参数:
 //   - cache: 缓存数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *TmdbCacheDAO) Update(cache *TmdbCache) error {
@@ -171,6 +235,7 @@ func (d *TmdbCacheDAO) DeleteExpired() (int64, error) {
 // 用于文件列表批量获取TMDB识别结果
 // 参数:
 //   - queryKeys: 查询键列表（文件ID或文件名）
+//
 // 返回:
 //   - map[string]*TmdbCache: 以query_key为键的缓存映射
 //   - error: 错误信息
@@ -284,6 +349,7 @@ type RenamePreset struct {
 // GetByID 根据ID获取更名预设
 // 参数:
 //   - id: 预设ID
+//
 // 返回:
 //   - *RenamePreset: 预设数据
 //   - error: 错误信息
@@ -310,6 +376,7 @@ func (d *RenamePresetDAO) GetByID(id int) (*RenamePreset, error) {
 // GetByMediaType 根据媒体类型获取预设列表
 // 参数:
 //   - mediaType: 媒体类型（movie/tv）
+//
 // 返回:
 //   - []*RenamePreset: 预设列表
 //   - error: 错误信息
@@ -373,6 +440,7 @@ func (d *RenamePresetDAO) GetAll() ([]*RenamePreset, error) {
 // Create 创建预设
 // 参数:
 //   - preset: 预设数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *RenamePresetDAO) Create(preset *RenamePreset) error {
@@ -392,6 +460,7 @@ func (d *RenamePresetDAO) Create(preset *RenamePreset) error {
 // Update 更新预设
 // 参数:
 //   - preset: 预设数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *RenamePresetDAO) Update(preset *RenamePreset) error {
@@ -410,6 +479,7 @@ func (d *RenamePresetDAO) Update(preset *RenamePreset) error {
 // Delete 删除预设
 // 参数:
 //   - id: 预设ID
+//
 // 返回:
 //   - error: 错误信息
 func (d *RenamePresetDAO) Delete(id int) error {
@@ -454,6 +524,7 @@ type MediaFileCache struct {
 // 参数:
 //   - sourceID: 媒体源ID
 //   - filePath: 文件路径
+//
 // 返回:
 //   - *MediaFileCache: 缓存数据
 //   - error: 错误信息
@@ -509,6 +580,7 @@ func (d *MediaFileCacheDAO) GetByPath(sourceID int, filePath string) (*MediaFile
 // CreateOrUpdate 创建或更新文件缓存
 // 参数:
 //   - cache: 缓存数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *MediaFileCacheDAO) CreateOrUpdate(cache *MediaFileCache) error {
@@ -542,6 +614,7 @@ func (d *MediaFileCacheDAO) CreateOrUpdate(cache *MediaFileCache) error {
 // DeleteBySourceID 删除指定媒体源的所有缓存
 // 参数:
 //   - sourceID: 媒体源ID
+//
 // 返回:
 //   - error: 错误信息
 func (d *MediaFileCacheDAO) DeleteBySourceID(sourceID int) error {

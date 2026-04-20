@@ -1,4 +1,4 @@
-/* 全局样式重置 */
+﻿/* 鍏ㄥ眬鏍峰紡閲嶇疆 */
 * {
   margin: 0;
   padding: 0;
@@ -12,7 +12,7 @@ body {
   line-height: 1.6;
 }
 
-/* 滚动条样式 */
+/* 婊氬姩鏉℃牱寮?*/
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -32,7 +32,7 @@ body {
   background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
 }
 
-/* 通用容器样式 */
+/* 閫氱敤瀹瑰櫒鏍峰紡 */
 .container {
   width: 100%;
   max-width: 1400px;
@@ -40,7 +40,7 @@ body {
   padding: 0 20px;
 }
 
-/* 通用按钮样式 */
+/* 閫氱敤鎸夐挳鏍峰紡 */
 .btn {
   display: inline-block;
   padding: 10px 20px;
@@ -85,7 +85,7 @@ body {
   box-shadow: 0 6px 20px rgba(17, 153, 142, 0.5);
 }
 
-/* 通用表单样式 */
+/* 閫氱敤琛ㄥ崟鏍峰紡 */
 .form-group {
   margin-bottom: 20px;
 }
@@ -112,7 +112,7 @@ body {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
 }
 
-/* 通用卡片样式 */
+/* 閫氱敤鍗＄墖鏍峰紡 */
 .card {
   background-color: white;
   border-radius: 12px;
@@ -138,7 +138,7 @@ body {
   color: #303133;
 }
 
-/* 通用表格样式 */
+/* 閫氱敤琛ㄦ牸鏍峰紡 */
 .table {
   width: 100%;
   border-collapse: separate;
@@ -173,7 +173,7 @@ body {
   border-bottom: none;
 }
 
-/* 通用提示信息样式 */
+/* 閫氱敤鎻愮ず淇℃伅鏍峰紡 */
 .alert {
   padding: 14px 18px;
   border-radius: 8px;
@@ -205,7 +205,7 @@ body {
   border: 1px solid #bee5eb;
 }
 
-/* Element Plus 组件样式覆盖 */
+/* Element Plus 缁勪欢鏍峰紡瑕嗙洊 */
 .el-button {
   border-radius: 8px;
   font-weight: 500;
@@ -333,7 +333,7 @@ body {
   color: white;
 }
 
-/* 动画效果 */
+/* 鍔ㄧ敾鏁堟灉 */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -364,19 +364,238 @@ body {
   animation: slideIn 0.3s ease-out;
 }
 
-/* 响应式设计 */
+/* 鍝嶅簲寮忚璁?*/
 @media (max-width: 768px) {
   .container {
     padding: 0 15px;
   }
-  
+
   .card {
     padding: 16px;
     border-radius: 8px;
   }
-  
+
   .table th,
   .table td {
     padding: 10px 12px;
   }
 }
+
+/* ===== 鍝嶅簲寮忔柇鐐瑰伐鍏风被 ===== */
+
+/* 浠呯Щ鍔ㄧ鏄剧ず */
+.mobile-only {
+  display: none !important;
+}
+
+/* 浠呮闈㈢鏄剧ず */
+.desktop-only {
+  display: initial !important;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: initial !important;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+}
+
+/* ===== 鍏ㄥ眬 Element-Plus 鍝嶅簲寮忚鐩?===== */
+
+/* 绉诲姩绔璇濇鍏ㄥ睆 */
+@media (max-width: 768px) {
+  .el-dialog {
+    --el-dialog-width: 100% !important;
+    --el-dialog-margin-top: 0 !important;
+    border-radius: 0 !important;
+    max-height: 100vh;
+  }
+
+  .el-dialog__header {
+    padding: 14px 16px;
+  }
+
+  .el-dialog__title {
+    font-size: 16px;
+  }
+
+  .el-dialog__body {
+    padding: 16px;
+  }
+
+  /* 琛ㄦ牸鏈€灏忓搴︾‘淇濆彲妯悜婊氬姩 */
+  .el-table {
+    min-width: unset;
+  }
+
+  /* 鍒嗛〉缁勪欢绉诲姩绔畝鍖?*/
+  .el-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .el-pagination .el-pagination__sizes {
+    display: none;
+  }
+
+  .el-pagination .el-pagination__jump {
+    display: none;
+  }
+
+  /* 琛ㄥ崟鏍囩瀹藉害閫傞厤 */
+  .el-form--label-top .el-form-item__label {
+    padding-bottom: 4px;
+  }
+
+  /* 鍗＄墖鍐呰竟璺濈缉灏?*/
+  .el-card__body {
+    padding: 12px;
+  }
+}
+
+/* 骞虫澘绔€傞厤 */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .el-dialog {
+    --el-dialog-width: 90% !important;
+  }
+}
+
+/* ===== 鏆楄壊妯″紡鑷畾涔夋牱寮忚鐩?===== */
+html.dark {
+  /* 鍏ㄥ眬鑳屾櫙涓庢枃瀛?*/
+  --el-bg-color: #141414;
+  --el-bg-color-overlay: #1d1d1d;
+  --el-bg-color-page: #0a0a0a;
+
+  color-scheme: dark;
+}
+
+html.dark body {
+  background-color: #0a0a0a;
+  color: #e5eaf3;
+}
+
+/* 婊氬姩鏉℃殫鑹查€傞厤 */
+html.dark ::-webkit-scrollbar-track {
+  background: #262626;
+}
+
+html.dark ::-webkit-scrollbar-thumb {
+  background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+}
+
+/* 閫氱敤鍗＄墖鏆楄壊閫傞厤 */
+html.dark .card {
+  background-color: #1d1d1d;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+html.dark .card:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+html.dark .card-header {
+  border-bottom-color: #363637;
+}
+
+html.dark .card-title {
+  color: #e5eaf3;
+}
+
+/* 閫氱敤琛ㄦ牸鏆楄壊閫傞厤 */
+html.dark .table {
+  background-color: #1d1d1d;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+}
+
+html.dark .table th,
+html.dark .table td {
+  border-bottom-color: #363637;
+}
+
+html.dark .table th {
+  background: linear-gradient(135deg, #262627 0%, #1d1d1e 100%);
+  color: #cfd3dc;
+}
+
+html.dark .table tr:hover td {
+  background-color: #262627;
+}
+
+/* 琛ㄥ崟鏆楄壊閫傞厤 */
+html.dark .form-label {
+  color: #a3a6ad;
+}
+
+html.dark .form-control {
+  background-color: #1d1d1d;
+  border-color: #4c4d4f;
+  color: #e5eaf3;
+}
+
+html.dark .form-control:focus {
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.3);
+}
+
+/* 鎻愮ず淇℃伅鏆楄壊閫傞厤 */
+html.dark .alert-success {
+  background: linear-gradient(135deg, #1a3a2a 0%, #153025 100%);
+  color: #67c23a;
+  border-color: #1c4c32;
+}
+
+html.dark .alert-danger {
+  background: linear-gradient(135deg, #3a1a1a 0%, #301515 100%);
+  color: #f56c6c;
+  border-color: #4c1c1c;
+}
+
+html.dark .alert-warning {
+  background: linear-gradient(135deg, #3a3a1a 0%, #303015 100%);
+  color: #e6a23c;
+  border-color: #4c4c1c;
+}
+
+html.dark .alert-info {
+  background: linear-gradient(135deg, #1a2a3a 0%, #152530 100%);
+  color: #409eff;
+  border-color: #1c3c4c;
+}
+
+/* Element Plus 琛ㄦ牸鏆楄壊澧炲己 */
+html.dark .el-table th.el-table__cell {
+  background-color: #262627;
+  color: #cfd3dc;
+}
+
+html.dark .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background-color: #1a1a1b;
+}
+
+.el-overlay-dialog {
+  overflow: auto;
+}
+
+.el-message-box {
+  max-width: calc(100vw - 32px);
+}
+
+.app-message-box-overlay {
+  z-index: 3999 !important;
+}
+
+.app-message-box {
+  z-index: 4000 !important;
+  margin: 0 auto !important;
+  max-width: min(420px, calc(100vw - 32px)) !important;
+}
+

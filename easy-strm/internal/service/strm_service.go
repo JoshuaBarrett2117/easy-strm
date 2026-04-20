@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -225,4 +226,75 @@ func (s *StrmService) UpsertFile(strmConfigID int, fileName, filePath, pickCode,
 // CountFilesByConfigID 统计指定配置的STRM文件数量
 func (s *StrmService) CountFilesByConfigID(strmConfigID int) (int, error) {
 	return s.strmFileDAO.CountByConfigID(strmConfigID)
+}
+
+// FindMatchingConfigByCloud115ID 根据媒体源关联的 115 账号 ID 查找匹配的 STRM 配置
+// 匹配逻辑：优先匹配 net_disk_path 为目标路径前缀的配置，否则返回该账号下的第一个配置
+// Args:
+//   - cloud115ID: 115 账号 ID
+//   - targetPath: 整理后的目标路径（如 /已整理/电影/xxx）
+// Returns:
+//   - *domain.StrmConfig: 匹配到的 STRM 配置，未找到返回 nil
+//   - error: 查询错误
+func (s *StrmService) FindMatchingConfigByCloud115ID(cloud115ID int, targetPath string) (*domain.StrmConfig, error) {
+	configs, err := s.strmConfigDAO.GetAll("id", "asc")
+	if err != nil {
+		return nil, fmt.Errorf("查询STRM配置列表失败: %v", err)
+	}
+
+	// 筛选同一 115 账号下的配置
+	var matched []*domain.StrmConfig
+	for _, cfg := range configs {
+		if cfg.Cloud115Id == cloud115ID {
+			matched = append(matched, cfg)
+		}
+	}
+
+	if len(matched) == 0 {
+		return nil, nil
+	}
+
+	// 优先匹配 net_disk_path 为 targetPath 前缀的配置（路径最精确的优先）
+	var bestMatch *domain.StrmConfig
+	bestLen := 0
+	for _, cfg := range matched {
+		if strings.HasPrefix(targetPath, cfg.NetDiskPath) {
+			if len(cfg.NetDiskPath) > bestLen {
+				bestMatch = cfg
+				bestLen = len(cfg.NetDiskPath)
+			}
+		}
+	}
+
+	if bestMatch != nil {
+		return bestMatch, nil
+	}
+
+	// 无前缀匹配时返回该账号下第一个配置
+	return matched[0], nil
+}
+
+// UpdateNetDiskPath 更新 STRM 配置的网盘路径
+// 整理完成后自动将目标目录写入 STRM 配置的 net_disk_path
+func (s *StrmService) UpdateNetDiskPath(configID int, netDiskPath string) error {
+	cfg, err := s.strmConfigDAO.GetByID(configID)
+	if err != nil {
+		return fmt.Errorf("获取STRM配置失败: %v", err)
+	}
+	if cfg == nil {
+		return fmt.Errorf("STRM配置不存在: ID %d", configID)
+	}
+
+	_, err = s.strmConfigDAO.UpdateExt(
+		cfg.ID, cfg.Cloud115Id, netDiskPath, cfg.LocalPath,
+		cfg.Cron, cfg.Extension, cfg.SyncMode, cfg.SourceAccount,
+		cfg.TargetAccount, cfg.TargetDirectory, cfg.AutoCleanup,
+		cfg.CleanupThreshold, cfg.CleanupPolicy, cfg.MaxConcurrency,
+	)
+	if err != nil {
+		return fmt.Errorf("更新STRM配置网盘路径失败: %v", err)
+	}
+
+	logger.Infof("StrmService[UpdateNetDiskPath] 已更新配置 ID %d 的网盘路径为: %s", configID, netDiskPath)
+	return nil
 }

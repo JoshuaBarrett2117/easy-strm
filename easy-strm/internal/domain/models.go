@@ -127,6 +127,9 @@ const (
 	TaskTypeSyncTransfer   TaskType = "sync_transfer"
 	TaskTypeCleanup        TaskType = "cleanup"
 	TaskTypeProxyRefresh   TaskType = "proxy_refresh"
+	TaskTypeOrganize       TaskType = "organize"
+	TaskTypeScrape         TaskType = "scrape"
+	TaskTypeEmbyRefresh    TaskType = "emby_refresh"
 )
 
 // TaskTypeNames 任务类型中文名称映射
@@ -137,6 +140,9 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeSyncTransfer:   "秒传同步",
 	TaskTypeCleanup:        "空间清理",
 	TaskTypeProxyRefresh:   "直链刷新",
+	TaskTypeOrganize:       "媒体整理",
+	TaskTypeScrape:         "NFO刮削",
+	TaskTypeEmbyRefresh:    "Emby库刷新",
 }
 
 // TaskStatus 任务运行状态
@@ -145,11 +151,13 @@ type TaskStatus struct {
 	TaskType       TaskType `json:"task_type"`
 	TaskName       string   `json:"task_name"`
 	Status         string   `json:"status"`
+	Priority       int      `json:"priority"`
 	Progress       int      `json:"progress"`
 	TotalFiles     int      `json:"total_files"`
 	ProcessedFiles int      `json:"processed_files"`
 	SuccessFiles   int      `json:"success_files"`
 	FailedFiles    int      `json:"failed_files"`
+	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	ErrorMessage   string   `json:"error_message"`
 	CreateTime     string   `json:"create_time"`
 	UpdateTime     string   `json:"update_time"`
@@ -180,6 +188,7 @@ const (
 	TaskStatusRunning   = "running"
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
+	TaskStatusCancelled = "cancelled"
 )
 
 // FileListRequest 文件列表请求

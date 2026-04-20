@@ -138,12 +138,20 @@ func (c *FileOperationController) CopyFile(ctx *gin.Context) {
 func (c *FileOperationController) DeleteFile(ctx *gin.Context) {
 	var req struct {
 		SourceID int      `json:"source_id" binding:"required"`
-		FileIDs  []string `json:"file_ids" binding:"required"`
+		FileIDs  []string `json:"file_ids"`
+		FileID   string   `json:"file_id"`
+		FilePath string   `json:"file_path"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		logger.Warnf("FileOperationController[DeleteFile] 请求体无效: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+
+	fileIDs := normalizeDeleteFileIDs(req.FileIDs, req.FileID, req.FilePath)
+	if len(fileIDs) == 0 {
+		ErrorResp(ctx, http.StatusBadRequest, "文件ID不能为空")
 		return
 	}
 
@@ -156,18 +164,31 @@ func (c *FileOperationController) DeleteFile(ctx *gin.Context) {
 	}
 
 	// 执行批量删除操作
-	result, err := c.fileOperationService.DeleteFile(req.SourceID, req.FileIDs)
+	result, err := c.fileOperationService.DeleteFile(req.SourceID, fileIDs)
 	if err != nil {
 		logger.Errorf("FileOperationController[DeleteFile] 删除文件失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	logger.Infof("FileOperationController[DeleteFile] 删除文件成功: %d 个文件", len(req.FileIDs))
+	logger.Infof("FileOperationController[DeleteFile] 删除文件成功: %d 个文件", len(fileIDs))
 	SuccessResp(ctx, gin.H{
 		"message": result.Message,
 		"data":    result,
 	})
+}
+
+func normalizeDeleteFileIDs(fileIDs []string, fileID, filePath string) []string {
+	if len(fileIDs) > 0 {
+		return fileIDs
+	}
+	if fileID != "" {
+		return []string{fileID}
+	}
+	if filePath != "" {
+		return []string{filePath}
+	}
+	return nil
 }
 
 // RenameFile 重命名文件

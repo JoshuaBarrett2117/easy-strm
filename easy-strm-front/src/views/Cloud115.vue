@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="cloud115-container">
     <el-card shadow="hover" class="main-card">
       <template #header>
@@ -100,7 +100,7 @@
                 <el-icon><Key /></el-icon>
                 扫码更新
               </el-button>
-              <el-button type="warning" size="small" @click="handleTest(scope.row)">
+              <el-button type="warning" size="small" @click="handleTest(scope.row)" :loading="testingAccountId === scope.row.id">
                 <el-icon><RefreshRight /></el-icon>
                 测试
               </el-button>
@@ -131,13 +131,14 @@
       v-model="dialogVisible"
       :title="dialogTitle"
       width="600px"
+      append-to-body
     >
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
         <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入115云账号名称" />
+          <el-input v-model="form.name" placeholder="请输入 115 云账号名称" />
         </el-form-item>
         <el-form-item label="Cookie" prop="cookie">
-          <el-input v-model="form.cookie" type="textarea" placeholder="请输入115云账号Cookie" :rows="3" />
+          <el-input v-model="form.cookie" type="textarea" placeholder="请输入 115 云账号 Cookie" :rows="3" />
         </el-form-item>
         <el-form-item label="账号类型" prop="account_type">
           <el-radio-group v-model="form.account_type">
@@ -145,7 +146,7 @@
             <el-radio label="vip">VIP观影号</el-radio>
             <el-radio label="both">兼顾</el-radio>
           </el-radio-group>
-          <div class="form-tip">设置账号在同步任务中的角色类型</div>
+          <div class="form-tip">设置账号在同步任务中的角色类型。</div>
         </el-form-item>
         <el-form-item label="状态" prop="status">
           <el-radio-group v-model="form.status">
@@ -156,7 +157,7 @@
         </el-form-item>
         <el-form-item label="优先级" prop="priority">
           <el-input-number v-model="form.priority" :min="1" :max="10" :step="1" />
-          <div class="form-tip">1-10，数字越大优先级越高，用于同步调度排序</div>
+          <div class="form-tip">1-10，数字越大优先级越高，用于同步调度排序。</div>
         </el-form-item>
         <el-divider content-position="left">文件转存配置</el-divider>
         <el-form-item label="转存账号" prop="transfer_account_id">
@@ -168,17 +169,17 @@
               :value="account.id"
             />
           </el-select>
-          <div class="form-tip">选择后将文件转存到该账号下获取直链</div>
+          <div class="form-tip">选择后会将文件转存到该账号下以获取直链。</div>
         </el-form-item>
         <el-form-item label="转存目录" prop="transfer_directory" :disabled="transferDisabled">
           <el-input v-model="form.transfer_directory" placeholder="留空则转存到根目录" :disabled="transferDisabled" />
-          <div class="form-tip">文件转存的目标目录路径，如：/视频/转存文件</div>
+          <div class="form-tip">文件转存的目标目录路径，例如：/视频/转存文件。</div>
         </el-form-item>
         <el-form-item label="秒传方式" prop="transfer_method" :disabled="transferDisabled">
           <el-select v-model="form.transfer_method" placeholder="请选择秒传方式" style="width: 100%" :disabled="transferDisabled">
             <el-option label="alist" value="alist" />
           </el-select>
-          <div class="form-tip">选择失败时自动回退到直链获取</div>
+          <div class="form-tip">选择失败时自动回退到直链获取。</div>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -196,9 +197,10 @@
       width="450px"
       :close-on-click-modal="false"
       @close="handleQRCodeDialogClose"
+      append-to-body
     >
       <div class="qrcode-container">
-        <!-- 渠道选择 - 按钮样式 -->
+        <!-- 渠道选择 -->
         <div class="channel-selector">
           <div class="channel-label">扫码渠道</div>
           <div class="channel-buttons">
@@ -236,7 +238,7 @@
           <div class="qrcode-tips">
             <p>{{ channelTip }}</p>
             <p class="expire-tip" v-if="qrcodeExpireTime > 0">
-              二维码有效期: {{ formatExpireTime(qrcodeExpireTime) }}
+              二维码有效期：{{ formatExpireTime(qrcodeExpireTime) }}
             </p>
           </div>
         </div>
@@ -256,7 +258,8 @@
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { Plus, Edit, Delete, RefreshRight, Key, Loading, WarningFilled, View, Hide, Cloudy } from '@element-plus/icons-vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { showConfirmDialog } from '../utils/ui/messageBox'
 import { request } from '../utils/api'
 import { get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api/cloud115'
 
@@ -272,7 +275,7 @@ const maskSensitive = (text) => {
 }
 
 /**
- * 切换Cookie显示状态
+ * 切换 Cookie 显示状态
  * @param {Object} row - 行数据
  */
 const toggleShowCookie = (row) => {
@@ -280,7 +283,7 @@ const toggleShowCookie = (row) => {
 }
 
 /**
- * 切换AccessToken显示状态
+ * 切换 AccessToken 显示状态
  * @param {Object} row - 行数据
  */
 const toggleShowAccessToken = (row) => {
@@ -288,7 +291,7 @@ const toggleShowAccessToken = (row) => {
 }
 
 /**
- * 切换RefreshToken显示状态
+ * 切换 RefreshToken 显示状态
  * @param {Object} row - 行数据
  */
 const toggleShowRefreshToken = (row) => {
@@ -297,16 +300,16 @@ const toggleShowRefreshToken = (row) => {
 
 // 账号类型映射
 const accountTypeMap = {
-  'resource': { name: '资源号', type: 'primary' },
-  'vip': { name: 'VIP观影号', type: 'success' },
-  'both': { name: '兼顾', type: 'warning' }
+  resource: { name: '资源号', type: 'primary' },
+  vip: { name: 'VIP观影号', type: 'success' },
+  both: { name: '兼顾', type: 'warning' }
 }
 
 // 状态映射
 const statusMap = {
-  'active': { name: '正常', type: 'success' },
-  'cooling': { name: '冷却中', type: 'warning' },
-  'disabled': { name: '禁用', type: 'danger' }
+  active: { name: '正常', type: 'success' },
+  cooling: { name: '冷却中', type: 'warning' },
+  disabled: { name: '禁用', type: 'danger' }
 }
 
 /**
@@ -398,11 +401,12 @@ const pageSize = ref(10)
 const sortField = ref('id')
 const sortOrder = ref('asc')
 
-// 对话框
+// 对话框状态
 const dialogVisible = ref(false)
 const dialogTitle = ref('新增115云账号')
 const formRef = ref(null)
 const loading = ref(false)
+const testingAccountId = ref(null)
 
 // 转存相关字段禁用状态
 const transferDisabled = ref(false)
@@ -425,14 +429,14 @@ const form = ref({
 // 表单验证规则
 const rules = {
   name: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
-  cookie: [{ required: false, message: '请输入Cookie', trigger: 'blur' }],
-  access_token: [{ required: false, message: '请输入Access Token', trigger: 'blur' }],
-  refresh_token: [{ required: false, message: '请输入Refresh Token', trigger: 'blur' }]
+  cookie: [{ required: false, message: '请输入 Cookie', trigger: 'blur' }],
+  access_token: [{ required: false, message: '请输入 Access Token', trigger: 'blur' }],
+  refresh_token: [{ required: false, message: '请输入 Refresh Token', trigger: 'blur' }]
 }
 
 /**
  * 获取转存账号名称
- * @param {number} accountId - 账号ID
+ * @param {number} accountId - 账号 ID
  * @returns {string} 账号名称
  */
 const getTransferAccountName = (accountId) => {
@@ -471,13 +475,13 @@ const selectedChannel = ref('wechatmini')
 
 // 渠道提示映射
 const channelTips = {
-  web: '请使用115网页版扫描二维码登录',
-  android: '请使用115安卓APP扫描二维码登录',
-  ios: '请使用115 iOS APP扫描二维码登录',
-  tv: '请使用115电视版扫描二维码登录',
+  web: '请使用 115 网页版扫描二维码登录',
+  android: '请使用 115 安卓 APP 扫描二维码登录',
+  ios: '请使用 115 iOS APP 扫描二维码登录',
+  tv: '请使用 115 电视版扫描二维码登录',
   alipaymini: '请使用支付宝小程序扫描二维码登录',
   wechatmini: '请使用微信小程序扫描二维码登录',
-  qandroid: '请使用115安卓Q版扫描二维码登录'
+  qandroid: '请使用 115 安卓 Q 版扫描二维码登录'
 }
 
 // 登录状态文本映射
@@ -503,11 +507,11 @@ const formatExpireTime = (seconds) => {
   if (seconds <= 0) return '已过期'
   const minutes = Math.floor(seconds / 60)
   const secs = seconds % 60
-  return `${minutes}分${secs}秒`
+  return `${minutes}分 ${secs}秒`
 }
 
 /**
- * 获取115云账号列表
+ * 获取 115 云账号列表
  */
 const fetchCloud115List = async () => {
   try {
@@ -519,15 +523,15 @@ const fetchCloud115List = async () => {
     cloud115List.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
     total.value = apiData?.total || cloud115List.value.length
   } catch (error) {
-    ElMessage.error('获取115云账号列表失败')
+    ElMessage.error('获取 115 云账号列表失败')
   }
 }
 
 /**
  * 处理表格排序变化
  * @param {Object} column - 列信息
- * @param {string} prop - 排序字段
- * @param {string} order - 排序方式
+ * @param {string} prop - 鎺掑簭瀛楁
+ * @param {string} order - 鎺掑簭鏂瑰紡
  */
 const handleSortChange = ({ prop, order }) => {
   if (prop && order) {
@@ -600,7 +604,7 @@ const handleSubmit = async () => {
       const apiUrl = form.value.id ? `/cloud115/${form.value.id}` : '/cloud115'
       const method = form.value.id ? 'PUT' : 'POST'
       
-      // 准备提交数据，将 null 转换为 0
+      // 鍑嗗鎻愪氦鏁版嵁锛屽皢 null 杞崲涓?0
       const submitData = {
         ...form.value,
         transfer_account_id: form.value.transfer_account_id || 0
@@ -652,8 +656,8 @@ const handleEdit = (row) => {
  * @param {Object} row - 账号数据
  */
 const handleDelete = (row) => {
-  ElMessageBox.confirm(
-    '确定要删除这个115云账号吗？',
+  showConfirmDialog(
+    '确定要删除这个 115 云账号吗？',
     '删除确认',
     {
       confirmButtonText: '确定',
@@ -676,20 +680,30 @@ const handleDelete = (row) => {
  * 测试账号连接
  * @param {Object} row - 账号数据
  */
-const handleTest = (row) => {
+const handleTest = async (row) => {
+  if (testingAccountId.value === row.id) return
+
+  testingAccountId.value = row.id
   ElMessage.info('正在测试115云账号连接...')
-  request(`/auth/cloud115/${row.id}`).then((response) => {
-    console.log('115云账号测试结果:', response)
-    const data = response.data
-    if (data.state && data.data) {
-      ElMessage.success(`测试成功！账号: ${data.data.name}`)
-    } else {
-      ElMessage.error(`测试失败: ${data.message || data.error || '未知错误'}`)
+  try {
+    const response = await request(`/auth/cloud115/${row.id}`, {
+      skipGlobalErrorMessage: true
+    })
+    const payload = response.data || {}
+    const data = payload.data || {}
+    if (payload.state === true) {
+      const fileCount = Number(data.file_count || 0)
+      ElMessage.success(payload.message || `测试成功：${data.name || row.name}，可访问 ${fileCount} 项`)
+      return
     }
-  }).catch((error) => {
+    ElMessage.error(`测试失败：${payload.message || payload.error || '未知错误'}`)
+  } catch (error) {
     console.error('115云账号测试失败:', error)
-    ElMessage.error('测试失败，错误信息已打印到控制台')
-  })
+    const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || '未知错误'
+    ElMessage.error(`测试失败：${errorMsg}`)
+  } finally {
+    testingAccountId.value = null
+  }
 }
 
 /**
@@ -716,8 +730,8 @@ const resetForm = () => {
 }
 
 /**
- * 分页大小改变
- * @param {number} size - 每页数量
+ * 分页大小变化
+ * @param {number} size - 姣忛〉鏁伴噺
  */
 const handleSizeChange = (size) => {
   pageSize.value = size
@@ -725,8 +739,8 @@ const handleSizeChange = (size) => {
 }
 
 /**
- * 当前页改变
- * @param {number} page - 当前页码
+ * 当前页变化
+ * @param {number} page - 褰撳墠椤电爜
  */
 const handleCurrentChange = (page) => {
   currentPage.value = page
@@ -749,7 +763,7 @@ const handleQRCodeLogin = () => {
  */
 const handleQRCodeUpdate = (row) => {
   updateCloudId.value = row.id
-  qrcodeDialogTitle.value = `扫码更新账号: ${row.name}`
+  qrcodeDialogTitle.value = `扫码更新账号：${row.name}`
   qrcodeDialogVisible.value = true
   fetchQRCode()
 }
@@ -784,10 +798,10 @@ const fetchQRCode = async () => {
       sign: data.sign
     }
     
-    // 生成二维码图片URL
+    // 生成二维码图片 URL
     qrcodeDataUrl.value = generateQRCodeDataUrl(data.qrcode)
     
-    // 设置二维码过期时间（默认120秒）
+    // 设置二维码过期时间，默认 120 秒
     qrcodeExpireTime.value = 120
     startExpireTimer()
     startPolling()
@@ -800,12 +814,12 @@ const fetchQRCode = async () => {
 }
 
 /**
- * 生成二维码Data URL
+ * 生成二维码 Data URL
  * @param {string} content - 二维码内容
- * @returns {string} 二维码图片的Data URL
+ * @returns {string} 二维码图片的 Data URL
  */
 const generateQRCodeDataUrl = (content) => {
-  // 使用第三方API生成二维码图片
+  // 使用第三方 API 生成二维码图片
   return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(content)}`
 }
 
@@ -840,19 +854,19 @@ const startPolling = () => {
       const status = response.data.data.status
       loginStatus.value = status
       
-      // 状态2表示登录成功
+      // 状态 2 表示登录成功
       if (status === 2) {
         stopPolling()
         stopExpireTimer()
         await handleLoginConfirm()
       }
-      // 状态3表示二维码过期
+      // 状态 3 表示二维码过期
       else if (status === 3) {
         stopPolling()
         stopExpireTimer()
-        qrcodeError.value = '二维码已过期，请刷新'
+      qrcodeError.value = '二维码已过期，请刷新'
       }
-      // 状态4表示登录失败
+      // 状态 4 表示登录失败
       else if (status === 4) {
         stopPolling()
         stopExpireTimer()
@@ -918,7 +932,7 @@ const handleLoginConfirm = async () => {
     
     const response = await confirm115Login(confirmData)
     
-    ElMessage.success(updateCloudId.value ? '账号Cookie更新成功' : '扫码登录成功，账号已创建')
+    ElMessage.success(updateCloudId.value ? '账号 Cookie 更新成功' : '扫码登录成功，账号已创建')
     qrcodeDialogVisible.value = false
     fetchCloud115List()
   } catch (error) {
@@ -1207,3 +1221,8 @@ onUnmounted(() => {
   line-height: 1.4;
 }
 </style>
+
+
+
+
+

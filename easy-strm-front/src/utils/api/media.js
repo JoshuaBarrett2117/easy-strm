@@ -58,6 +58,9 @@ export const searchTmdb = (params) => api.get('/media/tmdb/search', { params })
 // 识别文件
 export const identifyFile = (data) => api.post('/media/tmdb/identify', data)
 
+// 自动识别文件（返回 Top 3 候选，不写入缓存）
+export const autoIdentifyFile = (data) => api.post('/media/tmdb/auto-identify', data)
+
 // 批量识别文件
 export const batchIdentifyTmdb = (data) => api.post('/media/tmdb/batch-identify', data)
 
@@ -68,10 +71,14 @@ export const getMovieDetail = (id) => api.get(`/media/tmdb/movie/${id}`)
 export const getTvDetail = (id) => api.get(`/media/tmdb/tv/${id}`)
 
 // 获取 TMDB 配置
-export const getTmdbConfig = () => api.get('/media/tmdb/config')
+export const getTmdbConfig = (options = {}) => api.get('/media/tmdb/config', {
+  skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+})
 
 // 更新 TMDB API Key
-export const updateTmdbApiKey = (data) => api.post('/media/tmdb/config', data)
+export const updateTmdbApiKey = (data, options = {}) => api.post('/media/tmdb/config', data, {
+  skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+})
 
 /**
  * 更名预览 API（Phase 3）
@@ -102,11 +109,21 @@ export const listOrganizeCandidates = (data) => api.post('/media/organize/candid
 // 预览整理结果
 export const previewOrganize = (data) => api.post('/media/organize/preview', data)
 
+// 启动异步预览任务
+export const startPreviewTaskAsync = (data) => api.post('/media/organize/preview/async', data)
+
+// 获取预览任务状态
+export const getPreviewTaskStatus = (taskId) => api.get('/media/organize/preview/status', { params: { task_id: taskId } })
+
+// 检查可恢复任务
+export const checkRestorableTask = (data) => api.post('/media/organize/preview/check', data)
+
 // 执行整理
 export const executeOrganize = (data) => api.post('/media/organize/execute', data)
 
 // 批量识别文件（整理服务）
 export const batchIdentifyFiles = (data) => api.post('/media/organize/batch-identify', data)
+export const batchIdentifyDirectoryFiles = (data) => api.post('/media/organize/batch-identify-directory', data)
 
 // 批量更名预览（整理服务）
 export const batchRenamePreview = (data) => api.post('/media/organize/batch-rename-preview', data)
@@ -141,3 +158,14 @@ export const updateMediaCategory = (id, data) => api.put(`/media/categories/${id
 
 // 删除媒体分类
 export const deleteMediaCategory = (id) => api.delete(`/media/categories/${id}`)
+
+/**
+ * NFO 刮削 API
+ */
+
+// 刮削单个文件 NFO
+export const scrapeFile = (data) => api.post('/media/scrape/file', data)
+
+// 批量刮削文件 NFO
+export const scrapeFiles = (data) => api.post('/media/scrape/files', data)
+export const scrapeDirectoryFiles = (data) => api.post('/media/scrape/directory', data)

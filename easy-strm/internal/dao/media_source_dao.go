@@ -7,31 +7,33 @@ import (
 	"easy-strm/internal/domain"
 )
 
-// MediaSourceDAO 媒体源数据访问层
 type MediaSourceDAO struct{}
 
-// NewMediaSourceDAO 创建媒体源DAO实例
 func NewMediaSourceDAO() *MediaSourceDAO {
 	return &MediaSourceDAO{}
 }
 
-// GetByID 根据ID获取媒体源
-// 参数:
-//   - id: 媒体源ID
-// 返回:
-//   - *domain.MediaSource: 媒体源信息
-//   - error: 错误信息
-func (d *MediaSourceDAO) GetByID(id int) (*domain.MediaSource, error) {
+const mediaSourceColumns = `id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time`
+
+func scanMediaSource(scanner interface{ Scan(...interface{}) error }) (*domain.MediaSource, error) {
 	source := &domain.MediaSource{}
-	err := DB.QueryRow(
-		`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`,
-		id,
-	).Scan(
-		&source.ID, &source.Name, &source.SourceType, &source.Path,
+	err := scanner.Scan(
+		&source.ID, &source.Name, &source.SourceType, &source.Path, &source.WatchPath,
 		&source.Cloud115ID, &source.Priority, &source.Enabled,
+		&source.OrganizeTargetPath,
+		&source.MediaType, &source.ConflictPolicy, &source.OperationMode,
+		&source.AutoOrganize, &source.WatchEnabled, &source.WatchInterval,
+		&source.EmbyLibraryID,
 		&source.CreateTime, &source.UpdateTime,
 	)
+	return source, err
+}
+
+func (d *MediaSourceDAO) GetByID(id int) (*domain.MediaSource, error) {
+	source, err := scanMediaSource(DB.QueryRow(
+		`SELECT `+mediaSourceColumns+` FROM t_media_source WHERE id = $1`,
+		id,
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -41,13 +43,6 @@ func (d *MediaSourceDAO) GetByID(id int) (*domain.MediaSource, error) {
 	return source, nil
 }
 
-// GetAll 获取所有媒体源
-// 参数:
-//   - sortField: 排序字段
-//   - sortOrder: 排序方向 (asc/desc)
-// 返回:
-//   - []*domain.MediaSource: 媒体源列表
-//   - error: 错误信息
 func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSource, error) {
 	orderClause := "priority ASC, id ASC"
 	if sortField != "" {
@@ -58,8 +53,7 @@ func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSou
 	}
 
 	rows, err := DB.Query(
-		fmt.Sprintf(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source ORDER BY %s`, orderClause),
+		fmt.Sprintf(`SELECT %s FROM t_media_source ORDER BY %s`, mediaSourceColumns, orderClause),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("MediaSourceDAO[GetAll] 查询失败: %v", err)
@@ -68,12 +62,7 @@ func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSou
 
 	var list []*domain.MediaSource
 	for rows.Next() {
-		source := &domain.MediaSource{}
-		err := rows.Scan(
-			&source.ID, &source.Name, &source.SourceType, &source.Path,
-			&source.Cloud115ID, &source.Priority, &source.Enabled,
-			&source.CreateTime, &source.UpdateTime,
-		)
+		source, err := scanMediaSource(rows)
 		if err != nil {
 			return nil, fmt.Errorf("MediaSourceDAO[GetAll] 扫描失败: %v", err)
 		}
@@ -82,16 +71,9 @@ func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSou
 	return list, nil
 }
 
-// GetByType 根据类型获取媒体源列表
-// 参数:
-//   - sourceType: 媒体源类型 (local/cloud115)
-// 返回:
-//   - []*domain.MediaSource: 媒体源列表
-//   - error: 错误信息
 func (d *MediaSourceDAO) GetByType(sourceType string) ([]*domain.MediaSource, error) {
 	rows, err := DB.Query(
-		`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE source_type = $1 ORDER BY priority ASC, id ASC`,
+		`SELECT `+mediaSourceColumns+` FROM t_media_source WHERE source_type = $1 ORDER BY priority ASC, id ASC`,
 		sourceType,
 	)
 	if err != nil {
@@ -101,12 +83,7 @@ func (d *MediaSourceDAO) GetByType(sourceType string) ([]*domain.MediaSource, er
 
 	var list []*domain.MediaSource
 	for rows.Next() {
-		source := &domain.MediaSource{}
-		err := rows.Scan(
-			&source.ID, &source.Name, &source.SourceType, &source.Path,
-			&source.Cloud115ID, &source.Priority, &source.Enabled,
-			&source.CreateTime, &source.UpdateTime,
-		)
+		source, err := scanMediaSource(rows)
 		if err != nil {
 			return nil, fmt.Errorf("MediaSourceDAO[GetByType] 扫描失败: %v", err)
 		}
@@ -115,14 +92,9 @@ func (d *MediaSourceDAO) GetByType(sourceType string) ([]*domain.MediaSource, er
 	return list, nil
 }
 
-// GetEnabled 获取所有启用的媒体源
-// 返回:
-//   - []*domain.MediaSource: 启用的媒体源列表
-//   - error: 错误信息
 func (d *MediaSourceDAO) GetEnabled() ([]*domain.MediaSource, error) {
 	rows, err := DB.Query(
-		`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE enabled = true ORDER BY priority ASC, id ASC`,
+		`SELECT `+mediaSourceColumns+` FROM t_media_source WHERE enabled = true ORDER BY priority ASC, id ASC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("MediaSourceDAO[GetEnabled] 查询失败: %v", err)
@@ -131,12 +103,7 @@ func (d *MediaSourceDAO) GetEnabled() ([]*domain.MediaSource, error) {
 
 	var list []*domain.MediaSource
 	for rows.Next() {
-		source := &domain.MediaSource{}
-		err := rows.Scan(
-			&source.ID, &source.Name, &source.SourceType, &source.Path,
-			&source.Cloud115ID, &source.Priority, &source.Enabled,
-			&source.CreateTime, &source.UpdateTime,
-		)
+		source, err := scanMediaSource(rows)
 		if err != nil {
 			return nil, fmt.Errorf("MediaSourceDAO[GetEnabled] 扫描失败: %v", err)
 		}
@@ -145,59 +112,26 @@ func (d *MediaSourceDAO) GetEnabled() ([]*domain.MediaSource, error) {
 	return list, nil
 }
 
-// Create 创建媒体源
-// 参数:
-//   - name: 媒体源名称
-//   - sourceType: 媒体源类型
-//   - path: 路径
-//   - cloud115ID: 115账号ID（可选）
-//   - priority: 优先级
-//   - enabled: 是否启用
-// 返回:
-//   - *domain.MediaSource: 创建的媒体源
-//   - error: 错误信息
-func (d *MediaSourceDAO) Create(name, sourceType, path string, cloud115ID *int, priority int, enabled bool) (*domain.MediaSource, error) {
-	source := &domain.MediaSource{}
-	err := DB.QueryRow(
-		`INSERT INTO t_media_source (name, source_type, path, cloud115_id, priority, enabled)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time`,
-		name, sourceType, path, cloud115ID, priority, enabled,
-	).Scan(
-		&source.ID, &source.Name, &source.SourceType, &source.Path,
-		&source.Cloud115ID, &source.Priority, &source.Enabled,
-		&source.CreateTime, &source.UpdateTime,
-	)
+func (d *MediaSourceDAO) Create(name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
+	source, err := scanMediaSource(DB.QueryRow(
+		`INSERT INTO t_media_source (name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		RETURNING `+mediaSourceColumns,
+		name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
+	))
 	if err != nil {
 		return nil, fmt.Errorf("MediaSourceDAO[Create] 创建失败: %v", err)
 	}
 	return source, nil
 }
 
-// Update 更新媒体源
-// 参数:
-//   - id: 媒体源ID
-//   - name: 媒体源名称
-//   - sourceType: 媒体源类型
-//   - path: 路径
-//   - cloud115ID: 115账号ID（可选）
-//   - priority: 优先级
-//   - enabled: 是否启用
-// 返回:
-//   - *domain.MediaSource: 更新后的媒体源
-//   - error: 错误信息
-func (d *MediaSourceDAO) Update(id int, name, sourceType, path string, cloud115ID *int, priority int, enabled bool) (*domain.MediaSource, error) {
-	source := &domain.MediaSource{}
-	err := DB.QueryRow(
-		`UPDATE t_media_source SET name=$2, source_type=$3, path=$4, cloud115_id=$5, priority=$6, enabled=$7
+func (d *MediaSourceDAO) Update(id int, name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
+	source, err := scanMediaSource(DB.QueryRow(
+		`UPDATE t_media_source SET name=$2, source_type=$3, path=$4, watch_path=$5, cloud115_id=$6, priority=$7, enabled=$8, organize_target_path=$9, media_type=$10, conflict_policy=$11, operation_mode=$12, auto_organize=$13, watch_enabled=$14, watch_interval=$15, emby_library_id=$16
 		WHERE id=$1
-		RETURNING id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time`,
-		id, name, sourceType, path, cloud115ID, priority, enabled,
-	).Scan(
-		&source.ID, &source.Name, &source.SourceType, &source.Path,
-		&source.Cloud115ID, &source.Priority, &source.Enabled,
-		&source.CreateTime, &source.UpdateTime,
-	)
+		RETURNING `+mediaSourceColumns,
+		id, name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
+	))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("MediaSourceDAO[Update] 媒体源不存在")
@@ -207,11 +141,6 @@ func (d *MediaSourceDAO) Update(id int, name, sourceType, path string, cloud115I
 	return source, nil
 }
 
-// Delete 删除媒体源
-// 参数:
-//   - id: 媒体源ID
-// 返回:
-//   - error: 错误信息
 func (d *MediaSourceDAO) Delete(id int) error {
 	result, err := DB.Exec("DELETE FROM t_media_source WHERE id = $1", id)
 	if err != nil {
@@ -224,12 +153,6 @@ func (d *MediaSourceDAO) Delete(id int) error {
 	return nil
 }
 
-// UpdateEnabled 更新媒体源启用状态
-// 参数:
-//   - id: 媒体源ID
-//   - enabled: 是否启用
-// 返回:
-//   - error: 错误信息
 func (d *MediaSourceDAO) UpdateEnabled(id int, enabled bool) error {
 	result, err := DB.Exec(
 		`UPDATE t_media_source SET enabled=$2 WHERE id=$1`,
@@ -243,4 +166,26 @@ func (d *MediaSourceDAO) UpdateEnabled(id int, enabled bool) error {
 		return fmt.Errorf("MediaSourceDAO[UpdateEnabled] 媒体源不存在")
 	}
 	return nil
+}
+
+// GetWatchEnabled 获取所有启用监控的媒体源
+// 用于 WatchService 启动时加载需要监控的媒体源列表
+func (d *MediaSourceDAO) GetWatchEnabled() ([]*domain.MediaSource, error) {
+	rows, err := DB.Query(
+		`SELECT ` + mediaSourceColumns + ` FROM t_media_source WHERE watch_enabled = true AND enabled = true ORDER BY priority ASC, id ASC`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("MediaSourceDAO[GetWatchEnabled] 查询失败: %v", err)
+	}
+	defer rows.Close()
+
+	var list []*domain.MediaSource
+	for rows.Next() {
+		source, err := scanMediaSource(rows)
+		if err != nil {
+			return nil, fmt.Errorf("MediaSourceDAO[GetWatchEnabled] 扫描失败: %v", err)
+		}
+		list = append(list, source)
+	}
+	return list, nil
 }

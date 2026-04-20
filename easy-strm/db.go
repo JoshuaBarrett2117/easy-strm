@@ -861,6 +861,123 @@ END $$;
 		Warn("Failed to create idx_media_file_cache_media_type: %v", err)
 	}
 
+	// ============================================
+	// V9: 媒体源增加整理目的地目录字段
+	// ============================================
+	alterMediaSourceTargetPathSQL := `
+DO $$ BEGIN
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'organize_target_path') THEN
+		ALTER TABLE t_media_source ADD COLUMN organize_target_path VARCHAR(1000) DEFAULT '';
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'watch_path') THEN
+		ALTER TABLE t_media_source ADD COLUMN watch_path VARCHAR(1000) DEFAULT '';
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'media_type') THEN
+		ALTER TABLE t_media_source ADD COLUMN media_type VARCHAR(20) DEFAULT 'all';
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'conflict_policy') THEN
+		ALTER TABLE t_media_source ADD COLUMN conflict_policy VARCHAR(20) DEFAULT 'skip';
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'operation_mode') THEN
+		ALTER TABLE t_media_source ADD COLUMN operation_mode VARCHAR(20) DEFAULT 'move';
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'auto_organize') THEN
+		ALTER TABLE t_media_source ADD COLUMN auto_organize BOOLEAN DEFAULT FALSE;
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'watch_enabled') THEN
+		ALTER TABLE t_media_source ADD COLUMN watch_enabled BOOLEAN DEFAULT FALSE;
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'watch_interval') THEN
+		ALTER TABLE t_media_source ADD COLUMN watch_interval INTEGER DEFAULT 1800;
+	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'emby_library_id') THEN
+		ALTER TABLE t_media_source ADD COLUMN emby_library_id VARCHAR(100) DEFAULT '';
+	END IF;
+END $$;
+`
+	_, err = db.Exec(alterMediaSourceTargetPathSQL)
+	if err != nil {
+		Error("Failed to add organize_target_path to t_media_source: %v", err)
+		return err
+	}
+
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.organize_target_path IS '整理目的地目录（根目录），如 /已整理'`)
+	if err != nil {
+		Warn("Failed to add comment for organize_target_path: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.watch_path IS '监控目录；115 自动监控时使用该目录而不是源路径'`)
+	if err != nil {
+		Warn("Failed to add comment for watch_path: %v", err)
+	}
+
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.media_type IS '自动整理默认媒体类型（all/movie/tv）'`)
+	if err != nil {
+		Warn("Failed to add comment for media_type: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.conflict_policy IS '自动整理默认冲突策略（skip/overwrite/suffix）'`)
+	if err != nil {
+		Warn("Failed to add comment for conflict_policy: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.operation_mode IS '自动整理默认操作方式（move/copy/hardlink/symlink）'`)
+	if err != nil {
+		Warn("Failed to add comment for operation_mode: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.auto_organize IS '是否在监控到新增文件后自动整理'`)
+	if err != nil {
+		Warn("Failed to add comment for auto_organize: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.watch_enabled IS '是否开启媒体源监控'`)
+	if err != nil {
+		Warn("Failed to add comment for watch_enabled: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.watch_interval IS '监控轮询间隔（秒）'`)
+	if err != nil {
+		Warn("Failed to add comment for watch_interval: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.emby_library_id IS '关联的 Emby 媒体库 ID'`)
+	if err != nil {
+		Warn("Failed to add comment for emby_library_id: %v", err)
+	}
+
+	// ============================================
+	// V10: 识别结果缓存表
+	// ============================================
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS t_identify_cache (
+		    id              SERIAL PRIMARY KEY,
+		    file_hash       VARCHAR(64) NOT NULL,
+		    file_name       VARCHAR(500) NOT NULL,
+		    media_type      VARCHAR(20) NOT NULL,
+		    tmdb_id         INTEGER,
+		    title           VARCHAR(255),
+		    original_title  VARCHAR(255),
+		    year            INTEGER,
+		    season_number   INTEGER DEFAULT 0,
+		    episode_number  INTEGER DEFAULT 0,
+		    poster_path     VARCHAR(500),
+		    is_manual       BOOLEAN DEFAULT FALSE,
+		    source_id       INTEGER,
+		    created_at      TIMESTAMP DEFAULT NOW(),
+		    updated_at      TIMESTAMP DEFAULT NOW()
+		);
+	`)
+	if err != nil {
+		Error("Failed to create t_identify_cache: %v", err)
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_identify_cache_file_hash ON t_identify_cache(file_hash)`)
+	if err != nil {
+		Warn("Failed to create idx_identify_cache_file_hash: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_identify_cache_is_manual ON t_identify_cache(is_manual)`)
+	if err != nil {
+		Warn("Failed to create idx_identify_cache_is_manual: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_identify_cache_created_at ON t_identify_cache(created_at)`)
+	if err != nil {
+		Warn("Failed to create idx_identify_cache_created_at: %v", err)
+	}
+
 	Info("Database initialized successfully")
 	return nil
 }

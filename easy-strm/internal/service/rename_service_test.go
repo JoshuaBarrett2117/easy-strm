@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"os"
@@ -13,12 +13,28 @@ import (
 	"easy-strm/internal/domain"
 )
 
+const testMediaSourceColumns = "id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time"
+
+func newMediaSourceRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled",
+		"organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id",
+		"create_time", "update_time",
+	})
+}
+
+func expectMediaSourceByID(mock sqlmock.Sqlmock, sourceID int, rows *sqlmock.Rows) {
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT ` + testMediaSourceColumns + ` FROM t_media_source WHERE id = $1`)).
+		WithArgs(sourceID).
+		WillReturnRows(rows)
+}
+
 // ============================================
-// RenameService 模板引擎测试
+// RenameService 模锟斤拷锟斤拷锟斤拷锟斤拷锟?
 // ============================================
 
-// TestApplyTemplate_电影模板 测试电影命名模板的变量替换
-func TestApplyTemplate_电影模板(t *testing.T) {
+// TestApplyTemplate_锟斤拷影模锟斤拷 锟斤拷锟皆碉拷影锟斤拷锟斤拷模锟斤拷谋锟斤拷锟斤拷婊?
+func TestApplyTemplateMovie(t *testing.T) {
 	svc := &RenameService{}
 
 	cases := []struct {
@@ -29,25 +45,25 @@ func TestApplyTemplate_电影模板(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "默认电影模板",
+			name:     "默锟较碉拷影模锟斤拷",
 			template: "{{ title }}{% if year %} ({{ year }}){% endif %}",
 			title:    "Inception",
 			year:     2010,
 			want:     "Inception (2010)",
 		},
 		{
-			name:     "带质量的模板",
+			name:     "锟斤拷锟斤拷锟斤拷锟斤拷模锟斤拷",
 			template: "{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %}.{{ videoFormat }}{% endif %}",
 			title:    "Interstellar",
 			year:     2014,
-			want:     "Interstellar (2014)", // quality为空时应清理
+			want:     "Interstellar (2014)", // quality为锟斤拷时应锟斤拷锟斤拷
 		},
 		{
-			name:     "纯标题模板",
+			name:     "锟斤拷锟斤拷锟斤拷模锟斤拷",
 			template: "{{ title }}",
-			title:    "流浪地球",
+			title:    "锟斤拷锟剿碉拷锟斤拷",
 			year:     2019,
-			want:     "流浪地球",
+			want:     "锟斤拷锟剿碉拷锟斤拷",
 		},
 	}
 
@@ -58,14 +74,14 @@ func TestApplyTemplate_电影模板(t *testing.T) {
 				t.Fatalf("妯℃澘娓叉煋澶辫触: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("模板结果不匹配: got=%q, want=%q", got, tc.want)
+				t.Errorf("模锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%q, want=%q", got, tc.want)
 			}
 		})
 	}
 }
 
-// TestApplyTemplate_剧集模板 测试剧集命名模板的变量替换
-func TestApplyTemplate_剧集模板(t *testing.T) {
+// TestApplyTemplate_锟界集模锟斤拷 锟斤拷锟皆剧集锟斤拷锟斤拷模锟斤拷谋锟斤拷锟斤拷婊?
+func TestApplyTemplate_锟界集模锟斤拷(t *testing.T) {
 	svc := &RenameService{}
 
 	cases := []struct {
@@ -77,7 +93,7 @@ func TestApplyTemplate_剧集模板(t *testing.T) {
 		want     string
 	}{
 		{
-			name:     "默认剧集模板",
+			name:     "默锟较剧集模锟斤拷",
 			template: `{{ title }}/S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`,
 			title:    "Breaking Bad",
 			season:   1,
@@ -85,7 +101,7 @@ func TestApplyTemplate_剧集模板(t *testing.T) {
 			want:     "Breaking Bad/S01E02",
 		},
 		{
-			name:     "带年份的剧集模板",
+            name:     "Season template with year",
 			template: `{{ title }}{% if year %} ({{ year }}){% endif %} S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`,
 			title:    "Friends",
 			season:   3,
@@ -101,76 +117,76 @@ func TestApplyTemplate_剧集模板(t *testing.T) {
 				t.Fatalf("妯℃澘娓叉煋澶辫触: %v", err)
 			}
 			if got != tc.want {
-				t.Errorf("模板结果不匹配: got=%q, want=%q", got, tc.want)
+				t.Errorf("模锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%q, want=%q", got, tc.want)
 			}
 		})
 	}
 }
 
-// TestGetDefaultTemplate_电影 测试获取默认电影模板
-func TestGetDefaultTemplate_电影(t *testing.T) {
+// TestGetDefaultTemplate_锟斤拷影 锟斤拷锟皆伙拷取默锟较碉拷影模锟斤拷
+func TestGetDefaultTemplate_锟斤拷影(t *testing.T) {
 	svc := &RenameService{}
 	tmpl := svc.getDefaultTemplate("movie")
 	want := defaultMovieTemplate
 	if tmpl != want {
-		t.Errorf("默认电影模板不匹配: got=%q", tmpl)
+		t.Errorf("默锟较碉拷影模锟藉不匹锟斤拷: got=%q", tmpl)
 	}
 }
 
-// TestGetDefaultTemplate_剧集 测试获取默认剧集模板
-func TestGetDefaultTemplate_剧集(t *testing.T) {
+// TestGetDefaultTemplate_锟界集 锟斤拷锟皆伙拷取默锟较剧集模锟斤拷
+func TestGetDefaultTemplate_锟界集(t *testing.T) {
 	svc := &RenameService{}
 	tmpl := svc.getDefaultTemplate("tv")
 	want := defaultTVTemplate
 	if tmpl != want {
-		t.Errorf("默认剧集模板不匹配: got=%q", tmpl)
+		t.Errorf("默锟较剧集模锟藉不匹锟斤拷: got=%q", tmpl)
 	}
 }
 
-func TestApplyTemplate_Jinja2默认电影模板完整渲染(t *testing.T) {
+func TestApplyTemplate_Jinja2默锟较碉拷影模锟斤拷锟斤拷锟斤拷锟斤拷染(t *testing.T) {
 	svc := &RenameService{}
 	template := svc.getDefaultTemplate("movie")
 
-	got, err := svc.applyTemplate(template, "盗梦空间", "Inception", 2010, 0, 0, "1080p", "", "", ".mkv", 27205)
+	got, err := svc.applyTemplate(template, "锟斤拷锟轿空硷拷", "Inception", 2010, 0, 0, "1080p", "", "", ".mkv", 27205)
 	if err != nil {
-		t.Fatalf("渲染 Jinja2 电影默认模板失败: %v", err)
+		t.Fatalf("锟斤拷染 Jinja2 锟斤拷影默锟斤拷模锟斤拷失锟斤拷: %v", err)
 	}
 
-	want := "盗梦空间 (2010)/盗梦空间 (2010) [1080p].mkv"
+	want := "锟斤拷锟轿空硷拷 (2010)/锟斤拷锟轿空硷拷 (2010) [1080p].mkv"
 	if got != want {
-		t.Fatalf("Jinja2 电影默认模板渲染结果不匹配: got=%q, want=%q", got, want)
+		t.Fatalf("Jinja2 锟斤拷影默锟斤拷模锟斤拷锟斤拷染锟斤拷锟斤拷锟狡ワ拷锟? got=%q, want=%q", got, want)
 	}
 }
 
-func TestApplyTemplate_Jinja2默认剧集模板完整渲染(t *testing.T) {
+func TestApplyTemplate_Jinja2默锟较剧集模锟斤拷锟斤拷锟斤拷锟斤拷染(t *testing.T) {
 	svc := &RenameService{}
 	template := svc.getDefaultTemplate("tv")
 
-	got, err := svc.applyTemplate(template, "绝命毒师", "Breaking Bad", 2008, 1, 2, "1080p", "", "", ".mkv", 1396)
+	got, err := svc.applyTemplate(template, "锟斤拷锟斤拷锟斤拷师", "Breaking Bad", 2008, 1, 2, "1080p", "", "", ".mkv", 1396)
 	if err != nil {
-		t.Fatalf("渲染 Jinja2 剧集默认模板失败: %v", err)
+		t.Fatalf("锟斤拷染 Jinja2 锟界集默锟斤拷模锟斤拷失锟斤拷: %v", err)
 	}
 
-	want := "绝命毒师 (2008)/Season 01/绝命毒师 - S01E02 [1080p].mkv"
+	want := "锟斤拷锟斤拷锟斤拷师 (2008)/Season 01/锟斤拷锟斤拷锟斤拷师 - S01E02 [1080p].mkv"
 	if got != want {
-		t.Fatalf("Jinja2 剧集默认模板渲染结果不匹配: got=%q, want=%q", got, want)
+		t.Fatalf("Jinja2 锟界集默锟斤拷模锟斤拷锟斤拷染锟斤拷锟斤拷锟狡ワ拷锟? got=%q, want=%q", got, want)
 	}
 }
 
-func TestNormalizeBuiltinTemplate_兼容旧官方模板(t *testing.T) {
+func TestNormalizeBuiltinTemplate_锟斤拷锟捷旧官凤拷模锟斤拷(t *testing.T) {
 	svc := &RenameService{}
 
 	if got := svc.normalizeBuiltinTemplate(legacyDefaultMovieTemplate, "movie"); got != defaultMovieTemplate {
-		t.Fatalf("旧电影官方模板兼容失败: got=%q", got)
+		t.Fatalf("锟缴碉拷影锟劫凤拷模锟斤拷锟斤拷锟绞э拷锟? got=%q", got)
 	}
 
 	if got := svc.normalizeBuiltinTemplate(legacyDefaultTVTemplate, "tv"); got != defaultTVTemplate {
-		t.Fatalf("旧剧集官方模板兼容失败: got=%q", got)
+		t.Fatalf("锟缴剧集锟劫凤拷模锟斤拷锟斤拷锟绞э拷锟? got=%q", got)
 	}
 }
 
-// TestGetDefaultTemplate_优先读取系统配置 测试系统配置中的模板优先级高于内置默认值
-func TestGetDefaultTemplate_优先读取系统配置(t *testing.T) {
+// TestGetDefaultTemplate_锟斤拷锟饺讹拷取系统锟斤拷锟斤拷 锟斤拷锟斤拷系统锟斤拷锟斤拷锟叫碉拷模锟斤拷锟斤拷锟饺硷拷锟斤拷锟斤拷锟斤拷锟斤拷默锟斤拷值
+func TestGetDefaultTemplate_锟斤拷锟饺讹拷取系统锟斤拷锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
@@ -189,20 +205,20 @@ func TestGetDefaultTemplate_优先读取系统配置(t *testing.T) {
 
 	tmpl := svc.getDefaultTemplate("movie")
 	if tmpl != "{{ title }} - {{ year }}" {
-		t.Fatalf("系统配置模板未生效: got=%q", tmpl)
+		t.Fatalf("系统锟斤拷锟斤拷模锟斤拷未锟斤拷效: got=%q", tmpl)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
 // ============================================
-// RenameService 季集解析测试
+// RenameService 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
 // ============================================
 
-// TestParseSeasonEpisode_标准格式 测试标准季集格式解析
-func TestParseSeasonEpisode_标准格式(t *testing.T) {
+// TestParseSeasonEpisode_锟斤拷准锟斤拷式 锟斤拷锟皆憋拷准锟斤拷锟斤拷锟斤拷式锟斤拷锟斤拷
+func TestParseSeasonEpisode_锟斤拷准锟斤拷式(t *testing.T) {
 	svc := &RenameService{}
 
 	cases := []struct {
@@ -214,45 +230,45 @@ func TestParseSeasonEpisode_标准格式(t *testing.T) {
 		{"S01E02", "Movie.S01E02.720p.mkv", 1, 2},
 		{"S12E99", "Show.S12E99.1080p.mp4", 12, 99},
 		{"1x05", "House.1x05.720p.mkv", 1, 5},
-		{"EP03", "三体.EP03.mkv", 1, 3},
-		{"无季集信息", "Movie.2020.1080p.mkv", 0, 0},
+		{"EP03", "锟斤拷锟斤拷.EP03.mkv", 1, 3},
+		{"锟睫硷拷锟斤拷锟斤拷息", "Movie.2020.1080p.mkv", 0, 0},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			parsed := svc.parseSeasonEpisode(tc.filename)
 			if parsed.Season != tc.wantSeason {
-				t.Errorf("季数不匹配: got=%d, want=%d", parsed.Season, tc.wantSeason)
+				t.Errorf("锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%d, want=%d", parsed.Season, tc.wantSeason)
 			}
 			if parsed.Episode != tc.wantEpisode {
-				t.Errorf("集数不匹配: got=%d, want=%d", parsed.Episode, tc.wantEpisode)
+				t.Errorf("锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%d, want=%d", parsed.Episode, tc.wantEpisode)
 			}
 		})
 	}
 }
 
-// TestParseSeasonEpisode_质量来源编码 测试从文件名中提取质量、来源、编码
-func TestParseSeasonEpisode_质量来源编码(t *testing.T) {
+// TestParseSeasonEpisode_锟斤拷锟斤拷锟斤拷源锟斤拷锟斤拷 锟斤拷锟皆达拷锟侥硷拷锟斤拷锟斤拷锟斤拷取锟斤拷锟斤拷锟斤拷锟斤拷源锟斤拷锟斤拷锟斤拷
+func TestParseSeasonEpisode_锟斤拷锟斤拷锟斤拷源锟斤拷锟斤拷(t *testing.T) {
 	svc := &RenameService{}
 
 	parsed := svc.parseSeasonEpisode("Show.S01E01.1080p.BluRay.x264.mkv")
 	if parsed.Quality != "1080p" {
-		t.Errorf("质量不匹配: got=%q", parsed.Quality)
+		t.Errorf("锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%q", parsed.Quality)
 	}
 	if parsed.Source != "BluRay" {
-		t.Errorf("来源不匹配: got=%q", parsed.Source)
+		t.Errorf("锟斤拷源锟斤拷匹锟斤拷: got=%q", parsed.Source)
 	}
 	if parsed.Codec != "x264" {
-		t.Errorf("编码不匹配: got=%q", parsed.Codec)
+		t.Errorf("锟斤拷锟诫不匹锟斤拷: got=%q", parsed.Codec)
 	}
 }
 
 // ============================================
-// RenameService 标题清理测试
+// RenameService 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟?
 // ============================================
 
-// TestCleanTitle_移除标签 测试标签清理功能
-func TestCleanTitle_移除标签(t *testing.T) {
+// TestCleanTitle_锟狡筹拷锟斤拷签 锟斤拷锟皆憋拷签锟斤拷锟斤拷锟斤拷锟?
+func TestCleanTitle_锟狡筹拷锟斤拷签(t *testing.T) {
 	svc := &RenameService{}
 
 	cases := []struct {
@@ -261,19 +277,19 @@ func TestCleanTitle_移除标签(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "移除质量标签",
+			name:  "锟狡筹拷锟斤拷锟斤拷锟斤拷签",
 			input: "The Movie 1080p BluRay x264",
 			want:  "The Movie",
 		},
 		{
-			name:  "移除季集标签",
+			name:  "锟狡筹拷锟斤拷锟斤拷锟斤拷签",
 			input: "Breaking Bad S01E02",
 			want:  "Breaking Bad",
 		},
 		{
-			name:  "中文标题不受影响",
-			input: "流浪地球",
-			want:  "流浪地球",
+			name:  "锟斤拷锟侥憋拷锟解不锟斤拷影锟斤拷",
+			input: "锟斤拷锟剿碉拷锟斤拷",
+			want:  "锟斤拷锟剿碉拷锟斤拷",
 		},
 	}
 
@@ -281,37 +297,33 @@ func TestCleanTitle_移除标签(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got := svc.cleanTitle(tc.input)
 			if got != tc.want {
-				t.Errorf("清理结果不匹配: got=%q, want=%q", got, tc.want)
+				t.Errorf("锟斤拷锟斤拷锟斤拷锟斤拷匹锟斤拷: got=%q, want=%q", got, tc.want)
 			}
 		})
 	}
 }
 
 // ============================================
-// RenameService 预览与执行测试
+// RenameService 预锟斤拷锟斤拷执锟叫诧拷锟斤拷
 // ============================================
 
-// TestPreviewRename_本地文件_保留扩展名 测试预览时保留扩展名
-func TestPreviewRename_本地文件_保留扩展名(t *testing.T) {
+// TestPreviewRename_锟斤拷锟斤拷锟侥硷拷_锟斤拷锟斤拷锟斤拷展锟斤拷 锟斤拷锟斤拷预锟斤拷时锟斤拷锟斤拷锟斤拷展锟斤拷
+func TestPreviewRename_锟斤拷锟斤拷锟侥硷拷_锟斤拷锟斤拷锟斤拷展锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "Movie.2020.1080p.mkv"), []byte("video"), 0644); err != nil {
-		t.Fatalf("创建测试文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷锟斤拷锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenamePreviewRequest{
 		SourceID:  1,
@@ -322,46 +334,42 @@ func TestPreviewRename_本地文件_保留扩展名(t *testing.T) {
 
 	result, err := renameSvc.PreviewRename(req)
 	if err != nil {
-		t.Fatalf("预览失败: %v", err)
+		t.Fatalf("预锟斤拷失锟斤拷: %v", err)
 	}
 
-	// 验证扩展名保留
+	// 锟斤拷证锟斤拷展锟斤拷锟斤拷锟斤拷
 	if filepath.Ext(result.NewName) != ".mkv" {
-		t.Errorf("应保留扩展名.mkv, got=%q", result.NewName)
+		t.Errorf("应锟斤拷锟斤拷锟斤拷展锟斤拷.mkv, got=%q", result.NewName)
 	}
-	// 验证原始文件名
+	// 锟斤拷证原始锟侥硷拷锟斤拷
 	if result.OriginalName != "Movie.2020.1080p.mkv" {
-		t.Errorf("原始文件名不匹配: got=%q", result.OriginalName)
+		t.Errorf("原始锟侥硷拷锟斤拷锟斤拷匹锟斤拷: got=%q", result.OriginalName)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestPreviewRename_空模板时使用系统配置 测试整理链路不传模板时会回退到系统配置中的规则
-func TestPreviewRename_空模板时使用系统配置(t *testing.T) {
+// TestPreviewRename_锟斤拷模锟斤拷时使锟斤拷系统锟斤拷锟斤拷 锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷路锟斤拷锟斤拷模锟斤拷时锟斤拷锟斤拷说锟较低筹拷锟斤拷锟斤拷械墓锟斤拷锟?
+func TestPreviewRename_锟斤拷模锟斤拷时使锟斤拷系统锟斤拷锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "Movie.mkv"), []byte("video"), 0644); err != nil {
-		t.Fatalf("创建测试文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷锟斤拷锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, dao.NewSystemConfigDAO())
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
 	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
 		AddRow(1, "movie_naming_template", "{{ title }} - {{ year }}", now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, config_key, config_val, create_time, update_time 
 		 FROM t_system_config WHERE config_key = $1`)).
@@ -377,40 +385,36 @@ func TestPreviewRename_空模板时使用系统配置(t *testing.T) {
 
 	result, err := renameSvc.PreviewRename(req)
 	if err != nil {
-		t.Fatalf("预览失败: %v", err)
+		t.Fatalf("预锟斤拷失锟斤拷: %v", err)
 	}
 
 	if result.NewName != "Movie - 0.mkv" {
-		t.Fatalf("系统配置模板未用于生成新文件名: got=%q", result.NewName)
+		t.Fatalf("系统锟斤拷锟斤拷模锟斤拷未锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟侥硷拷锟斤拷: got=%q", result.NewName)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_本地文件_成功 测试本地文件更名执行成功
-func TestExecuteRename_本地文件_成功(t *testing.T) {
+// TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟缴癸拷 锟斤拷锟皆憋拷锟斤拷锟侥硷拷锟斤拷锟斤拷执锟叫成癸拷
+func TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟缴癸拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	originalFile := filepath.Join(root, "old_name.mkv")
 	if err := os.WriteFile(originalFile, []byte("video"), 0644); err != nil {
-		t.Fatalf("创建测试文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷锟斤拷锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID:  1,
@@ -421,98 +425,90 @@ func TestExecuteRename_本地文件_成功(t *testing.T) {
 
 	result, err := renameSvc.ExecuteRename(req)
 	if err != nil {
-		t.Fatalf("执行更名失败: %v", err)
+		t.Fatalf("执锟叫革拷锟斤拷失锟斤拷: %v", err)
 	}
 	if !result.Success {
-		t.Fatalf("更名应当成功: %s", result.Message)
+		t.Fatalf("锟斤拷锟斤拷应锟斤拷锟缴癸拷: %s", result.Message)
 	}
 
-	// 验证新文件存在
+	// 锟斤拷证锟斤拷锟侥硷拷锟斤拷锟斤拷
 	newFile := filepath.Join(root, "New Name.mkv")
 	if _, err := os.Stat(newFile); err != nil {
-		t.Errorf("新文件应当存在: %v", err)
+		t.Errorf("锟斤拷锟侥硷拷应锟斤拷锟斤拷锟斤拷: %v", err)
 	}
-	// 验证旧文件已不存在
+	// 锟斤拷证锟斤拷锟侥硷拷锟窖诧拷锟斤拷锟斤拷
 	if _, err := os.Stat(originalFile); !os.IsNotExist(err) {
-		t.Errorf("旧文件应当已不存在")
+		t.Errorf("锟斤拷锟侥硷拷应锟斤拷锟窖诧拷锟斤拷锟斤拷")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_本地文件_自动补扩展名 测试没有扩展名时自动补齐
-func TestExecuteRename_本地文件_自动补扩展名(t *testing.T) {
+// TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟皆讹拷锟斤拷锟斤拷展锟斤拷 锟斤拷锟斤拷没锟斤拷锟斤拷展锟斤拷时锟皆讹拷锟斤拷锟斤拷
+func TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟皆讹拷锟斤拷锟斤拷展锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "movie.mp4"), []byte("video"), 0644); err != nil {
-		t.Fatalf("创建测试文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷锟斤拷锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID: 1,
 		FileID:   "movie.mp4",
-		NewName:  "renamed_movie", // 不带扩展名
+		NewName:  "renamed_movie", // 锟斤拷锟斤拷锟斤拷展锟斤拷
 	}
 
 	result, err := renameSvc.ExecuteRename(req)
 	if err != nil {
-		t.Fatalf("执行更名失败: %v", err)
+		t.Fatalf("执锟叫革拷锟斤拷失锟斤拷: %v", err)
 	}
 	if !result.Success {
-		t.Fatalf("更名应当成功: %s", result.Message)
+		t.Fatalf("锟斤拷锟斤拷应锟斤拷锟缴癸拷: %s", result.Message)
 	}
 
-	// 验证自动补了 .mp4 扩展名
+	// 锟斤拷证锟皆讹拷锟斤拷锟斤拷 .mp4 锟斤拷展锟斤拷
 	renamedFile := filepath.Join(root, "renamed_movie.mp4")
 	if _, err := os.Stat(renamedFile); err != nil {
-		t.Errorf("自动补扩展名后文件应存在: %v", err)
+		t.Errorf("锟皆讹拷锟斤拷锟斤拷展锟斤拷锟斤拷锟侥硷拷应锟斤拷锟斤拷: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_目标已存在_不覆盖 测试目标文件已存在且不覆盖时返回错误
-func TestExecuteRename_目标已存在_不覆盖(t *testing.T) {
+// TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷锟斤拷 锟斤拷锟斤拷目锟斤拷锟侥硷拷锟窖达拷锟斤拷锟揭诧拷锟斤拷锟斤拷时锟斤拷锟截达拷锟斤拷
+func TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "source.mkv"), []byte("source"), 0644); err != nil {
-		t.Fatalf("创建源文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷源锟侥硷拷失锟斤拷: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "target.mkv"), []byte("exists"), 0644); err != nil {
-		t.Fatalf("创建目标文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷目锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID:  1,
@@ -523,38 +519,34 @@ func TestExecuteRename_目标已存在_不覆盖(t *testing.T) {
 
 	_, err := renameSvc.ExecuteRename(req)
 	if err == nil {
-		t.Fatal("目标文件已存在且不覆盖时应返回错误")
+		t.Fatal("目锟斤拷锟侥硷拷锟窖达拷锟斤拷锟揭诧拷锟斤拷锟斤拷时应锟斤拷锟截达拷锟斤拷")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_目标已存在_覆盖 测试目标文件已存在且覆盖时成功
-func TestExecuteRename_目标已存在_覆盖(t *testing.T) {
+// TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷 锟斤拷锟斤拷目锟斤拷锟侥硷拷锟窖达拷锟斤拷锟揭革拷锟斤拷时锟缴癸拷
+func TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "source.mkv"), []byte("new-content"), 0644); err != nil {
-		t.Fatalf("创建源文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷源锟侥硷拷失锟斤拷: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "target.mkv"), []byte("old-content"), 0644); err != nil {
-		t.Fatalf("创建目标文件失败: %v", err)
+		t.Fatalf("锟斤拷锟斤拷目锟斤拷锟侥硷拷失锟斤拷: %v", err)
 	}
 
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID:  1,
@@ -565,25 +557,25 @@ func TestExecuteRename_目标已存在_覆盖(t *testing.T) {
 
 	result, err := renameSvc.ExecuteRename(req)
 	if err != nil {
-		t.Fatalf("覆盖更名应成功: %v", err)
+		t.Fatalf("锟斤拷锟角革拷锟斤拷应锟缴癸拷: %v", err)
 	}
 	if !result.Success {
-		t.Fatalf("覆盖更名应成功: %s", result.Message)
+		t.Fatalf("锟斤拷锟角革拷锟斤拷应锟缴癸拷: %s", result.Message)
 	}
 
-	// 验证文件内容已被覆盖
+	// 锟斤拷证锟侥硷拷锟斤拷锟斤拷锟窖憋拷锟斤拷锟斤拷
 	content, _ := os.ReadFile(filepath.Join(root, "target.mkv"))
 	if string(content) != "new-content" {
-		t.Errorf("文件内容应当被覆盖: got=%q", string(content))
+		t.Errorf("锟侥硷拷锟斤拷锟斤拷应锟斤拷锟斤拷锟斤拷锟斤拷: got=%q", string(content))
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_115云盘_不支持 测试115云盘更名返回不支持
-func TestExecuteRename_115云盘_不支持(t *testing.T) {
+// TestExecuteRename_115锟斤拷锟斤拷_锟斤拷支锟斤拷 锟斤拷锟斤拷115锟斤拷锟教革拷锟斤拷锟斤拷锟截诧拷支锟斤拷
+func TestExecuteRename_115锟斤拷锟斤拷_锟斤拷支锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
@@ -592,13 +584,9 @@ func TestExecuteRename_115云盘_不支持(t *testing.T) {
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "cloud", domain.SourceTypeCloud115, "0", &cloud115ID, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "cloud", domain.SourceTypeCloud115, "0", "0", &cloud115ID, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID: 1,
@@ -608,16 +596,16 @@ func TestExecuteRename_115云盘_不支持(t *testing.T) {
 
 	_, err := renameSvc.ExecuteRename(req)
 	if err == nil {
-		t.Fatal("115云盘更名应返回不支持")
+		t.Fatal("115锟斤拷锟教革拷锟斤拷应锟斤拷锟截诧拷支锟斤拷")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
 
-// TestExecuteRename_源文件不存在 测试源文件不存在时返回错误
-func TestExecuteRename_源文件不存在(t *testing.T) {
+// TestExecuteRename_源锟侥硷拷锟斤拷锟斤拷锟斤拷 锟斤拷锟斤拷源锟侥硷拷锟斤拷锟斤拷锟斤拷时锟斤拷锟截达拷锟斤拷
+func TestExecuteRename_源锟侥硷拷锟斤拷锟斤拷锟斤拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
 
@@ -627,13 +615,9 @@ func TestExecuteRename_源文件不存在(t *testing.T) {
 	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, nil, 10, true, now, now)
-
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
-		FROM t_media_source WHERE id = $1`)).
-		WithArgs(1).
-		WillReturnRows(sourceRows)
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
 		SourceID: 1,
@@ -643,10 +627,42 @@ func TestExecuteRename_源文件不存在(t *testing.T) {
 
 	_, err := renameSvc.ExecuteRename(req)
 	if err == nil {
-		t.Fatal("源文件不存在时应返回错误")
+		t.Fatal("源锟侥硷拷锟斤拷锟斤拷锟斤拷时应锟斤拷锟截达拷锟斤拷")
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("未满足的期望: %v", err)
+		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
 	}
 }
+
+func TestRenameServiceNormalizeGeneratedNameRemovesDuplicatedTailAfterExtension(t *testing.T) {
+	svc := &RenameService{}
+
+	got := svc.normalizeGeneratedName(
+		"锟斤拷锟斤拷A锟轿ｏ拷锟斤拷锟桔碉拷锟铰匡拷锟斤拷 (2020).mp4锟斤拷锟斤拷A锟轿ｏ拷锟斤拷锟桔碉拷锟铰匡拷锟斤拷",
+		"Doraemon.2020.1080p.mkv",
+		".mp4",
+	)
+
+	if got != "锟斤拷锟斤拷A锟轿ｏ拷锟斤拷锟桔碉拷锟铰匡拷锟斤拷 (2020).mp4" {
+		t.Fatalf("unexpected normalized name: %q", got)
+	}
+}
+
+func TestRenameServiceNormalizeGeneratedNameRemovesDuplicatedTailAfterTemplateProvidedExtension(t *testing.T) {
+	svc := &RenameService{}
+
+	got := svc.normalizeGeneratedName(
+		"Mobile.Movie.2024..mp4Mobile.Movie.2024.",
+		"Mobile.Movie.2024.1080p.mkv",
+		".mkv",
+	)
+
+	if got != "Mobile.Movie.2024..mp4" {
+		t.Fatalf("unexpected normalized name with template extension: %q", got)
+	}
+}
+
+
+
+

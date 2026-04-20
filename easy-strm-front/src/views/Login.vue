@@ -32,12 +32,12 @@
         </div>
       </template>
       
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px" class="login-form">
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="80px" class="login-form" @submit.prevent="handleLogin">
         <el-form-item label="用户名" prop="name">
-          <el-input v-model="form.name" placeholder="请输入用户名" prefix-icon="User" />
+          <el-input v-model="form.name" placeholder="请输入用户名" :prefix-icon="User" @keyup.enter="handleLogin" />
         </el-form-item>
         <el-form-item label="密码" prop="password">
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" prefix-icon="Lock" show-password />
+          <el-input v-model="form.password" type="password" placeholder="请输入密码" :prefix-icon="Lock" show-password @keyup.enter="handleLogin" />
         </el-form-item>
         <el-form-item class="login-btn-container">
           <el-button type="primary" @click="handleLogin" :loading="loading" class="login-btn">
@@ -57,19 +57,20 @@
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Right } from '@element-plus/icons-vue'
-import { login } from '../utils/api'
+import { Lock, Right, User } from '@element-plus/icons-vue'
+import { login } from '../utils/api/auth'
 import md5 from 'crypto-js/md5'
 
 const formRef = ref(null)
 const loading = ref(false)
 const form = ref({
-  name: 'admin',
-  password: 'admin'
+  name: '',
+  password: ''
 })
 
 const rules = {
   name: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  // 仅做非空校验，避免把后端真实默认密码误判为无效
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
 }
 
@@ -84,8 +85,10 @@ const handleLogin = () => {
       const md5Password = md5(form.value.password).toString()
       
       login({
-        name: form.value.name,
+        name: form.value.name.trim(),
         password: md5Password
+      }, {
+        skipGlobalErrorMessage: true
       }).catch((error) => {
         const errorMsg = error.response?.data?.error || error.message || '登录失败，请检查用户名和密码'
         ElMessage.error(errorMsg)

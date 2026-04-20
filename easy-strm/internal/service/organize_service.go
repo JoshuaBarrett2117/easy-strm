@@ -1,17 +1,26 @@
 package service
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+	"github.com/go-redis/redis/v8"
+)
+
+const (
+	defaultPreviewConcurrency = 10
+	identifyCacheRedisTTL     = 7 * 24 * time.Hour
 )
 
 // OrganizeService 自动整理服务
@@ -20,11 +29,15 @@ type OrganizeService struct {
 	mediaSourceService   *MediaSourceService
 	tmdbService          *TmdbService
 	tmdbCacheDAO         *dao.TmdbCacheDAO
+	identifyCacheDAO     *dao.IdentifyCacheDAO
 	renameService        *RenameService
 	fileOperationService *FileOperationService
 	categoryDAO          *dao.MediaCategoryDAO
 	cloud115DAO          *dao.Cloud115DAO
+	systemConfigDAO      SystemConfigReader
+	scrapeService        *ScrapeService
 	client               Cloud115Client
+	redisClient          *redis.Client
 }
 
 // NewOrganizeService 创建自动整理服务实例
@@ -43,17 +56,24 @@ func NewOrganizeService(
 	fileOperationService *FileOperationService,
 	categoryDAO *dao.MediaCategoryDAO,
 	cloud115DAO *dao.Cloud115DAO,
+	systemConfigDAO SystemConfigReader,
+	scrapeService *ScrapeService,
 	client Cloud115Client,
+	redisClient *redis.Client,
 ) *OrganizeService {
 	return &OrganizeService{
 		mediaSourceService:   mediaSourceService,
 		tmdbService:          tmdbService,
 		tmdbCacheDAO:         dao.NewTmdbCacheDAO(),
+		identifyCacheDAO:     dao.NewIdentifyCacheDAO(),
 		renameService:        renameService,
 		fileOperationService: fileOperationService,
 		categoryDAO:          categoryDAO,
 		cloud115DAO:          cloud115DAO,
+		systemConfigDAO:      systemConfigDAO,
+		scrapeService:        scrapeService,
 		client:               client,
+		redisClient:          redisClient,
 	}
 }
 
@@ -96,6 +116,43 @@ type OrganizeCandidate struct {
 	FileName   string `json:"file_name"`
 	FilePath   string `json:"file_path"`
 	SourcePath string `json:"source_path"`
+}
+
+// OrganizePreviewTask 异步预览任务
+type OrganizePreviewTask struct {
+	TaskID     string        `json:"task_id"`
+	SourceID   int           `json:"source_id"`
+	SourcePath string        `json:"source_path"`
+	TargetPath string        `json:"target_path"`
+	MediaType  string        `json:"media_type"`
+	FileIDs    []string      `json:"file_ids"`
+	Status     string        `json:"status"` // pending, processing, completed, failed
+	Progress   *TaskProgress `json:"progress,omitempty"`
+	Result     *TaskResult   `json:"result,omitempty"`
+	Error      string        `json:"error,omitempty"`
+	CreatedAt  time.Time     `json:"created_at"`
+	UpdatedAt  time.Time     `json:"updated_at"`
+}
+
+// TaskProgress 任务进度
+type TaskProgress struct {
+	Total       int    `json:"total"`
+	Processed   int    `json:"processed"`
+	CurrentFile string `json:"current_file,omitempty"`
+}
+
+// TaskResult 任务结果
+type TaskResult struct {
+	Previews []OrganizePreview `json:"previews"`
+	Summary  *TaskSummary      `json:"summary"`
+}
+
+// TaskSummary 任务汇总
+type TaskSummary struct {
+	Total       int `json:"total"`
+	Conflicts   int `json:"conflicts"`
+	Failed      int `json:"failed"`
+	Processable int `json:"processable"`
 }
 
 const (
@@ -227,25 +284,234 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 
 	overrideMap := s.buildOrganizeManualOverrideMap(manualItems)
 
-	// 预览每个文件
+	// 并发预览每个文件
 	previews := make([]OrganizePreview, 0, len(files))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, defaultPreviewConcurrency)
+
 	for _, file := range files {
-		preview, err := s.previewFile(source, file, targetPath, template, categories, overrideMap)
-		if err != nil {
-			logger.Warnf("OrganizeService[PreviewOrganize] 预览文件失败: %s, error: %v", file.Name, err)
-			previews = append(previews, OrganizePreview{
-				FileID:        file.ID,
-				FileName:      file.Name,
-				FilePath:      file.Path,
-				IdentifyError: err.Error(),
-			})
-		} else {
-			previews = append(previews, *preview)
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+
+		go func(f domain.MediaFile) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			preview, err := s.previewFile(source, f, targetPath, template, categories, overrideMap)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				logger.Warnf("OrganizeService[PreviewOrganize] 预览文件失败: %s, error: %v", f.Name, err)
+				previews = append(previews, OrganizePreview{
+					FileID:        f.ID,
+					FileName:      f.Name,
+					FilePath:      f.Path,
+					IdentifyError: err.Error(),
+				})
+			} else {
+				previews = append(previews, *preview)
+			}
+		}(file)
 	}
+	wg.Wait()
 
 	logger.Infof("OrganizeService[PreviewOrganize] 预览完成: total=%d", len(previews))
 	return previews, nil
+}
+
+// GenerateTaskKey 生成任务Key
+func GenerateTaskKey(sourceID int, sourcePath string, fileIDs []string) string {
+	key := fmt.Sprintf("organize:preview:%d:%s", sourceID, sourcePath)
+	if len(fileIDs) > 0 {
+		key += ":" + strings.Join(fileIDs, ",")
+	}
+	return key
+}
+
+func (s *OrganizeService) persistPreviewTask(ctx context.Context, taskKey string, task *OrganizePreviewTask) error {
+	if s.redisClient == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+	if task == nil {
+		return fmt.Errorf("preview task is nil")
+	}
+
+	task.UpdatedAt = time.Now()
+	taskJSON, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal preview task failed: %w", err)
+	}
+
+	if err := s.redisClient.Set(ctx, taskKey, string(taskJSON), 24*time.Hour).Err(); err != nil {
+		return fmt.Errorf("persist preview task failed: %w", err)
+	}
+	return nil
+}
+
+// StartPreviewTask 启动异步预览任务
+func (s *OrganizeService) StartPreviewTask(sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) (string, error) {
+	if s.redisClient == nil {
+		return "", fmt.Errorf("预览任务存储未初始化")
+	}
+
+	taskID := fmt.Sprintf("preview_%d_%d", sourceID, time.Now().UnixNano())
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+
+	task := OrganizePreviewTask{
+		TaskID:     taskID,
+		SourceID:   sourceID,
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		MediaType:  mediaType,
+		FileIDs:    fileIDs,
+		Status:     "pending",
+		Progress:   &TaskProgress{},
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	ctx := context.Background()
+	if err := s.persistPreviewTask(ctx, taskKey, &task); err != nil {
+		return "", fmt.Errorf("保存任务失败: %v", err)
+	}
+
+	go s.runPreviewTask(taskID, sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+
+	return taskID, nil
+}
+
+// runPreviewTask 后台运行预览任务
+func (s *OrganizeService) runPreviewTask(taskID string, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) {
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+	ctx := context.Background()
+
+	task := OrganizePreviewTask{
+		TaskID:     taskID,
+		SourceID:   sourceID,
+		SourcePath: sourcePath,
+		TargetPath: targetPath,
+		MediaType:  mediaType,
+		FileIDs:    fileIDs,
+		Status:     "pending",
+		Progress:   &TaskProgress{},
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
+	if err != nil {
+		logger.Errorf("OrganizeService[runPreviewTask] 获取任务失败: %v", err)
+		return
+	}
+
+	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+		logger.Errorf("OrganizeService[runPreviewTask] 解析任务失败: %v", err)
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("预览任务数据损坏: %v", err)
+		if persistErr := s.persistPreviewTask(ctx, taskKey, &task); persistErr != nil {
+			logger.Errorf("OrganizeService[runPreviewTask] 更新任务失败: %v", persistErr)
+		}
+		return
+	}
+
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("预览任务异常中断: %v", panicErr)
+			if persistErr := s.persistPreviewTask(ctx, taskKey, &task); persistErr != nil {
+				logger.Errorf("OrganizeService[runPreviewTask] 更新异常任务失败: %v", persistErr)
+			}
+		}
+	}()
+
+	task.Status = "processing"
+	if err := s.persistPreviewTask(ctx, taskKey, &task); err != nil {
+		logger.Errorf("OrganizeService[runPreviewTask] 更新任务状态失败: %v", err)
+	}
+
+	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	if err != nil {
+		task.Status = "failed"
+		task.Error = err.Error()
+	} else {
+		conflictCount := 0
+		failedCount := 0
+		for _, preview := range previews {
+			if preview.Conflict {
+				conflictCount++
+			}
+			if preview.IdentifyError != "" {
+				failedCount++
+			}
+		}
+
+		task.Status = "completed"
+		task.Result = &TaskResult{
+			Previews: previews,
+			Summary: &TaskSummary{
+				Total:       len(previews),
+				Conflicts:   conflictCount,
+				Failed:      failedCount,
+				Processable: len(previews) - failedCount,
+			},
+		}
+	}
+
+	if err := s.persistPreviewTask(ctx, taskKey, &task); err != nil {
+		logger.Errorf("OrganizeService[runPreviewTask] 保存最终任务失败: %v", err)
+	}
+}
+
+// GetPreviewTaskStatus 获取预览任务状态
+func (s *OrganizeService) GetPreviewTaskStatus(taskID string) (*OrganizePreviewTask, error) {
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+	ctx := context.Background()
+
+	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("获取任务状态失败: %v", err)
+	}
+
+	var task OrganizePreviewTask
+	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+		return nil, fmt.Errorf("解析任务失败: %v", err)
+	}
+
+	return &task, nil
+}
+
+// CheckRestorableTask 检查是否有可恢复的任务
+func (s *OrganizeService) CheckRestorableTask(sourceID int, sourcePath string, fileIDs []string) (*OrganizePreviewTask, error) {
+	// StartPreviewTask 使用的是 organize:task:preview_<sourceID>_<timestamp>
+	pattern := fmt.Sprintf("organize:task:preview_%d_*", sourceID)
+	ctx := context.Background()
+
+	keys, err := s.redisClient.Keys(ctx, pattern).Result()
+	if err != nil || len(keys) == 0 {
+		return nil, nil
+	}
+
+	for _, key := range keys {
+		taskJSON, err := s.redisClient.Get(ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		var task OrganizePreviewTask
+		if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+			continue
+		}
+
+		if task.Status == "processing" || task.Status == "pending" {
+			return &task, nil
+		}
+	}
+
+	return nil, nil
 }
 
 // OrganizeDirectory 整理目录
@@ -264,22 +530,19 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizeResult, error) {
 	operationMode = normalizeOrganizeOperationMode(operationMode)
 	if operationMode == "" {
-		return nil, fmt.Errorf("不支持的整理方式")
+		return nil, fmt.Errorf("unsupported organize mode")
 	}
 
-	logger.Infof("OrganizeService[OrganizeDirectory] 开始整理: source_id=%d, source_path=%s, target_path=%s, operation_mode=%s",
+	logger.Infof("OrganizeService[OrganizeDirectory] start: source_id=%d, source_path=%s, target_path=%s, operation_mode=%s",
 		sourceID, sourcePath, targetPath, operationMode)
 
-	// 先预览
 	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 	if err != nil {
 		return nil, err
 	}
 
-	// 执行整理
 	results := make([]OrganizeResult, 0, len(previews))
 	for _, preview := range previews {
-		// 跳过识别失败的文件
 		if preview.IdentifyError != "" {
 			results = append(results, OrganizeResult{
 				FileID:   preview.FileID,
@@ -292,7 +555,7 @@ func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath
 
 		result, err := s.organizeFile(sourceID, preview, conflictPolicy, operationMode)
 		if err != nil {
-			logger.Warnf("OrganizeService[OrganizeDirectory] 整理文件失败: %s, error: %v", preview.FileName, err)
+			logger.Warnf("OrganizeService[OrganizeDirectory] organize failed: %s, error: %v", preview.FileName, err)
 			results = append(results, OrganizeResult{
 				FileID:   preview.FileID,
 				FileName: preview.FileName,
@@ -300,13 +563,53 @@ func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath
 				Message:  err.Error(),
 				OldPath:  preview.FilePath,
 			})
-		} else {
-			results = append(results, *result)
+			continue
 		}
+
+		s.maybeScrapeOrganizedResult(sourceID, *result)
+		results = append(results, *result)
 	}
 
-	logger.Infof("OrganizeService[OrganizeDirectory] 整理完成: total=%d", len(results))
+	logger.Infof("OrganizeService[OrganizeDirectory] completed: total=%d", len(results))
 	return results, nil
+}
+
+func (s *OrganizeService) maybeScrapeOrganizedResult(sourceID int, result OrganizeResult) {
+	if s.scrapeService == nil || !result.Success || result.Skipped || strings.TrimSpace(result.NewPath) == "" {
+		return
+	}
+	if !s.getBoolConfig("scrape_enabled_on_organize", true) {
+		return
+	}
+	if !filepath.IsAbs(result.NewPath) {
+		return
+	}
+	if _, err := os.Stat(result.NewPath); err != nil {
+		logger.Warnf("OrganizeService[maybeScrapeOrganizedResult] skip scrape because file is missing: path=%s err=%v", result.NewPath, err)
+		return
+	}
+
+	if _, _, _, err := s.scrapeService.ScrapeAbsoluteFile(sourceID, result.NewPath); err != nil {
+		logger.Warnf("OrganizeService[maybeScrapeOrganizedResult] scrape failed: path=%s err=%v", result.NewPath, err)
+	}
+}
+
+func (s *OrganizeService) getBoolConfig(key string, defaultValue bool) bool {
+	if s.systemConfigDAO == nil {
+		return defaultValue
+	}
+	config, err := s.systemConfigDAO.GetByKey(key)
+	if err != nil || config == nil {
+		return defaultValue
+	}
+	switch strings.ToLower(strings.TrimSpace(config.ConfigVal)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }
 
 func (s *OrganizeService) filterFilesByIDs(files []domain.MediaFile, fileIDs []string) []domain.MediaFile {
@@ -666,7 +969,7 @@ func (s *OrganizeService) prependCategoryTargetPath(targetPath, categoryPath str
 }
 
 func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.MediaFile, targetPath, template string, categories []*domain.MediaCategory, overrideMap map[string]domain.OrganizeManualOverride) (*OrganizePreview, error) {
-	identifyResult, err := s.getPreferredIdentifyResult(file, s.matchOrganizeManualOverride(file, overrideMap))
+	identifyResult, err := s.getPreferredIdentifyResult(file, s.matchOrganizeManualOverride(file, overrideMap), source.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -695,36 +998,9 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 		return nil, fmt.Errorf("生成更名预览失败: %v", err)
 	}
 
-	// 构建目标路径: 检查新文件名是否包含目录结构（由模板生成）
-	generatedName := renameResult.NewName
-	var folderName string
-	if strings.Contains(generatedName, "/") || strings.Contains(generatedName, "\\") {
-		// 模版自身定义了多级结构，不再强制嵌套 title 目录
-		folderName = filepath.Dir(generatedName)
-		if folderName == "." {
-			folderName = ""
-		}
-		// renameResult.NewName 只保留纯文件名，便于后续 115云盘/本地 API 的精确落子
-		renameResult.NewName = filepath.Base(generatedName)
-	} else {
-		// 对于没有附带目录的文件（默认电影），自动包裹一层与其同名的目录，以满足 Plex/Emby 标准
-		folderName = ""
-	}
-
-	if strings.Contains(generatedName, "/") || strings.Contains(generatedName, "\\") {
-		renameResult.NewName = filepath.Base(generatedName)
-	}
-
-	var finalTargetPath string
-	if folderName != "" {
-		finalTargetPath = filepath.Join(targetPath, s.sanitizeFolderName(folderName))
-	} else {
-		finalTargetPath = targetPath
-	}
-
-	finalTargetPath, newName, newPath := s.buildOrganizeTargetPath(targetPath, generatedName)
+	finalTargetPath, newName, newPath := s.buildOrganizeTargetPath(targetPath, renameResult.NewName)
 	if source.SourceType == domain.SourceTypeCloud115 {
-		finalTargetPath, newName, newPath = s.buildCloud115OrganizeTargetPath(targetPath, generatedName)
+		finalTargetPath, newName, newPath = s.buildCloud115OrganizeTargetPath(targetPath, renameResult.NewName)
 	}
 	renameResult.NewName = newName
 	conflict := false
@@ -757,12 +1033,20 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 	}, nil
 }
 
-func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manualOverride *domain.OrganizeManualOverride) (*domain.TmdbIdentifyResult, error) {
+func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manualOverride *domain.OrganizeManualOverride, sourceID int) (*domain.TmdbIdentifyResult, error) {
 	if manualOverride != nil {
-		return s.buildManualIdentifyResult(file, *manualOverride), nil
+		result := s.buildManualIdentifyResult(file, *manualOverride)
+		if s.tmdbService != nil {
+			s.tmdbService.EnsureIdentifyMetadata(result)
+		}
+		s.saveIdentifyResultToCache(file, result, sourceID, true)
+		return result, nil
 	}
 
 	if cached := s.getCachedIdentifyResult(file); cached != nil {
+		if s.tmdbService != nil {
+			s.tmdbService.EnsureIdentifyMetadata(cached)
+		}
 		return cached, nil
 	}
 
@@ -773,6 +1057,12 @@ func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manu
 	if !identifyResult.Success {
 		return nil, fmt.Errorf("识别失败: %s", identifyResult.Message)
 	}
+
+	if s.tmdbService != nil {
+		s.tmdbService.EnsureIdentifyMetadata(identifyResult)
+	}
+	s.saveIdentifyResultToCache(file, identifyResult, sourceID, false)
+
 	return identifyResult, nil
 }
 
@@ -832,54 +1122,180 @@ func (s *OrganizeService) buildManualIdentifyResult(file domain.MediaFile, item 
 }
 
 func (s *OrganizeService) getCachedIdentifyResult(file domain.MediaFile) *domain.TmdbIdentifyResult {
-	if s.tmdbCacheDAO == nil || s.tmdbService == nil {
+	if s.identifyCacheDAO == nil && (s.tmdbCacheDAO == nil || s.tmdbService == nil) {
 		return nil
 	}
 
-	keys := make([]string, 0, 3)
-	for _, key := range []string{file.ID, file.CID, strings.ToLower(strings.TrimSpace(file.Name))} {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		seen := false
-		for _, existing := range keys {
-			if existing == key {
-				seen = true
-				break
-			}
-		}
-		if !seen {
-			keys = append(keys, key)
-		}
+	fileHash := dao.FileHash(file.Name)
+
+	if cached := s.getIdentifyCacheFromRedis(fileHash); cached != nil {
+		logger.Debugf("OrganizeService[getCachedIdentifyResult] Redis命中: %s", file.Name)
+		return cached
 	}
 
-	for _, key := range keys {
-		for _, mediaType := range []string{"movie", "tv"} {
-			cache, err := s.tmdbCacheDAO.GetByQueryKey(key, mediaType)
-			if err != nil || cache == nil {
+	if cached := s.getIdentifyCacheFromDB(fileHash); cached != nil {
+		s.saveIdentifyCacheToRedis(fileHash, cached)
+		logger.Debugf("OrganizeService[getCachedIdentifyResult] 数据库命中: %s", file.Name)
+		return cached
+	}
+
+	if s.tmdbCacheDAO != nil && s.tmdbService != nil {
+		keys := make([]string, 0, 3)
+		for _, key := range []string{file.ID, file.CID, strings.ToLower(strings.TrimSpace(file.Name))} {
+			key = strings.TrimSpace(key)
+			if key == "" {
 				continue
 			}
-
-			result := &domain.TmdbIdentifyResult{
-				Success:       true,
-				Message:       "使用已有识别结果",
-				Filename:      file.Name,
-				MediaType:     cache.MediaType,
-				TmdbID:        cache.TmdbID,
-				Title:         cache.Title,
-				OriginalTitle: cache.OriginalTitle,
-				Year:          cache.Year,
-				SeasonNumber:  cache.SeasonNumber,
-				EpisodeNumber: cache.EpisodeNumber,
+			seen := false
+			for _, existing := range keys {
+				if existing == key {
+					seen = true
+					break
+				}
 			}
-			applyCachedMetadata(result, cache.RawData)
-			s.tmdbService.enrichCachedIdentifyMetadata(result, cache)
-			return result
+			if !seen {
+				keys = append(keys, key)
+			}
+		}
+
+		for _, key := range keys {
+			for _, mediaType := range []string{"movie", "tv"} {
+				cache, err := s.tmdbCacheDAO.GetByQueryKey(key, mediaType)
+				if err != nil || cache == nil {
+					continue
+				}
+
+				result := &domain.TmdbIdentifyResult{
+					Success:       true,
+					Message:       "使用已有识别结果",
+					Filename:      file.Name,
+					MediaType:     cache.MediaType,
+					TmdbID:        cache.TmdbID,
+					Title:         cache.Title,
+					OriginalTitle: cache.OriginalTitle,
+					Year:          cache.Year,
+					SeasonNumber:  cache.SeasonNumber,
+					EpisodeNumber: cache.EpisodeNumber,
+				}
+				applyCachedMetadata(result, cache.RawData)
+				s.tmdbService.enrichCachedIdentifyMetadata(result, cache)
+				return result
+			}
 		}
 	}
 
 	return nil
+}
+
+func (s *OrganizeService) getIdentifyCacheFromRedis(fileHash string) *domain.TmdbIdentifyResult {
+	if s.redisClient == nil {
+		return nil
+	}
+	key := fmt.Sprintf("identify:cache:%s", fileHash)
+	ctx := context.Background()
+	value, err := s.redisClient.Get(ctx, key).Result()
+	if err != nil || value == "" {
+		return nil
+	}
+	var cache struct {
+		MediaType     string `json:"media_type"`
+		TmdbID        int    `json:"tmdb_id"`
+		Title         string `json:"title"`
+		OriginalTitle string `json:"original_title"`
+		Year          int    `json:"year"`
+		SeasonNumber  int    `json:"season_number"`
+		EpisodeNumber int    `json:"episode_number"`
+		PosterURL     string `json:"poster_path"`
+		IsManual      bool   `json:"is_manual"`
+	}
+	if err := json.Unmarshal([]byte(value), &cache); err != nil {
+		logger.Warnf("OrganizeService[getIdentifyCacheFromRedis] JSON解析失败: %v", err)
+		return nil
+	}
+	return &domain.TmdbIdentifyResult{
+		Success:       true,
+		Message:       "使用已有识别结果",
+		Filename:      "",
+		MediaType:     cache.MediaType,
+		TmdbID:        cache.TmdbID,
+		Title:         cache.Title,
+		OriginalTitle: cache.OriginalTitle,
+		Year:          cache.Year,
+		SeasonNumber:  cache.SeasonNumber,
+		EpisodeNumber: cache.EpisodeNumber,
+	}
+}
+
+func (s *OrganizeService) getIdentifyCacheFromDB(fileHash string) *domain.TmdbIdentifyResult {
+	cache, err := s.identifyCacheDAO.GetByFileHash(fileHash)
+	if err != nil || cache == nil {
+		return nil
+	}
+	return &domain.TmdbIdentifyResult{
+		Success:       true,
+		Message:       "使用已有识别结果",
+		Filename:      cache.FileName,
+		MediaType:     cache.MediaType,
+		TmdbID:        cache.TmdbID,
+		Title:         cache.Title,
+		OriginalTitle: cache.OriginalTitle,
+		Year:          cache.Year,
+		SeasonNumber:  cache.SeasonNumber,
+		EpisodeNumber: cache.EpisodeNumber,
+	}
+}
+
+func (s *OrganizeService) saveIdentifyCacheToRedis(fileHash string, result *domain.TmdbIdentifyResult) {
+	if s.redisClient == nil {
+		return
+	}
+	key := fmt.Sprintf("identify:cache:%s", fileHash)
+	data := map[string]interface{}{
+		"media_type":     result.MediaType,
+		"tmdb_id":        result.TmdbID,
+		"title":          result.Title,
+		"original_title": result.OriginalTitle,
+		"year":           result.Year,
+		"season_number":  result.SeasonNumber,
+		"episode_number": result.EpisodeNumber,
+	}
+	jsonData, err := json.Marshal(data)
+	if err != nil {
+		logger.Warnf("OrganizeService[saveIdentifyCacheToRedis] JSON序列化失败: %v", err)
+		return
+	}
+	ctx := context.Background()
+	if err := s.redisClient.Set(ctx, key, string(jsonData), identifyCacheRedisTTL).Err(); err != nil {
+		logger.Warnf("OrganizeService[saveIdentifyCacheToRedis] 保存Redis失败: %v", err)
+	}
+}
+
+func (s *OrganizeService) saveIdentifyCacheToDB(fileHash, fileName string, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) {
+	cache := &dao.IdentifyCache{
+		FileHash:      fileHash,
+		FileName:      fileName,
+		MediaType:     result.MediaType,
+		TmdbID:        result.TmdbID,
+		Title:         result.Title,
+		OriginalTitle: result.OriginalTitle,
+		Year:          result.Year,
+		SeasonNumber:  result.SeasonNumber,
+		EpisodeNumber: result.EpisodeNumber,
+		IsManual:      isManual,
+		SourceID:      sourceID,
+	}
+	if err := s.identifyCacheDAO.CreateOrUpdate(cache); err != nil {
+		logger.Warnf("OrganizeService[saveIdentifyCacheToDB] 保存数据库失败: %v", err)
+	}
+}
+
+func (s *OrganizeService) saveIdentifyResultToCache(file domain.MediaFile, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) {
+	if s.identifyCacheDAO == nil {
+		return
+	}
+	fileHash := dao.FileHash(file.Name)
+	s.saveIdentifyCacheToRedis(fileHash, result)
+	s.saveIdentifyCacheToDB(fileHash, file.Name, result, sourceID, isManual)
 }
 
 // sanitizeFolderName 移除文件名中不支持的特殊字符
@@ -1212,7 +1628,7 @@ func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, co
 
 	return &OrganizeResult{
 		FileID:   preview.FileID,
-		FileName: preview.FileName,
+		FileName: preview.NewName,
 		Success:  true,
 		Skipped:  false,
 		Message:  organizeOperationSuccessMessage(operationMode),
@@ -1332,6 +1748,44 @@ func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domai
 // 返回:
 //   - []domain.RenamePreviewResult: 预览结果列表
 //   - error: 错误信息
+// BatchIdentifyDirectory 递归扫描目录后批量识别视频文件
+func (s *OrganizeService) BatchIdentifyDirectory(sourceID int, sourcePath string, fileIDs []string) ([]domain.TmdbIdentifyResult, error) {
+	candidates, err := s.ListOrganizeCandidates(sourceID, sourcePath, "all", fileIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return []domain.TmdbIdentifyResult{}, nil
+	}
+
+	ids := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		ids = append(ids, candidate.FileID)
+	}
+	return s.BatchIdentify(sourceID, ids)
+}
+
+// ScrapeDirectory 递归扫描目录后批量刮削视频文件
+func (s *OrganizeService) ScrapeDirectory(sourceID int, sourcePath string, fileIDs []string) ([]ScrapeResult, error) {
+	if s.scrapeService == nil {
+		return nil, fmt.Errorf("刮削服务未初始化")
+	}
+
+	candidates, err := s.ListOrganizeCandidates(sourceID, sourcePath, "all", fileIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		return []ScrapeResult{}, nil
+	}
+
+	filePaths := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		filePaths = append(filePaths, candidate.FilePath)
+	}
+	return s.scrapeService.ScrapeFiles(sourceID, filePaths)
+}
+
 func (s *OrganizeService) BatchRenamePreview(items []domain.RenamePreviewRequest) ([]domain.RenamePreviewResult, error) {
 	logger.Infof("OrganizeService[BatchRenamePreview] 开始批量预览: count=%d", len(items))
 

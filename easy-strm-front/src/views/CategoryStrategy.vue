@@ -161,7 +161,8 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
+import { showConfirmDialog } from '../utils/ui/messageBox'
 import {
   CollectionTag,
   Delete,
@@ -409,7 +410,7 @@ const handleDelete = () => {
     return
   }
 
-  ElMessageBox.confirm(`确定删除分类策略「${form.value.name}」吗？`, '删除确认', {
+  showConfirmDialog(`确定删除分类策略「${form.value.name}」吗？`, '删除确认', {
     confirmButtonText: '删除',
     cancelButtonText: '取消',
     type: 'warning'

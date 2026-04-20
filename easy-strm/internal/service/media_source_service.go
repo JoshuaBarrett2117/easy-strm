@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"fmt"
@@ -79,6 +79,69 @@ func (s *MediaSourceService) GetEnabled() ([]*domain.MediaSource, error) {
 	return s.mediaSourceDAO.GetEnabled()
 }
 
+// GetWatchEnabled 获取启用目录监控的媒体源
+func (s *MediaSourceService) GetWatchEnabled() ([]*domain.MediaSource, error) {
+	return s.mediaSourceDAO.GetWatchEnabled()
+}
+
+func normalizeMediaType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "all":
+		return "all"
+	case "movie", "tv":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "all"
+	}
+}
+
+func normalizeConflictPolicy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "skip":
+		return "skip"
+	case "overwrite", "suffix":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "skip"
+	}
+}
+
+func normalizeOperationMode(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "move":
+		return "move"
+	case "copy", "hardlink", "symlink":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "move"
+	}
+}
+
+func normalizeWatchPath(sourceType, path, watchPath string, watchEnabled bool) (string, error) {
+	watchPath = strings.TrimSpace(watchPath)
+	path = strings.TrimSpace(path)
+
+	if watchPath != "" {
+		return watchPath, nil
+	}
+
+	if sourceType == domain.SourceTypeCloud115 {
+		if watchEnabled {
+			return "", fmt.Errorf("115 目录监控需要指定监控目录")
+		}
+		if path != "" {
+			return path, nil
+		}
+		return "", nil
+	}
+
+	if path != "" {
+		return path, nil
+	}
+
+	return "", nil
+}
+
 // Create 创建媒体源
 // 参数:
 //   - name: 媒体源名称
@@ -91,7 +154,7 @@ func (s *MediaSourceService) GetEnabled() ([]*domain.MediaSource, error) {
 // 返回:
 //   - *domain.MediaSource: 创建的媒体源
 //   - error: 错误信息
-func (s *MediaSourceService) Create(name, sourceType, path string, cloud115ID *int, priority int, enabled bool) (*domain.MediaSource, error) {
+func (s *MediaSourceService) Create(name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
 	// 验证媒体源类型
 	if sourceType != domain.SourceTypeLocal && sourceType != domain.SourceTypeCloud115 {
 		return nil, fmt.Errorf("无效的媒体源类型")
@@ -103,6 +166,20 @@ func (s *MediaSourceService) Create(name, sourceType, path string, cloud115ID *i
 	}
 	if path == "" {
 		return nil, fmt.Errorf("路径不能为空")
+	}
+
+	watchPath, err := normalizeWatchPath(sourceType, path, watchPath, watchEnabled)
+	if err != nil {
+		return nil, err
+	}
+	mediaType = normalizeMediaType(mediaType)
+	conflictPolicy = normalizeConflictPolicy(conflictPolicy)
+	operationMode = normalizeOperationMode(operationMode)
+	if !watchEnabled {
+		autoOrganize = false
+	}
+	if watchInterval <= 0 {
+		watchInterval = 1800
 	}
 
 	// 验证115账号
@@ -128,7 +205,7 @@ func (s *MediaSourceService) Create(name, sourceType, path string, cloud115ID *i
 	}
 
 	// 创建媒体源
-	source, err := s.mediaSourceDAO.Create(name, sourceType, path, cloud115ID, priority, enabled)
+	source, err := s.mediaSourceDAO.Create(name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID)
 	if err != nil {
 		logger.Errorf("MediaSourceService[Create] 创建媒体源失败: %v", err)
 		return nil, fmt.Errorf("创建媒体源失败: %v", err)
@@ -151,7 +228,7 @@ func (s *MediaSourceService) Create(name, sourceType, path string, cloud115ID *i
 // 返回:
 //   - *domain.MediaSource: 更新后的媒体源
 //   - error: 错误信息
-func (s *MediaSourceService) Update(id int, name, sourceType, path string, cloud115ID *int, priority int, enabled bool) (*domain.MediaSource, error) {
+func (s *MediaSourceService) Update(id int, name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
 	// 验证媒体源类型
 	if sourceType != domain.SourceTypeLocal && sourceType != domain.SourceTypeCloud115 {
 		return nil, fmt.Errorf("无效的媒体源类型")
@@ -163,6 +240,20 @@ func (s *MediaSourceService) Update(id int, name, sourceType, path string, cloud
 	}
 	if path == "" {
 		return nil, fmt.Errorf("路径不能为空")
+	}
+
+	watchPath, err := normalizeWatchPath(sourceType, path, watchPath, watchEnabled)
+	if err != nil {
+		return nil, err
+	}
+	mediaType = normalizeMediaType(mediaType)
+	conflictPolicy = normalizeConflictPolicy(conflictPolicy)
+	operationMode = normalizeOperationMode(operationMode)
+	if !watchEnabled {
+		autoOrganize = false
+	}
+	if watchInterval <= 0 {
+		watchInterval = 1800
 	}
 
 	// 验证115账号
@@ -180,7 +271,7 @@ func (s *MediaSourceService) Update(id int, name, sourceType, path string, cloud
 	}
 
 	// 更新媒体源
-	source, err := s.mediaSourceDAO.Update(id, name, sourceType, path, cloud115ID, priority, enabled)
+	source, err := s.mediaSourceDAO.Update(id, name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID)
 	if err != nil {
 		logger.Errorf("MediaSourceService[Update] 更新媒体源失败: %v", err)
 		return nil, fmt.Errorf("更新媒体源失败: %v", err)

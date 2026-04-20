@@ -1,4 +1,4 @@
-package controller
+﻿package controller
 
 import (
 	"fmt"
@@ -19,15 +19,22 @@ import (
 type MediaSourceController struct {
 	mediaSourceService *service.MediaSourceService
 	cloud115Service    *service.Cloud115Service
+	watchService       watchLifecycle
 	client             service.Cloud115Client
 	tmdbCacheDAO       *dao.TmdbCacheDAO
 }
 
+type watchLifecycle interface {
+	StartWatching(sourceID int) error
+	StopWatching(sourceID int)
+}
+
 // NewMediaSourceController 创建媒体源控制器实例
-func NewMediaSourceController(mediaSourceService *service.MediaSourceService, cloud115Service *service.Cloud115Service, client service.Cloud115Client) *MediaSourceController {
+func NewMediaSourceController(mediaSourceService *service.MediaSourceService, cloud115Service *service.Cloud115Service, watchService watchLifecycle, client service.Cloud115Client) *MediaSourceController {
 	return &MediaSourceController{
 		mediaSourceService: mediaSourceService,
 		cloud115Service:    cloud115Service,
+		watchService:       watchService,
 		client:             client,
 		tmdbCacheDAO:       dao.NewTmdbCacheDAO(),
 	}
@@ -75,12 +82,21 @@ func (c *MediaSourceController) GetByID(ctx *gin.Context) {
 // POST /api/media/sources
 func (c *MediaSourceController) Create(ctx *gin.Context) {
 	var req struct {
-		Name        string `json:"name" binding:"required"`
-		SourceType  string `json:"source_type" binding:"required"`
-		Path        string `json:"path" binding:"required"`
-		Cloud115ID  *int   `json:"cloud115_id"`
-		Priority    int    `json:"priority"`
-		Enabled     bool   `json:"enabled"`
+		Name               string `json:"name" binding:"required"`
+		SourceType         string `json:"source_type" binding:"required"`
+		Path               string `json:"path" binding:"required"`
+		WatchPath          string `json:"watch_path"`
+		Cloud115ID         *int   `json:"cloud115_id"`
+		Priority           int    `json:"priority"`
+		Enabled            bool   `json:"enabled"`
+		OrganizeTargetPath string `json:"organize_target_path"`
+		MediaType          string `json:"media_type"`
+		ConflictPolicy     string `json:"conflict_policy"`
+		OperationMode      string `json:"operation_mode"`
+		AutoOrganize       bool   `json:"auto_organize"`
+		WatchEnabled       bool   `json:"watch_enabled"`
+		WatchInterval      int    `json:"watch_interval"`
+		EmbyLibraryID      string `json:"emby_library_id"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -101,15 +117,30 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 			logger.Warnf("MediaSourceController[Create] 本地路径不存在或无法访问，但仍允许创建: %s, 错误: %v", req.Path, err)
 			// 不返回错误，允许创建媒体源
 		}
+		if req.WatchPath != "" && req.WatchPath != req.Path {
+			if err := c.mediaSourceService.ValidateLocalPath(req.WatchPath); err != nil {
+				ErrorResp(ctx, http.StatusBadRequest, "监控目录无效")
+				return
+			}
+		}
 	}
 
 	source, err := c.mediaSourceService.Create(
 		req.Name,
 		req.SourceType,
 		req.Path,
+		req.WatchPath,
 		req.Cloud115ID,
 		req.Priority,
 		req.Enabled,
+		req.OrganizeTargetPath,
+		req.MediaType,
+		req.ConflictPolicy,
+		req.OperationMode,
+		req.AutoOrganize,
+		req.WatchEnabled,
+		req.WatchInterval,
+		req.EmbyLibraryID,
 	)
 	if err != nil {
 		logger.Errorf("MediaSourceController[Create] 创建失败: %v", err)
@@ -118,6 +149,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 	}
 
 	logger.Infof("MediaSourceController[Create] 创建媒体源成功: %s (ID: %d)", source.Name, source.ID)
+	c.syncWatchState(source)
 	SuccessResp(ctx, gin.H{
 		"message": "创建成功",
 		"data":    source,
@@ -137,12 +169,21 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 	// 更新请求体：所有字段均为可选，支持部分更新
 	// 业务背景：用户可能只想更新名称或优先级，无需提供完整信息
 	var req struct {
-		Name        *string `json:"name"`
-		SourceType  *string `json:"source_type"`
-		Path        *string `json:"path"`
-		Cloud115ID  *int    `json:"cloud115_id"`
-		Priority    *int    `json:"priority"`
-		Enabled     *bool   `json:"enabled"`
+		Name               *string `json:"name"`
+		SourceType         *string `json:"source_type"`
+		Path               *string `json:"path"`
+		WatchPath          *string `json:"watch_path"`
+		Cloud115ID         *int    `json:"cloud115_id"`
+		Priority           *int    `json:"priority"`
+		Enabled            *bool   `json:"enabled"`
+		OrganizeTargetPath *string `json:"organize_target_path"`
+		MediaType          *string `json:"media_type"`
+		ConflictPolicy     *string `json:"conflict_policy"`
+		OperationMode      *string `json:"operation_mode"`
+		AutoOrganize       *bool   `json:"auto_organize"`
+		WatchEnabled       *bool   `json:"watch_enabled"`
+		WatchInterval      *int    `json:"watch_interval"`
+		EmbyLibraryID      *string `json:"emby_library_id"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -175,6 +216,11 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		path = *req.Path
 	}
 
+	watchPath := existingSource.WatchPath
+	if req.WatchPath != nil {
+		watchPath = *req.WatchPath
+	}
+
 	cloud115ID := existingSource.Cloud115ID
 	if req.Cloud115ID != nil {
 		cloud115ID = req.Cloud115ID
@@ -190,12 +236,58 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		enabled = *req.Enabled
 	}
 
+	organizeTargetPath := existingSource.OrganizeTargetPath
+	if req.OrganizeTargetPath != nil {
+		organizeTargetPath = *req.OrganizeTargetPath
+	}
+
+	mediaType := existingSource.MediaType
+	if req.MediaType != nil {
+		mediaType = *req.MediaType
+	}
+
+	conflictPolicy := existingSource.ConflictPolicy
+	if req.ConflictPolicy != nil {
+		conflictPolicy = *req.ConflictPolicy
+	}
+
+	operationMode := existingSource.OperationMode
+	if req.OperationMode != nil {
+		operationMode = *req.OperationMode
+	}
+
+	autoOrganize := existingSource.AutoOrganize
+	if req.AutoOrganize != nil {
+		autoOrganize = *req.AutoOrganize
+	}
+
+	watchEnabled := existingSource.WatchEnabled
+	if req.WatchEnabled != nil {
+		watchEnabled = *req.WatchEnabled
+	}
+
+	watchInterval := existingSource.WatchInterval
+	if req.WatchInterval != nil {
+		watchInterval = *req.WatchInterval
+	}
+
+	embyLibraryID := existingSource.EmbyLibraryID
+	if req.EmbyLibraryID != nil {
+		embyLibraryID = *req.EmbyLibraryID
+	}
+
 	// 验证本地路径（路径不存在时仅警告，不阻止更新）
 	// 业务背景：用户可能先配置媒体源，稍后再创建目录
 	if sourceType == domain.SourceTypeLocal {
 		if err := c.mediaSourceService.ValidateLocalPath(path); err != nil {
 			logger.Warnf("MediaSourceController[Update] 本地路径不存在或无法访问，但仍允许更新: %s, 错误: %v", path, err)
 			// 不返回错误，允许更新媒体源
+		}
+		if watchPath != "" && watchPath != path {
+			if err := c.mediaSourceService.ValidateLocalPath(watchPath); err != nil {
+				ErrorResp(ctx, http.StatusBadRequest, "监控目录无效")
+				return
+			}
 		}
 	}
 
@@ -204,9 +296,18 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		name,
 		sourceType,
 		path,
+		watchPath,
 		cloud115ID,
 		priority,
 		enabled,
+		organizeTargetPath,
+		mediaType,
+		conflictPolicy,
+		operationMode,
+		autoOrganize,
+		watchEnabled,
+		watchInterval,
+		embyLibraryID,
 	)
 	if err != nil {
 		logger.Errorf("MediaSourceController[Update] 更新失败: %v", err)
@@ -215,6 +316,7 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 	}
 
 	logger.Infof("MediaSourceController[Update] 更新媒体源成功: %s (ID: %d)", source.Name, id)
+	c.syncWatchState(source)
 	SuccessResp(ctx, gin.H{
 		"message": "更新成功",
 		"data":    source,
@@ -237,9 +339,30 @@ func (c *MediaSourceController) Delete(ctx *gin.Context) {
 	}
 
 	logger.Infof("MediaSourceController[Delete] 删除媒体源成功: ID %d", id)
+	c.stopWatchState(id)
 	SuccessResp(ctx, gin.H{
 		"message": "删除成功",
 	})
+}
+
+func (c *MediaSourceController) syncWatchState(source *domain.MediaSource) {
+	if c.watchService == nil || source == nil {
+		return
+	}
+
+	c.watchService.StopWatching(source.ID)
+	if source.Enabled && source.WatchEnabled {
+		if err := c.watchService.StartWatching(source.ID); err != nil {
+			logger.Warnf("MediaSourceController[syncWatchState] 启动监控失败: source_id=%d, error=%v", source.ID, err)
+		}
+	}
+}
+
+func (c *MediaSourceController) stopWatchState(sourceID int) {
+	if c.watchService == nil {
+		return
+	}
+	c.watchService.StopWatching(sourceID)
 }
 
 // GetFiles 获取文件列表

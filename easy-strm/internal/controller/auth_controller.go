@@ -1,14 +1,23 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
+	"time"
 
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
+
+// UserInfo 用户信息（用于回调注入时传递用户数据）
+type UserInfo struct {
+	ID         int
+	Name       string
+	Password   string
+	CreateTime time.Time
+	UpdateTime time.Time
+}
 
 type AuthController struct {
 	authService *service.AuthService
@@ -17,6 +26,27 @@ type AuthController struct {
 		Get(key string) (string, error)
 		Del(key string) error
 	}
+
+	// --- 回调依赖：main 包全局函数通过依赖注入解耦 ---
+	// NOTE: 以下函数属于 main 包，无法在 controller 层直接引用，
+	// 因此通过回调模式注入，与 CronController/LogController 保持一致
+
+	// getUserByName: 根据用户名获取用户（main.GetUserByName）
+	getUserByName func(name string) (*UserInfo, error)
+	// getUserByID: 根据ID获取用户（main.GetUserByID）
+	getUserByID func(id int) (*UserInfo, error)
+	// verifyPassword: 验证密码（main.VerifyPassword）
+	verifyPassword func(hashedPassword, password string) error
+	// generateToken: 生成JWT token（main.GenerateToken）
+	generateToken func(userID int, secret string) (string, error)
+	// setToken: 将token存储到Redis（main.SetToken）
+	setToken func(userID int, token string) error
+	// getToken: 从Redis获取token（main.GetToken）
+	getToken func(userID int) (string, error)
+	// jwtSecret: JWT密钥（来自 config.JWTSecret）
+	jwtSecret string
+	// verifyTokenAndReturnUserID: 验证token并返回userID（main.VerifyToken 的包装）
+	verifyTokenAndReturnUserID func(tokenString string, secret string) (int, error)
 }
 
 func NewAuthController(authService *service.AuthService) *AuthController {
@@ -24,6 +54,8 @@ func NewAuthController(authService *service.AuthService) *AuthController {
 		authService: authService,
 	}
 }
+
+// --- 回调注入方法 ---
 
 func (c *AuthController) SetRedisClient(client interface {
 	Set(key string, value interface{}, expiration int) error
@@ -33,77 +65,124 @@ func (c *AuthController) SetRedisClient(client interface {
 	c.redisClient = client
 }
 
+func (c *AuthController) SetGetUserByName(fn func(name string) (*UserInfo, error)) {
+	c.getUserByName = fn
+}
+
+func (c *AuthController) SetGetUserByID(fn func(id int) (*UserInfo, error)) {
+	c.getUserByID = fn
+}
+
+func (c *AuthController) SetVerifyPassword(fn func(hashedPassword, password string) error) {
+	c.verifyPassword = fn
+}
+
+func (c *AuthController) SetGenerateToken(fn func(userID int, secret string) (string, error)) {
+	c.generateToken = fn
+}
+
+func (c *AuthController) SetSetToken(fn func(userID int, token string) error) {
+	c.setToken = fn
+}
+
+func (c *AuthController) SetGetToken(fn func(userID int) (string, error)) {
+	c.getToken = fn
+}
+
+func (c *AuthController) SetJWTSecret(secret string) {
+	c.jwtSecret = secret
+}
+
+// --- 路由处理器方法 ---
+
+// Login 登录处理器
+// Route: POST /login, POST /auth/login
+// 保持与原 auth.go 内联处理器一致的响应格式
 func (c *AuthController) Login(ctx *gin.Context) {
 	var loginData struct {
-		Name     string `json:"name" binding:"required"`
-		Password string `json:"password" binding:"required"`
+		Name     string `json:"name"`
+		Password string `json:"password"`
 	}
 
 	if err := ctx.ShouldBindJSON(&loginData); err != nil {
-		logger.Warnf("AuthController[Login] 请求体无效: %v", err)
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "无效的请求体"})
+		logger.Warnf("AuthController[Login] 无效的登录请求体 from %s: %v", ctx.ClientIP(), err)
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
 
-	user, token, err := c.authService.Login(loginData.Name, loginData.Password)
+	if c.getUserByName == nil || c.verifyPassword == nil || c.generateToken == nil || c.setToken == nil {
+		logger.Error("AuthController[Login] 回调依赖未注入")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
+		return
+	}
+
+	// 验证用户名
+	user, err := c.getUserByName(loginData.Name)
 	if err != nil {
-		logger.Warnf("AuthController[Login] 登录失败: %s, error: %v", loginData.Name, err)
-		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或密码错误"})
+		logger.Warnf("AuthController[Login] 用户 %s 未找到 from %s", loginData.Name, ctx.ClientIP())
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		return
+	}
+	logger.Infof("AuthController[Login] 找到用户 %s from %s", loginData.Name, ctx.ClientIP())
+
+	// 验证密码
+	err = c.verifyPassword(user.Password, loginData.Password)
+	if err != nil {
+		logger.Warnf("AuthController[Login] 用户 %s 密码错误 from %s", loginData.Name, ctx.ClientIP())
+		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return
 	}
 
-	if c.redisClient != nil {
-		if err := c.redisClient.Set(fmt.Sprintf("user:token:%d", user.ID), token, 0); err != nil {
-			logger.Errorf("AuthController[Login] 保存token到Redis失败: %v", err)
-		}
+	// 生成JWT token
+	token, err := c.generateToken(user.ID, c.jwtSecret)
+	if err != nil {
+		logger.Errorf("AuthController[Login] 生成token失败 user %d: %v", user.ID, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+		return
 	}
 
-	logger.Infof("AuthController[Login] 用户登录成功: %s", loginData.Name)
+	// 将token存储到Redis
+	err = c.setToken(user.ID, token)
+	if err != nil {
+		logger.Errorf("AuthController[Login] 存储token失败 user %d: %v", user.ID, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store token"})
+		return
+	}
+
+	logger.Infof("AuthController[Login] 用户 %s 登录成功 from %s", loginData.Name, ctx.ClientIP())
 	ctx.JSON(http.StatusOK, gin.H{
-		"message": "登录成功",
+		"message": "Login successful",
 		"token":   token,
 		"user_id": user.ID,
 		"name":    user.Name,
 	})
 }
 
+// GetUserInfo 获取用户信息
+// Route: GET /user/info
 func (c *AuthController) GetUserInfo(ctx *gin.Context) {
 	userID, exists := ctx.Get("userID")
 	if !exists {
-		logger.Error("AuthController[GetUserInfo] 无法获取用户ID")
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "无法获取用户信息"})
+		logger.Error("AuthController[GetUserInfo] 无法从上下文获取userID")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 		return
 	}
 
-	typedUserID, ok := userID.(int64)
-	if !ok {
-		logger.Errorf("AuthController[GetUserInfo] userID类型错误: %T, value: %v", userID, userID)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("userID类型错误: %T", userID)})
+	if c.getUserByID == nil {
+		logger.Error("AuthController[GetUserInfo] 回调依赖未注入")
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
-	logger.Warnf("AuthController[GetUserInfo] 开始获取用户信息, typedUserID: %d", typedUserID)
-
-	defer func() {
-		if r := recover(); r != nil {
-			logger.Errorf("AuthController[GetUserInfo] 发生panic: %v", r)
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("内部错误: %v", r)})
-		}
-	}()
-
-	user, err := c.authService.GetUserByID(int(typedUserID))
-	logger.Warnf("AuthController[GetUserInfo] GetUserByID返回, user: %v, err: %v", user, err)
+	// 根据用户ID获取用户信息
+	user, err := c.getUserByID(userID.(int))
 	if err != nil {
-		logger.Errorf("AuthController[GetUserInfo] 获取用户信息失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("获取用户信息失败: %v", err)})
-		return
-	}
-	if user == nil {
-		logger.Errorf("AuthController[GetUserInfo] 用户不存在, typedUserID: %d", typedUserID)
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "用户不存在"})
+		logger.Errorf("AuthController[GetUserInfo] 获取用户失败 ID %d: %v", userID, err)
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
+	logger.Infof("AuthController[GetUserInfo] 获取用户信息成功 ID %d", userID)
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":          user.ID,
@@ -114,7 +193,9 @@ func (c *AuthController) GetUserInfo(ctx *gin.Context) {
 	})
 }
 
-func (c *AuthController) JWTMiddleware(secret string) gin.HandlerFunc {
+// JWTMiddleware JWT验证中间件
+// 保持与原 auth.go 中间件一致的逻辑
+func (c *AuthController) JWTMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		authHeader := ctx.GetHeader("Authorization")
 		if authHeader == "" {
@@ -128,28 +209,91 @@ func (c *AuthController) JWTMiddleware(secret string) gin.HandlerFunc {
 			tokenString = authHeader[7:]
 		}
 
-		claims, err := c.authService.VerifyToken(tokenString)
-		if err != nil {
-			logger.Warnf("AuthController[JWTMiddleware] Token验证失败: %v", err)
-			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "无效的token"})
-			ctx.Abort()
-			return
-		}
-
-		if c.redisClient != nil {
-			tokenInRedis, err := c.redisClient.Get(fmt.Sprintf("user:token:%d", claims.UserID))
-			if err != nil || tokenInRedis != tokenString {
-				logger.Warnf("AuthController[JWTMiddleware] Redis中token不匹配")
-				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "无效的token"})
+		// 使用 main 包的 VerifyToken 验证
+		if c.generateToken == nil || c.getToken == nil {
+			// 回调未注入时，回退到 service 层验证
+			claims, err := c.authService.VerifyToken(tokenString)
+			if err != nil {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 				ctx.Abort()
 				return
 			}
+			ctx.Set("userID", int(claims.UserID))
+			ctx.Next()
+			return
 		}
 
-		ctx.Set("userID", claims.UserID)
+		// 通过 main 包的 VerifyToken 验证（注入的回调）
+		// NOTE: 这里需要注入 verifyToken 回调来解析 JWT
+		// 由于 VerifyToken 返回 *JWTClaims（main 包类型），
+		// 我们通过注入一个 verifyTokenAndReturnUserID 回调来简化
+		if c.verifyTokenAndReturnUserID != nil {
+			userID, err := c.verifyTokenAndReturnUserID(tokenString, c.jwtSecret)
+			if err != nil {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+				ctx.Abort()
+				return
+			}
+
+			// 验证token是否存在于Redis
+			tokenInRedis, err := c.getToken(userID)
+			if err != nil {
+				logger.Errorf("AuthController[JWTMiddleware] 从Redis获取token失败: %v", err)
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Failed to validate token"})
+				ctx.Abort()
+				return
+			}
+
+			if tokenInRedis != tokenString {
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+				ctx.Abort()
+				return
+			}
+
+			ctx.Set("userID", userID)
+			ctx.Next()
+			return
+		}
+
+		// 兜底：使用 service 层
+		claims, err := c.authService.VerifyToken(tokenString)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			ctx.Abort()
+			return
+		}
+		ctx.Set("userID", int(claims.UserID))
 		ctx.Next()
 	}
 }
+
+// SetVerifyTokenAndReturnUserID 注入验证token并返回userID的回调
+func (c *AuthController) SetVerifyTokenAndReturnUserID(fn func(tokenString string, secret string) (int, error)) {
+	c.verifyTokenAndReturnUserID = fn
+}
+
+// UpdatePassword 更新密码
+func (c *AuthController) UpdatePassword(ctx *gin.Context) {
+	var data struct {
+		Name    string `json:"name"`
+		NewPass string `json:"new_password"`
+	}
+	if err := ctx.ShouldBindJSON(&data); err != nil {
+		ctx.JSON(400, gin.H{"error": "参数错误"})
+		return
+	}
+	if data.Name == "" || data.NewPass == "" {
+		ctx.JSON(400, gin.H{"error": "用户名和新密码不能为空"})
+		return
+	}
+	if err := c.authService.UpdatePassword(data.Name, data.NewPass); err != nil {
+		ctx.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(200, gin.H{"message": "密码更新成功"})
+}
+
+// --- 通用响应辅助函数 ---
 
 type Response struct {
 	State   bool        `json:"state"`
@@ -175,22 +319,13 @@ func ErrorResp(ctx *gin.Context, httpStatus int, errMsg string) {
 	ctx.JSON(httpStatus, gin.H{"error": errMsg})
 }
 
-func (c *AuthController) UpdatePassword(ctx *gin.Context) {
-var data struct {
-Name    string `json:"name"`
-NewPass string `json:"new_password"`
-}
-if err := ctx.ShouldBindJSON(&data); err != nil {
-ctx.JSON(400, gin.H{"error": "参数错误"})
-return
-}
-if data.Name == "" || data.NewPass == "" {
-ctx.JSON(400, gin.H{"error": "用户名和新密码不能为空"})
-return
-}
-if err := c.authService.UpdatePassword(data.Name, data.NewPass); err != nil {
-ctx.JSON(500, gin.H{"error": err.Error()})
-return
-}
-ctx.JSON(200, gin.H{"message": "密码更新成功"})
+func InfoResp(ctx *gin.Context, httpStatus int, message string, data interface{}) {
+	ctx.JSON(httpStatus, Response{
+		State:   true,
+		Code:    0,
+		Message: message,
+		Data:    data,
+		Error:   "",
+		Errno:   0,
+	})
 }

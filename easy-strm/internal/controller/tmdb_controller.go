@@ -192,6 +192,34 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	})
 }
 
+// AutoIdentify 自动识别文件，返回 Top 3 候选供前端选择
+// POST /api/media/tmdb/auto-identify
+// 不写入缓存，仅返回候选列表；用户选择后再调用 Identify 端点绑定
+func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
+	var req struct {
+		Filename  string `json:"filename" binding:"required"`
+		MediaType string `json:"media_type"` // 可选：movie | tv，不传则自动判断
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		logger.Errorf("TmdbController[AutoIdentify] 绑定请求失败: %v", err)
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+
+	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", req.Filename)
+
+	result, err := c.tmdbService.GetCandidates(req.Filename)
+	if err != nil {
+		logger.Errorf("TmdbController[AutoIdentify] 获取候选失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "获取候选失败: "+err.Error())
+		return
+	}
+
+	logger.Infof("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", req.Filename, len(result.Candidates))
+	SuccessResp(ctx, result)
+}
+
 // BatchIdentify 批量识别文件
 // POST /api/media/tmdb/batch-identify
 func pickPreferredTitlesFromDetail(detail map[string]interface{}, mediaType, fallbackTitle string) (string, string) {
@@ -369,18 +397,19 @@ func (c *TmdbController) UpdateAPIKey(ctx *gin.Context) {
 func (c *TmdbController) GetConfig(ctx *gin.Context) {
 	apiKey := c.tmdbService.GetAPIKey()
 	language := c.tmdbService.GetLanguage()
+	hasKey := c.tmdbService.HasUsableAPIKey()
 
 	// 对 API Key 进行脱敏处理（只显示前后各4位）
 	maskedKey := ""
-	if len(apiKey) > 8 {
+	if hasKey && len(apiKey) > 8 {
 		maskedKey = apiKey[:4] + "****" + apiKey[len(apiKey)-4:]
-	} else if len(apiKey) > 0 {
+	} else if hasKey && len(apiKey) > 0 {
 		maskedKey = "****"
 	}
 
 	SuccessResp(ctx, gin.H{
 		"api_key":  maskedKey,
 		"language": language,
-		"has_key":  apiKey != "",
+		"has_key":  hasKey,
 	})
 }

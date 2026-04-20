@@ -321,6 +321,12 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	var pickCode string
 	maxRetries := 60
 	for i := 0; i < maxRetries; i++ {
+		// 等待目录树导出时也检查取消标记
+		if IsTaskCancelled(taskID) {
+			Info("[cron] 任务在等待目录树导出时被取消: %s", taskID)
+			return nil, fmt.Errorf("任务已取消")
+		}
+
 		statusResp, err := client.GetExportDirectoryTreeStatus(exportId, cloud115.Cookie)
 		if err != nil {
 			time.Sleep(5 * time.Second)
@@ -389,6 +395,12 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	}
 
 	for path, existingFile := range existingMap {
+		// 协作式取消检查
+		if IsTaskCancelled(taskID) {
+			Info("增量同步任务已被取消(删除阶段): %s", taskID)
+			return result, nil
+		}
+
 		if _, exists := cloudFilesMap[path]; !exists {
 			if err := os.Remove(existingFile.LocalStrmPath); err != nil && !os.IsNotExist(err) {
 				Warn("删除STRM文件失败 %s: %v", existingFile.LocalStrmPath, err)
@@ -406,6 +418,12 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	}
 
 	for _, video := range collection.Videos {
+		// 协作式取消检查
+		if IsTaskCancelled(taskID) {
+			Info("增量同步任务已被取消: %s", taskID)
+			return result, nil
+		}
+
 		if existingFile, exists := existingMap[video.RelativePath]; exists {
 			if existingFile.PickCode == video.PickCode && existingFile.Sha1 == video.Sha1 {
 				result.Skipped++
@@ -533,6 +551,22 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	}
 
 	for i, video := range collection.Videos {
+		// 协作式取消检查：每次迭代前检查取消标记
+		if IsTaskCancelled(taskID) {
+			Info("[cron] 任务已被取消: %s, 已处理 %d/%d", taskID, i, result.Total)
+			return result, nil
+		}
+
+		// 恢复时跳过已处理的文件
+		fileID := video.PickCode
+		if fileID == "" {
+			fileID = video.Sha1
+		}
+		if fileID != "" && IsFileProcessed(taskID, fileID) {
+			Debug("[cron] 跳过已处理文件: %s", video.Name)
+			continue
+		}
+
 		localStrmPath, err := generator.GenerateSingleStrmFile(video, strmConfig.NetDiskPath)
 		if err != nil {
 			Warn("[cron] 生成STRM文件失败 %s: %v", video.Name, err)
@@ -541,6 +575,11 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 
 		UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath)
 		Debug("[cron] 生成STRM文件: %s", localStrmPath)
+
+		// 记录已处理的文件ID，用于恢复时跳过
+		if fileID != "" {
+			AddProcessedFileID(taskID, fileID)
+		}
 
 		if (i+1)%10 == 0 {
 			Info("[cron] Full STRM generation progress: %d/%d", i+1, result.Total)

@@ -52,6 +52,7 @@ login.json
 *.swp
 *.swo
 
-# Debug files
+# Debug files & directory
 *_debug*.txt
 parse_log.txt
+debug/

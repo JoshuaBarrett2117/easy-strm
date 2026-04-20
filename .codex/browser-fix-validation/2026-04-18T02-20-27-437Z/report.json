@@ -1,0 +1,31 @@
+{
+  "runDir": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-20-27-437Z",
+  "results": [
+    {
+      "id": "1-???????????????",
+      "ok": true,
+      "detail": "email/phone fields absent"
+    },
+    {
+      "id": "2-???????????????",
+      "ok": false,
+      "detail": "initial=测试中...,待测试,待测试,待测试,待测试 final=成功,成功,成功,成功,成功"
+    },
+    {
+      "id": "3-115?????????????",
+      "ok": true,
+      "detail": "测试成功：115账号，可访问 13 项 | 测试失败：账号测试失败: parse cookie failed: bad cookie"
+    },
+    {
+      "id": "RUN",
+      "ok": false,
+      "detail": "Error: TMDB search failed: {\"error\":\"TMDB API 返回错误: 401\"}\n    at chooseTmdbMovie (file:///C:/Users/a3875/Documents/code/easy-strm/easy-strm-front/[eval1]:138:31)\n    at async runChecks (file:///C:/Users/a3875/Documents/code/easy-strm/easy-strm-front/[eval1]:273:21)\n    at async file:///C:/Users/a3875/Documents/code/easy-strm/easy-strm-front/[eval1]:381:5"
+    }
+  ],
+  "screenshots": {
+    "01-user-info": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-20-27-437Z\\01-user-info.png",
+    "02-network-dialog": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-20-27-437Z\\02-network-dialog.png",
+    "03-cloud115-test": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-20-27-437Z\\03-cloud115-test.png",
+    "error": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-20-27-437Z\\error.png"
+  }
+}

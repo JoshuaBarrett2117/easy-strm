@@ -24,6 +24,8 @@ const cookieUtils = {
 
 export { cookieUtils }
 
+let isRedirectingToLogin = false
+
 const saveCurrentUrl = () => {
   localStorage.setItem('redirectUrl', window.location.href)
 }
@@ -35,8 +37,16 @@ const clearCredentials = () => {
 }
 
 const redirectToLogin = () => {
+  if (isRedirectingToLogin) {
+    return
+  }
+  isRedirectingToLogin = true
   saveCurrentUrl()
-  window.location.href = '/login'
+  window.location.replace('/login')
+}
+
+const getResponseErrorMessage = (error) => {
+  return error?.response?.data?.error || error?.message || '请求失败'
 }
 
 api.interceptors.request.use(
@@ -53,18 +63,29 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   response => response,
   error => {
-    if (error.response && error.response.status === 401) {
-      ElMessage.error('登录已过期，请重新登录')
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
+
+    if (error.response?.status === 401) {
+      if (!isRedirectingToLogin) {
+        ElMessage.error('登录已过期，请重新登录')
+      }
       clearCredentials()
       redirectToLogin()
       return Promise.reject(new Error('登录已过期'))
     }
+
+    if (error.config?.skipGlobalErrorMessage) {
+      return Promise.reject(error)
+    }
+
     if (error.response) {
-      const message = error.response.data.error || '请求失败'
-      ElMessage.error(message)
+      ElMessage.error(getResponseErrorMessage(error))
     } else {
       ElMessage.error('网络错误，请稍后重试')
     }
+
     return Promise.reject(error)
   }
 )
@@ -72,8 +93,13 @@ api.interceptors.response.use(
 export const request = (url, options = {}) => {
   const method = options.method || 'GET'
   const data = options.data || {}
-  if (method === 'GET') {
-    return api.get(url, { params: data })
+  const requestOptions = {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
   }
-  return api({ method, url, data })
+
+  if (method === 'GET') {
+    return api.get(url, { ...requestOptions, params: data })
+  }
+
+  return api({ ...requestOptions, method, url, data })
 }

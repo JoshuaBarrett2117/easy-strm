@@ -1,5 +1,13 @@
 import { api, cookieUtils } from './request'
 
+const clearCredentials = () => {
+  localStorage.removeItem('token')
+  localStorage.removeItem('user_id')
+  localStorage.removeItem('user_name')
+  localStorage.removeItem('redirectUrl')
+  cookieUtils.removeCookie('token')
+}
+
 const handleLoginSuccess = (response) => {
   localStorage.setItem('token', response.token)
   localStorage.setItem('user_id', response.user_id)
@@ -9,27 +17,28 @@ const handleLoginSuccess = (response) => {
   const redirectUrl = localStorage.getItem('redirectUrl')
   if (redirectUrl) {
     localStorage.removeItem('redirectUrl')
-    window.location.href = redirectUrl
+    window.location.replace(redirectUrl)
   } else {
-    window.location.href = '/dashboard/user-info'
+    window.location.replace('/dashboard/user-info')
   }
 }
 
-export const login = (data) => {
-  return api.post('/auth/login', data).then(response => {
+export const login = (data, options = {}) => {
+  return api.post('/login', data, {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  }).then(response => {
     handleLoginSuccess(response.data)
     return response
   })
 }
 
-export const getUserInfo = () => {
-  return api.get('/auth/user/info')
+export const getUserInfo = (options = {}) => {
+  return api.get('/user/info', {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
 }
 
 export const logout = () => {
-  localStorage.removeItem('token')
-  localStorage.removeItem('user_id')
-  localStorage.removeItem('user_name')
-  cookieUtils.removeCookie('token')
-  window.location.href = '/login'
+  clearCredentials()
+  window.location.replace('/login')
 }

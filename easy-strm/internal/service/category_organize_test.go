@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"easy-strm/internal/domain"

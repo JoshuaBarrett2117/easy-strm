@@ -1,4 +1,4 @@
-package domain
+﻿package domain
 
 import "time"
 
@@ -9,9 +9,18 @@ type MediaSource struct {
 	Name       string    `json:"name"`        // 媒体源名称
 	SourceType string    `json:"source_type"` // 媒体源类型: local | cloud115
 	Path       string    `json:"path"`        // 本地路径或115目录CID
+	WatchPath  string    `json:"watch_path"`  // 监控目录
 	Cloud115ID *int      `json:"cloud115_id"` // 115账号ID（仅cloud115类型）
 	Priority   int       `json:"priority"`    // 优先级（数值越小优先级越高）
 	Enabled    bool      `json:"enabled"`     // 是否启用
+	OrganizeTargetPath string    `json:"organize_target_path"` // 整理目标目录
+	MediaType          string    `json:"media_type"`          // all | movie | tv
+	ConflictPolicy     string    `json:"conflict_policy"`     // skip | overwrite | suffix
+	OperationMode      string    `json:"operation_mode"`      // move | copy | hardlink | symlink
+	AutoOrganize       bool      `json:"auto_organize"`       // 是否自动整理
+	WatchEnabled       bool      `json:"watch_enabled"`       // 是否启用监控
+	WatchInterval      int       `json:"watch_interval"`      // 轮询间隔（秒）
+	EmbyLibraryID      string    `json:"emby_library_id"`     // Emby 媒体库 ID
 	CreateTime time.Time `json:"create_time"` // 创建时间
 	UpdateTime time.Time `json:"update_time"` // 更新时间
 }

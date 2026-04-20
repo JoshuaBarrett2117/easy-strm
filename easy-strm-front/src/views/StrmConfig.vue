@@ -1,35 +1,35 @@
-<template>
+﻿<template>
   <div class="strm-config-container">
     <el-card shadow="hover" class="main-card">
       <template #header>
         <div class="card-header">
           <div class="header-title">
             <el-icon class="header-icon"><Setting /></el-icon>
-            <span>STRM文件配置管理</span>
+            <span>STRM鏂囦欢閰嶇疆绠＄悊</span>
           </div>
           <el-button type="primary" @click="handleAdd">
             <el-icon><Plus /></el-icon>
-            新增配置
+            鏂板閰嶇疆
           </el-button>
         </div>
       </template>
       
       <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
         <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
-        <el-table-column label="115账号" min-width="120" align="center" sortable="custom" prop="cloud115_id">
+        <el-table-column label="115璐﹀彿" min-width="120" align="center" sortable="custom" prop="cloud115_id">
           <template #default="scope">
             <el-tag type="info">{{ getCloud115Name(scope.row.cloud115_id) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="net_disk_path" label="网盘目录" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="local_path" label="本地目录" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="cron" label="Cron配置" width="120" align="center">
+        <el-table-column prop="net_disk_path" label="缃戠洏鐩綍" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="local_path" label="鏈湴鐩綍" min-width="180" show-overflow-tooltip />
+        <el-table-column prop="cron" label="Cron閰嶇疆" width="120" align="center">
           <template #default="scope">
             <el-tag v-if="scope.row.cron" type="warning">{{ scope.row.cron }}</el-tag>
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="定时任务" width="100" align="center">
+        <el-table-column label="瀹氭椂浠诲姟" width="100" align="center">
           <template #default="scope">
             <el-tag v-if="getCronTask(scope.row.id)" :type="getCronTask(scope.row.id).status === 'enabled' ? 'success' : 'info'">
               {{ getCronTask(scope.row.id).status === 'enabled' ? '已启用' : '已禁用' }}
@@ -37,7 +37,7 @@
             <span v-else class="text-muted">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="下次执行" width="160" align="center">
+        <el-table-column label="涓嬫鎵ц" width="160" align="center">
           <template #default="scope">
             <span v-if="getCronTask(scope.row.id) && getCronTask(scope.row.id).next_run_time">
               {{ formatTime(getCronTask(scope.row.id).next_run_time) }}
@@ -50,40 +50,40 @@
             <span class="extension-text">{{ scope.row.extension || '-' }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
-        <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
-        <el-table-column label="操作" min-width="320" fixed="right" align="center">
+        <el-table-column prop="create_time" label="鍒涘缓鏃堕棿" width="160" align="center" sortable="custom" />
+        <el-table-column prop="update_time" label="鏇存柊鏃堕棿" width="160" align="center" sortable="custom" />
+        <el-table-column label="鎿嶄綔" min-width="320" fixed="right" align="center">
           <template #default="scope">
             <div class="action-buttons">
               <el-button size="small" type="primary" @click="handleEdit(scope.row)">
                 <el-icon><Edit /></el-icon>
-                编辑
+                缂栬緫
               </el-button>
               <el-button size="small" type="danger" @click="handleDelete(scope.row.id)">
                 <el-icon><Delete /></el-icon>
-                删除
+                鍒犻櫎
               </el-button>
               <el-button size="small" type="warning" @click="handleFullGenerate(scope.row.id)"
                 :loading="isGenerating(scope.row.id)" :disabled="isGenerating(scope.row.id)">
                 <el-icon v-if="!isGenerating(scope.row.id)"><Refresh /></el-icon>
-                {{ isGenerating(scope.row.id) ? '生成中...' : '全量生成' }}
+                {{ isGenerating(scope.row.id) ? '鐢熸垚涓?..' : '鍏ㄩ噺鐢熸垚' }}
               </el-button>
               <el-dropdown v-if="getCronTask(scope.row.id)" trigger="click" @command="(cmd) => handleCronCommand(cmd, scope.row)">
                 <el-button size="small" type="info">
                   <el-icon><Timer /></el-icon>
-                  定时任务
+                  瀹氭椂浠诲姟
                   <el-icon class="el-icon--right"><ArrowDown /></el-icon>
                 </el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item :command="'toggle'" :disabled="cronTaskLoading">
-                      {{ getCronTask(scope.row.id).status === 'enabled' ? '禁用定时任务' : '启用定时任务' }}
+                      {{ getCronTask(scope.row.id).status === 'enabled' ? '绂佺敤瀹氭椂浠诲姟' : '鍚敤瀹氭椂浠诲姟' }}
                     </el-dropdown-item>
                     <el-dropdown-item :command="'run'" :disabled="cronTaskLoading">
-                      立即执行
+                      绔嬪嵆鎵ц
                     </el-dropdown-item>
                     <el-dropdown-item :command="'status'" divided>
-                      查看详情
+                      鏌ョ湅璇︽儏
                     </el-dropdown-item>
                   </el-dropdown-menu>
                 </template>
@@ -94,7 +94,7 @@
       </el-table>
     </el-card>
 
-    <!-- 任务进度卡片 -->
+    <!-- 浠诲姟杩涘害鍗＄墖 -->
     <transition name="slide-fade">
       <el-card v-if="taskInfo" shadow="hover" class="task-card">
         <template #header>
@@ -103,7 +103,7 @@
               <el-icon class="task-icon" :class="{ 'spin': taskInfo.status === 'running' }">
                 <component :is="taskStatusIcon" />
               </el-icon>
-              <span>{{ taskInfo.status === 'running' ? '正在生成 STRM 文件...' : taskStatusLabel }}</span>
+              <span>{{ taskInfo.status === 'running' ? '姝ｅ湪鐢熸垚 STRM 鏂囦欢...' : taskStatusLabel }}</span>
             </div>
             <el-button circle text @click="clearTask">
               <el-icon><Close /></el-icon>
@@ -112,7 +112,7 @@
         </template>
 
         <div class="task-body">
-          <!-- 进度条 -->
+          <!-- 杩涘害鏉?-->
           <el-progress
             :percentage="taskProgress"
             :status="taskProgressStatus"
@@ -121,19 +121,19 @@
             :format="progressFormat"
           />
 
-          <!-- 统计数据 -->
+          <!-- 缁熻鏁版嵁 -->
           <div class="task-stats">
             <div class="stat-item">
               <div class="stat-value total">{{ taskInfo.total_files || 0 }}</div>
-              <div class="stat-label">总文件数</div>
+              <div class="stat-label">鎬绘枃浠舵暟</div>
             </div>
             <div class="stat-item">
               <div class="stat-value success">{{ taskInfo.success_files || 0 }}</div>
-              <div class="stat-label">成功</div>
+              <div class="stat-label">鎴愬姛</div>
             </div>
             <div class="stat-item">
               <div class="stat-value failed">{{ taskInfo.failed_files || 0 }}</div>
-              <div class="stat-label">失败</div>
+              <div class="stat-label">澶辫触</div>
             </div>
             <div class="stat-item">
               <div class="stat-value pending">{{ pendingCount }}</div>
@@ -141,17 +141,17 @@
             </div>
           </div>
 
-          <!-- 错误信息 -->
+          <!-- 閿欒淇℃伅 -->
           <el-alert v-if="taskInfo.error_message" type="error" :title="taskInfo.error_message" show-icon :closable="false" class="task-error" />
         </div>
       </el-card>
     </transition>
 
-    <!-- 新增/编辑对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px">
+    <!-- 鏂板/缂栬緫瀵硅瘽妗?-->
+    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" append-to-body>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="115账号" prop="cloud115_id">
-          <el-select v-model="form.cloud115_id" placeholder="请选择115账号">
+        <el-form-item label="115璐﹀彿" prop="cloud115_id">
+          <el-select v-model="form.cloud115_id" placeholder="璇烽€夋嫨115璐﹀彿">
             <el-option
               v-for="account in cloud115List"
               :key="account.id"
@@ -161,17 +161,17 @@
           </el-select>
         </el-form-item>
         
-        <el-form-item label="网盘目录" prop="net_disk_path">
+        <el-form-item label="缃戠洏鐩綍" prop="net_disk_path">
           <el-input v-model="form.net_disk_path" placeholder="请输入网盘目录路径" />
         </el-form-item>
         
-        <el-form-item label="本地目录" prop="local_path">
+        <el-form-item label="鏈湴鐩綍" prop="local_path">
           <el-input v-model="form.local_path" placeholder="请输入本地目录路径" />
         </el-form-item>
         
-        <el-form-item label="cron表达式" prop="cron">
-          <el-input v-model="form.cron" placeholder="请输入cron表达式，如：0 0 * * *" />
-          <el-button type="text" @click="showCronPicker = true">快捷生成</el-button>
+        <el-form-item label="Cron表达式" prop="cron">
+          <el-input v-model="form.cron" placeholder="璇疯緭鍏ron琛ㄨ揪寮忥紝濡傦細0 0 * * *" />
+          <el-button type="text" @click="showCronPicker = true">蹇嵎鐢熸垚</el-button>
         </el-form-item>
         
         <el-form-item label="后缀名" prop="extension">
@@ -179,33 +179,33 @@
         </el-form-item>
       </el-form>
       
-      <!-- cron表达式快捷生成器 -->
+      <!-- cron琛ㄨ揪寮忓揩鎹风敓鎴愬櫒 -->
       <el-dialog v-model="showCronPicker" title="Cron表达式快捷生成" width="400px">
         <el-form :model="cronForm">
-          <el-form-item label="执行周期">
+          <el-form-item label="鎵ц鍛ㄦ湡">
             <el-radio-group v-model="cronForm.period">
-              <el-radio label="daily">每天</el-radio>
-              <el-radio label="weekly">每周</el-radio>
-              <el-radio label="monthly">每月</el-radio>
+              <el-radio label="daily">姣忓ぉ</el-radio>
+              <el-radio label="weekly">姣忓懆</el-radio>
+              <el-radio label="monthly">姣忔湀</el-radio>
             </el-radio-group>
           </el-form-item>
           
-          <el-form-item label="执行时间">
-            <el-time-picker v-model="cronForm.time" type="time" format="HH:mm" value-format="HH:mm" placeholder="请选择执行时间" />
+          <el-form-item label="鎵ц鏃堕棿">
+            <el-time-picker v-model="cronForm.time" type="time" format="HH:mm" value-format="HH:mm" placeholder="璇烽€夋嫨鎵ц鏃堕棿" />
           </el-form-item>
         </el-form>
         <template #footer>
           <span class="dialog-footer">
-            <el-button @click="showCronPicker = false">取消</el-button>
-            <el-button type="primary" @click="generateCronExpression">生成</el-button>
+            <el-button @click="showCronPicker = false">鍙栨秷</el-button>
+            <el-button type="primary" @click="generateCronExpression">鐢熸垚</el-button>
           </span>
         </template>
       </el-dialog>
       
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
+          <el-button @click="dialogVisible = false">鍙栨秷</el-button>
+          <el-button type="primary" @click="handleSubmit">纭畾</el-button>
         </span>
       </template>
     </el-dialog>
@@ -214,50 +214,51 @@
 
 <script setup>
 import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { Setting, Plus, Edit, Delete, Refresh, Close, CircleCheck, CircleClose, Loading, Timer, ArrowDown } from '@element-plus/icons-vue'
 import { request } from '../utils/api'
+import { showAlertDialog, showConfirmDialog } from '../utils/ui/messageBox'
 
 const DEFAULT_EXTENSION = '.mp4,.avi,.mkv,.mov,.wmv,.flv,.webm,.m4v,.mpeg,.mpg,.3gp,.rmvb,.rm,.vob,.ts,.m2ts,.divx,.asf'
 
-// STRM配置列表
+// STRM閰嶇疆鍒楄〃
 const strmConfigList = ref([])
 
-// 115账号列表
+// 115璐﹀彿鍒楄〃
 const cloud115List = ref([])
 
-// Cron任务列表
+// Cron浠诲姟鍒楄〃
 const cronTaskList = ref([])
 const cronTaskLoading = ref(false)
 
-// 排序状态
+// 鎺掑簭鐘舵€?
 const sortField = ref('id')
 const sortOrder = ref('asc')
 
-// 对话框状态
+// 瀵硅瘽妗嗙姸鎬?
 const dialogVisible = ref(false)
-const dialogTitle = ref('新增配置')
+const dialogTitle = ref('鏂板閰嶇疆')
 const showCronPicker = ref(false)
 
-// 当前任务信息
+// 褰撳墠浠诲姟淇℃伅
 const taskInfo = ref(null)
 const currentTaskId = ref(null)
 const generatingConfigId = ref(null)
 let pollTimer = null
 
-// 判断某个配置是否正在生成
+// 鍒ゆ柇鏌愪釜閰嶇疆鏄惁姝ｅ湪鐢熸垚
 const isGenerating = (configId) => {
   return generatingConfigId.value === configId && taskInfo.value?.status === 'running'
 }
 
-// 任务进度 —— 直接使用后端返回的 progress 字段（0-100）
+// 浠诲姟杩涘害 鈥斺€?鐩存帴浣跨敤鍚庣杩斿洖鐨?progress 瀛楁锛?-100锛?
 const taskProgress = computed(() => {
   if (!taskInfo.value) return 0
   if (taskInfo.value.status === 'completed') return 100
   if (taskInfo.value.status === 'failed') return taskInfo.value.progress || 0
-  // 后端 progress 字段已经是 0-100 的值
+  // 鍚庣 progress 瀛楁宸茬粡鏄?0-100 鐨勫€?
   const p = taskInfo.value.progress || 0
-  // running 状态至少显示 5% 表示已经开始了
+  // running 鐘舵€佽嚦灏戞樉绀?5% 琛ㄧず宸茬粡寮€濮嬩簡
   return p === 0 && taskInfo.value.status === 'running' ? 5 : p
 })
 
@@ -269,7 +270,7 @@ const taskProgressStatus = computed(() => {
   return ''
 })
 
-// 待处理数量
+// 寰呭鐞嗘暟閲?
 const pendingCount = computed(() => {
   if (!taskInfo.value) return 0
   const total = taskInfo.value.total_files || 0
@@ -278,7 +279,7 @@ const pendingCount = computed(() => {
   return pending > 0 ? pending : 0
 })
 
-// 任务状态图标
+// 浠诲姟鐘舵€佸浘鏍?
 const taskStatusIcon = computed(() => {
   if (!taskInfo.value) return Loading
   if (taskInfo.value.status === 'completed') return CircleCheck
@@ -286,23 +287,23 @@ const taskStatusIcon = computed(() => {
   return Loading
 })
 
-// 任务状态标签
+// 浠诲姟鐘舵€佹爣绛?
 const taskStatusLabel = computed(() => {
   if (!taskInfo.value) return ''
-  if (taskInfo.value.status === 'completed') return '生成完成！'
-  if (taskInfo.value.status === 'failed') return '生成失败'
-  return '生成中...'
+  if (taskInfo.value.status === 'completed') return '生成完成'
+  if (taskInfo.value.status === 'failed') return '鐢熸垚澶辫触'
+  return '鐢熸垚涓?..'
 })
 
-// 进度格式化
+// 杩涘害鏍煎紡鍖?
 const progressFormat = (percentage) => {
   if (!taskInfo.value) return `${percentage}%`
-  if (taskInfo.value.status === 'completed') return '完成'
-  if (taskInfo.value.status === 'running' && taskInfo.value.total_files === 0) return '准备中...'
+  if (taskInfo.value.status === 'completed') return '瀹屾垚'
+  if (taskInfo.value.status === 'running' && taskInfo.value.total_files === 0) return '鍑嗗涓?..'
   return `${percentage}%`
 }
 
-// 开始轮询任务状态
+// 寮€濮嬭疆璇换鍔＄姸鎬?
 const startPolling = (taskId) => {
   stopPolling()
   pollTimer = setInterval(async () => {
@@ -310,16 +311,16 @@ const startPolling = (taskId) => {
       const resp = await request(`/strm/task/${taskId}`)
       taskInfo.value = resp.data.data
       if (taskInfo.value.status === 'completed') {
-        ElMessage.success('STRM 文件全量生成完成！')
+        ElMessage.success('STRM 文件全量生成完成')
         generatingConfigId.value = null
         stopPolling()
       } else if (taskInfo.value.status === 'failed') {
-        ElMessage.error('STRM 文件生成失败：' + (taskInfo.value.error_message || '未知错误'))
+        ElMessage.error(`STRM 文件生成失败：${taskInfo.value.error_message || '未知错误'}`)
         generatingConfigId.value = null
         stopPolling()
       }
     } catch (e) {
-      // 如果任务不存在，自动关闭进度条
+      // 濡傛灉浠诲姟涓嶅瓨鍦紝鑷姩鍏抽棴杩涘害鏉?
       const errorMsg = e.response?.data?.error || e.message || ''
       if (errorMsg.includes('Task not found')) {
         clearTask()
@@ -329,7 +330,7 @@ const startPolling = (taskId) => {
   }, 2000)
 }
 
-// 停止轮询
+// 鍋滄杞
 const stopPolling = () => {
   if (pollTimer) {
     clearInterval(pollTimer)
@@ -337,14 +338,14 @@ const stopPolling = () => {
   }
 }
 
-// 清除任务信息
+// 娓呴櫎浠诲姟淇℃伅
 const clearTask = () => {
   taskInfo.value = null
   currentTaskId.value = null
   stopPolling()
 }
 
-// 表单数据
+// 琛ㄥ崟鏁版嵁
 const formRef = ref(null)
 const form = ref({
   id: '',
@@ -355,32 +356,32 @@ const form = ref({
   extension: '.strm'
 })
 
-// cron生成器表单
+// cron鐢熸垚鍣ㄨ〃鍗?
 const cronForm = ref({
   period: 'daily',
   time: ''
 })
 
-// 表单验证规则
+// 琛ㄥ崟楠岃瘉瑙勫垯
 const rules = {
-  cloud115_id: [{ required: true, message: '请选择115账号', trigger: 'change' }],
+  cloud115_id: [{ required: true, message: '璇烽€夋嫨115璐﹀彿', trigger: 'change' }],
   net_disk_path: [{ required: true, message: '请输入网盘目录', trigger: 'blur' }],
   local_path: [{ required: true, message: '请输入本地目录', trigger: 'blur' }],
-  cron: [{ required: true, message: '请输入cron表达式', trigger: 'blur' }],
+  cron: [{ required: true, message: '请输入 Cron 表达式', trigger: 'blur' }],
   extension: [{ required: true, message: '请输入后缀名', trigger: 'blur' }]
 }
 
-// 获取115账号列表
+// 鑾峰彇115璐﹀彿鍒楄〃
 const fetchCloud115List = async () => {
   try {
     const response = await request('/cloud115')
     cloud115List.value = response.data.data || []
   } catch (error) {
-    ElMessage.error('获取115账号列表失败')
+    ElMessage.error('鑾峰彇115璐﹀彿鍒楄〃澶辫触')
   }
 }
 
-// 获取STRM配置列表
+// 鑾峰彇STRM閰嶇疆鍒楄〃
 const fetchStrmConfigList = async () => {
   try {
     const params = new URLSearchParams()
@@ -390,26 +391,26 @@ const fetchStrmConfigList = async () => {
     const apiData = response.data.data
     strmConfigList.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
   } catch (error) {
-    ElMessage.error('获取STRM配置列表失败')
+    ElMessage.error('鑾峰彇STRM閰嶇疆鍒楄〃澶辫触')
   }
 }
 
-// 获取Cron任务列表
+// 鑾峰彇Cron浠诲姟鍒楄〃
 const fetchCronTaskList = async () => {
   try {
     const response = await request('/cron/tasks')
     cronTaskList.value = response.data.data || []
   } catch (error) {
-    console.error('获取Cron任务列表失败', error)
+    console.error('鑾峰彇Cron浠诲姟鍒楄〃澶辫触', error)
   }
 }
 
-// 根据配置ID获取对应的Cron任务
+// 鏍规嵁閰嶇疆ID鑾峰彇瀵瑰簲鐨凜ron浠诲姟
 const getCronTask = (configId) => {
   return cronTaskList.value.find(task => task.strm_config_id === configId)
 }
 
-// 格式化时间
+// 鏍煎紡鍖栨椂闂?
 const formatTime = (time) => {
   if (!time) return '-'
   const date = new Date(time)
@@ -423,10 +424,10 @@ const formatTime = (time) => {
 }
 
 /**
- * 处理表格排序变化
- * @param {Object} column - 列信息
- * @param {string} prop - 排序字段
- * @param {string} order - 排序方式
+ * 澶勭悊琛ㄦ牸鎺掑簭鍙樺寲
+ * @param {Object} column - 鍒椾俊鎭?
+ * @param {string} prop - 鎺掑簭瀛楁
+ * @param {string} order - 鎺掑簭鏂瑰紡
  */
 const handleSortChange = ({ prop, order }) => {
   if (prop && order) {
@@ -439,15 +440,15 @@ const handleSortChange = ({ prop, order }) => {
   fetchStrmConfigList()
 }
 
-// 根据ID获取115账号名称
+// 鏍规嵁ID鑾峰彇115璐﹀彿鍚嶇О
 const getCloud115Name = (id) => {
   const account = cloud115List.value.find(item => item.id === id)
-  return account ? account.name : '未知账号'
+  return account ? account.name : '鏈煡璐﹀彿'
 }
 
-// 新增配置
+// 鏂板閰嶇疆
 const handleAdd = () => {
-  dialogTitle.value = '新增配置'
+  dialogTitle.value = '鏂板閰嶇疆'
   form.value = {
     id: '',
     cloud115_id: 0,
@@ -459,9 +460,9 @@ const handleAdd = () => {
   dialogVisible.value = true
 }
 
-// 编辑配置
+// 缂栬緫閰嶇疆
 const handleEdit = (row) => {
-  dialogTitle.value = '编辑配置'
+  dialogTitle.value = '缂栬緫閰嶇疆'
   form.value = {
     id: row.id,
     cloud115_id: parseInt(row.cloud115_id),
@@ -473,7 +474,7 @@ const handleEdit = (row) => {
   dialogVisible.value = true
 }
 
-// 提交表单
+// 鎻愪氦琛ㄥ崟
 const handleSubmit = () => {
   formRef.value.validate((valid) => {
     if (valid) {
@@ -490,59 +491,59 @@ const handleSubmit = () => {
           method: 'PUT',
           data: requestData
         }).then(() => {
-          ElMessage.success('配置更新成功')
+          ElMessage.success('閰嶇疆鏇存柊鎴愬姛')
           dialogVisible.value = false
           fetchStrmConfigList()
           fetchCronTaskList()
         }).catch(() => {
-          ElMessage.error('配置更新失败')
+          ElMessage.error('閰嶇疆鏇存柊澶辫触')
         })
       } else {
         request('/strm/config', {
           method: 'POST',
           data: requestData
         }).then(() => {
-          ElMessage.success('配置创建成功')
+          ElMessage.success('閰嶇疆鍒涘缓鎴愬姛')
           dialogVisible.value = false
           fetchStrmConfigList()
           fetchCronTaskList()
         }).catch(() => {
-          ElMessage.error('配置创建失败')
+          ElMessage.error('閰嶇疆鍒涘缓澶辫触')
         })
       }
     }
   })
 }
 
-// 删除配置
+// 鍒犻櫎閰嶇疆
 const handleDelete = (id) => {
-  ElMessageBox.confirm('确定要删除这个配置吗？', '警告', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
+  showConfirmDialog('确定要删除这个配置吗？', '警告', {
+    confirmButtonText: '纭畾',
+    cancelButtonText: '鍙栨秷',
     type: 'warning'
   }).then(() => {
     request(`/strm/config/${id}`, {
       method: 'DELETE'
     }).then(() => {
-      ElMessage.success('配置删除成功')
+      ElMessage.success('閰嶇疆鍒犻櫎鎴愬姛')
       fetchStrmConfigList()
       fetchCronTaskList()
     }).catch(() => {
-      ElMessage.error('配置删除失败')
+      ElMessage.error('閰嶇疆鍒犻櫎澶辫触')
     })
   }).catch(() => {})
 }
 
-// 全量生成STRM文件
+// 鍏ㄩ噺鐢熸垚STRM鏂囦欢
 const handleFullGenerate = (id) => {
-  ElMessageBox.confirm('确定要全量生成STRM文件吗？这将清除并重建所有 STRM 文件。', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消'
+  showConfirmDialog('确定要全量生成 STRM 文件吗？这将清除并重建全部 STRM 文件。', '提示', {
+    confirmButtonText: '纭畾',
+    cancelButtonText: '鍙栨秷'
   }).then(() => {
-    // 先清除之前的任务
+    // 鍏堟竻闄や箣鍓嶇殑浠诲姟
     clearTask()
     generatingConfigId.value = id
-    // 初始化任务状态为 running
+    // 鍒濆鍖栦换鍔＄姸鎬佷负 running
     taskInfo.value = { status: 'running', total_files: 0, processed_files: 0, success_files: 0, failed_files: 0 }
 
     request(`/strm/config/${id}/generate/full`, {
@@ -553,17 +554,17 @@ const handleFullGenerate = (id) => {
         currentTaskId.value = taskId
         startPolling(taskId)
       } else {
-        ElMessage.success('全量生成STRM文件成功')
+        ElMessage.success('鍏ㄩ噺鐢熸垚STRM鏂囦欢鎴愬姛')
         clearTask()
       }
     }).catch(() => {
-      ElMessage.error('全量生成STRM文件失败')
+      ElMessage.error('鍏ㄩ噺鐢熸垚STRM鏂囦欢澶辫触')
       clearTask()
     })
   }).catch(() => {})
 }
 
-// 处理定时任务下拉菜单命令
+// 澶勭悊瀹氭椂浠诲姟涓嬫媺鑿滃崟鍛戒护
 const handleCronCommand = (command, row) => {
   const task = getCronTask(row.id)
   if (!task) return
@@ -581,10 +582,10 @@ const handleCronCommand = (command, row) => {
   }
 }
 
-// 切换定时任务状态
+// 鍒囨崲瀹氭椂浠诲姟鐘舵€?
 const handleToggleCronTask = async (task) => {
   const newStatus = task.status === 'enabled' ? 'disabled' : 'enabled'
-  const actionText = newStatus === 'enabled' ? '启用' : '禁用'
+  const actionText = newStatus === 'enabled' ? '鍚敤' : '绂佺敤'
   
   try {
     cronTaskLoading.value = true
@@ -598,13 +599,13 @@ const handleToggleCronTask = async (task) => {
     ElMessage.success(`定时任务已${actionText}`)
     fetchCronTaskList()
   } catch (error) {
-    ElMessage.error(`${actionText}定时任务失败`)
+    ElMessage.error(`${actionText}瀹氭椂浠诲姟澶辫触`)
   } finally {
     cronTaskLoading.value = false
   }
 }
 
-// 立即执行定时任务
+// 绔嬪嵆鎵ц瀹氭椂浠诲姟
 const handleRunCronTask = async (task) => {
   try {
     cronTaskLoading.value = true
@@ -612,53 +613,53 @@ const handleRunCronTask = async (task) => {
       method: 'POST'
     })
     ElMessage.success('定时任务已触发执行，请查看任务进度')
-    // 刷新任务列表
+    // 鍒锋柊浠诲姟鍒楄〃
     fetchCronTaskList()
   } catch (error) {
-    ElMessage.error('执行定时任务失败')
+    ElMessage.error('鎵ц瀹氭椂浠诲姟澶辫触')
   } finally {
     cronTaskLoading.value = false
   }
 }
 
-// 显示定时任务详情
+// 鏄剧ず瀹氭椂浠诲姟璇︽儏
 const showCronTaskStatus = (task) => {
   const statusText = task.status === 'enabled' ? '已启用' : '已禁用'
-  const lastRunTime = task.last_run_time ? formatTime(task.last_run_time) : '从未执行'
+  const lastRunTime = task.last_run_time ? formatTime(task.last_run_time) : '浠庢湭鎵ц'
   const nextRunTime = task.next_run_time ? formatTime(task.next_run_time) : '-'
   const lastRunStatus = task.last_run_status || '-'
   const lastRunMessage = task.last_run_message || '-'
   
-  ElMessageBox.alert(
+  showAlertDialog(
     `<div style="line-height: 2;">
       <p><strong>任务名称：</strong>${task.task_name}</p>
-      <p><strong>任务状态：</strong>${statusText}</p>
-      <p><strong>Cron表达式：</strong>${task.cron_expr}</p>
+      <p><strong>浠诲姟鐘舵€侊細</strong>${statusText}</p>
+      <p><strong>Cron琛ㄨ揪寮忥細</strong>${task.cron_expr}</p>
       <p><strong>上次执行时间：</strong>${lastRunTime}</p>
-      <p><strong>上次执行状态：</strong>${lastRunStatus}</p>
+      <p><strong>涓婃鎵ц鐘舵€侊細</strong>${lastRunStatus}</p>
       <p><strong>上次执行结果：</strong>${lastRunMessage}</p>
       <p><strong>下次执行时间：</strong>${nextRunTime}</p>
     </div>`,
-    '定时任务详情',
+    '瀹氭椂浠诲姟璇︽儏',
     {
       dangerouslyUseHTMLString: true,
-      confirmButtonText: '关闭'
+      confirmButtonText: '鍏抽棴'
     }
   )
 }
 
-// 生成cron表达式
+// 鐢熸垚cron琛ㄨ揪寮?
 const generateCronExpression = () => {
   const time = cronForm.value.time
   if (!time || typeof time !== 'string') {
-    ElMessage.error('请选择执行时间')
+    ElMessage.error('璇烽€夋嫨鎵ц鏃堕棿')
     return
   }
   
   try {
     const parts = time.split(':')
     if (parts.length !== 2) {
-      ElMessage.error('时间格式错误')
+      ElMessage.error('鏃堕棿鏍煎紡閿欒')
       return
     }
     const [hour, minute] = parts
@@ -682,19 +683,19 @@ const generateCronExpression = () => {
     form.value.cron = cronExpression
     showCronPicker.value = false
   } catch (error) {
-    ElMessage.error('生成cron表达式失败')
+    ElMessage.error('生成 Cron 表达式失败')
     console.error('Error generating cron expression:', error)
   }
 }
 
-// 初始化
+// 鍒濆鍖?
 onMounted(() => {
   fetchCloud115List()
   fetchStrmConfigList()
   fetchCronTaskList()
 })
 
-// 销毁时清理定时器
+// 閿€姣佹椂娓呯悊瀹氭椂鍣?
 onBeforeUnmount(() => {
   stopPolling()
 })
@@ -773,7 +774,7 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
 }
 
-/* 任务进度卡片 */
+/* 浠诲姟杩涘害鍗＄墖 */
 .task-card {
   border-radius: 12px;
   overflow: hidden;
@@ -864,7 +865,7 @@ onBeforeUnmount(() => {
   margin-top: 16px;
 }
 
-/* 过渡动画 */
+/* 杩囨浮鍔ㄧ敾 */
 .slide-fade-enter-active {
   transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -880,3 +881,4 @@ onBeforeUnmount(() => {
   transform: translateY(-8px);
 }
 </style>
+

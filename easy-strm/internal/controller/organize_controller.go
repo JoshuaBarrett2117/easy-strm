@@ -13,10 +13,17 @@ import (
 // OrganizeController 自动整理控制器
 type OrganizeController struct {
 	organizeService *service.OrganizeService
+	// embyRefreshCallback 整理完成后的Emby刷新回调（由main包注入）
+	embyRefreshCallback func(sourceID int) *service.EmbyLibraryRefreshResult
 }
 
 func NewOrganizeController(organizeService *service.OrganizeService) *OrganizeController {
 	return &OrganizeController{organizeService: organizeService}
+}
+
+// SetEmbyRefreshCallback 注入Emby刷新回调
+func (c *OrganizeController) SetEmbyRefreshCallback(fn func(sourceID int) *service.EmbyLibraryRefreshResult) {
+	c.embyRefreshCallback = fn
 }
 
 // PreviewOrganize 预览整理结果
@@ -105,6 +112,100 @@ func (c *OrganizeController) PreviewOrganize(ctx *gin.Context) {
 	})
 }
 
+// StartPreviewTaskAsync 启动异步预览任务
+func (c *OrganizeController) StartPreviewTaskAsync(ctx *gin.Context) {
+	var req struct {
+		SourceID    int                             `json:"source_id" binding:"required"`
+		SourcePath  string                          `json:"source_path"`
+		TargetPath  string                          `json:"target_path"`
+		MediaType   string                          `json:"media_type"`
+		Template    string                          `json:"template"`
+		FileIDs     []string                        `json:"file_ids"`
+		UseCategory bool                            `json:"use_category"`
+		ManualItems []domain.OrganizeManualOverride `json:"manual_items"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	if req.MediaType == "" {
+		req.MediaType = "all"
+	}
+
+	if !req.UseCategory && req.TargetPath == "" {
+		ErrorResp(ctx, http.StatusBadRequest, "使用非分类整理时必须提供目标目录")
+		return
+	}
+
+	taskID, err := c.organizeService.StartPreviewTask(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.FileIDs, req.UseCategory, req.ManualItems)
+	if err != nil {
+		logger.Errorf("OrganizeController[StartPreviewTaskAsync] 启动任务失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SuccessResp(ctx, gin.H{
+		"task_id": taskID,
+		"message": "任务已启动",
+	})
+}
+
+// GetPreviewTaskStatus 获取预览任务状态
+func (c *OrganizeController) GetPreviewTaskStatus(ctx *gin.Context) {
+	taskID := ctx.Query("task_id")
+	if taskID == "" {
+		ErrorResp(ctx, http.StatusBadRequest, "缺少task_id参数")
+		return
+	}
+
+	task, err := c.organizeService.GetPreviewTaskStatus(taskID)
+	if err != nil {
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if task == nil {
+		ErrorResp(ctx, http.StatusNotFound, "任务不存在")
+		return
+	}
+
+	// 直接返回 task 对象，SuccessResp 会将其放入 Data 字段中
+	// 这样前端 statusResponse.data.data 对应的就是 task 结构，而不是 {"data": task}
+	SuccessResp(ctx, task)
+}
+
+// CheckRestorableTask 检查可恢复任务
+func (c *OrganizeController) CheckRestorableTask(ctx *gin.Context) {
+	var req struct {
+		SourceID   int      `json:"source_id" binding:"required"`
+		SourcePath string   `json:"source_path"`
+		FileIDs    []string `json:"file_ids"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+
+	task, err := c.organizeService.CheckRestorableTask(req.SourceID, req.SourcePath, req.FileIDs)
+	if err != nil {
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if task == nil {
+		SuccessResp(ctx, gin.H{
+			"has_task": false,
+		})
+		return
+	}
+
+	SuccessResp(ctx, gin.H{
+		"has_task": task != nil,
+		"task":     task,
+	})
+}
+
 // ExecuteOrganize 执行整理
 func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 	var req struct {
@@ -165,6 +266,19 @@ func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 		}
 	}
 
+	// 整理成功后触发 Emby 媒体库刷新（仅在有成功文件时）
+	var embyRefreshResult *service.EmbyLibraryRefreshResult
+	if successCount > 0 && c.embyRefreshCallback != nil {
+		embyRefreshResult = c.embyRefreshCallback(req.SourceID)
+		if embyRefreshResult != nil {
+			if embyRefreshResult.Success {
+				logger.Infof("OrganizeController[ExecuteOrganize] Emby刷新成功: %s", embyRefreshResult.Message)
+			} else {
+				logger.Warnf("OrganizeController[ExecuteOrganize] Emby刷新失败: %s", embyRefreshResult.Message)
+			}
+		}
+	}
+
 	SuccessResp(ctx, gin.H{
 		"data":    results,
 		"total":   len(results),
@@ -177,6 +291,7 @@ func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 			"skipped": skippedCount,
 			"failed":  failedCount,
 		},
+		"emby_refresh": embyRefreshResult,
 	})
 }
 
@@ -204,6 +319,44 @@ func (c *OrganizeController) BatchIdentify(ctx *gin.Context) {
 	}
 
 	SuccessResp(ctx, gin.H{"data": results, "total": len(results)})
+}
+
+// BatchIdentifyDirectory 递归扫描目录后批量识别视频文件
+func (c *OrganizeController) BatchIdentifyDirectory(ctx *gin.Context) {
+	var req struct {
+		SourceID   int      `json:"source_id" binding:"required"`
+		SourcePath string   `json:"source_path"`
+		FileIDs    []string `json:"file_ids"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+
+	results, err := c.organizeService.BatchIdentifyDirectory(req.SourceID, req.SourcePath, req.FileIDs)
+	if err != nil {
+		logger.Errorf("OrganizeController[BatchIdentifyDirectory] 批量识别失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	successCount := 0
+	failedCount := 0
+	for _, result := range results {
+		if result.Success {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+
+	SuccessResp(ctx, gin.H{
+		"data":    results,
+		"total":   len(results),
+		"success": successCount,
+		"failed":  failedCount,
+	})
 }
 
 // BatchRenamePreview 批量更名预览

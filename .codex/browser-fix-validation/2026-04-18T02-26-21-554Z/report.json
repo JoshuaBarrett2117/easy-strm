@@ -1,0 +1,19 @@
+{
+  "runDir": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-26-21-554Z",
+  "results": [
+    {
+      "id": "1-???????????????",
+      "ok": true,
+      "detail": "email/phone fields absent"
+    },
+    {
+      "id": "RUN",
+      "ok": false,
+      "detail": "page.waitForFunction: Timeout 30000ms exceeded.\n    at runChecks (C:\\Users\\a3875\\Documents\\code\\easy-strm\\easy-strm-front\\[eval1]:192:14)\n    at async file:///C:/Users/a3875/Documents/code/easy-strm/easy-strm-front/[eval1]:337:5"
+    }
+  ],
+  "screenshots": {
+    "01-user-info": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-26-21-554Z\\01-user-info.png",
+    "error": "C:\\Users\\a3875\\Documents\\code\\easy-strm\\.codex\\browser-fix-validation\\2026-04-18T02-26-21-554Z\\error.png"
+  }
+}

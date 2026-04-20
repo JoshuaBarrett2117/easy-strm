@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 
@@ -28,7 +29,8 @@ type TaskStatus struct {
 	TaskID         string   `json:"task_id"`
 	TaskType       TaskType `json:"task_type"`       // 任务类型
 	TaskName       string   `json:"task_name"`       // 任务名称
-	Status         string   `json:"status"`          // pending, running, completed, failed
+	Status         string   `json:"status"`          // pending, running, completed, failed, cancelled
+	Priority       int      `json:"priority"`        // 优先级：0=最高，默认5
 	Progress       int      `json:"progress"`        // 进度百分比
 	TotalFiles     int      `json:"total_files"`     // 待生成文件总数
 	ProcessedFiles int      `json:"processed_files"` // 已处理文件数
@@ -45,20 +47,30 @@ const (
 	TaskStatusRunning   = "running"
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
+	TaskStatusCancelled = "cancelled"
 )
 
 // 任务Redis key前缀
 const taskKeyPrefix = "easy_strm:task:"
 const taskListKey = "easy_strm:task:list"
+const taskCancelKeyPrefix = "easy_strm:task:cancel:"   // 取消标记 key
+const taskProgressKeyPrefix = "easy_strm:task:progress:" // 已处理文件ID集合 key
 
-// CreateTask 创建新任务
+// CreateTask 创建新任务（默认优先级5）
 func CreateTask(taskID string, taskType TaskType, taskName string) (*TaskStatus, error) {
+	return CreateTaskWithPriority(taskID, taskType, taskName, 5)
+}
+
+// CreateTaskWithPriority 创建带优先级的任务
+// priority: 0=最高优先级，数值越小越优先
+func CreateTaskWithPriority(taskID string, taskType TaskType, taskName string, priority int) (*TaskStatus, error) {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	task := &TaskStatus{
 		TaskID:     taskID,
 		TaskType:   taskType,
 		TaskName:   taskName,
 		Status:     TaskStatusPending,
+		Priority:   priority,
 		Progress:   0,
 		CreateTime: now,
 		UpdateTime: now,
@@ -71,7 +83,7 @@ func CreateTask(taskID string, taskType TaskType, taskName string) (*TaskStatus,
 	}
 
 	AddTaskToList(taskID)
-	Debug("Created task: %s, type: %s, name: %s", taskID, taskType, taskName)
+	Debug("Created task: %s, type: %s, name: %s, priority: %d", taskID, taskType, taskName, priority)
 	return task, nil
 }
 
@@ -241,4 +253,138 @@ func RemoveTaskFromList(taskID string) error {
 	}
 	Debug("Removed task %s from list", taskID)
 	return nil
+}
+
+// --- 任务取消机制 ---
+
+// SetTaskCancelFlag 设置任务取消标记
+// goroutine 在每次迭代时检查此标记，实现协作式取消
+func SetTaskCancelFlag(taskID string) error {
+	ctx := context.Background()
+	key := taskCancelKeyPrefix + taskID
+	// 设置取消标记，24小时过期（与任务本身同步）
+	return redisClient.Set(ctx, key, "1", 24*time.Hour).Err()
+}
+
+// IsTaskCancelled 检查任务是否已被取消
+// 在 goroutine 的每次迭代中调用此函数检查取消标记
+func IsTaskCancelled(taskID string) bool {
+	ctx := context.Background()
+	key := taskCancelKeyPrefix + taskID
+	val, err := redisClient.Get(ctx, key).Result()
+	if err == redis.Nil {
+		return false
+	}
+	if err != nil {
+		Warn("检查任务取消标记失败 %s: %v", taskID, err)
+		return false
+	}
+	return val == "1"
+}
+
+// ClearTaskCancelFlag 清除任务取消标记
+func ClearTaskCancelFlag(taskID string) error {
+	ctx := context.Background()
+	key := taskCancelKeyPrefix + taskID
+	return redisClient.Del(ctx, key).Err()
+}
+
+// CancelTask 取消任务（设置取消标记 + 更新状态）
+func CancelTask(taskID string) error {
+	task, err := GetTask(taskID)
+	if err != nil {
+		return fmt.Errorf("获取任务失败: %v", err)
+	}
+	if task == nil {
+		return fmt.Errorf("任务不存在: %s", taskID)
+	}
+
+	// 仅 pending/running 状态可取消
+	if task.Status != TaskStatusPending && task.Status != TaskStatusRunning {
+		return fmt.Errorf("任务状态不允许取消: %s (当前: %s)", taskID, task.Status)
+	}
+
+	// 设置取消标记，让运行中的 goroutine 感知
+	if err := SetTaskCancelFlag(taskID); err != nil {
+		Error("设置取消标记失败 %s: %v", taskID, err)
+	}
+
+	// 更新任务状态为 cancelled
+	task.Status = TaskStatusCancelled
+	task.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
+	return SaveTask(task)
+}
+
+// --- 任务进度追踪（用于恢复） ---
+
+// AddProcessedFileID 记录已处理的文件ID到 Redis Set
+// 恢复任务时通过此集合跳过已处理文件
+func AddProcessedFileID(taskID string, fileID string) error {
+	ctx := context.Background()
+	key := taskProgressKeyPrefix + taskID
+	return redisClient.SAdd(ctx, key, fileID).Err()
+}
+
+// IsFileProcessed 检查文件是否已被处理过（用于恢复时跳过）
+func IsFileProcessed(taskID string, fileID string) bool {
+	ctx := context.Background()
+	key := taskProgressKeyPrefix + taskID
+	isMember, err := redisClient.SIsMember(ctx, key, fileID).Result()
+	if err != nil {
+		Warn("检查文件处理状态失败 %s/%s: %v", taskID, fileID, err)
+		return false
+	}
+	return isMember
+}
+
+// GetProcessedFileIDs 获取已处理的文件ID集合
+func GetProcessedFileIDs(taskID string) ([]string, error) {
+	ctx := context.Background()
+	key := taskProgressKeyPrefix + taskID
+	members, err := redisClient.SMembers(ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+	return members, nil
+}
+
+// ClearTaskProgress 清除任务的进度记录
+func ClearTaskProgress(taskID string) error {
+	ctx := context.Background()
+	key := taskProgressKeyPrefix + taskID
+	return redisClient.Del(ctx, key).Err()
+}
+
+// --- 任务恢复 ---
+
+// ResumeTask 恢复已取消或失败的任务
+// 将任务状态重置为 pending，保留进度信息，等待调度器重新执行
+func ResumeTask(taskID string) (*TaskStatus, error) {
+	task, err := GetTask(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("获取任务失败: %v", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("任务不存在: %s", taskID)
+	}
+
+	// 仅 cancelled/failed 状态可恢复
+	if task.Status != TaskStatusCancelled && task.Status != TaskStatusFailed {
+		return nil, fmt.Errorf("任务状态不允许恢复: %s (当前: %s)", taskID, task.Status)
+	}
+
+	// 清除取消标记
+	ClearTaskCancelFlag(taskID)
+
+	// 重置状态为 pending，保留进度信息（processed_files 等字段保留）
+	task.Status = TaskStatusPending
+	task.ErrorMessage = ""
+	task.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
+
+	if err := SaveTask(task); err != nil {
+		return nil, fmt.Errorf("保存任务失败: %v", err)
+	}
+
+	Info("任务已恢复: %s, 保留进度: %d/%d", taskID, task.ProcessedFiles, task.TotalFiles)
+	return task, nil
 }

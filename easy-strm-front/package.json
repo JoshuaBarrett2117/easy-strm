@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "e2e:organize-preview-refresh": "node scripts/e2e-organize-preview-refresh.mjs",
+    "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",
@@ -19,6 +21,8 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
     "playwright": "^1.58.2",
+    "unplugin-auto-import": "^0.18.6",
+    "unplugin-vue-components": "^0.27.5",
     "vite": "^6.0.3"
   }
 }

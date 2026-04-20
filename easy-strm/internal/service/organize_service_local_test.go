@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"os"
@@ -17,10 +17,10 @@ func expectLocalMediaSourceByID(t *testing.T, mock sqlmock.Sqlmock, sourceID int
 	t.Helper()
 
 	now := time.Now()
-	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(sourceID, "local", domain.SourceTypeLocal, root, nil, 10, true, now, now)
+	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(sourceID, "local", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(sourceID).
 		WillReturnRows(rows)
@@ -74,3 +74,8 @@ func TestOrganizeServiceListOrganizeCandidatesIncludesVideosFromSelectedDirector
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
+
+
+
+
+

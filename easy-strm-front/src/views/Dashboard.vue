@@ -98,6 +98,7 @@
       top="5vh"
       :close-on-click-modal="false"
       :destroy-on-close="true"
+      append-to-body
     >
       <div class="log-container">
         <div class="log-toolbar">
@@ -148,6 +149,7 @@
       top="5vh"
       :close-on-click-modal="false"
       :destroy-on-close="true"
+      append-to-body
     >
       <div class="task-dialog-container">
         <div class="task-toolbar">
@@ -156,7 +158,14 @@
         </div>
         <div class="task-list" v-loading="taskLoading">
           <div v-if="taskList.length > 0" class="task-items">
-            <TaskCard v-for="task in taskList" :key="task.task_id" :task="task" />
+            <TaskCard
+              v-for="task in taskList"
+              :key="task.task_id"
+              :task="task"
+              @cancel="handleCancelTask"
+              @resume="handleResumeTask"
+              @detail="handleTaskDetail"
+            />
           </div>
           <el-empty v-else description="暂无运行中的任务" />
         </div>
@@ -166,6 +175,107 @@
       </template>
     </el-dialog>
 
+    <el-drawer
+      v-model="taskDetailVisible"
+      title="任务详情"
+      size="42%"
+      :destroy-on-close="true"
+      append-to-body
+    >
+      <div class="task-detail-drawer" v-loading="taskDetailLoading">
+        <el-alert
+          v-if="taskDetailError"
+          type="error"
+          :title="taskDetailError"
+          show-icon
+          :closable="false"
+          class="task-detail-error"
+        />
+
+        <template v-if="taskDetailData">
+          <el-descriptions :column="1" border class="task-detail-summary">
+            <el-descriptions-item label="任务ID">
+              {{ taskDetailData.task_id || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="任务名称">
+              {{ taskDetailData.task_name || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="任务类型">
+              {{ taskDetailData.task_type || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="状态">
+              {{ taskDetailData.status || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="创建时间">
+              {{ taskDetailData.create_time || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="更新时间">
+              {{ taskDetailData.update_time || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="进度">
+              {{ taskDetailData.progress ?? 0 }}%
+            </el-descriptions-item>
+            <el-descriptions-item label="文件统计">
+              成功 {{ taskDetailData.success_files || 0 }} / 总数 {{ taskDetailData.total_files || 0 }} / 失败 {{ taskDetailData.failed_files || 0 }}
+            </el-descriptions-item>
+            <el-descriptions-item label="错误信息">
+              {{ taskDetailData.error_message || '-' }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div class="task-detail-section">
+            <div class="task-detail-section-title">任务元数据</div>
+            <div v-if="taskDetailMetadataRows.length > 0" class="task-detail-meta-grid">
+              <div
+                v-for="item in taskDetailMetadataRows"
+                :key="item.key"
+                class="task-detail-meta-item"
+              >
+                <div class="task-detail-meta-label">{{ item.label }}</div>
+                <div class="task-detail-meta-value">{{ item.value }}</div>
+              </div>
+            </div>
+            <el-empty v-else description="暂无任务元数据" />
+          </div>
+
+          <div v-if="taskDetailFailedItems.length > 0" class="task-detail-section">
+            <div class="task-detail-section-title">失败文件</div>
+            <div v-if="taskDetailFailureGroups.length > 0" class="task-detail-failure-summary">
+              <div
+                v-for="group in taskDetailFailureGroups"
+                :key="group.key"
+                class="task-detail-failure-group"
+              >
+                <div class="task-detail-failure-group-header">
+                  <div class="task-detail-failure-group-title">{{ group.label }}</div>
+                  <el-tag :type="group.tagType" size="small">{{ group.items.length }}</el-tag>
+                </div>
+                <div class="task-detail-failure-group-reason">
+                  {{ group.reason || '未提供失败原因' }}
+                </div>
+              </div>
+            </div>
+            <div class="task-detail-failed-list">
+              <div
+                v-for="item in taskDetailFailedItems"
+                :key="`${item.file_id || item.file_name}-${item.reason}`"
+                class="task-detail-failed-item"
+              >
+                <div class="task-detail-failed-main">
+                  <span class="task-detail-failed-name">{{ item.file_name }}</span>
+                  <span v-if="item.file_id" class="task-detail-failed-id">{{ item.file_id }}</span>
+                  <el-tag v-if="item.category" :type="taskDetailFailureTagType(item.category)" size="small">
+                    {{ taskDetailFailureTagLabel(item.category) }}
+                  </el-tag>
+                </div>
+                <div class="task-detail-failed-reason">{{ item.reason || '未提供失败原因' }}</div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </el-drawer>
+
     <el-dialog
       v-model="networkDialogVisible"
       title="网络连通性测试"
@@ -173,6 +283,7 @@
       top="8vh"
       :close-on-click-modal="false"
       :destroy-on-close="true"
+      append-to-body
     >
       <div class="network-toolbar">
         <el-button :icon="Refresh" @click="loadNetworkResults" :loading="networkLoading">刷新</el-button>
@@ -182,21 +293,26 @@
         <el-table-column prop="url" label="地址" min-width="220" />
         <el-table-column label="连通状态" width="110">
           <template #default="{ row }">
-            <el-tag :type="row.ok ? 'success' : 'danger'">
-              {{ row.ok ? '成功' : '失败' }}
+            <el-tag :type="getNetworkStatusTag(row)">
+              {{ getNetworkStatusText(row) }}
             </el-tag>
           </template>
         </el-table-column>
         <el-table-column label="代理路径" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.via_proxy ? 'warning' : 'info'">
+            <el-tag v-if="row.via_proxy !== null && row.via_proxy !== undefined" :type="row.via_proxy ? 'warning' : 'info'">
               {{ row.via_proxy ? '代理' : '直连' }}
             </el-tag>
+            <span v-else>-</span>
           </template>
         </el-table-column>
         <el-table-column prop="status_code" label="HTTP" width="90" />
         <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
-        <el-table-column prop="error" label="错误信息" min-width="200" />
+        <el-table-column label="错误信息" min-width="200">
+          <template #default="{ row }">
+            {{ row.error || row.status_message || '-' }}
+          </template>
+        </el-table-column>
       </el-table>
       <template #footer>
         <el-button @click="networkDialogVisible = false">关闭</el-button>
@@ -206,16 +322,17 @@
 </template>
 
 <script setup>
-import { computed, ref, onUnmounted, watch } from 'vue'
+import { computed, nextTick, ref, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { User, Cloudy, Setting, SwitchButton, Document, Refresh, List, Tools, FolderOpened, CollectionTag, Connection } from '@element-plus/icons-vue'
-import { ElMessageBox, ElMessage } from 'element-plus'
-import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList, testNetworkConnectivity } from '../utils/api'
+import { ElMessage } from 'element-plus'
+import { showConfirmDialog } from '../utils/ui/messageBox'
+import { getLogFiles, getLogFileContent, getLogConfig, updateLogConfig, getTaskList, getTaskDetail, cancelTask, resumeTask, getNetworkProbeSites, testNetworkConnectivity } from '../utils/api'
 import TaskCard from '../components/TaskCard.vue'
 
 const router = useRouter()
 
-// 判断是否为admin用户
+// 判断是否为 admin 用户
 const isAdmin = computed(() => {
   const userName = localStorage.getItem('user_name')
   return userName === 'admin'
@@ -264,9 +381,9 @@ const loadLogFiles = async () => {
   try {
     const response = await getLogFiles()
     logFiles.value = response.data.data || []
-    // 默认选择最新的INFO日志文件（后端已按日期降序排列）
+    // 默认选择最新的 INFO 日志文件，后端已按日期降序排列
     if (logFiles.value.length > 0) {
-      // 优先选择INFO类型的日志文件
+      // 优先选择 INFO 类型的日志文件
       const infoLogFile = logFiles.value.find(f => f.type === 'info')
       selectedLogFile.value = infoLogFile ? infoLogFile.name : logFiles.value[0].name
       await loadLogContent()
@@ -321,7 +438,7 @@ const toggleAutoRefresh = (value) => {
   if (value) {
     autoRefreshTimer = setInterval(() => {
       loadLogContent()
-    }, 3000) // 每3秒刷新一次
+    }, 3000) // 每 3 秒刷新一次
   } else {
     if (autoRefreshTimer) {
       clearInterval(autoRefreshTimer)
@@ -370,7 +487,7 @@ const formatFileSize = (bytes) => {
  * 处理退出登录
  */
 const handleLogout = () => {
-  ElMessageBox.confirm('确定要退出登录吗？', '提示', {
+  showConfirmDialog('确定要退出登录吗？', '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     type: 'warning'
@@ -388,10 +505,201 @@ const taskList = ref([])
 const taskLoading = ref(false)
 const autoRefreshTasks = ref(false)
 let taskRefreshTimer = null
+const taskDetailVisible = ref(false)
+const taskDetailLoading = ref(false)
+const taskDetailData = ref(null)
+const taskDetailError = ref('')
+
+const taskDetailMetadataRows = computed(() => {
+  const metadata = taskDetailData.value?.metadata
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return []
+  }
+
+  const labelMap = {
+    source_id: '来源ID',
+    source_name: '来源媒体源',
+    source_type: '来源类型',
+    source_path: '来源路径',
+    organize_target_path: '整理目标',
+    media_type: '媒体类型',
+    conflict_policy: '冲突策略',
+    operation_mode: '整理方式',
+    watch_interval: '监控间隔',
+    trigger_mode: '触发方式',
+    detected_files: '检测文件数',
+    success_files: '成功数',
+    failed_files: '失败数',
+    result_summary: '结果概览',
+    failure_category: '失败分类',
+    failure_reason: '失败原因',
+    failed_item_count: '失败文件数'
+  }
+
+  return Object.entries(metadata)
+    .filter(([key, value]) => key !== 'failed_items' && value !== null && value !== undefined && value !== '')
+    .map(([key, value]) => {
+      let formatted = value
+      if (key === 'trigger_mode') {
+        formatted = value === 'polling' ? '115 轮询监控' : value === 'fsnotify' ? '本地实时监控' : value
+      } else if (key === 'media_type') {
+        const mediaTypeMap = { all: '全部', movie: '电影', tv: '剧集' }
+        formatted = mediaTypeMap[value] || value
+      } else if (key === 'conflict_policy') {
+        const conflictPolicyMap = { skip: '跳过', overwrite: '覆盖', suffix: '追加序号' }
+        formatted = conflictPolicyMap[value] || value
+      } else if (key === 'operation_mode') {
+        const operationModeMap = { move: '移动', copy: '复制', hardlink: '硬链接', symlink: '软链接' }
+        formatted = operationModeMap[value] || value
+      } else if (key === 'watch_interval' && Number.isFinite(Number(value))) {
+        formatted = `${value} 秒`
+      } else if (Array.isArray(value)) {
+        formatted = `${value.length} 项`
+      } else if (typeof value === 'object') {
+        formatted = JSON.stringify(value)
+      }
+
+      return {
+        key,
+        label: labelMap[key] || key,
+        value: String(formatted)
+      }
+    })
+})
+
+const taskDetailFailedItems = computed(() => {
+  const items = taskDetailData.value?.metadata?.failed_items
+  if (!Array.isArray(items)) {
+    return []
+  }
+
+  return items
+    .map((item) => ({
+      file_id: item?.file_id || item?.fileID || '',
+      file_name: item?.file_name || item?.fileName || item?.file_id || '',
+      category: item?.category || '',
+      reason: item?.reason || ''
+    }))
+    .filter(item => item.file_id || item.file_name)
+})
+
+const taskDetailFailureGroups = computed(() => {
+  const items = taskDetailFailedItems.value
+  if (items.length === 0) {
+    return []
+  }
+
+  const groupOrder = ['identify_failed', 'organize_failed', 'cloud115_auth_failed', 'cloud115_failed', 'scan_failed', 'target_path', 'partial_failed', 'conflict_skipped', 'panic', 'other']
+  const groupMap = new Map()
+
+  const getGroupKey = (category, reason) => {
+    const normalizedCategory = String(category || '').trim()
+    if (normalizedCategory) {
+      return normalizedCategory
+    }
+    const text = String(reason || '').toLowerCase()
+    if (text.includes('identify') || text.includes('tmdb') || text.includes('recogniz')) return 'identify_failed'
+    if (text.includes('organize') || text.includes('move') || text.includes('copy')) return 'organize_failed'
+    if (text.includes('cookie') || text.includes('auth') || text.includes('unauthorized')) return 'cloud115_auth_failed'
+    if (text.includes('cloud115') || text.includes('115')) return 'cloud115_failed'
+    if (text.includes('scan') || text.includes('list')) return 'scan_failed'
+    if (text.includes('target') && text.includes('path')) return 'target_path'
+    if (text.includes('partial') || text.includes('部分')) return 'partial_failed'
+    if (text.includes('conflict') || text.includes('冲突')) return 'conflict_skipped'
+    if (text.includes('panic') || text.includes('exception')) return 'panic'
+    return 'other'
+  }
+
+  const getGroupMeta = (key) => {
+    const meta = {
+      identify_failed: { label: '识别失败', tagType: 'warning' },
+      organize_failed: { label: '整理失败', tagType: 'danger' },
+      cloud115_auth_failed: { label: '115 账号失效', tagType: 'danger' },
+      cloud115_failed: { label: '115 操作失败', tagType: 'danger' },
+      scan_failed: { label: '扫描失败', tagType: 'warning' },
+      target_path: { label: '目标路径异常', tagType: 'warning' },
+      partial_failed: { label: '部分失败', tagType: 'warning' },
+      conflict_skipped: { label: '冲突跳过', tagType: 'warning' },
+      panic: { label: '异常中断', tagType: 'danger' },
+      other: { label: '其他失败', tagType: 'info' }
+    }
+    return meta[key] || meta.other
+  }
+
+  for (const item of items) {
+    const key = getGroupKey(item.category, item.reason)
+    if (!groupMap.has(key)) {
+      const meta = getGroupMeta(key)
+      groupMap.set(key, {
+        key,
+        label: meta.label,
+        tagType: meta.tagType,
+        reason: item.reason || '',
+        items: []
+      })
+    }
+    groupMap.get(key).items.push(item)
+  }
+
+  return groupOrder
+    .filter(key => groupMap.has(key))
+    .map(key => groupMap.get(key))
+})
+
+const taskDetailFailureTagLabel = (category) => {
+  const map = {
+    identify_failed: '识别失败',
+    organize_failed: '整理失败',
+    cloud115_auth_failed: '115 账号失效',
+    cloud115_failed: '115 操作失败',
+    scan_failed: '扫描失败',
+    target_path: '目标路径异常',
+    panic: '异常中断',
+    partial_failed: '部分失败',
+    conflict_skipped: '冲突跳过',
+    other: '其他失败'
+  }
+  return map[String(category || '').trim()] || '其他失败'
+}
+
+const taskDetailFailureTagType = (category) => {
+  const key = String(category || '').trim()
+  if (key === 'identify_failed' || key === 'scan_failed' || key === 'target_path') return 'warning'
+  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'danger'
+  if (key === 'partial_failed') return 'warning'
+  return 'info'
+}
 
 const networkDialogVisible = ref(false)
 const networkLoading = ref(false)
 const networkResults = ref([])
+let networkProbeRunId = 0
+
+const normalizeNetworkSites = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data
+  }
+  return []
+}
+
+const normalizeNetworkResult = (payload) => {
+  if (Array.isArray(payload)) {
+    return payload[0] || null
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data[0] || null
+  }
+  if (payload?.data && typeof payload.data === 'object') {
+    return payload.data
+  }
+  if (payload && typeof payload === 'object') {
+    return payload
+  }
+  return null
+}
 
 /**
  * 显示任务弹窗
@@ -399,6 +707,27 @@ const networkResults = ref([])
 const showTaskDialog = async () => {
   taskDialogVisible.value = true
   await loadTaskList()
+}
+
+const handleTaskDetail = async (taskId) => {
+  if (!taskId) {
+    return
+  }
+
+  taskDetailVisible.value = true
+  taskDetailLoading.value = true
+  taskDetailError.value = ''
+  taskDetailData.value = null
+
+  try {
+    const response = await getTaskDetail(taskId)
+    taskDetailData.value = response.data.data || response.data || null
+  } catch (error) {
+    console.error('加载任务详情失败:', error)
+    taskDetailError.value = error.response?.data?.error || error.message || '加载任务详情失败'
+  } finally {
+    taskDetailLoading.value = false
+  }
 }
 
 /**
@@ -414,6 +743,34 @@ const loadTaskList = async () => {
     ElMessage.error('加载任务列表失败')
   } finally {
     taskLoading.value = false
+  }
+}
+
+const handleCancelTask = async (taskId) => {
+  if (!taskId) {
+    return
+  }
+
+  try {
+    await cancelTask(taskId)
+    ElMessage.success('任务已取消')
+    await loadTaskList()
+  } catch (error) {
+    console.error('取消任务失败:', error)
+  }
+}
+
+const handleResumeTask = async (taskId) => {
+  if (!taskId) {
+    return
+  }
+
+  try {
+    await resumeTask(taskId)
+    ElMessage.success('任务已重新执行')
+    await loadTaskList()
+  } catch (error) {
+    console.error('恢复任务失败:', error)
   }
 }
 
@@ -439,19 +796,73 @@ const showNetworkDialog = async () => {
 }
 
 const loadNetworkResults = async () => {
+  const runId = ++networkProbeRunId
   networkLoading.value = true
   try {
-    const response = await testNetworkConnectivity()
-    networkResults.value = response.data.data || []
+    const siteResponse = await getNetworkProbeSites()
+    const sites = normalizeNetworkSites(siteResponse.data.data)
+    networkResults.value = sites.map(site => ({
+      ...site,
+      ok: null,
+      status_code: null,
+      duration_ms: null,
+      via_proxy: null,
+      error: '',
+      status_message: '待测试'
+    }))
+    await nextTick()
+
+    for (const site of sites) {
+      if (runId !== networkProbeRunId) {
+        return
+      }
+
+      const currentItem = networkResults.value.find(item => item.name === site.name && item.url === site.url)
+      if (currentItem) {
+        currentItem.status_message = '测试中...'
+      }
+
+      try {
+        const response = await testNetworkConnectivity({ name: site.name, url: site.url })
+        const result = normalizeNetworkResult(response.data.data)
+        if (currentItem && result) {
+          Object.assign(currentItem, result, {
+            status_message: result.ok ? '成功' : '失败'
+          })
+        }
+      } catch (error) {
+        const errorMsg = error.response?.data?.error || error.message || '测试失败'
+        if (currentItem) {
+          Object.assign(currentItem, {
+            ok: false,
+            error: errorMsg,
+            status_message: '失败'
+          })
+        }
+      }
+    }
   } catch (error) {
     console.error('加载网络测试结果失败:', error)
     ElMessage.error('加载网络测试结果失败')
     networkResults.value = []
   } finally {
-    networkLoading.value = false
+    if (runId === networkProbeRunId) {
+      networkLoading.value = false
+    }
   }
 }
 
+const getNetworkStatusText = (row) => {
+  if (row.ok === true) return '成功'
+  if (row.ok === false) return '失败'
+  return row.status_message || '待测试'
+}
+
+const getNetworkStatusTag = (row) => {
+  if (row.ok === true) return 'success'
+  if (row.ok === false) return 'danger'
+  return 'info'
+}
 // 组件卸载时清理定时器
 onUnmounted(() => {
   if (autoRefreshTimer) {
@@ -463,7 +874,7 @@ onUnmounted(() => {
 })
 
 /**
- * 监听弹窗关闭，停止自动刷新
+ * 监听日志弹窗关闭，停止自动刷新
  */
 watch(logDialogVisible, (newVal) => {
   if (!newVal) {
@@ -486,6 +897,13 @@ watch(taskDialogVisible, (newVal) => {
       clearInterval(taskRefreshTimer)
       taskRefreshTimer = null
     }
+  }
+})
+
+watch(taskDetailVisible, (newVal) => {
+  if (!newVal) {
+    taskDetailError.value = ''
+    taskDetailData.value = null
   }
 })
 </script>
@@ -706,6 +1124,129 @@ watch(taskDialogVisible, (newVal) => {
   flex-direction: column;
 }
 
+.task-detail-drawer {
+  padding-right: 8px;
+}
+
+.task-detail-error {
+  margin-bottom: 16px;
+}
+
+.task-detail-summary {
+  margin-bottom: 16px;
+}
+
+.task-detail-section {
+  margin-bottom: 20px;
+}
+
+.task-detail-section-title {
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.task-detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.task-detail-meta-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f7f8fa;
+  border: 1px solid #ebeef5;
+}
+
+.task-detail-meta-label {
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.task-detail-meta-value {
+  font-size: 13px;
+  color: #303133;
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.task-detail-failure-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.task-detail-failure-group {
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.task-detail-failure-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.task-detail-failure-group-title {
+  font-weight: 600;
+  color: #303133;
+}
+
+.task-detail-failure-group-reason {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+  word-break: break-word;
+}
+
+.task-detail-failed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.task-detail-failed-item {
+  padding: 12px 14px;
+  border: 1px solid #fde2e2;
+  border-radius: 10px;
+  background: #fffafa;
+}
+
+.task-detail-failed-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.task-detail-failed-name {
+  font-weight: 600;
+  color: #303133;
+  word-break: break-all;
+}
+
+.task-detail-failed-id {
+  font-size: 12px;
+  color: #909399;
+  word-break: break-all;
+}
+
+.task-detail-failed-reason {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #f56c6c;
+  word-break: break-word;
+}
+
 .task-toolbar {
   display: flex;
   align-items: center;
@@ -731,4 +1272,8 @@ watch(taskDialogVisible, (newVal) => {
   margin-bottom: 12px;
 }
 </style>
+
+
+
+
 

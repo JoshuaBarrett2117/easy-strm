@@ -3,6 +3,7 @@ package dao
 import (
 	"database/sql"
 	"fmt"
+	"time"
 
 	"easy-strm/internal/domain"
 )
@@ -18,7 +19,7 @@ func NewStrmConfigDAO() *StrmConfigDAO {
 // GetByID 根据ID获取STRM配置
 func (s *StrmConfigDAO) GetByID(id int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`SELECT id, cloud115_id, net_disk_path, local_path, cron, extension,
 		COALESCE(dir_tree_file, ''), sync_mode, COALESCE(source_account, 0), COALESCE(target_account, 0),
 		COALESCE(target_directory, ''), auto_cleanup, COALESCE(cleanup_threshold, 0),
@@ -55,7 +56,7 @@ func (s *StrmConfigDAO) GetAll(sortField, sortOrder string) ([]*domain.StrmConfi
 		COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 0), create_time, update_time
 		FROM t_strm_config ORDER BY %s`, orderClause)
 
-	rows, err := db.Query(query)
+	rows, err := DB.Query(query)
 	if err != nil {
 		return nil, fmt.Errorf("StrmConfigDAO[GetAll] 查询失败: %v", err)
 	}
@@ -79,7 +80,7 @@ func (s *StrmConfigDAO) GetAll(sortField, sortOrder string) ([]*domain.StrmConfi
 // Create 创建STRM配置
 func (s *StrmConfigDAO) Create(cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time`,
@@ -95,7 +96,7 @@ func (s *StrmConfigDAO) Create(cloud115Id int, netDiskPath, localPath, cron, ext
 // Update 更新STRM配置
 func (s *StrmConfigDAO) Update(id, cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`UPDATE t_strm_config SET cloud115_id=$1, net_disk_path=$2, local_path=$3, cron=$4, extension=$5
 		WHERE id=$6
 		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time`,
@@ -111,7 +112,7 @@ func (s *StrmConfigDAO) Update(id, cloud115Id int, netDiskPath, localPath, cron,
 // CreateExt 创建STRM配置（扩展版，包含秒传同步字段）
 func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
@@ -126,7 +127,7 @@ func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, 
 // UpdateExt 更新STRM配置（扩展版，包含秒传同步字段）
 func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`UPDATE t_strm_config SET cloud115_id=$1, net_disk_path=$2, local_path=$3, cron=$4, extension=$5, sync_mode=$6, source_account=$7, target_account=$8, target_directory=$9, auto_cleanup=$10, cleanup_threshold=$11, cleanup_policy=$12, max_concurrency=$13
 		WHERE id=$14
 		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
@@ -140,7 +141,7 @@ func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cr
 
 // Delete 删除STRM配置
 func (s *StrmConfigDAO) Delete(id int) error {
-	result, err := db.Exec("DELETE FROM t_strm_config WHERE id = $1", id)
+	result, err := DB.Exec("DELETE FROM t_strm_config WHERE id = $1", id)
 	if err != nil {
 		return fmt.Errorf("StrmConfigDAO[Delete] 删除失败: %v", err)
 	}
@@ -161,7 +162,7 @@ func NewStrmFileDAO() *StrmFileDAO {
 
 // GetByConfigID 根据配置ID获取所有STRM文件记录
 func (s *StrmFileDAO) GetByConfigID(strmConfigID int) ([]*domain.StrmFile, error) {
-	rows, err := db.Query(
+	rows, err := DB.Query(
 		`SELECT id, strm_config_id, file_name, file_path, COALESCE(pick_code, ''),
 		COALESCE(sha1, ''), COALESCE(file_size, 0), COALESCE(local_strm_path, ''),
 		create_time, update_time FROM t_strm_file WHERE strm_config_id = $1`,
@@ -187,7 +188,7 @@ func (s *StrmFileDAO) GetByConfigID(strmConfigID int) ([]*domain.StrmFile, error
 // GetByPath 根据配置ID和文件路径获取STRM文件记录
 func (s *StrmFileDAO) GetByPath(strmConfigID int, filePath string) (*domain.StrmFile, error) {
 	f := &domain.StrmFile{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`SELECT id, strm_config_id, file_name, file_path, COALESCE(pick_code, ''),
 		COALESCE(sha1, ''), COALESCE(file_size, 0), COALESCE(local_strm_path, ''),
 		create_time, update_time FROM t_strm_file WHERE strm_config_id = $1 AND file_path = $2`,
@@ -206,7 +207,7 @@ func (s *StrmFileDAO) GetByPath(strmConfigID int, filePath string) (*domain.Strm
 // Upsert 创建或更新STRM文件记录
 func (s *StrmFileDAO) Upsert(strmConfigID int, fileName, filePath, pickCode, sha1 string, fileSize int64, localStrmPath string) (*domain.StrmFile, error) {
 	f := &domain.StrmFile{}
-	err := db.QueryRow(
+	err := DB.QueryRow(
 		`INSERT INTO t_strm_file (strm_config_id, file_name, file_path, pick_code, sha1, file_size, local_strm_path)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (strm_config_id, file_path) DO UPDATE SET
@@ -223,7 +224,7 @@ func (s *StrmFileDAO) Upsert(strmConfigID int, fileName, filePath, pickCode, sha
 
 // DeleteByConfigID 删除指定配置的所有STRM文件记录
 func (s *StrmFileDAO) DeleteByConfigID(strmConfigID int) error {
-	_, err := db.Exec("DELETE FROM t_strm_file WHERE strm_config_id = $1", strmConfigID)
+	_, err := DB.Exec("DELETE FROM t_strm_file WHERE strm_config_id = $1", strmConfigID)
 	if err != nil {
 		return fmt.Errorf("StrmFileDAO[DeleteByConfigID] 删除失败: %v", err)
 	}
@@ -233,9 +234,29 @@ func (s *StrmFileDAO) DeleteByConfigID(strmConfigID int) error {
 // CountByConfigID 统计指定配置的STRM文件数量
 func (s *StrmFileDAO) CountByConfigID(strmConfigID int) (int, error) {
 	var count int
-	err := db.QueryRow("SELECT COUNT(*) FROM t_strm_file WHERE strm_config_id = $1", strmConfigID).Scan(&count)
+	err := DB.QueryRow("SELECT COUNT(*) FROM t_strm_file WHERE strm_config_id = $1", strmConfigID).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("StrmFileDAO[CountByConfigID] 统计失败: %v", err)
 	}
 	return count, nil
+}
+
+// CountAll 统计所有STRM文件总数
+func (s *StrmFileDAO) CountAll() (int, error) {
+	var count int
+	err := DB.QueryRow("SELECT COUNT(*) FROM t_strm_file").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("StrmFileDAO[CountAll] 统计失败: %v", err)
+	}
+	return count, nil
+}
+
+// GetLastGenerationTime 获取最近一次STRM文件生成时间（取最新 update_time）
+func (s *StrmFileDAO) GetLastGenerationTime() (*time.Time, error) {
+	var lastTime *time.Time
+	err := DB.QueryRow("SELECT MAX(update_time) FROM t_strm_file").Scan(&lastTime)
+	if err != nil {
+		return nil, fmt.Errorf("StrmFileDAO[GetLastGenerationTime] 查询失败: %v", err)
+	}
+	return lastTime, nil
 }

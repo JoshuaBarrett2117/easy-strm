@@ -1,4 +1,4 @@
-package service
+﻿package service
 
 import (
 	"encoding/json"
@@ -94,10 +94,10 @@ func expectCloud115MediaSourceByID(t *testing.T, mock sqlmock.Sqlmock, sourceID 
 	t.Helper()
 
 	now := time.Now()
-	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "cloud115_id", "priority", "enabled", "create_time", "update_time"}).
-		AddRow(sourceID, "cloud", domain.SourceTypeCloud115, root, &cloud115ID, 10, true, now, now)
+	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(sourceID, "cloud", domain.SourceTypeCloud115, root, root, &cloud115ID, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, cloud115_id, priority, enabled, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(sourceID).
 		WillReturnRows(rows)
@@ -266,7 +266,7 @@ func TestOrganizeService_GetCachedIdentifyResultPrefersManualCloudIDCache(t *tes
 
 	rawData, err := json.Marshal(domain.TmdbSearchResult{
 		TmdbID:    1148677,
-		Title:     "哆啦A梦：大雄的地球交响乐",
+		Title:     "鍝嗗暒A姊︼細澶ч泟鐨勫湴鐞冧氦鍝嶄箰",
 		MediaType: "movie",
 		GenreIDs:  []int{16},
 		Countries: []string{"JP"},
@@ -281,7 +281,12 @@ func TestOrganizeService_GetCachedIdentifyResultPrefersManualCloudIDCache(t *tes
 		"id", "query_key", "media_type", "tmdb_id", "title", "original_title", "year", "poster_path",
 		"overview", "vote_average", "release_date", "first_air_date", "season_number", "episode_number",
 		"raw_data", "expire_at", "create_time", "update_time",
-	}).AddRow(1, "2979491657162553316", "movie", 1148677, "哆啦A梦：大雄的地球交响乐", "映画ドラえもん のび太の地球交響楽", 2024, nil, nil, 0, "2024-03-01", nil, nil, nil, rawData, now.Add(24*time.Hour), now, now)
+	}).AddRow(
+		1, "2979491657162553316", "movie", 1148677,
+		"Doraemon Earth Symphony", "Doraemon Earth Symphony",
+		2024, nil, nil, 0, "2024-03-01", nil, nil, nil,
+		rawData, now.Add(24*time.Hour), now, now,
+	)
 
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, query_key, media_type, tmdb_id, title, original_title, year, poster_path, 
 		        overview, vote_average, release_date, first_air_date, season_number, episode_number, 
@@ -326,7 +331,7 @@ func TestOrganizeService_GetCachedIdentifyResultPrefersManualCloudIDCache(t *tes
 	if result == nil {
 		t.Fatal("expected cached identify result")
 	}
-	if result.TmdbID != 1148677 || result.Title != "哆啦A梦：大雄的地球交响乐" {
+	if result.TmdbID != 1148677 || result.Title != "Doraemon Earth Symphony" {
 		t.Fatalf("unexpected cached identify result: %+v", result)
 	}
 
@@ -436,7 +441,7 @@ func TestOrganizeService_GetPreferredIdentifyResultPrefersManualOverride(t *test
 		Year:      2005,
 		Season:    1,
 		Episode:   2,
-	})
+	}, 1)
 	if err != nil {
 		t.Fatalf("expected manual override to succeed: %v", err)
 	}
@@ -476,3 +481,9 @@ func TestOrganizeService_MatchOrganizeManualOverrideSupportsCloudID(t *testing.T
 		t.Fatalf("unexpected override match: %+v", match)
 	}
 }
+
+
+
+
+
+

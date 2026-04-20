@@ -1,14 +1,12 @@
-import axios from 'axios'
+﻿import axios from 'axios'
 import { ElMessage } from 'element-plus'
 
-// 创建Axios实例
 const api = axios.create({
   baseURL: '/api',
   timeout: 10000,
-  withCredentials: true // 允许携带凭证，用于跨域请求
+  withCredentials: true
 })
 
-// Cookie操作工具函数
 const cookieUtils = {
   setCookie(name, value, days = 7) {
     const date = new Date()
@@ -24,25 +22,34 @@ const cookieUtils = {
   }
 }
 
-// 保存当前页面URL到localStorage
+let isRedirectingToLogin = false
+
 const saveCurrentUrl = () => {
   localStorage.setItem('redirectUrl', window.location.href)
 }
 
-// 清除本地存储的凭证
 const clearCredentials = () => {
   localStorage.removeItem('token')
   localStorage.removeItem('user_id')
+  localStorage.removeItem('user_name')
+  localStorage.removeItem('redirectUrl')
   cookieUtils.removeCookie('token')
 }
 
-// 跳转到登录页面
 const redirectToLogin = () => {
+  if (isRedirectingToLogin) {
+    return
+  }
+
+  isRedirectingToLogin = true
   saveCurrentUrl()
-  window.location.href = '/login'
+  window.location.replace('/login')
 }
 
-// 请求拦截器，自动添加token
+const getResponseErrorMessage = (error) => {
+  return error?.response?.data?.error || error?.message || '请求失败'
+}
+
 api.interceptors.request.use(
   config => {
     const token = localStorage.getItem('token')
@@ -51,84 +58,90 @@ api.interceptors.request.use(
     }
     return config
   },
-  error => {
-    return Promise.reject(error)
-  }
+  error => Promise.reject(error)
 )
 
-// 响应拦截器，处理token验证失败的情况
 api.interceptors.response.use(
-  response => {
-    return response
-  },
+  response => response,
   error => {
-    // 处理token验证失败的情况
-    if (error.response && error.response.status === 401) {
-      ElMessage.error('登录已过期，请重新登录')
+    if (axios.isCancel(error)) {
+      return Promise.reject(error)
+    }
+
+    if (error.response?.status === 401) {
+      if (!isRedirectingToLogin) {
+        ElMessage.error('登录已过期，请重新登录')
+      }
       clearCredentials()
       redirectToLogin()
       return Promise.reject(new Error('登录已过期'))
     }
-    // 处理其他错误
+
+    if (error.config?.skipGlobalErrorMessage) {
+      return Promise.reject(error)
+    }
+
     if (error.response) {
-      const message = error.response.data.error || '请求失败'
-      ElMessage.error(message)
+      ElMessage.error(getResponseErrorMessage(error))
     } else {
       ElMessage.error('网络错误，请稍后重试')
     }
+
     return Promise.reject(error)
   }
 )
 
-// 通用请求函数
 export const request = (url, options = {}) => {
   const method = options.method || 'GET'
   const data = options.data || {}
-  
-  if (method === 'GET') {
-    return api.get(url, { params: data })
-  } else {
-    return api({ method, url, data })
+  const requestOptions = {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
   }
+
+  if (method === 'GET') {
+    return api.get(url, { ...requestOptions, params: data })
+  }
+
+  return api({ ...requestOptions, method, url, data })
 }
 
-// 登录成功后处理
 const handleLoginSuccess = (response) => {
-  // 存储token到本地存储
   localStorage.setItem('token', response.token)
   localStorage.setItem('user_id', response.user_id)
   localStorage.setItem('user_name', response.name)
   cookieUtils.setCookie('token', response.token)
-  
-  // 检查是否有重定向URL
+
   const redirectUrl = localStorage.getItem('redirectUrl')
   if (redirectUrl) {
     localStorage.removeItem('redirectUrl')
-    window.location.href = redirectUrl
+    window.location.replace(redirectUrl)
   } else {
-    // 默认跳转到用户信息页面
-    window.location.href = '/dashboard/user-info'
+    window.location.replace('/dashboard/user-info')
   }
 }
 
-// 登录API
-export const login = (data) => {
-  return api.post('/login', data).then(response => {
+export const login = (data, options = {}) => {
+  return api.post('/login', data, {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  }).then(response => {
     handleLoginSuccess(response.data)
     return response
   })
 }
 
-// 获取用户信息API
-export const getUserInfo = () => {
-  return api.get('/user/info')
+export const getUserInfo = (options = {}) => {
+  return api.get('/user/info', {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
 }
-
-// 115云相关API已移动到 utils/api/cloud115.js
 
 export { cookieUtils }
 
-// 日志查看API（仅admin用户可访问）
+export const logout = () => {
+  clearCredentials()
+  window.location.replace('/login')
+}
+
 export const getLogFiles = () => {
   return api.get('/logs')
 }
@@ -145,16 +158,22 @@ export const updateLogConfig = (value) => {
   return api.put('/logs/config', { value })
 }
 
-// 任务相关API
 export const getTaskList = () => {
-  return api.get('/tasks')
+  return api.get('/tasks/unified')
 }
 
 export const getTaskDetail = (taskId) => {
   return api.get(`/strm/task/${taskId}`)
 }
 
-// 系统配置API
+export const cancelTask = (taskId) => {
+  return api.post(`/tasks/${taskId}/cancel`)
+}
+
+export const resumeTask = (taskId) => {
+  return api.post(`/tasks/${taskId}/resume`)
+}
+
 export const getSettings = () => {
   return api.get('/settings')
 }
@@ -171,6 +190,11 @@ export const updateSettings = (settings) => {
   return api.put('/settings', settings)
 }
 
-export const testNetworkConnectivity = () => {
-  return api.get('/network/test')
+export const getNetworkProbeSites = () => {
+  return api.get('/network/test', { params: { mode: 'list' } })
 }
+
+export const testNetworkConnectivity = (params = {}) => {
+  return api.get('/network/test', { params })
+}
+

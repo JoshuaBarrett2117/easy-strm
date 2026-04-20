@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 
+	"easy-strm/internal/dao"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -87,6 +89,10 @@ func main() {
 	if err := SeedAdmin(); err != nil {
 		Error("Failed to seed admin user: %v", err)
 	}
+
+	// 初始化 DAO 层（在所有路由设置之前）
+	dao.Init(getDBInstance(), getRedisClientInstance())
+	dao.InitDAO(getDBInstance())
 
 	// 初始化cron调度器
 	if err := InitCronScheduler(); err != nil {

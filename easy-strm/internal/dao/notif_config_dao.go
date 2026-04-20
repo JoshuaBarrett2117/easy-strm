@@ -32,6 +32,26 @@ func (n *NotificationConfigDAO) GetAll() ([]*domain.NotificationConfig, error) {
 	return configs, nil
 }
 
+// GetAllEnabled 仅查询已启用的通知配置，供 NotificationService 批量发送使用
+func (n *NotificationConfigDAO) GetAllEnabled() ([]*domain.NotificationConfig, error) {
+	rows, err := db.Query("SELECT id, channel, config, enabled, created_at, updated_at FROM t_notification_config WHERE enabled = true ORDER BY id")
+	if err != nil {
+		return nil, fmt.Errorf("NotificationConfigDAO[GetAllEnabled] 查询失败: %v", err)
+	}
+	defer rows.Close()
+
+	var configs []*domain.NotificationConfig
+	for rows.Next() {
+		config := &domain.NotificationConfig{}
+		err := rows.Scan(&config.ID, &config.Channel, &config.Config, &config.Enabled, &config.CreatedAt, &config.UpdatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("NotificationConfigDAO[GetAllEnabled] 扫描失败: %v", err)
+		}
+		configs = append(configs, config)
+	}
+	return configs, nil
+}
+
 func (n *NotificationConfigDAO) GetByChannel(channel string) (*domain.NotificationConfig, error) {
 	config := &domain.NotificationConfig{}
 	err := db.QueryRow(
