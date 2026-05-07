@@ -6,6 +6,16 @@
     append-to-body
   >
     <div class="rename-container" v-loading="loading">
+      <section class="rename-overview">
+        <article class="rename-chip">
+          <span>待处理项目</span>
+          <strong>{{ previewList.length }}</strong>
+        </article>
+        <article class="rename-chip">
+          <span>当前动作</span>
+          <strong>批量重命名</strong>
+        </article>
+      </section>
       <div class="table-shell">
         <el-table :data="previewList" border style="width: 100%" stripe>
           <el-table-column prop="original_name" label="原文件名" min-width="300" />
@@ -82,7 +92,15 @@ const handleExecute = async () => {
     const data = response.data.data || response.data || {}
     const successCount = data.success || 0
     const failedCount = data.failed || 0
-    ElMessage.success(`批量重命名完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
+    if (failedCount > 0 && successCount === 0) {
+      ElMessage.error(`批量重命名失败：共 ${failedCount} 项未执行成功`)
+      return
+    }
+    if (failedCount > 0) {
+      ElMessage.warning(`批量重命名部分完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
+    } else {
+      ElMessage.success(`批量重命名完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
+    }
     visible.value = false
     emit('execute-success')
   } catch (error) {
@@ -101,6 +119,32 @@ const handleExecute = async () => {
   overflow-y: auto;
 }
 
+.rename-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.rename-chip {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(244, 239, 231, 0.88);
+}
+
+.rename-chip span {
+  display: block;
+  font-size: 12px;
+  color: #8a7b6d;
+}
+
+.rename-chip strong {
+  display: block;
+  margin-top: 8px;
+  color: #17313a;
+  font-size: 24px;
+}
+
 .table-shell {
   overflow-x: auto;
 }
@@ -112,8 +156,25 @@ const handleExecute = async () => {
 }
 
 @media (max-width: 768px) {
+  .rename-overview {
+    grid-template-columns: 1fr;
+  }
+
   .rename-container {
     max-height: none;
   }
+}
+
+:global(.dark) .rename-chip {
+  background: rgba(16, 26, 37, 0.88);
+  border: 1px solid rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .rename-chip span {
+  color: #9faebb;
+}
+
+:global(.dark) .rename-chip strong {
+  color: #e8edf4;
 }
 </style>

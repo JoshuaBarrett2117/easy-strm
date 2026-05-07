@@ -23,6 +23,8 @@ func TestEnsureIdentifyMetadataMovie(t *testing.T) {
 				{"iso_3166_1": "JP"},
 			},
 			"original_language": "ja",
+			"title":             "盗梦空间",
+			"original_title":    "Inception",
 		})
 	}))
 	defer server.Close()
@@ -46,6 +48,51 @@ func TestEnsureIdentifyMetadataMovie(t *testing.T) {
 	}
 	if result.Language != "ja" {
 		t.Fatalf("unexpected language: %s", result.Language)
+	}
+	if result.Title != "盗梦空间" {
+		t.Fatalf("unexpected title: %s", result.Title)
+	}
+	if result.OriginalTitle != "Inception" {
+		t.Fatalf("unexpected original title: %s", result.OriginalTitle)
+	}
+}
+
+func TestEnsureIdentifyMetadataTVOriginalTitle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/tv/1396" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"genres": []map[string]interface{}{
+				{"id": 18},
+			},
+			"origin_country":   []string{"US"},
+			"original_language": "en",
+			"name":              "绝命毒师",
+			"original_name":     "Breaking Bad",
+		})
+	}))
+	defer server.Close()
+
+	svc := NewTmdbService("fake-key", nil)
+	svc.baseURL = server.URL
+	svc.httpClient = server.Client()
+
+	result := &domain.TmdbIdentifyResult{
+		TmdbID:    1396,
+		MediaType: "tv",
+	}
+
+	svc.EnsureIdentifyMetadata(result)
+
+	if result.Title != "绝命毒师" {
+		t.Fatalf("unexpected title: %s", result.Title)
+	}
+	if result.OriginalTitle != "Breaking Bad" {
+		t.Fatalf("unexpected original title: %s", result.OriginalTitle)
+	}
+	if len(result.Countries) != 1 || result.Countries[0] != "US" {
+		t.Fatalf("unexpected countries: %+v", result.Countries)
 	}
 }
 

@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	pathpkg "path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -16,6 +18,15 @@ import (
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+
+	"github.com/go-redis/redis/v8"
+)
+
+const (
+	tmdbSearchRedisTTL  = 6 * time.Hour
+	tmdbDetailRedisTTL  = 24 * time.Hour
+	tmdbSearchKeyPrefix = "easy_strm:tmdb:search:"
+	tmdbDetailKeyPrefix = "easy_strm:tmdb:detail:"
 )
 
 // TmdbService TMDB 服务
@@ -97,6 +108,9 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
+	if results, ok := s.loadSearchCache("movie", query, year); ok {
+		return results, nil
+	}
 
 	// 构建请求 URL
 	apiURL := fmt.Sprintf("%s/search/movie?api_key=%s&language=%s&query=%s",
@@ -166,6 +180,7 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 	}
 
 	logger.Infof("TmdbService[SearchMovie] 搜索完成: query=%s, results=%d", query, len(results))
+	s.saveSearchCache("movie", query, year, results)
 	return results, nil
 }
 
@@ -183,6 +198,9 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 	}
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	if results, ok := s.loadSearchCache("tv", query, year); ok {
+		return results, nil
 	}
 
 	// 构建请求 URL
@@ -255,6 +273,7 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 	}
 
 	logger.Infof("TmdbService[SearchTV] 搜索完成: query=%s, results=%d", query, len(results))
+	s.saveSearchCache("tv", query, year, results)
 	return results, nil
 }
 
@@ -315,6 +334,12 @@ func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult
 	logger.Infof("TmdbService[GetCandidates] 获取候选成功: title=%s, candidates=%d, type=%s",
 		result.Title, len(candidates), result.MediaType)
 	return result, nil
+}
+
+// GetCandidatesWithPath 基于文件路径及其目录上下文获取候选结果。
+func (s *TmdbService) GetCandidatesWithPath(filePath string) (*domain.TmdbIdentifyResult, error) {
+	logger.Infof("TmdbService[GetCandidatesWithPath] 开始获取候选: %s", filePath)
+	return s.GetCandidates(filePath)
 }
 
 // IdentifyFile 识别文件，自动判断是电影还是剧集
@@ -397,17 +422,41 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 	return result, nil
 }
 
+// IdentifyFileWithPath 基于文件路径及其目录上下文识别媒体信息。
+func (s *TmdbService) IdentifyFileWithPath(filePath string) (*domain.TmdbIdentifyResult, error) {
+	logger.Infof("TmdbService[IdentifyFileWithPath] 开始识别文件: %s", filePath)
+	return s.IdentifyFile(filePath)
+}
+
 // searchCandidatesWithFallback 按多个标题变体搜索 TMDB，提升中文标题和标点差异的命中率。
 func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename) ([]domain.TmdbSearchResult, error) {
 	if parsed == nil || parsed.Title == "" {
 		return nil, nil
 	}
 
-	queries := buildSearchQueryVariants(parsed.Title)
-	for i, query := range queries {
+	queries := make([]string, 0)
+	for _, title := range parsed.SearchTitles {
+		queries = append(queries, buildSearchQueryVariants(title)...)
+	}
+	if len(queries) == 0 {
+		queries = buildSearchQueryVariants(parsed.Title)
+	}
+
+	seen := make(map[string]struct{}, len(queries))
+	orderedQueries := make([]string, 0, len(queries))
+	for _, query := range queries {
+		query = strings.TrimSpace(query)
 		if query == "" {
 			continue
 		}
+		if _, ok := seen[query]; ok {
+			continue
+		}
+		seen[query] = struct{}{}
+		orderedQueries = append(orderedQueries, query)
+	}
+
+	for i, query := range orderedQueries {
 		if i > 0 {
 			logger.Infof("TmdbService[searchCandidatesWithFallback] 原始查询无结果，尝试回退查询: %s", query)
 		}
@@ -503,28 +552,53 @@ func compactSearchTitle(title string) string {
 // 返回:
 //   - *ParsedFilename: 解析结果
 func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
+	segments := splitPathSegments(filename)
+	result := parseMediaNameSegment(lastPathSegment(segments), true)
+	searchTitles := make([]string, 0, 3)
+	searchTitles = appendUniqueNonEmpty(searchTitles, result.Title)
+
+	for i := len(segments) - 2; i >= 0 && len(segments)-i <= 3; i-- {
+		contextParsed := parseMediaNameSegment(segments[i], false)
+		if contextParsed.Year > 0 && result.Year == 0 {
+			result.Year = contextParsed.Year
+		}
+		if result.MediaType == "movie" && contextParsed.MediaType == "tv" && result.Season == 0 && result.Episode == 0 {
+			result.MediaType = contextParsed.MediaType
+			result.Season = contextParsed.Season
+			result.Episode = contextParsed.Episode
+		}
+		searchTitles = appendUniqueNonEmpty(searchTitles, contextParsed.Title)
+	}
+
+	if result.Title == "" && len(searchTitles) > 0 {
+		result.Title = searchTitles[0]
+	}
+	result.SearchTitles = searchTitles
+	return result
+}
+
+func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
 	result := &ParsedFilename{
-		MediaType: "movie", // 默认为电影
+		MediaType: "movie",
 	}
 
-	// 移除扩展名
-	name := filename
-	if ext := filepath.Ext(filename); ext != "" {
-		name = strings.TrimSuffix(filename, ext)
+	name := strings.TrimSpace(input)
+	if trimExt {
+		if ext := filepath.Ext(name); ext != "" {
+			name = strings.TrimSuffix(name, ext)
+		}
 	}
 
-	// 替换常见分隔符为空格
 	name = strings.ReplaceAll(name, ".", " ")
 	name = strings.ReplaceAll(name, "_", " ")
 	name = strings.ReplaceAll(name, "-", " ")
 
-	// 提取季集信息（剧集判断）
 	seasonEpisodePatterns := []string{
-		`(?i)S(\d{1,2})E(\d{1,2})`,                     // S01E02
-		`(?i)Season\s*(\d{1,2})\s*Episode\s*(\d{1,2})`, // Season 1 Episode 2
-		`(?i)(\d{1,2})x(\d{1,2})`,                      // 1x02
-		`(?i)第(\d+)季第(\d+)集`,                           // 第1季第2集
-		`(?i)EP?(\d{1,3})`,                             // EP02, E02
+		`(?i)S(\d{1,2})E(\d{1,2})`,
+		`(?i)Season\s*(\d{1,2})\s*Episode\s*(\d{1,2})`,
+		`(?i)(\d{1,2})x(\d{1,2})`,
+		`(?i)第(\d+)季第(\d+)集`,
+		`(?i)EP?(\d{1,3})`,
 	}
 
 	for _, pattern := range seasonEpisodePatterns {
@@ -536,21 +610,19 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 				result.Episode, _ = strconv.Atoi(matches[2])
 			} else {
 				result.Episode, _ = strconv.Atoi(matches[1])
-				result.Season = 1 // 默认第一季
+				result.Season = 1
 			}
 			name = re.ReplaceAllString(name, "")
 			break
 		}
 	}
 
-	// 提取年份
 	yearPattern := regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
 	if matches := yearPattern.FindStringSubmatch(name); len(matches) > 0 {
 		result.Year, _ = strconv.Atoi(matches[1])
 		name = strings.Replace(name, matches[0], "", 1)
 	}
 
-	// 提取视频质量
 	qualityPatterns := map[string]string{
 		`(?i)\b4K\b`:      "4K",
 		`(?i)\b2160p\b`:   "2160p",
@@ -569,7 +641,6 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 		}
 	}
 
-	// 提取来源
 	sourcePatterns := map[string]string{
 		`(?i)\bAMZN\b`: "AMZN",
 		`(?i)\bNF\b`:   "NF",
@@ -584,7 +655,6 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 		}
 	}
 
-	// 提取编码
 	codecPatterns := map[string]string{
 		`(?i)\bx264\b`:    "x264",
 		`(?i)\bx265\b`:    "x265",
@@ -600,40 +670,112 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 		}
 	}
 
-	// 清理标题
-	// 移除常见标签
 	tagsToRemove := []string{
-		`(?i)\bBluRay\b`, `(?i)\bWEB-?DL\b`, `(?i)\bHDTV\b`,
+		`(?i)\bREMUX\b`,
+		`(?i)\bBluRay\b`, `(?i)\bWEB-?DL\b`, `(?i)\bWEB\s*DL\b`, `(?i)\bHDTV\b`,
 		`(?i)\bBDRip\b`, `(?i)\bDVDRip\b`, `(?i)\bHDRip\b`,
 		`(?i)\bx264\b`, `(?i)\bx265\b`, `(?i)\bH\.?264\b`, `(?i)\bH\.?265\b`,
 		`(?i)\bHEVC\b`, `(?i)\bAVC\b`, `(?i)\bAAC\b`, `(?i)\bAC3\b`,
-		`(?i)\bDTS\b`, `(?i)\bDD5\.?1\b`, `(?i)\b5\.?1\b`,
+		`(?i)\bDTS\s*HD\b`, `(?i)\bDTSHD\b`, `(?i)\bTRUEHD\b`, `(?i)\bATMOS\b`, `(?i)\bDTS\b`, `(?i)\bHD\b`,
+		`(?i)\bDD5\.?1\b`, `(?i)\bDDP?5\.?1\b`, `(?i)\bDDP?\s*5\s*1\b`, `(?i)\b7\.?1\b`, `(?i)\b7\s*1\b`, `(?i)\b5\.?1\b`,
+		`(?i)\bMA\b`,
 		`(?i)\b4K\b`, `(?i)\b2160p\b`, `(?i)\b1080p\b`, `(?i)\b720p\b`,
-		`(?i)\bAMZN\b`, `(?i)\bNF\b`, `(?i)\bHMAX\b`,
+		`(?i)\bAMZN\b`, `(?i)\bNF\b`, `(?i)\bHMAX\b`, `(?i)\bDSNP\b`, `(?i)\bATVP\b`,
+		`(?i)\bHQ\b`, `高码率`, `低码率`, `非60帧版`, `60帧版`, `高帧率`,
+		`杜比视界`, `杜比`, `国语`, `国粤`, `中字`, `双字`, `内封`, `特效字幕`, `收藏版`,
 	}
 	for _, tag := range tagsToRemove {
 		re := regexp.MustCompile(tag)
 		name = re.ReplaceAllString(name, "")
 	}
 
-	// 清理多余空格和特殊字符
 	title := strings.TrimSpace(name)
 	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
+	title = trimReleaseGroupSuffix(title)
 	result.Title = title
-
 	return result
 }
 
 // ParsedFilename 解析后的文件名信息
 type ParsedFilename struct {
-	Title     string
-	Year      int
-	MediaType string // movie | tv
-	Season    int
-	Episode   int
-	Quality   string
-	Source    string
-	Codec     string
+	Title        string
+	Year         int
+	MediaType    string // movie | tv
+	Season       int
+	Episode      int
+	Quality      string
+	Source       string
+	Codec        string
+	SearchTitles []string
+}
+
+func splitPathSegments(input string) []string {
+	normalized := strings.TrimSpace(input)
+	if normalized == "" {
+		return nil
+	}
+	normalized = filepath.ToSlash(normalized)
+	normalized = pathpkg.Clean(normalized)
+	parts := strings.Split(normalized, "/")
+	segments := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		segments = append(segments, part)
+	}
+	return segments
+}
+
+func lastPathSegment(segments []string) string {
+	if len(segments) == 0 {
+		return ""
+	}
+	return segments[len(segments)-1]
+}
+
+func appendUniqueNonEmpty(items []string, value string) []string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return items
+	}
+	for _, item := range items {
+		if item == value {
+			return items
+		}
+	}
+	return append(items, value)
+}
+
+func trimReleaseGroupSuffix(title string) string {
+	tokens := strings.Fields(strings.TrimSpace(title))
+	if len(tokens) <= 1 {
+		return strings.TrimSpace(title)
+	}
+
+	last := tokens[len(tokens)-1]
+	if looksLikeReleaseGroupToken(last) {
+		tokens = tokens[:len(tokens)-1]
+	}
+	return strings.Join(tokens, " ")
+}
+
+func looksLikeReleaseGroupToken(token string) bool {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false
+	}
+
+	if regexp.MustCompile(`[\p{Han}]`).MatchString(token) {
+		return true
+	}
+
+	if regexp.MustCompile(`^[A-Z0-9]{2,8}$`).MatchString(token) {
+		return true
+	}
+
+	return false
 }
 
 // buildCacheKey 构建缓存键
@@ -758,6 +900,9 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
+	if detail, ok := s.loadDetailCache("movie", tmdbID, 0, 0); ok {
+		return detail, nil
+	}
 
 	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, s.apiKey, s.language)
@@ -777,6 +922,7 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
 	}
 
+	s.saveDetailCache("movie", tmdbID, 0, 0, result)
 	return result, nil
 }
 
@@ -790,6 +936,9 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	if detail, ok := s.loadDetailCache("tv", tmdbID, 0, 0); ok {
+		return detail, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s",
@@ -810,6 +959,7 @@ func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
 	}
 
+	s.saveDetailCache("tv", tmdbID, 0, 0, result)
 	return result, nil
 }
 
@@ -817,6 +967,9 @@ func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 func (s *TmdbService) GetTVEpisodeDetail(tmdbID, season, episode int) (map[string]interface{}, error) {
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	if detail, ok := s.loadDetailCache("tv_episode", tmdbID, season, episode); ok {
+		return detail, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/tv/%d/season/%d/episode/%d?api_key=%s&language=%s",
@@ -837,5 +990,82 @@ func (s *TmdbService) GetTVEpisodeDetail(tmdbID, season, episode int) (map[strin
 		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
 	}
 
+	s.saveDetailCache("tv_episode", tmdbID, season, episode, result)
 	return result, nil
+}
+
+func (s *TmdbService) loadSearchCache(mediaType, query string, year int) ([]domain.TmdbSearchResult, bool) {
+	client := dao.GetGlobalRedisClient()
+	if client == nil {
+		return nil, false
+	}
+
+	value, err := client.Get(context.Background(), s.searchCacheKey(mediaType, query, year)).Result()
+	if err == redis.Nil || value == "" {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	var results []domain.TmdbSearchResult
+	if err := json.Unmarshal([]byte(value), &results); err != nil {
+		return nil, false
+	}
+	return results, true
+}
+
+func (s *TmdbService) saveSearchCache(mediaType, query string, year int, results []domain.TmdbSearchResult) {
+	client := dao.GetGlobalRedisClient()
+	if client == nil {
+		return
+	}
+
+	payload, err := json.Marshal(results)
+	if err != nil {
+		return
+	}
+	_ = client.Set(context.Background(), s.searchCacheKey(mediaType, query, year), payload, tmdbSearchRedisTTL).Err()
+}
+
+func (s *TmdbService) loadDetailCache(kind string, tmdbID, season, episode int) (map[string]interface{}, bool) {
+	client := dao.GetGlobalRedisClient()
+	if client == nil {
+		return nil, false
+	}
+
+	value, err := client.Get(context.Background(), s.detailCacheKey(kind, tmdbID, season, episode)).Result()
+	if err == redis.Nil || value == "" {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	var detail map[string]interface{}
+	if err := json.Unmarshal([]byte(value), &detail); err != nil {
+		return nil, false
+	}
+	return detail, true
+}
+
+func (s *TmdbService) saveDetailCache(kind string, tmdbID, season, episode int, detail map[string]interface{}) {
+	client := dao.GetGlobalRedisClient()
+	if client == nil || detail == nil {
+		return
+	}
+
+	payload, err := json.Marshal(detail)
+	if err != nil {
+		return
+	}
+	_ = client.Set(context.Background(), s.detailCacheKey(kind, tmdbID, season, episode), payload, tmdbDetailRedisTTL).Err()
+}
+
+func (s *TmdbService) searchCacheKey(mediaType, query string, year int) string {
+	return fmt.Sprintf("%s%s:%s:%d:%s", tmdbSearchKeyPrefix, strings.ToLower(strings.TrimSpace(mediaType)), s.language, year, strings.ToLower(strings.TrimSpace(query)))
+}
+
+func (s *TmdbService) detailCacheKey(kind string, tmdbID, season, episode int) string {
+	return fmt.Sprintf("%s%s:%s:%d:%d:%d", tmdbDetailKeyPrefix, strings.ToLower(strings.TrimSpace(kind)), s.language, tmdbID, season, episode)
 }

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, request } from "playwright";
 
-const FRONTEND_URL = process.env.E2E_FRONTEND_URL || "http://127.0.0.1:3001";
+const FRONTEND_URL = process.env.E2E_FRONTEND_URL || "http://localhost:3001";
 const BACKEND_API = process.env.E2E_BACKEND_API || "http://127.0.0.1:8082";
 const ROOT_DIR = path.resolve(process.cwd(), "..");
 const DEBUG_DIR = path.join(ROOT_DIR, "debug");
@@ -141,14 +141,21 @@ async function main() {
       fail(`关闭弹窗后轮询未停止，关闭后计数 ${countAfterClose}，当前 ${statusPollCount}`);
     }
 
-    await row.locator("button").first().click();
-    const browserDialogAgain = page.locator(".el-dialog").last();
+    const browserDialogAgain = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
     await browserDialogAgain.waitFor({ timeout: 15000 });
 
-    await browserDialogAgain.locator(".el-table__body-wrapper tbody .el-checkbox").first().click();
     await browserDialogAgain.locator(".organize-primary-btn").click();
     organizeDialog = page.locator(".el-dialog").last();
     await organizeDialog.waitFor({ timeout: 15000 });
+
+    await page.waitForFunction(() => {
+      const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
+      const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
+      if (!dialog) return false;
+      const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
+      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button"));
+      return !loadingMask && !footerButtons[1]?.classList.contains("is-loading");
+    }, { timeout: 15000 });
 
     const dialogState = await organizeDialog.evaluate((dialog) => {
       const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button")).map((button) => ({

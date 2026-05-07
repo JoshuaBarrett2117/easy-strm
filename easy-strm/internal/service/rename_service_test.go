@@ -1,9 +1,10 @@
-﻿package service
+package service
 
 import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,7 +102,7 @@ func TestApplyTemplate_锟界集模锟斤拷(t *testing.T) {
 			want:     "Breaking Bad/S01E02",
 		},
 		{
-            name:     "Season template with year",
+			name:     "Season template with year",
 			template: `{{ title }}{% if year %} ({{ year }}){% endif %} S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`,
 			title:    "Friends",
 			season:   3,
@@ -397,6 +398,107 @@ func TestPreviewRename_锟斤拷模锟斤拷时使锟斤拷系统锟斤拷锟斤
 	}
 }
 
+func TestPreviewRename_InferTVTemplateWhenMediaTypeMissing(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Series.Name.S01E02.1080p.mkv"), []byte("video"), 0644); err != nil {
+		t.Fatalf("创建测试文件失败: %v", err)
+	}
+
+	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
+	renameSvc := NewRenameService(mediaSvc, nil, nil, dao.NewSystemConfigDAO())
+
+	now := time.Now()
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
+		AddRow(2, "tv_naming_template", `{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`, now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, config_key, config_val, create_time, update_time 
+		 FROM t_system_config WHERE config_key = $1`)).
+		WithArgs("tv_naming_template").
+		WillReturnRows(configRows)
+
+	req := &domain.RenamePreviewRequest{
+		SourceID: 1,
+		FileID:   "Series.Name.S01E02.1080p.mkv",
+	}
+
+	result, err := renameSvc.PreviewRename(req)
+	if err != nil {
+		t.Fatalf("预览失败: %v", err)
+	}
+
+	if result.MediaType != "tv" {
+		t.Fatalf("应推断为剧集模板: got=%q", result.MediaType)
+	}
+
+	if result.NewName != "Series Name - S01E02.mkv" {
+		t.Fatalf("剧集模板未生效: got=%q", result.NewName)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("未满足预期: %v", err)
+	}
+}
+
+func TestPreviewRenamePrefersProvidedIdentifyMetadata(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Codex.Manually.Fixed.Release.mkv"), []byte("video"), 0644); err != nil {
+		t.Fatalf("创建测试文件失败: %v", err)
+	}
+
+	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
+	renameSvc := NewRenameService(mediaSvc, nil, nil, dao.NewSystemConfigDAO())
+
+	now := time.Now()
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
+		AddRow(2, "tv_naming_template", `{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`, now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, config_key, config_val, create_time, update_time 
+		 FROM t_system_config WHERE config_key = $1`)).
+		WithArgs("tv_naming_template").
+		WillReturnRows(configRows)
+
+	req := &domain.RenamePreviewRequest{
+		SourceID:  1,
+		FileID:    "Codex.Manually.Fixed.Release.mkv",
+		MediaType: "tv",
+		Title:     "Codex Manual Show",
+		Year:      2024,
+		Season:    1,
+		Episode:   2,
+	}
+
+	result, err := renameSvc.PreviewRename(req)
+	if err != nil {
+		t.Fatalf("预览失败: %v", err)
+	}
+
+	if result.Title != "Codex Manual Show" || result.Year != 2024 {
+		t.Fatalf("应优先使用传入识别结果: %+v", result)
+	}
+	if result.Season != 1 || result.Episode != 2 {
+		t.Fatalf("应优先使用传入季集号: %+v", result)
+	}
+	if result.NewName != "Codex Manual Show - S01E02.mkv" {
+		t.Fatalf("手动识别元数据未流入更名结果: got=%q", result.NewName)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("未满足预期: %v", err)
+	}
+}
+
 // TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟缴癸拷 锟斤拷锟皆憋拷锟斤拷锟侥硷拷锟斤拷锟斤拷执锟叫成癸拷
 func TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟缴癸拷(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
@@ -663,6 +765,92 @@ func TestRenameServiceNormalizeGeneratedNameRemovesDuplicatedTailAfterTemplatePr
 	}
 }
 
+func TestPreviewRename_LocalSourceStripsTemplateDirectories(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
 
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "Rename.Target.2024.1080p.mkv"), []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
 
+	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
+	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
 
+	now := time.Now()
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
+
+	req := &domain.RenamePreviewRequest{
+		SourceID:  1,
+		FileID:    "Rename.Target.2024.1080p.mkv",
+		MediaType: "movie",
+	}
+
+	result, err := renameSvc.PreviewRename(req)
+	if err != nil {
+		t.Fatalf("preview rename failed: %v", err)
+	}
+	if strings.Contains(result.NewName, `\`) || strings.Contains(result.NewName, "/") {
+		t.Fatalf("expected new_name to stay as filename only, got %q", result.NewName)
+	}
+	if strings.Contains(result.NewName, "..") {
+		t.Fatalf("expected new_name to avoid duplicated dots, got %q", result.NewName)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestExecuteRename_LocalSourceIgnoresDirectorySegmentsInNewName(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	root := t.TempDir()
+	originalPath := filepath.Join(root, "Rename.Target.2024.1080p.mkv")
+	if err := os.WriteFile(originalPath, []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to create source file: %v", err)
+	}
+
+	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
+	renameSvc := NewRenameService(mediaSvc, nil, nil, nil)
+
+	now := time.Now()
+	sourceRows := newMediaSourceRows().
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+	expectMediaSourceByID(mock, 1, sourceRows)
+
+	req := &domain.RenameExecuteRequest{
+		SourceID: 1,
+		FileID:   "Rename.Target.2024.1080p.mkv",
+		NewName:  `Season 01\Rename Target (2024).mkv`,
+	}
+
+	result, err := renameSvc.ExecuteRename(req)
+	if err != nil {
+		t.Fatalf("execute rename failed: %v", err)
+	}
+	expectedPath := filepath.Join(root, "Rename Target (2024).mkv")
+	if result.NewPath != expectedPath {
+		t.Fatalf("expected sanitized target path %q, got %q", expectedPath, result.NewPath)
+	}
+	if _, err := os.Stat(expectedPath); err != nil {
+		t.Fatalf("expected renamed file to exist: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestRenameServiceCleanTitleCollapsesDanglingSeparators(t *testing.T) {
+	svc := &RenameService{}
+
+	got := svc.cleanTitle("Rename.Target.2024.1080p.copy")
+
+	if got != "Rename Target 2024 copy" {
+		t.Fatalf("unexpected cleaned title: %q", got)
+	}
+}

@@ -311,3 +311,26 @@ func TestScrapeServiceOutputOptionsCanDisableArtworkAndNFO(t *testing.T) {
 	}
 }
 
+func TestBuildFallbackRawDataForMovie(t *testing.T) {
+	rawData, err := buildFallbackRawData(&domain.TmdbIdentifyResult{
+		TmdbID:        550,
+		MediaType:     "movie",
+		Title:         "Fight Club",
+		OriginalTitle: "Fight Club",
+		Year:          1999,
+	})
+	if err != nil {
+		t.Fatalf("buildFallbackRawData returned error: %v", err)
+	}
+	text := string(rawData)
+	if !strings.Contains(text, `"id":550`) {
+		t.Fatalf("expected tmdb id in fallback payload: %s", text)
+	}
+	if !strings.Contains(text, `"title":"Fight Club"`) {
+		t.Fatalf("expected title in fallback payload: %s", text)
+	}
+	if !strings.Contains(text, `"release_date":"1999-01-01"`) {
+		t.Fatalf("expected release date in fallback payload: %s", text)
+	}
+}
+

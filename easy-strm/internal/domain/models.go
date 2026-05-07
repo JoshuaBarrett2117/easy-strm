@@ -29,10 +29,10 @@ type Cloud115 struct {
 	Status            string     `json:"status"`
 	CoolingStartTime  *time.Time `json:"cooling_start_time"`
 	TransferMethod    string     `json:"transfer_method"`
-	AlistUrl           string     `json:"alist_url"`
-	AlistToken         string     `json:"alist_token"`
-	CreateTime         time.Time  `json:"create_time"`
-	UpdateTime         time.Time  `json:"update_time"`
+	AlistUrl          string     `json:"alist_url"`
+	AlistToken        string     `json:"alist_token"`
+	CreateTime        time.Time  `json:"create_time"`
+	UpdateTime        time.Time  `json:"update_time"`
 }
 
 // TransferMethod 秒传方式常量
@@ -58,23 +58,23 @@ const (
 
 // StrmConfig 领域模型：STRM文件配置
 type StrmConfig struct {
-	ID              int       `json:"id"`
-	Cloud115Id      int       `json:"cloud115_id"`
-	NetDiskPath     string    `json:"net_disk_path"`
-	LocalPath       string    `json:"local_path"`
-	Cron            string    `json:"cron"`
-	Extension       string    `json:"extension"`
-	DirTreeFile     string    `json:"dir_tree_file"`
-	SyncMode        string    `json:"sync_mode"`
-	SourceAccount   int       `json:"source_account"`
-	TargetAccount   int       `json:"target_account"`
-	TargetDirectory string    `json:"target_directory"`
-	AutoCleanup     bool      `json:"auto_cleanup"`
-	CleanupThreshold int     `json:"cleanup_threshold"`
-	CleanupPolicy   string    `json:"cleanup_policy"`
-	MaxConcurrency  int       `json:"max_concurrency"`
-	CreateTime      time.Time `json:"create_time"`
-	UpdateTime      time.Time `json:"update_time"`
+	ID               int       `json:"id"`
+	Cloud115Id       int       `json:"cloud115_id"`
+	NetDiskPath      string    `json:"net_disk_path"`
+	LocalPath        string    `json:"local_path"`
+	Cron             string    `json:"cron"`
+	Extension        string    `json:"extension"`
+	DirTreeFile      string    `json:"dir_tree_file"`
+	SyncMode         string    `json:"sync_mode"`
+	SourceAccount    int       `json:"source_account"`
+	TargetAccount    int       `json:"target_account"`
+	TargetDirectory  string    `json:"target_directory"`
+	AutoCleanup      bool      `json:"auto_cleanup"`
+	CleanupThreshold int       `json:"cleanup_threshold"`
+	CleanupPolicy    string    `json:"cleanup_policy"`
+	MaxConcurrency   int       `json:"max_concurrency"`
+	CreateTime       time.Time `json:"create_time"`
+	UpdateTime       time.Time `json:"update_time"`
 }
 
 // SystemConfig 领域模型：系统配置
@@ -123,44 +123,48 @@ type TaskType string
 const (
 	TaskTypeStrmGenerate    TaskType = "strm_generate"
 	TaskTypeIncrementalSync TaskType = "incremental_sync"
-	TaskTypeSyncFull       TaskType = "sync_full"
-	TaskTypeSyncTransfer   TaskType = "sync_transfer"
-	TaskTypeCleanup        TaskType = "cleanup"
-	TaskTypeProxyRefresh   TaskType = "proxy_refresh"
-	TaskTypeOrganize       TaskType = "organize"
-	TaskTypeScrape         TaskType = "scrape"
-	TaskTypeEmbyRefresh    TaskType = "emby_refresh"
+	TaskTypeSyncFull        TaskType = "sync_full"
+	TaskTypeSyncTransfer    TaskType = "sync_transfer"
+	TaskTypeCleanup         TaskType = "cleanup"
+	TaskTypeProxyRefresh    TaskType = "proxy_refresh"
+	TaskTypeOrganize        TaskType = "organize"
+	TaskTypeScrape          TaskType = "scrape"
+	TaskTypeEmbyRefresh     TaskType = "emby_refresh"
+	TaskTypeLibrarySync     TaskType = "library_sync"
+	TaskTypeLibraryPipeline TaskType = "library_pipeline"
 )
 
 // TaskTypeNames 任务类型中文名称映射
 var TaskTypeNames = map[TaskType]string{
 	TaskTypeStrmGenerate:    "STRM文件生成",
 	TaskTypeIncrementalSync: "增量同步",
-	TaskTypeSyncFull:       "全量同步",
-	TaskTypeSyncTransfer:   "秒传同步",
-	TaskTypeCleanup:        "空间清理",
-	TaskTypeProxyRefresh:   "直链刷新",
-	TaskTypeOrganize:       "媒体整理",
-	TaskTypeScrape:         "NFO刮削",
-	TaskTypeEmbyRefresh:    "Emby库刷新",
+	TaskTypeSyncFull:        "全量同步",
+	TaskTypeSyncTransfer:    "秒传同步",
+	TaskTypeCleanup:         "空间清理",
+	TaskTypeProxyRefresh:    "直链刷新",
+	TaskTypeOrganize:        "媒体整理",
+	TaskTypeScrape:          "NFO刮削",
+	TaskTypeEmbyRefresh:     "Emby库刷新",
+	TaskTypeLibrarySync:     "媒体库同步",
+	TaskTypeLibraryPipeline: "媒体入库流水线",
 }
 
 // TaskStatus 任务运行状态
 type TaskStatus struct {
-	TaskID         string   `json:"task_id"`
-	TaskType       TaskType `json:"task_type"`
-	TaskName       string   `json:"task_name"`
-	Status         string   `json:"status"`
-	Priority       int      `json:"priority"`
-	Progress       int      `json:"progress"`
-	TotalFiles     int      `json:"total_files"`
-	ProcessedFiles int      `json:"processed_files"`
-	SuccessFiles   int      `json:"success_files"`
-	FailedFiles    int      `json:"failed_files"`
+	TaskID         string                 `json:"task_id"`
+	TaskType       TaskType               `json:"task_type"`
+	TaskName       string                 `json:"task_name"`
+	Status         string                 `json:"status"`
+	Priority       int                    `json:"priority"`
+	Progress       int                    `json:"progress"`
+	TotalFiles     int                    `json:"total_files"`
+	ProcessedFiles int                    `json:"processed_files"`
+	SuccessFiles   int                    `json:"success_files"`
+	FailedFiles    int                    `json:"failed_files"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	ErrorMessage   string   `json:"error_message"`
-	CreateTime     string   `json:"create_time"`
-	UpdateTime     string   `json:"update_time"`
+	ErrorMessage   string                 `json:"error_message"`
+	CreateTime     string                 `json:"create_time"`
+	UpdateTime     string                 `json:"update_time"`
 }
 
 // NotificationConfig 通知配置领域模型
@@ -189,18 +193,19 @@ const (
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
 	TaskStatusCancelled = "cancelled"
+	TaskStatusSkipped   = "skipped"
 )
 
 // FileListRequest 文件列表请求
 type FileListRequest struct {
-	SourceID   int    `json:"source_id"`
-	Path       string `json:"path"`       // 当前目录路径
-	Page       int    `json:"page"`       // 页码
-	PageSize   int    `json:"page_size"`  // 每页数量
-	SortField  string `json:"sort_field"` // 排序字段
-	SortOrder  string `json:"sort_order"` // asc | desc
-	Filter     string `json:"filter"`     // 过滤条件
-	Search     string `json:"search"`     // 搜索关键词
+	SourceID  int    `json:"source_id"`
+	Path      string `json:"path"`       // 当前目录路径
+	Page      int    `json:"page"`       // 页码
+	PageSize  int    `json:"page_size"`  // 每页数量
+	SortField string `json:"sort_field"` // 排序字段
+	SortOrder string `json:"sort_order"` // asc | desc
+	Filter    string `json:"filter"`     // 过滤条件
+	Search    string `json:"search"`     // 搜索关键词
 }
 
 // FileItem 文件项

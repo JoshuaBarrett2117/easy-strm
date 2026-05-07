@@ -6,10 +6,16 @@
     append-to-body
   >
     <div class="candidates-container" v-loading="loading">
-      <div class="candidates-hint">
-        <el-icon style="margin-right: 4px;"><InfoFilled /></el-icon>
-        为您找到了以下匹配结果，请选择正确的条目；如果都不匹配，可以切换到手动搜索。
-      </div>
+      <section class="candidates-overview">
+        <div class="candidates-hint">
+          <el-icon style="margin-right: 4px;"><InfoFilled /></el-icon>
+          为您找到了以下匹配结果，请选择正确的条目；如果都不匹配，可以切换到手动搜索。
+        </div>
+        <div class="overview-chip">
+          <span>候选数量</span>
+          <strong>{{ candidatesList.length }}</strong>
+        </div>
+      </section>
 
       <div v-if="candidatesList.length > 0" class="candidates-grid">
         <div
@@ -100,16 +106,46 @@ const handleManualSearch = () => {
   min-height: 200px;
 }
 
+.candidates-overview {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .candidates-hint {
   display: flex;
   align-items: center;
-  padding: 10px 14px;
-  margin-bottom: 16px;
-  background: #f0f9eb;
-  border-radius: 6px;
+  padding: 12px 16px;
+  background: linear-gradient(135deg, rgba(31, 111, 120, 0.1), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+  border-radius: 14px;
   font-size: 13px;
-  color: #67c23a;
+  color: #24535f;
   line-height: 1.5;
+  flex: 1;
+}
+
+.overview-chip {
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(244, 239, 231, 0.88);
+  min-width: 110px;
+  text-align: center;
+}
+
+.overview-chip span {
+  display: block;
+  font-size: 12px;
+  color: #8a7b6d;
+}
+
+.overview-chip strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+  color: #17313a;
 }
 
 .candidates-grid {
@@ -220,5 +256,33 @@ const handleManualSearch = () => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+:global(.dark) .candidates-hint,
+:global(.dark) .overview-chip,
+:global(.dark) .candidate-card {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .candidate-title,
+:global(.dark) .overview-chip strong {
+  color: #e8edf4;
+}
+
+:global(.dark) .candidate-meta,
+:global(.dark) .candidate-overview,
+:global(.dark) .candidate-original-title,
+:global(.dark) .candidates-hint,
+:global(.dark) .overview-chip span,
+:global(.dark) .no-poster-sm {
+  color: #9faebb;
+}
+
+@media (max-width: 768px) {
+  .candidates-overview {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

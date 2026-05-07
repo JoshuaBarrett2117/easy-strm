@@ -13,8 +13,11 @@
   box-sizing: border-box;
 }
 
+html {
+  font-family: "Avenir Next", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+
 body {
-  font-family: Arial, sans-serif;
   background-color: #f5f5f5;
 }
 

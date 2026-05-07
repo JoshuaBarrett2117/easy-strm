@@ -78,7 +78,10 @@ func (c *TaskController) GetUnified(ctx *gin.Context) {
 }
 
 func (c *TaskController) Get(ctx *gin.Context) {
-	taskID := ctx.Query("task_id")
+	taskID := ctx.Param("task_id")
+	if taskID == "" {
+		taskID = ctx.Query("task_id")
+	}
 	if taskID == "" {
 		ErrorResp(ctx, http.StatusBadRequest, "task_id is required")
 		return

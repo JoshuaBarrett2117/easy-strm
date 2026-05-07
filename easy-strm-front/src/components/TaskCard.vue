@@ -216,7 +216,17 @@ const taskTypeTagTypes = {
   sync_files: 'info'
 }
 
-const taskTypeName = computed(() => task.value ? (taskTypeNames[task.value.task_type] || '未知任务') : '未知任务')
+const taskTypeName = computed(() => {
+  const t = task.value
+  if (!t) return '未知任务'
+  if (t.task_type === 'watch_auto_organize') {
+    const sourceType = t.metadata?.source_type
+    if (sourceType === 'local') return '本地自动整理'
+    if (sourceType === 'cloud115') return '115 自动整理'
+    return '自动整理'
+  }
+  return taskTypeNames[t.task_type] || '未知任务'
+})
 const taskDisplayName = computed(() => task.value ? (task.value.task_name || taskTypeName.value) : '任务')
 const taskTypeTagType = computed(() => task.value ? (taskTypeTagTypes[task.value.task_type] || 'info') : 'info')
 
@@ -261,12 +271,12 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
   const t = task.value
-  return !!t && (t.status === 'cancelled' || t.status === 'failed')
+  return !!t && t.task_type === 'watch_auto_organize' && (t.status === 'cancelled' || t.status === 'failed')
 })
 
 const showProgress = computed(() => {
   const t = task.value
-  return !!t && ['running', 'completed', 'failed', 'cancelled'].includes(t.status) && (t.progress > 0 || t.total_files > 0)
+  return !!t && ['pending', 'running', 'completed', 'failed', 'cancelled'].includes(t.status)
 })
 
 const showFileStats = computed(() => {

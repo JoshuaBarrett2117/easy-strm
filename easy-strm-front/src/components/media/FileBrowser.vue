@@ -11,6 +11,23 @@
     top="4vh"
     append-to-body
   >
+    <section class="workspace-overview">
+      <div class="workspace-overview__copy">
+        <h2>{{ currentDirectoryName || '文件浏览工作区' }}</h2>
+        <p>
+          当前正在浏览 {{ isCloud115 ? '115 云盘媒体源' : '本地媒体源' }}，
+          可在这里完成目录切换、筛选、识别、重命名、整理和删除操作。
+        </p>
+      </div>
+      <div class="workspace-overview__grid">
+        <article v-for="card in browserOverviewCards" :key="card.label" class="overview-card">
+          <span class="overview-card__label">{{ card.label }}</span>
+          <strong class="overview-card__value">{{ card.value }}</strong>
+          <p class="overview-card__hint">{{ card.hint }}</p>
+        </article>
+      </div>
+    </section>
+
     <div class="breadcrumb-container">
       <el-breadcrumb separator="/">
         <el-breadcrumb-item>
@@ -42,6 +59,21 @@
     </div>
 
     <div class="filter-container">
+      <div class="status-rail">
+        <div class="status-rail__item">
+          <span>当前源</span>
+          <strong>{{ currentSourceName }}</strong>
+        </div>
+        <div class="status-rail__item">
+          <span>当前显示路径</span>
+          <strong>{{ currentDisplayPath }}</strong>
+        </div>
+        <div class="status-rail__item">
+          <span>已选文件</span>
+          <strong>{{ selectedFiles.length }} 项</strong>
+        </div>
+      </div>
+
       <div class="filter-search-row">
         <el-input
           v-model="searchKeyword"
@@ -391,6 +423,15 @@ const currentDirectoryName = computed(() => {
   return parts[parts.length - 1] || props.currentSource.name || '根目录'
 })
 
+const currentSourceName = computed(() => {
+  const source = activeSource.value || props.currentSource
+  return source?.name || '未选择媒体源'
+})
+
+const currentDisplayPath = computed(() => {
+  return isCloud115.value ? currentCloud115DisplayPath.value : currentPath.value
+})
+
 /** 是否可以返回上一级 */
 const canGoBack = computed(() => {
   const source = activeSource.value || props.currentSource
@@ -411,6 +452,32 @@ const filteredFileList = computed(() => {
   }
   return fileList.value
 })
+
+const directoryCount = computed(() => filteredFileList.value.filter(item => item.is_dir).length)
+const videoCount = computed(() => filteredFileList.value.filter(item => !item.is_dir && getFileType(item.name) === 'video').length)
+const identifiedCount = computed(() => filteredFileList.value.filter(item => item.tmdb_title).length)
+const browserOverviewCards = computed(() => [
+  {
+    label: '当前目录项目',
+    value: total.value || filteredFileList.value.length,
+    hint: `${directoryCount.value} 个目录，${videoCount.value} 个视频文件`
+  },
+  {
+    label: 'TMDB 已识别',
+    value: identifiedCount.value,
+    hint: filteredFileList.value.length ? '可继续执行整理或刮削' : '进入目录后开始处理文件'
+  },
+  {
+    label: '筛选模式',
+    value: filterType.value || '全部',
+    hint: searchKeyword.value ? `关键词：${searchKeyword.value}` : '当前未设置关键词搜索'
+  },
+  {
+    label: '批量操作状态',
+    value: selectedFiles.value.length ? '已就绪' : '待选择',
+    hint: selectedFiles.value.length ? `已选 ${selectedFiles.value.length} 项` : '勾选文件后可直接批量处理'
+  }
+])
 
 // --- 方法 ---
 /**
@@ -634,6 +701,65 @@ defineExpose({
 </script>
 
 <style scoped>
+.workspace-overview {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.workspace-overview__copy {
+  padding: 20px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+}
+
+.workspace-overview__copy h2 {
+  margin: 0;
+  font-size: 24px;
+  color: #17313a;
+}
+
+.workspace-overview__copy p {
+  margin: 12px 0 0;
+  color: #6c6259;
+  line-height: 1.7;
+}
+
+.workspace-overview__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 241, 231, 0.94));
+  border: 1px solid rgba(120, 101, 72, 0.1);
+}
+
+.overview-card__label {
+  display: block;
+  color: #8a7b6d;
+  font-size: 13px;
+}
+
+.overview-card__value {
+  display: block;
+  margin-top: 12px;
+  font-size: 28px;
+  color: #17313a;
+  line-height: 1.1;
+}
+
+.overview-card__hint {
+  margin: 10px 0 0;
+  color: #73675d;
+  line-height: 1.6;
+}
+
 .breadcrumb-container {
   margin-bottom: 15px;
   padding: 10px 15px;
@@ -677,6 +803,34 @@ defineExpose({
   flex-direction: column;
   margin-bottom: 15px;
   gap: 10px;
+}
+
+.status-rail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-rail__item {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(244, 239, 231, 0.88);
+  border: 1px solid rgba(120, 101, 72, 0.08);
+}
+
+.status-rail__item span {
+  display: block;
+  color: #8a7b6d;
+  font-size: 12px;
+}
+
+.status-rail__item strong {
+  display: block;
+  margin-top: 8px;
+  color: #17313a;
+  font-size: 16px;
+  line-height: 1.5;
+  word-break: break-all;
 }
 
 .filter-search-row {
@@ -817,8 +971,38 @@ defineExpose({
   padding: 10px 0;
 }
 
+:global(.dark) .workspace-overview__copy,
+:global(.dark) .overview-card,
+:global(.dark) .status-rail__item,
+:global(.dark) .breadcrumb-container {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .workspace-overview__copy h2,
+:global(.dark) .overview-card__value,
+:global(.dark) .status-rail__item strong,
+:global(.dark) .file-name,
+:global(.dark) .breadcrumb-link {
+  color: #e8edf4;
+}
+
+:global(.dark) .workspace-overview__copy p,
+:global(.dark) .overview-card__hint,
+:global(.dark) .overview-card__label,
+:global(.dark) .status-rail__item span,
+:global(.dark) .text-muted {
+  color: #9faebb;
+}
+
 /* ===== 响应式：移动端（< 768px） ===== */
 @media (max-width: 768px) {
+  .workspace-overview,
+  .workspace-overview__grid,
+  .status-rail {
+    grid-template-columns: 1fr;
+  }
+
   .breadcrumb-container {
     flex-direction: column;
     align-items: flex-start;

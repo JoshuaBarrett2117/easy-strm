@@ -116,9 +116,9 @@ func (ws *WatchService) createAutoOrganizeTask(source *domain.MediaSource, sourc
 	}
 
 	taskID := fmt.Sprintf("watch_auto_organize_%d_%d", source.ID, time.Now().UnixNano())
-	taskName := fmt.Sprintf("115鑷姩鏁寸悊-%s", source.Name)
+	taskName := fmt.Sprintf("115自动整理-%s", source.Name)
 	if source.SourceType == domain.SourceTypeLocal {
-		taskName = fmt.Sprintf("鏈湴鑷姩鏁寸悊-%s", source.Name)
+		taskName = fmt.Sprintf("本地自动整理-%s", source.Name)
 	}
 
 	if err := ws.taskManager.Create(taskID, watchAutoOrganizeTaskType, taskName); err != nil {
@@ -208,7 +208,7 @@ func (ws *WatchService) updateTaskResultMetadata(taskID string, source *domain.M
 		"detected_files":       total,
 		"success_files":        success,
 		"failed_files":         failed,
-		"result_summary":       fmt.Sprintf("鎴愬姛 %d锛屽け璐?%d", success, failed),
+		"result_summary":       fmt.Sprintf("成功 %d，失败 %d", success, failed),
 	}
 
 	if category != "" {
@@ -251,11 +251,13 @@ func summarizeAutoOrganizeFailure(err error) (string, string) {
 	lowerMessage := strings.ToLower(message)
 
 	switch {
-	case strings.Contains(lowerMessage, "target") && strings.Contains(lowerMessage, "path"):
+	case strings.Contains(lowerMessage, "target") && strings.Contains(lowerMessage, "path"),
+		strings.Contains(message, "目标"),
+		strings.Contains(message, "路径"):
 		return "target_path", message
-	case strings.Contains(lowerMessage, "scan") || strings.Contains(lowerMessage, "list"):
+	case strings.Contains(lowerMessage, "scan") || strings.Contains(lowerMessage, "list") || strings.Contains(message, "扫描"):
 		return "scan_failed", message
-	case strings.Contains(lowerMessage, "identify") || strings.Contains(lowerMessage, "tmdb") || strings.Contains(lowerMessage, "recogniz"):
+	case strings.Contains(lowerMessage, "identify") || strings.Contains(lowerMessage, "tmdb") || strings.Contains(lowerMessage, "recogniz") || strings.Contains(message, "识别"):
 		return "identify_failed", message
 	case isCloud115AuthFailureMessage(message):
         return "cloud115_auth_failed", "115 账号 Cookie 已失效，请重新登录"
@@ -271,19 +273,20 @@ func classifyWatchFailureCategory(reason string) string {
 	switch {
 	case lowerReason == "":
 		return "other"
-	case strings.Contains(lowerReason, "identify") || strings.Contains(lowerReason, "tmdb") || strings.Contains(lowerReason, "recogniz"):
+	case strings.Contains(lowerReason, "identify") || strings.Contains(lowerReason, "tmdb") || strings.Contains(lowerReason, "recogniz") || strings.Contains(reason, "识别"):
 		return "identify_failed"
 	case strings.Contains(lowerReason, "cookie") || strings.Contains(lowerReason, "auth") || strings.Contains(lowerReason, "unauthorized") || strings.Contains(lowerReason, "token"):
 		return "cloud115_auth_failed"
 	case strings.Contains(lowerReason, "cloud115") || strings.Contains(lowerReason, "115"):
 		return "cloud115_failed"
-	case strings.Contains(lowerReason, "scan") || strings.Contains(lowerReason, "list"):
+	case strings.Contains(lowerReason, "scan") || strings.Contains(lowerReason, "list") || strings.Contains(reason, "扫描"):
 		return "scan_failed"
-	case strings.Contains(lowerReason, "target") && strings.Contains(lowerReason, "path"):
+	case strings.Contains(lowerReason, "target") && strings.Contains(lowerReason, "path"),
+		(strings.Contains(reason, "目标") && strings.Contains(reason, "路径")):
 		return "target_path"
 	case strings.Contains(lowerReason, "panic") || strings.Contains(lowerReason, "exception"):
 		return "panic"
-	case strings.Contains(lowerReason, "organize") || strings.Contains(lowerReason, "move") || strings.Contains(lowerReason, "copy"):
+	case strings.Contains(lowerReason, "organize") || strings.Contains(lowerReason, "move") || strings.Contains(lowerReason, "copy") || strings.Contains(reason, "整理"):
 		return "organize_failed"
 	default:
 		return "other"
@@ -310,11 +313,11 @@ func summarizeAutoOrganizeResults(results []OrganizeResult) (string, string) {
 
 		lowerMessage := strings.ToLower(result.Message)
 		switch {
-		case strings.Contains(lowerMessage, "identify") || strings.Contains(lowerMessage, "tmdb") || strings.Contains(lowerMessage, "recogniz"):
+		case strings.Contains(lowerMessage, "identify") || strings.Contains(lowerMessage, "tmdb") || strings.Contains(lowerMessage, "recogniz") || strings.Contains(result.Message, "识别"):
 			identifyFailures++
 		case isCloud115AuthFailureMessage(result.Message):
             return "cloud115_auth_failed", "115 账号 Cookie 已失效，请重新登录"
-		case strings.Contains(lowerMessage, "conflict") || strings.Contains(lowerMessage, "exists"):
+		case strings.Contains(lowerMessage, "conflict") || strings.Contains(lowerMessage, "exists") || strings.Contains(result.Message, "冲突"):
 			conflictFailures++
 		default:
 			moveFailures++
@@ -323,13 +326,13 @@ func summarizeAutoOrganizeResults(results []OrganizeResult) (string, string) {
 
 	switch {
 	case identifyFailures > 0 && conflictFailures == 0 && moveFailures == 0:
-		return "identify_failed", fmt.Sprintf("璇嗗埆澶辫触 %d 椤癸細%s", identifyFailures, firstMessage)
+		return "identify_failed", fmt.Sprintf("识别失败 %d 项：%s", identifyFailures, firstMessage)
 	case conflictFailures > 0 && identifyFailures == 0 && moveFailures == 0:
-		return "conflict_skipped", fmt.Sprintf("鍐茬獊璺宠繃 %d 椤癸細%s", conflictFailures, firstMessage)
+		return "conflict_skipped", fmt.Sprintf("冲突跳过 %d 项：%s", conflictFailures, firstMessage)
 	case isCloud115AuthFailureMessage(firstMessage):
         return "cloud115_auth_failed", "115 账号 Cookie 已失效，请重新登录"
 	case moveFailures > 0 && identifyFailures == 0 && conflictFailures == 0:
-		return "organize_failed", fmt.Sprintf("鏁寸悊澶辫触 %d 椤癸細%s", moveFailures, firstMessage)
+		return "organize_failed", fmt.Sprintf("整理失败 %d 项：%s", moveFailures, firstMessage)
 	case identifyFailures > 0 || conflictFailures > 0 || moveFailures > 0:
         return "partial_failed", fmt.Sprintf("识别失败 %d 项，冲突跳过 %d 项，整理失败 %d 项", identifyFailures, conflictFailures, moveFailures)
 	default:
@@ -345,7 +348,7 @@ func buildWatchFailureItems(results []OrganizeResult) []watchFailureItem {
 		}
 		reason := result.Message
 		if reason == "" {
-			reason = "鏁寸悊澶辫触"
+			reason = "整理失败"
 		}
 		items = append(items, watchFailureItem{
 			FileID:   result.FileID,
@@ -419,11 +422,11 @@ func isCloud115AuthFailureMessage(message string) bool {
 		strings.Contains(lowerMessage, "authentication"),
 		strings.Contains(lowerMessage, "token expired"),
 		strings.Contains(lowerMessage, "session expired"),
-		strings.Contains(message, "鐧诲綍澶辨晥"),
-		strings.Contains(message, "cookie澶辨晥"),
-		strings.Contains(message, "cookie鏃犳晥"),
-		strings.Contains(message, "115璐﹀彿澶辨晥"),
-		strings.Contains(message, "璐﹀彿澶辨晥"),
+		strings.Contains(message, "登录失效"),
+		strings.Contains(message, "cookie失效"),
+		strings.Contains(message, "cookie无效"),
+		strings.Contains(message, "115账号失效"),
+		strings.Contains(message, "账号失效"),
         strings.Contains(message, "请重新登录"),
         strings.Contains(message, "账号不存在"):
 		return true
@@ -489,13 +492,13 @@ func (ws *WatchService) StopAll() {
 func (ws *WatchService) StartWatching(sourceID int) error {
 	source, err := ws.mediaSourceService.GetByID(sourceID)
 	if err != nil || source == nil {
-		return fmt.Errorf("婵帊缍嬪┃鎰瑝鐎涙ê婀? id=%d", sourceID)
+		return fmt.Errorf("获取媒体源失败或不存在: id=%d", sourceID)
 	}
 	if !source.Enabled {
-		return fmt.Errorf("婵帊缍嬪┃鎰弓閸氼垳鏁? id=%d", sourceID)
+		return fmt.Errorf("媒体源未启用: id=%d", sourceID)
 	}
 	if !source.WatchEnabled {
-		return fmt.Errorf("濯掍綋婧愭湭寮€鍚洃鎺? id=%d", sourceID)
+		return fmt.Errorf("媒体源未开启监控: id=%d", sourceID)
 	}
 
 	switch source.SourceType {
@@ -504,7 +507,7 @@ func (ws *WatchService) StartWatching(sourceID int) error {
 	case domain.SourceTypeCloud115:
 		return ws.startCloud115Watching(source)
 	default:
-		return fmt.Errorf("涓嶆敮鎸佺殑濯掍綋婧愮被鍨? %s", source.SourceType)
+		return fmt.Errorf("不支持的媒体源类型: %s", source.SourceType)
 	}
 }
 
@@ -542,7 +545,7 @@ func (ws *WatchService) startLocalWatching(source *domain.MediaSource) error {
 	if ws.watcher == nil {
 		watcher, err := fsnotify.NewWatcher()
 		if err != nil {
-			return fmt.Errorf("鍒涘缓 fsnotify watcher 澶辫触: %v", err)
+			return fmt.Errorf("创建 fsnotify watcher 失败: %v", err)
 		}
 		ws.watcher = watcher
 		go ws.handleLocalEvents()
@@ -551,11 +554,11 @@ func (ws *WatchService) startLocalWatching(source *domain.MediaSource) error {
 	watchPath := resolveWatchPath(source)
 	info, err := os.Stat(watchPath)
 	if err != nil || !info.IsDir() {
-		return fmt.Errorf("鐩綍涓嶅瓨鍦ㄦ垨涓嶅彲璁块棶: %s", watchPath)
+		return fmt.Errorf("目录不存在或不可访问: %s", watchPath)
 	}
 
 	if err := ws.watcher.Add(watchPath); err != nil {
-		return fmt.Errorf("娣诲姞鐩戞帶鐩綍澶辫触: %s, error: %v", watchPath, err)
+		return fmt.Errorf("添加监控目录失败: %s, error: %v", watchPath, err)
 	}
 
 	ws.localWatches[source.ID] = &localWatchState{
@@ -631,7 +634,14 @@ func (ws *WatchService) processNewLocalFile(source *domain.MediaSource, filePath
 	if !source.AutoOrganize {
 		return
 	}
-	ws.triggerAutoOrganize(source, resolveWatchPath(source), []string{filePath})
+
+	organizeSourcePath, organizeFileID, err := buildLocalWatchOrganizeTarget(source, filePath)
+	if err != nil {
+		logger.Warnf("[WatchService] build local watch organize target failed: source_id=%d, file=%s, error=%v", source.ID, filePath, err)
+		return
+	}
+
+	ws.triggerAutoOrganize(source, organizeSourcePath, []string{organizeFileID})
 }
 
 func (ws *WatchService) startCloud115Watching(source *domain.MediaSource) error {
@@ -642,7 +652,7 @@ func (ws *WatchService) startCloud115Watching(source *domain.MediaSource) error 
 		return nil
 	}
 	if source.Cloud115ID == nil {
-		return fmt.Errorf("115 濯掍綋婧愭湭鍏宠仈璐﹀彿: source_id=%d", source.ID)
+		return fmt.Errorf("115 媒体源未关联账号: source_id=%d", source.ID)
 	}
 
 	interval := source.WatchInterval
@@ -713,12 +723,12 @@ func (ws *WatchService) pollCloud115Directory(state *cloud115WatchState) {
 
 func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[string]bool, error) {
 	if source.Cloud115ID == nil {
-		return nil, fmt.Errorf("鏈叧鑱?115 璐﹀彿")
+		return nil, fmt.Errorf("未关联 115 账号")
 	}
 
 	cloud115, err := ws.cloud115DAO.GetByID(*source.Cloud115ID)
 	if err != nil || cloud115 == nil {
-		return nil, fmt.Errorf("115 璐﹀彿涓嶅瓨鍦? cloud115_id=%d", *source.Cloud115ID)
+		return nil, fmt.Errorf("115 账号不存在: cloud115_id=%d", *source.Cloud115ID)
 	}
 
 	cidStr := resolveWatchPath(source)
@@ -727,12 +737,12 @@ func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[st
 	}
 	cid, err := strconv.Atoi(cidStr)
 	if err != nil {
-		return nil, fmt.Errorf("CID 鏍煎紡閿欒: %s", cidStr)
+		return nil, fmt.Errorf("CID 格式错误: %s", cidStr)
 	}
 
 	fileList, err := ws.client.GetFileList(cid, 1, 0, 1000, cloud115.ID, cloud115.Cookie)
 	if err != nil {
-		return nil, fmt.Errorf("鑾峰彇 115 鏂囦欢鍒楄〃澶辫触: %v", err)
+		return nil, fmt.Errorf("获取 115 文件列表失败: %v", err)
 	}
 
 	fileSet := make(map[string]bool, len(fileList.Files))
@@ -758,6 +768,37 @@ func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[st
 	return fileSet, nil
 }
 
+func buildLocalWatchOrganizeTarget(source *domain.MediaSource, filePath string) (string, string, error) {
+	if source == nil {
+		return "", "", fmt.Errorf("媒体源不能为空")
+	}
+
+	basePath := filepath.Clean(source.Path)
+	absFilePath := filepath.Clean(filePath)
+	watchPath := filepath.Clean(resolveWatchPath(source))
+
+	relativeFileID, err := filepath.Rel(basePath, absFilePath)
+	if err != nil {
+		return "", "", fmt.Errorf("计算文件相对路径失败: %w", err)
+	}
+	if relativeFileID == "." || strings.HasPrefix(relativeFileID, "..") {
+		return "", "", fmt.Errorf("文件不在媒体源目录内: %s", filePath)
+	}
+
+	relativeSourcePath, err := filepath.Rel(basePath, watchPath)
+	if err != nil {
+		return "", "", fmt.Errorf("计算监控目录相对路径失败: %w", err)
+	}
+	if relativeSourcePath == "." {
+		relativeSourcePath = ""
+	}
+	if strings.HasPrefix(relativeSourcePath, "..") {
+		return "", "", fmt.Errorf("监控目录不在媒体源目录内: %s", watchPath)
+	}
+
+	return relativeSourcePath, relativeFileID, nil
+}
+
 func (ws *WatchService) triggerAutoOrganize(source *domain.MediaSource, sourcePath string, fileIDs []string) {
 	if len(fileIDs) == 0 {
 		return
@@ -776,7 +817,7 @@ func (ws *WatchService) triggerAutoOrganize(source *domain.MediaSource, sourcePa
 
 		defer func() {
 			if r := recover(); r != nil {
-				reason := fmt.Sprintf("鑷姩鏁寸悊寮傚父: %v", r)
+				reason := fmt.Sprintf("自动整理异常: %v", r)
 				if taskID != "" {
 					ws.updateTaskResultMetadata(taskID, source, sourcePath, fileIDs, len(fileIDs), 0, len(fileIDs), "panic", reason, buildWatchFailureItemsFromIDs(fileIDs, reason, "panic"))
 					ws.setTaskError(taskID, reason)
@@ -796,6 +837,7 @@ func (ws *WatchService) triggerAutoOrganize(source *domain.MediaSource, sourcePa
 			operationMode,
 			fileIDs,
 			true,
+			nil,
 			nil,
 		)
 		if err != nil {
@@ -845,7 +887,7 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 
 	taskType, _ := task["task_type"].(string)
 	if taskType != watchAutoOrganizeTaskType {
-		return fmt.Errorf("当前仅支持重试 115 自动整理任务")
+		return fmt.Errorf("当前仅支持重试自动整理任务")
 	}
 
 	metadata, _ := task["metadata"].(map[string]interface{})
@@ -871,13 +913,7 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 		return fmt.Errorf("媒体源不存在")
 	}
 
-	sourcePath, _ := metadata["watch_path"].(string)
-	if sourcePath == "" {
-		sourcePath, _ = metadata["source_path"].(string)
-	}
-	if sourcePath == "" {
-		sourcePath = resolveWatchPath(source)
-	}
+	sourcePath := resolveRetrySourcePath(metadata, source, fileIDs)
 	if source.OrganizeTargetPath == "" {
 		return fmt.Errorf("媒体源未配置整理目标路径")
 	}
@@ -911,6 +947,7 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 			fileIDs,
 			true,
 			nil,
+			nil,
 		)
 		if runErr != nil {
 			category, reason := summarizeAutoOrganizeFailure(runErr)
@@ -940,4 +977,29 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 	}()
 
 	return nil
+}
+
+func resolveRetrySourcePath(metadata map[string]interface{}, source *domain.MediaSource, fileIDs []string) string {
+	if metadata != nil {
+		if raw, exists := metadata["watch_path"]; exists {
+			if value, ok := raw.(string); ok {
+				return value
+			}
+		}
+		if raw, exists := metadata["source_path"]; exists {
+			if value, ok := raw.(string); ok {
+				return value
+			}
+		}
+	}
+
+	if source != nil && source.SourceType == domain.SourceTypeLocal && len(fileIDs) > 0 {
+		dir := filepath.Dir(fileIDs[0])
+		if dir == "." {
+			return ""
+		}
+		return dir
+	}
+
+	return resolveWatchPath(source)
 }

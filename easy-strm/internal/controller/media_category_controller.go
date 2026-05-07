@@ -37,6 +37,7 @@ func (c *MediaCategoryController) Create(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "参数错误")
 		return
 	}
+	cat.NormalizeMatchRules()
 	if err := c.dao.Create(&cat); err != nil {
 		logger.Errorf("MediaCategoryController[Create] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "创建媒体分类失败")
@@ -59,6 +60,7 @@ func (c *MediaCategoryController) Update(ctx *gin.Context) {
 		return
 	}
 	cat.ID = id
+	cat.NormalizeMatchRules()
 	if err := c.dao.Update(&cat); err != nil {
 		logger.Errorf("MediaCategoryController[Update] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "更新媒体分类失败")

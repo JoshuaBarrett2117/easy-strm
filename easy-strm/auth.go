@@ -235,6 +235,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmConfigDAO := dao.NewStrmConfigDAO()
 	strmFileDAO := dao.NewStrmFileDAO()
 	cronTaskDAO := dao.NewCronTaskDAO()
+	mediaSyncIndexDAO := dao.NewMediaSyncIndexDAO()
+	pendingMediaDAO := dao.NewPendingMediaDAO()
+	if err := dao.EnsureMediaLibraryTables(); err != nil {
+		Error("Failed to ensure media library tables: %v", err)
+	}
 
 	// 初始化 Service
 	mediaSourceService := service.NewMediaSourceService(mediaSourceDAO, cloud115DAO)
@@ -252,15 +257,22 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmService := service.NewStrmService(strmConfigDAO, strmFileDAO, cronTaskDAO)
 	cronService := service.NewCronService(cronTaskDAO)
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
+	taskService.SetTaskStepDAO(dao.NewTaskStepDAO())
 	dashboardService := service.NewDashboardService(cloud115DAO, mediaSourceDAO, strmFileDAO, dao.NewTaskRedisDAOWithGlobal())
 	authService := service.NewAuthService(dao.NewUserDAO(), config.JWTSecret)
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
 	embyService := service.NewEmbyService(systemConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
+	cacheAdminService := service.NewCacheAdminService(dao.DB, dao.GetGlobalRedisClient())
+	mediaSyncService := service.NewMediaSyncService(mediaSourceDAO, cloud115DAO, mediaSyncIndexDAO, taskService, client)
+	mediaSyncService.SetSystemConfigDAO(systemConfigDAO)
+	mediaLibraryPipelineService := service.NewMediaLibraryPipelineService(mediaSourceDAO, mediaSyncIndexDAO, pendingMediaDAO, strmConfigDAO, strmFileDAO, systemConfigDAO, tmdbService, taskService, embyService)
+	mediaSyncService.SetPipeline(mediaLibraryPipelineService)
 
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)
 	fileOperationController := controller.NewFileOperationController(fileOperationService, mediaSourceService)
 	organizeController := controller.NewOrganizeController(organizeService)
+	organizeController.SetTaskService(taskService)
 	tmdbController := controller.NewTmdbController(tmdbService)
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryDAO)
 	scrapeController := controller.NewScrapeController(scrapeService, organizeService)
@@ -273,6 +285,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	networkController := controller.NewNetworkController()
 	embyController := controller.NewEmbyController(embyService)
 	dashboardController := controller.NewDashboardController(dashboardService)
+	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
+	mediaSyncController := controller.NewMediaSyncController(mediaSyncService, mediaLibraryPipelineService)
+	pendingMediaController := controller.NewPendingMediaController(pendingMediaDAO, mediaLibraryPipelineService)
+	mediaLibraryController := controller.NewMediaLibraryController(mediaSyncIndexDAO, mediaLibraryPipelineService)
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
@@ -715,6 +731,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	{
 		// ========== Dashboard 数据概览 ==========
 		auth.GET("/dashboard/stats", dashboardController.GetStats)
+		auth.GET("/dashboard/overview", dashboardController.GetOverview)
+		auth.GET("/dashboard/resource-monitor", dashboardController.GetResourceMonitor)
+		auth.GET("/dashboard/trends/:kind", dashboardController.GetTrend)
+		auth.GET("/cache/overview", cacheAdminController.GetOverview)
+		auth.POST("/cache/clear", cacheAdminController.Clear)
 
 		// ========== 用户信息 ==========
 		auth.GET("/user/info", authController.GetUserInfo)
@@ -777,6 +798,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== 任务管理 ==========
 		auth.GET("/tasks", taskController.GetAll)
+		auth.GET("/tasks/:task_id", taskController.Get)
 		auth.GET("/tasks/unified", taskController.GetUnified)
 		auth.POST("/tasks/:task_id/cancel", taskController.Cancel)
 		auth.POST("/tasks/:task_id/resume", taskController.Resume)
@@ -796,8 +818,24 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/sources", mediaSourceController.Create)
 		auth.PUT("/media/sources/:id", mediaSourceController.Update)
 		auth.DELETE("/media/sources/:id", mediaSourceController.Delete)
+		auth.POST("/media/sources/:id/sync/full", mediaSyncController.RunFullSync)
+		auth.POST("/media/sources/:id/sync/incremental", mediaSyncController.RunIncrementalSync)
+		auth.GET("/media/sources/:id/sync/index", mediaSyncController.GetIndex)
+		auth.POST("/media/sources/:id/pipeline", mediaSyncController.RunPipeline)
 		auth.GET("/media/files", mediaSourceController.GetFiles)
 		auth.GET("/media/files/search", mediaSourceController.SearchFiles)
+
+		// ========== 媒体库与待处理 ==========
+		auth.GET("/media/library/items", mediaLibraryController.ListItems)
+		auth.GET("/media/library/items/:id", mediaLibraryController.GetItem)
+		auth.POST("/media/library/items/:id/pipeline", mediaLibraryController.RunPipeline)
+		auth.POST("/media/library/items/:id/strm", mediaLibraryController.GenerateStrm)
+		auth.POST("/media/library/items/:id/refresh-server", mediaLibraryController.RefreshServer)
+		auth.GET("/media/pending", pendingMediaController.List)
+		auth.POST("/media/pending", pendingMediaController.Create)
+		auth.POST("/media/pending/:id/identify", pendingMediaController.Identify)
+		auth.POST("/media/pending/:id/run", pendingMediaController.Run)
+		auth.POST("/media/pending/:id/ignore", pendingMediaController.Ignore)
 
 		// ========== 文件操作 ==========
 		auth.POST("/media/files/move", fileOperationController.MoveFile)
@@ -809,11 +847,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== 自动整理 ==========
 		auth.POST("/media/organize/candidates", organizeController.ListOrganizeCandidates)
+		auth.POST("/media/organize/candidates/async", organizeController.StartCandidateTaskAsync)
+		auth.GET("/media/organize/candidates/status", organizeController.GetCandidateTaskStatus)
 		auth.POST("/media/organize/preview", organizeController.PreviewOrganize)
 		auth.POST("/media/organize/preview/async", organizeController.StartPreviewTaskAsync)
 		auth.GET("/media/organize/preview/status", organizeController.GetPreviewTaskStatus)
 		auth.POST("/media/organize/preview/check", organizeController.CheckRestorableTask)
 		auth.POST("/media/organize/execute", organizeController.ExecuteOrganize)
+		auth.POST("/media/organize/execute/async", organizeController.ExecuteOrganizeAsync)
 		auth.POST("/media/organize/batch-identify", organizeController.BatchIdentify)
 		auth.POST("/media/organize/batch-identify-directory", organizeController.BatchIdentifyDirectory)
 		auth.POST("/media/organize/batch-rename-preview", organizeController.BatchRenamePreview)

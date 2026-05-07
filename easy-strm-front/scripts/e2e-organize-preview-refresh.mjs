@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { chromium, request } from "playwright";
 
-const FRONTEND_URL = process.env.E2E_FRONTEND_URL || "http://127.0.0.1:3001";
+const FRONTEND_URL = process.env.E2E_FRONTEND_URL || "http://localhost:3001";
 const BACKEND_API = process.env.E2E_BACKEND_API || "http://127.0.0.1:8082";
 const ROOT_DIR = path.resolve(process.cwd(), "..");
 const DEBUG_DIR = path.join(ROOT_DIR, "debug");

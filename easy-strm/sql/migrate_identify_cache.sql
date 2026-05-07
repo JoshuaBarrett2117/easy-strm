@@ -21,6 +21,21 @@ CREATE TABLE IF NOT EXISTS t_identify_cache (
 
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_identify_cache_file_hash ON t_identify_cache(file_hash);
+WITH duplicated_rows AS (
+    SELECT id
+    FROM (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                   PARTITION BY file_hash
+                   ORDER BY is_manual DESC, updated_at DESC, created_at DESC, id DESC
+               ) AS row_num
+        FROM t_identify_cache
+    ) ranked
+    WHERE ranked.row_num > 1
+)
+DELETE FROM t_identify_cache
+WHERE id IN (SELECT id FROM duplicated_rows);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_identify_cache_file_hash ON t_identify_cache(file_hash);
 CREATE INDEX IF NOT EXISTS idx_identify_cache_is_manual ON t_identify_cache(is_manual);
 CREATE INDEX IF NOT EXISTS idx_identify_cache_created_at ON t_identify_cache(created_at);
 

@@ -92,10 +92,14 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 	originalName := filepath.Base(originalPath)
 	ext := filepath.Ext(originalName)
 
+	// 先解析文件名，后续会同时用于媒体类型推断、季集号提取与质量识别
+	parsed := s.parseSeasonEpisode(originalName)
+	mediaType := normalizeRenameMediaType(req.MediaType, parsed)
+
 	// 如果没有提供模板，使用默认模板
 	template := req.Template
 	if template == "" {
-		template = s.getDefaultTemplate(req.MediaType)
+		template = s.getDefaultTemplate(mediaType)
 	}
 
 	// 如果提供了 TMDB ID，获取媒体信息
@@ -103,34 +107,41 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 	var enTitle string
 	var year int
 	var season, episode int
+	title = strings.TrimSpace(req.Title)
+	year = req.Year
+	season = req.Season
+	episode = req.Episode
 
 	if req.TmdbID > 0 {
 		// 从 TMDB 获取详细信息
-		if req.MediaType == "tv" {
+		if mediaType == "tv" {
 			detail, err := s.tmdbService.GetTVDetail(req.TmdbID)
 			if err == nil {
-				title, enTitle = pickRenameTitlesFromDetail(detail, req.MediaType, title, enTitle)
-				if firstAirDate, ok := detail["first_air_date"].(string); ok && len(firstAirDate) >= 4 {
-					year, _ = strconv.Atoi(firstAirDate[:4])
+				title, enTitle = pickRenameTitlesFromDetail(detail, mediaType, title, enTitle)
+				if year == 0 {
+					if firstAirDate, ok := detail["first_air_date"].(string); ok && len(firstAirDate) >= 4 {
+						year, _ = strconv.Atoi(firstAirDate[:4])
+					}
 				}
 			}
 		} else {
 			detail, err := s.tmdbService.GetMovieDetail(req.TmdbID)
 			if err == nil {
-				title, enTitle = pickRenameTitlesFromDetail(detail, req.MediaType, title, enTitle)
-				if releaseDate, ok := detail["release_date"].(string); ok && len(releaseDate) >= 4 {
-					year, _ = strconv.Atoi(releaseDate[:4])
+				title, enTitle = pickRenameTitlesFromDetail(detail, mediaType, title, enTitle)
+				if year == 0 {
+					if releaseDate, ok := detail["release_date"].(string); ok && len(releaseDate) >= 4 {
+						year, _ = strconv.Atoi(releaseDate[:4])
+					}
 				}
 			}
 		}
 	}
 
-	// 尝试从文件名解析季集信息
-	parsed := s.parseSeasonEpisode(originalName)
-	if parsed.Season > 0 {
+	// 只有在外部没有明确提供季集信息时，才回退到文件名解析结果。
+	if season == 0 && parsed.Season > 0 {
 		season = parsed.Season
 	}
-	if parsed.Episode > 0 {
+	if episode == 0 && parsed.Episode > 0 {
 		episode = parsed.Episode
 	}
 
@@ -145,6 +156,10 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 		return nil, fmt.Errorf("渲染 Jinja2 命名模板失败: %v", err)
 	}
 	newName = s.normalizeGeneratedName(newName, originalName, ext)
+	// 重命名结果只允许保留文件名，避免把整理模板里的目录层级带入本地重命名
+	if source.SourceType == domain.SourceTypeLocal {
+		newName = filepath.Base(newName)
+	}
 	if filepath.Ext(filepath.Base(newName)) == "" && ext != "" {
 		newName += ext
 	}
@@ -166,7 +181,7 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 		TmdbID:       req.TmdbID,
 		Title:        title,
 		Year:         year,
-		MediaType:    req.MediaType,
+		MediaType:    mediaType,
 		Season:       season,
 		Episode:      episode,
 		Quality:      parsed.Quality,
@@ -174,6 +189,18 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 
 	logger.Infof("RenameService[PreviewRename] 预览完成: %s -> %s", originalName, newName)
 	return result, nil
+}
+
+func normalizeRenameMediaType(requestedMediaType string, parsed *ParsedEpisode) string {
+	switch strings.ToLower(strings.TrimSpace(requestedMediaType)) {
+	case "movie", "tv":
+		return strings.ToLower(strings.TrimSpace(requestedMediaType))
+	}
+
+	if parsed != nil && (parsed.Season > 0 || parsed.Episode > 0) {
+		return "tv"
+	}
+	return "movie"
 }
 
 // ExecuteRename 执行更名
@@ -222,10 +249,11 @@ func (s *RenameService) executeLocalRename(source *domain.MediaSource, req *doma
 	}
 	dir := filepath.Dir(originalPath)
 	ext := filepath.Ext(originalPath)
-	newPath := filepath.Join(dir, req.NewName)
+	newName := filepath.Base(strings.TrimSpace(req.NewName))
+	newPath := filepath.Join(dir, newName)
 
 	// 如果新文件名没有扩展名，添加原扩展名
-	if filepath.Ext(req.NewName) == "" && ext != "" {
+	if filepath.Ext(newName) == "" && ext != "" {
 		newPath = newPath + ext
 	}
 
@@ -488,7 +516,13 @@ func (s *RenameService) cleanTitle(title string) string {
 		result = re.ReplaceAllString(result, "")
 	}
 
-	// 清理多余空格
+	// 将常见分隔符收口为空格，避免标签移除后留下连续标点
+	result = regexp.MustCompile(`[._]+`).ReplaceAllString(result, " ")
+	result = regexp.MustCompile(`\s*-\s*`).ReplaceAllString(result, " ")
+	result = regexp.MustCompile(`[()\[\]{}]+`).ReplaceAllString(result, " ")
+
+	// 清理首尾残留标点和多余空格
+	result = strings.Trim(result, " .-_")
 	result = strings.TrimSpace(result)
 	result = regexp.MustCompile(`\s+`).ReplaceAllString(result, " ")
 

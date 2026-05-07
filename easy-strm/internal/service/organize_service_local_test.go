@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"os"
@@ -75,7 +75,115 @@ func TestOrganizeServiceListOrganizeCandidatesIncludesVideosFromSelectedDirector
 	}
 }
 
+func TestOrganizeServiceScanLocalFilesWithoutMetadataStillReturnsCandidates(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "movie.mp4"), []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to seed video file: %v", err)
+	}
 
+	svc := &OrganizeService{}
+	files, err := svc.scanLocalFiles(root, "", "all", []string{"movie.mp4"}, false)
+	if err != nil {
+		t.Fatalf("expected local scan without metadata to succeed: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 scanned file, got %d", len(files))
+	}
+	if files[0].Name != "movie.mp4" {
+		t.Fatalf("unexpected scanned file: %+v", files[0])
+	}
+	if files[0].Size != 0 {
+		t.Fatalf("expected lightweight scan to skip file size lookup, got %d", files[0].Size)
+	}
+	if !files[0].ModifyTime.IsZero() {
+		t.Fatalf("expected lightweight scan to skip modify time lookup, got %v", files[0].ModifyTime)
+	}
+}
 
+func TestOrganizeServiceScanFilesDirectlyCollectsSelectedLocalFiles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "movie.mp4"), []byte("video"), 0644); err != nil {
+		t.Fatalf("failed to seed selected video file: %v", err)
+	}
+	blockedDir := filepath.Join(root, "blocked")
+	if err := os.MkdirAll(blockedDir, 0755); err != nil {
+		t.Fatalf("failed to seed blocked dir: %v", err)
+	}
 
+	svc := &OrganizeService{}
+	files, err := svc.scanFiles(
+		&domain.MediaSource{SourceType: domain.SourceTypeLocal, Path: root},
+		"",
+		"all",
+		[]string{"movie.mp4"},
+		false,
+	)
+	if err != nil {
+		t.Fatalf("expected direct selected-file scan to succeed: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected only the selected file, got %d", len(files))
+	}
+	if files[0].Name != "movie.mp4" {
+		t.Fatalf("unexpected selected file result: %+v", files[0])
+	}
+}
 
+func TestOrganizeServiceApplyOrganizeRenameOverridesUsesEditedName(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "target")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		t.Fatalf("failed to create target dir: %v", err)
+	}
+
+	source := &domain.MediaSource{SourceType: domain.SourceTypeLocal}
+	previews := []OrganizePreview{
+		{
+			FileID:     "Inception.2010.1080p.mkv",
+			FileName:   "Inception.2010.1080p.mkv",
+			NewName:    "盗梦空间 (2010).mkv",
+			TargetPath: targetDir,
+			NewPath:    filepath.Join(targetDir, "盗梦空间 (2010).mkv"),
+		},
+	}
+	renameItems := []domain.OrganizeRenameOverride{
+		{
+			FileID:  "Inception.2010.1080p.mkv",
+			NewName: "Manual Override Final.mkv",
+		},
+	}
+
+	svc := &OrganizeService{}
+	svc.applyOrganizeRenameOverrides(previews, source, renameItems)
+
+	if previews[0].NewName != "Manual Override Final.mkv" {
+		t.Fatalf("expected edited name to replace preview name, got %q", previews[0].NewName)
+	}
+	if filepath.Base(previews[0].NewPath) != "Manual Override Final.mkv" {
+		t.Fatalf("expected edited name to flow into target path, got %q", previews[0].NewPath)
+	}
+	if previews[0].Conflict {
+		t.Fatalf("expected no conflict for non-existing override target")
+	}
+}
+
+func TestOrganizeServiceAppendMissingFilePreviewsAddsRemovedSelectedFile(t *testing.T) {
+	svc := &OrganizeService{}
+	files := []domain.MediaFile{
+		{ID: "present.mkv", Name: "present.mkv", Path: "present.mkv"},
+	}
+	previews := []OrganizePreview{
+		{FileID: "present.mkv", FileName: "present.mkv", FilePath: "present.mkv"},
+	}
+
+	result := svc.appendMissingFilePreviews(previews, files, []string{"present.mkv", "missing.mkv"})
+	if len(result) != 2 {
+		t.Fatalf("expected 2 previews after appending missing file, got %d", len(result))
+	}
+	if result[1].FileID != "missing.mkv" {
+		t.Fatalf("expected missing preview to keep original file id, got %+v", result[1])
+	}
+	if result[1].IdentifyError != "源文件不存在或已被移除" {
+		t.Fatalf("expected missing preview error message, got %+v", result[1])
+	}
+}

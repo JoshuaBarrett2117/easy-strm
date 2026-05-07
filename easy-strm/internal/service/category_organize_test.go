@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"easy-strm/internal/domain"
@@ -245,5 +245,40 @@ func TestOrganizeService_关键词规则仍需满足其他条件(t *testing.T) {
 
 	if svc.matchCategoryRule(identifyResult, strings.ToLower(identifyResult.Title+" "+identifyResult.OriginalTitle), rule) {
 		t.Fatal("关键词命中后仍应继续校验其它条件，国家不匹配时不应命中")
+	}
+}
+
+func TestOrganizeService_关键词分类优先于通用元数据分类(t *testing.T) {
+	svc := &OrganizeService{}
+
+	identifyResult := &domain.TmdbIdentifyResult{
+		Title:         "盗梦空间",
+		OriginalTitle: "Inception",
+		MediaType:     "movie",
+		GenreIDs:      []int{28, 878},
+		Countries:     []string{"US"},
+		Language:      "en",
+	}
+
+	categories := []*domain.MediaCategory{
+		{
+			Name:       "外语电影",
+			MediaType:  "movie",
+			Enabled:    true,
+			MatchRules: []byte(`{"countries":["US","GB"],"languages":["en"]}`),
+			TargetPath: "/电影/外语电影",
+		},
+		{
+			Name:       "盗梦空间专题",
+			MediaType:  "movie",
+			Enabled:    true,
+			MatchRules: []byte(`{"keywords":["inception"]}`),
+			TargetPath: "/电影/科幻电影",
+		},
+	}
+
+	targetPath := svc.matchCategoryPath(identifyResult, categories)
+	if targetPath != "/电影/科幻电影" {
+		t.Fatalf("关键词分类应优先于通用元数据分类: got=%q", targetPath)
 	}
 }

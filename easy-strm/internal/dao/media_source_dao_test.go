@@ -17,6 +17,7 @@ func setupMockDB(t *testing.T) (sqlmock.Sqlmock, func()) {
 	}
 
 	Init(db, nil)
+	InitDAO(db)
 	return mock, func() { _ = db.Close() }
 }
 

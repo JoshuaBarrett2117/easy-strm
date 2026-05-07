@@ -19,6 +19,35 @@
           </div>
         </div>
       </template>
+
+      <section class="overview-panel">
+        <div class="overview-copy">
+          <h2>账号池总览</h2>
+          <p>扫码登录、转存链路、状态管理和连通性测试都继续沿用原有后端接口，这里只重构首屏表达与运营视角。</p>
+        </div>
+        <div class="overview-grid">
+          <article v-for="card in cloudOverviewCards" :key="card.label" class="overview-card">
+            <span class="overview-card__label">{{ card.label }}</span>
+            <strong class="overview-card__value">{{ card.value }}</strong>
+            <p class="overview-card__hint">{{ card.hint }}</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="status-rail">
+        <div class="status-rail__item">
+          <span>当前账号结构</span>
+          <strong>{{ accountStructureText }}</strong>
+        </div>
+        <div class="status-rail__item">
+          <span>高优先级账号</span>
+          <strong>{{ priorityLeadersText }}</strong>
+        </div>
+        <div class="status-rail__item">
+          <span>转存配置覆盖</span>
+          <strong>{{ transferCoverageText }}</strong>
+        </div>
+      </section>
       
       <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
         <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
@@ -497,6 +526,57 @@ const loginStatusMap = {
 const loginStatusText = computed(() => loginStatusMap[loginStatus.value]?.text || '未知状态')
 const loginStatusType = computed(() => loginStatusMap[loginStatus.value]?.type || 'info')
 const channelTip = computed(() => channelTips[selectedChannel.value] || '请扫描二维码登录')
+const activeAccounts = computed(() => cloud115List.value.filter(item => item.status === 'active'))
+const coolingAccounts = computed(() => cloud115List.value.filter(item => item.status === 'cooling'))
+const disabledAccounts = computed(() => cloud115List.value.filter(item => item.status === 'disabled'))
+const transferEnabledAccounts = computed(() => cloud115List.value.filter(item => item.transfer_account_id))
+const resourceAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'resource'))
+const vipAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'vip'))
+const hybridAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'both'))
+const cloudOverviewCards = computed(() => {
+  const highestPriority = cloud115List.value.reduce((max, item) => Math.max(max, Number(item.priority || 0)), 0)
+  return [
+    {
+      label: '账号总数',
+      value: cloud115List.value.length,
+      hint: `活跃 ${activeAccounts.value.length} 个，冷却 ${coolingAccounts.value.length} 个`
+    },
+    {
+      label: '可用账号',
+      value: activeAccounts.value.length,
+      hint: disabledAccounts.value.length ? `${disabledAccounts.value.length} 个账号处于禁用状态` : '当前没有被禁用的账号'
+    },
+    {
+      label: '已配置转存',
+      value: transferEnabledAccounts.value.length,
+      hint: transferEnabledAccounts.value.length ? '可直接参与直链转存链路' : '还没有账号配置转存目标'
+    },
+    {
+      label: '最高优先级',
+      value: highestPriority || '-',
+      hint: highestPriority ? '用于同步调度时的优先选择' : '暂无优先级配置'
+    }
+  ]
+})
+const accountStructureText = computed(() => {
+  return `资源号 ${resourceAccounts.value.length} / VIP ${vipAccounts.value.length} / 兼顾 ${hybridAccounts.value.length}`
+})
+const priorityLeadersText = computed(() => {
+  const leaders = [...cloud115List.value]
+    .sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0))
+    .slice(0, 3)
+    .map(item => item.name)
+    .filter(Boolean)
+  return leaders.length ? leaders.join('、') : '暂无'
+})
+const transferCoverageText = computed(() => {
+  if (!cloud115List.value.length) return '暂无账号'
+  return `${transferEnabledAccounts.value.length}/${cloud115List.value.length} 已接入转存`
+})
+
+const isDialogCancelAction = (error) => {
+  return error === 'cancel' || error === 'close' || error?.message === 'cancel' || error?.message === 'close'
+}
 
 /**
  * 格式化过期时间倒计时
@@ -530,8 +610,8 @@ const fetchCloud115List = async () => {
 /**
  * 处理表格排序变化
  * @param {Object} column - 列信息
- * @param {string} prop - 鎺掑簭瀛楁
- * @param {string} order - 鎺掑簭鏂瑰紡
+ * @param {string} prop - 排序字段
+ * @param {string} order - 排序方式
  */
 const handleSortChange = ({ prop, order }) => {
   if (prop && order) {
@@ -604,7 +684,7 @@ const handleSubmit = async () => {
       const apiUrl = form.value.id ? `/cloud115/${form.value.id}` : '/cloud115'
       const method = form.value.id ? 'PUT' : 'POST'
       
-      // 鍑嗗鎻愪氦鏁版嵁锛屽皢 null 杞崲涓?0
+      // 准备提交数据，将 null 转换为 0
       const submitData = {
         ...form.value,
         transfer_account_id: form.value.transfer_account_id || 0
@@ -671,7 +751,10 @@ const handleDelete = (row) => {
   }).then(() => {
     ElMessage.success('删除成功')
     fetchCloud115List()
-  }).catch(() => {
+  }).catch((error) => {
+    if (isDialogCancelAction(error)) {
+      return
+    }
     ElMessage.error('删除失败')
   })
 }
@@ -684,16 +767,27 @@ const handleTest = async (row) => {
   if (testingAccountId.value === row.id) return
 
   testingAccountId.value = row.id
-  ElMessage.info('正在测试115云账号连接...')
+  const loadingMessage = ElMessage({
+    type: 'info',
+    message: `正在测试账号「${row.name}」连接状态...`,
+    duration: 0,
+    showClose: true
+  })
   try {
     const response = await request(`/auth/cloud115/${row.id}`, {
       skipGlobalErrorMessage: true
     })
     const payload = response.data || {}
     const data = payload.data || {}
-    if (payload.state === true) {
+    if (payload.state === true || data?.id || data?.name) {
       const fileCount = Number(data.file_count || 0)
-      ElMessage.success(payload.message || `测试成功：${data.name || row.name}，可访问 ${fileCount} 项`)
+      const accountName = data.name || row.name || `账号 ${row.id}`
+      ElMessage({
+        type: 'success',
+        duration: 4000,
+        showClose: true,
+        message: `${accountName} 测试成功，连接正常，可访问 ${fileCount} 项内容。`
+      })
       return
     }
     ElMessage.error(`测试失败：${payload.message || payload.error || '未知错误'}`)
@@ -702,6 +796,7 @@ const handleTest = async (row) => {
     const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || '未知错误'
     ElMessage.error(`测试失败：${errorMsg}`)
   } finally {
+    loadingMessage.close()
     testingAccountId.value = null
   }
 }
@@ -731,7 +826,7 @@ const resetForm = () => {
 
 /**
  * 分页大小变化
- * @param {number} size - 姣忛〉鏁伴噺
+ * @param {number} size - 每页数量
  */
 const handleSizeChange = (size) => {
   pageSize.value = size
@@ -983,18 +1078,23 @@ onUnmounted(() => {
 
 <style scoped>
 .cloud115-container {
-  padding: 20px;
+  padding: 8px 0 0;
   min-height: calc(100vh - 100px);
 }
 
 .main-card {
-  border-radius: 12px;
+  border-radius: 24px;
   overflow: hidden;
+  border: 1px solid rgba(120, 101, 72, 0.12);
+  background: rgba(255, 252, 247, 0.84);
+  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
 }
 
 .main-card :deep(.el-card__header) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 16px 20px;
+  background:
+    radial-gradient(circle at top right, rgba(242, 166, 90, 0.28), transparent 32%),
+    linear-gradient(135deg, #1f6f78 0%, #24535f 55%, #17313a 100%);
+  padding: 20px 24px;
 }
 
 .card-header {
@@ -1008,12 +1108,12 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   color: white;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .header-icon {
-  font-size: 22px;
+  font-size: 24px;
 }
 
 .header-buttons {
@@ -1022,18 +1122,105 @@ onUnmounted(() => {
 }
 
 .custom-table {
-  border-radius: 8px;
+  border-radius: 18px;
   overflow: hidden;
 }
 
+.overview-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.overview-copy {
+  padding: 20px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+}
+
+.overview-copy h2 {
+  margin: 0;
+  font-size: 24px;
+  color: #17313a;
+}
+
+.overview-copy p {
+  margin: 12px 0 0;
+  line-height: 1.7;
+  color: #6c6259;
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 241, 231, 0.92));
+  border: 1px solid rgba(120, 101, 72, 0.1);
+}
+
+.overview-card__label {
+  display: block;
+  color: #8a7b6d;
+  font-size: 13px;
+}
+
+.overview-card__value {
+  display: block;
+  margin-top: 12px;
+  color: #17313a;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.overview-card__hint {
+  margin: 10px 0 0;
+  color: #73675d;
+  line-height: 1.6;
+}
+
+.status-rail {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+
+.status-rail__item {
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(244, 239, 231, 0.88);
+  border: 1px solid rgba(120, 101, 72, 0.08);
+}
+
+.status-rail__item span {
+  display: block;
+  color: #8a7b6d;
+  font-size: 12px;
+}
+
+.status-rail__item strong {
+  display: block;
+  margin-top: 8px;
+  color: #17313a;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
 .custom-table :deep(.el-table__header th) {
-  background-color: #f8f9fa !important;
-  color: #495057;
+  background-color: #f7f1e7 !important;
+  color: #4d453d;
   font-weight: 600;
 }
 
 .custom-table :deep(.el-table__row:hover > td) {
-  background-color: #e8f4fd !important;
+  background-color: #f8f2e8 !important;
 }
 
 .sensitive-cell {
@@ -1073,7 +1260,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 20px;
-  padding: 10px 0;
+  padding: 18px 0 4px;
 }
 
 .dialog-footer {
@@ -1086,7 +1273,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 20px;
+  padding: 10px 20px 20px;
 }
 
 .channel-selector {
@@ -1130,8 +1317,8 @@ onUnmounted(() => {
 }
 
 .channel-btn.active {
-  border-color: #409eff;
-  background-color: #409eff;
+  border-color: #1f6f78;
+  background-color: #1f6f78;
   color: #fff;
 }
 
@@ -1219,6 +1406,51 @@ onUnmounted(() => {
   color: #909399;
   margin-top: 4px;
   line-height: 1.4;
+}
+
+:global(.dark) .main-card {
+  background: rgba(14, 21, 32, 0.86);
+  border-color: rgba(139, 163, 185, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+:global(.dark) .overview-copy,
+:global(.dark) .overview-card,
+:global(.dark) .status-rail__item {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .overview-copy h2,
+:global(.dark) .overview-card__value,
+:global(.dark) .status-rail__item strong,
+:global(.dark) .full-text {
+  color: #e8edf4;
+}
+
+:global(.dark) .overview-copy p,
+:global(.dark) .overview-card__hint,
+:global(.dark) .overview-card__label,
+:global(.dark) .status-rail__item span,
+:global(.dark) .masked-text {
+  color: #9faebb;
+}
+
+:global(.dark) .custom-table :deep(.el-table__header th) {
+  background-color: #182231 !important;
+  color: #d6deea;
+}
+
+:global(.dark) .custom-table :deep(.el-table__row:hover > td) {
+  background-color: #14202d !important;
+}
+
+@media (max-width: 960px) {
+  .overview-panel,
+  .overview-grid,
+  .status-rail {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

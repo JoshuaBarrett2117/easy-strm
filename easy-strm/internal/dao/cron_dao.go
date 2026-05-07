@@ -129,18 +129,19 @@ func (c *CronTaskDAO) GetEnabled() ([]*domain.CronTask, error) {
 
 // Create 创建定时任务
 func (c *CronTaskDAO) Create(taskName, taskType string, cloud115ID, strmConfigID int, cronExpr string) (*domain.CronTask, error) {
-	task := &domain.CronTask{}
+	var taskID int
 	err := db.QueryRow(
 		`INSERT INTO t_cron_task (task_name, task_type, cloud115_id, strm_config_id, cron_expr, status)
 		VALUES ($1, $2, $3, $4, $5, 'enabled')
-		RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
-		last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time`,
+		RETURNING id`,
 		taskName, taskType, cloud115ID, strmConfigID, cronExpr,
-	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID,
-		&task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime,
-		&task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
+	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("CronTaskDAO[Create] 创建失败: %v", err)
+	}
+	task, err := c.GetByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("CronTaskDAO[Create] 回读失败: %v", err)
 	}
 	logger.Infof("CronTaskDAO[Create] 创建定时任务成功: %s (ID: %d)", taskName, task.ID)
 	return task, nil
@@ -148,17 +149,18 @@ func (c *CronTaskDAO) Create(taskName, taskType string, cloud115ID, strmConfigID
 
 // Update 更新定时任务
 func (c *CronTaskDAO) Update(id int, taskName, taskType, cronExpr, status string) (*domain.CronTask, error) {
-	task := &domain.CronTask{}
+	var taskID int
 	err := db.QueryRow(
 		`UPDATE t_cron_task SET task_name=$1, task_type=$2, cron_expr=$3, status=$4 WHERE id=$5
-		RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
-		last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time`,
+		RETURNING id`,
 		taskName, taskType, cronExpr, status, id,
-	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID,
-		&task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime,
-		&task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
+	).Scan(&taskID)
 	if err != nil {
 		return nil, fmt.Errorf("CronTaskDAO[Update] 更新失败: %v", err)
+	}
+	task, err := c.GetByID(taskID)
+	if err != nil {
+		return nil, fmt.Errorf("CronTaskDAO[Update] 回读失败: %v", err)
 	}
 	return task, nil
 }

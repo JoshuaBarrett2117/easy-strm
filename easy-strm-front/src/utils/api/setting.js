@@ -30,6 +30,14 @@ export const updateSettings = (settings, options = {}) => {
 
 export const testNetworkConnectivity = (options = {}) => {
   return request('/network/test', {
+    data: options,
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}
+
+export const getNetworkProbeSites = (options = {}) => {
+  return request('/network/test', {
+    data: { mode: 'list' },
     skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
   })
 }

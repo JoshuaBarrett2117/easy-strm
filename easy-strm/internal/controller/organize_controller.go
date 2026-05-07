@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,12 +16,18 @@ import (
 // OrganizeController 自动整理控制器
 type OrganizeController struct {
 	organizeService *service.OrganizeService
+	taskService     *service.TaskService
 	// embyRefreshCallback 整理完成后的Emby刷新回调（由main包注入）
 	embyRefreshCallback func(sourceID int) *service.EmbyLibraryRefreshResult
 }
 
 func NewOrganizeController(organizeService *service.OrganizeService) *OrganizeController {
 	return &OrganizeController{organizeService: organizeService}
+}
+
+// SetTaskService 注入任务服务，用于异步整理执行进度上报。
+func (c *OrganizeController) SetTaskService(taskService *service.TaskService) {
+	c.taskService = taskService
 }
 
 // SetEmbyRefreshCallback 注入Emby刷新回调
@@ -55,6 +64,57 @@ func (c *OrganizeController) ListOrganizeCandidates(ctx *gin.Context) {
 		"data":  candidates,
 		"total": len(candidates),
 	})
+}
+
+// StartCandidateTaskAsync 启动异步候选扫描任务
+func (c *OrganizeController) StartCandidateTaskAsync(ctx *gin.Context) {
+	var req struct {
+		SourceID   int      `json:"source_id" binding:"required"`
+		SourcePath string   `json:"source_path"`
+		MediaType  string   `json:"media_type"`
+		FileIDs    []string `json:"file_ids"`
+	}
+
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	if req.MediaType == "" {
+		req.MediaType = "all"
+	}
+
+	taskID, err := c.organizeService.StartCandidateTask(req.SourceID, req.SourcePath, req.MediaType, req.FileIDs)
+	if err != nil {
+		logger.Errorf("OrganizeController[StartCandidateTaskAsync] 启动任务失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	SuccessResp(ctx, gin.H{
+		"task_id": taskID,
+		"message": "候选扫描任务已启动",
+	})
+}
+
+// GetCandidateTaskStatus 获取候选扫描任务状态
+func (c *OrganizeController) GetCandidateTaskStatus(ctx *gin.Context) {
+	taskID := ctx.Query("task_id")
+	if taskID == "" {
+		ErrorResp(ctx, http.StatusBadRequest, "缺少task_id参数")
+		return
+	}
+
+	task, err := c.organizeService.GetCandidateTaskStatus(taskID)
+	if err != nil {
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if task == nil {
+		ErrorResp(ctx, http.StatusNotFound, "任务不存在")
+		return
+	}
+
+	SuccessResp(ctx, task)
 }
 
 func (c *OrganizeController) PreviewOrganize(ctx *gin.Context) {
@@ -208,45 +268,18 @@ func (c *OrganizeController) CheckRestorableTask(ctx *gin.Context) {
 
 // ExecuteOrganize 执行整理
 func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
-	var req struct {
-		SourceID       int                             `json:"source_id" binding:"required"`
-		SourcePath     string                          `json:"source_path"`
-		TargetPath     string                          `json:"target_path"` // 可以不传，如果启用了 UseCategory
-		MediaType      string                          `json:"media_type"`
-		Template       string                          `json:"template"`
-		ConflictPolicy string                          `json:"conflict_policy"`
-		OperationMode  string                          `json:"operation_mode"`
-		MoveFiles      *bool                           `json:"move_files"`
-		FileIDs        []string                        `json:"file_ids"`
-		UseCategory    bool                            `json:"use_category"`
-		ManualItems    []domain.OrganizeManualOverride `json:"manual_items"`
-	}
+	var req organizeExecuteRequest
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
 		return
 	}
-	if req.MediaType == "" {
-		req.MediaType = "all"
-	}
-	if req.ConflictPolicy == "" {
-		req.ConflictPolicy = "skip"
-	}
-
-	if !req.UseCategory && req.TargetPath == "" {
-		ErrorResp(ctx, http.StatusBadRequest, "使用非分类整理时必须提供目标目录")
+	if err := normalizeOrganizeExecuteRequest(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	operationMode := req.OperationMode
-	if operationMode == "" {
-		operationMode = "move"
-		if req.MoveFiles != nil && !*req.MoveFiles {
-			operationMode = "copy"
-		}
-	}
-
-	results, err := c.organizeService.OrganizeDirectory(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.ConflictPolicy, operationMode, req.FileIDs, req.UseCategory, req.ManualItems)
+	results, err := c.organizeService.OrganizeDirectory(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.ConflictPolicy, req.OperationMode, req.FileIDs, req.UseCategory, req.ManualItems, req.RenameItems)
 	if err != nil {
 		logger.Errorf("OrganizeController[ExecuteOrganize] 执行失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
@@ -293,6 +326,222 @@ func (c *OrganizeController) ExecuteOrganize(ctx *gin.Context) {
 		},
 		"emby_refresh": embyRefreshResult,
 	})
+}
+
+type organizeExecuteRequest struct {
+	SourceID       int                             `json:"source_id" binding:"required"`
+	SourcePath     string                          `json:"source_path"`
+	TargetPath     string                          `json:"target_path"`
+	MediaType      string                          `json:"media_type"`
+	Template       string                          `json:"template"`
+	ConflictPolicy string                          `json:"conflict_policy"`
+	OperationMode  string                          `json:"operation_mode"`
+	MoveFiles      *bool                           `json:"move_files"`
+	FileIDs        []string                        `json:"file_ids"`
+	UseCategory    bool                            `json:"use_category"`
+	ManualItems    []domain.OrganizeManualOverride `json:"manual_items"`
+	RenameItems    []domain.OrganizeRenameOverride `json:"rename_items"`
+}
+
+func normalizeOrganizeExecuteRequest(req *organizeExecuteRequest) error {
+	if req.MediaType == "" {
+		req.MediaType = "all"
+	}
+	if req.ConflictPolicy == "" {
+		req.ConflictPolicy = "skip"
+	}
+	if !req.UseCategory && req.TargetPath == "" {
+		return fmt.Errorf("使用非分类整理时必须提供目标目录")
+	}
+	if req.OperationMode == "" {
+		req.OperationMode = "move"
+		if req.MoveFiles != nil && !*req.MoveFiles {
+			req.OperationMode = "copy"
+		}
+	}
+	return nil
+}
+
+// ExecuteOrganizeAsync 异步执行整理，进度写入任务中心。
+func (c *OrganizeController) ExecuteOrganizeAsync(ctx *gin.Context) {
+	if c.taskService == nil {
+		ErrorResp(ctx, http.StatusInternalServerError, "任务服务未初始化")
+		return
+	}
+
+	var req organizeExecuteRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	if err := normalizeOrganizeExecuteRequest(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	taskID := fmt.Sprintf("organize_%d_%d", req.SourceID, time.Now().UnixNano())
+	taskName := fmt.Sprintf("手动整理-%d", req.SourceID)
+	if err := c.taskService.Create(taskID, "organize", taskName); err != nil {
+		logger.Errorf("OrganizeController[ExecuteOrganizeAsync] 创建任务失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	c.updateOrganizeTaskMetadata(taskID, req, nil, 0, 0, 0)
+	_ = c.taskService.UpdateProgress(taskID, len(req.FileIDs), 0, 0, 0)
+
+	go c.runOrganizeExecuteTask(taskID, req)
+
+	SuccessResp(ctx, gin.H{
+		"task_id": taskID,
+		"message": "整理任务已启动，可在任务中心查看进度",
+	})
+}
+
+func (c *OrganizeController) runOrganizeExecuteTask(taskID string, req organizeExecuteRequest) {
+	failedItems := make([]map[string]interface{}, 0)
+	progressTotal := len(req.FileIDs)
+	if progressTotal == 0 {
+		progressTotal = 1
+	}
+
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			errMsg := fmt.Sprintf("整理任务异常中断: %v", panicErr)
+			_ = c.taskService.SetError(taskID, errMsg)
+		}
+	}()
+
+	_ = c.taskService.UpdateStatus(taskID, "running")
+	_ = c.taskService.UpdateProgress(taskID, progressTotal, 0, 0, 0)
+
+	results, err := c.organizeService.OrganizeDirectoryWithCallbacks(
+		req.SourceID,
+		req.SourcePath,
+		req.TargetPath,
+		req.MediaType,
+		req.Template,
+		req.ConflictPolicy,
+		req.OperationMode,
+		req.FileIDs,
+		req.UseCategory,
+		req.ManualItems,
+		req.RenameItems,
+		func(progress service.OrganizeExecutionProgress) {
+			if progress.Total > 0 {
+				progressTotal = progress.Total
+			}
+			if progress.Result != nil && (!progress.Result.Success || progress.Result.Skipped) {
+				failedItems = append(failedItems, map[string]interface{}{
+					"file_id":   progress.Result.FileID,
+					"file_name": progress.Result.FileName,
+					"category":  classifyOrganizeTaskFailure(progress.Result),
+					"reason":    progress.Result.Message,
+				})
+			}
+			_ = c.taskService.UpdateProgress(taskID, progressTotal, progress.Processed, progress.Success, progress.Failed+progress.Skipped)
+		},
+		func() bool {
+			return c.taskService.IsCancelled(taskID)
+		},
+	)
+
+	if err != nil && c.taskService.IsCancelled(taskID) {
+		c.updateOrganizeTaskMetadata(taskID, req, failedItems, 0, 0, len(failedItems))
+		_ = c.taskService.UpdateStatus(taskID, "cancelled")
+		return
+	}
+	if err != nil {
+		c.updateOrganizeTaskMetadata(taskID, req, failedItems, 0, 0, len(failedItems))
+		_ = c.taskService.SetError(taskID, err.Error())
+		return
+	}
+
+	successCount, skippedCount, failedCount := summarizeOrganizeResults(results)
+	c.updateOrganizeTaskMetadata(taskID, req, failedItems, successCount, skippedCount, failedCount)
+	_ = c.taskService.UpdateProgress(taskID, len(results), len(results), successCount, failedCount+skippedCount)
+	if failedCount > 0 || skippedCount > 0 {
+		_ = c.taskService.SetError(taskID, fmt.Sprintf("整理完成但有 %d 项失败/跳过", failedCount+skippedCount))
+		return
+	}
+	_ = c.taskService.UpdateStatus(taskID, "completed")
+
+	if successCount > 0 && c.embyRefreshCallback != nil {
+		refreshResult := c.embyRefreshCallback(req.SourceID)
+		if refreshResult != nil && !refreshResult.Success {
+			logger.Warnf("OrganizeController[runOrganizeExecuteTask] Emby刷新失败: %s", refreshResult.Message)
+		}
+	}
+}
+
+func summarizeOrganizeResults(results []service.OrganizeResult) (successCount, skippedCount, failedCount int) {
+	for _, result := range results {
+		if result.Skipped {
+			skippedCount++
+		} else if result.Success {
+			successCount++
+		} else {
+			failedCount++
+		}
+	}
+	return successCount, skippedCount, failedCount
+}
+
+func classifyOrganizeTaskFailure(result *service.OrganizeResult) string {
+	if result == nil {
+		return "other"
+	}
+	if result.Skipped {
+		return "conflict_skipped"
+	}
+	message := result.Message
+	if message == "" {
+		return "other"
+	}
+	lowerMessage := strings.ToLower(message)
+	if containsAny(message, []string{"识别", "identify", "TMDB", "tmdb"}) {
+		return "identify_failed"
+	}
+	if containsAny(lowerMessage, []string{"冲突", "conflict", "已存在", "exists"}) {
+		return "conflict_skipped"
+	}
+	return "organize_failed"
+}
+
+func containsAny(text string, needles []string) bool {
+	for _, needle := range needles {
+		if needle != "" && strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *OrganizeController) updateOrganizeTaskMetadata(taskID string, req organizeExecuteRequest, failedItems []map[string]interface{}, successCount, skippedCount, failedCount int) {
+	if c.taskService == nil || taskID == "" {
+		return
+	}
+	metadata := map[string]interface{}{
+		"source_id":            req.SourceID,
+		"source_path":          req.SourcePath,
+		"organize_target_path": req.TargetPath,
+		"media_type":           req.MediaType,
+		"conflict_policy":      req.ConflictPolicy,
+		"operation_mode":       req.OperationMode,
+		"trigger_mode":         "manual",
+		"detected_files":       len(req.FileIDs),
+		"success_files":        successCount,
+		"failed_files":         failedCount,
+		"skipped_files":        skippedCount,
+		"result_summary":       fmt.Sprintf("成功 %d / 跳过 %d / 失败 %d", successCount, skippedCount, failedCount),
+	}
+	if len(failedItems) > 0 {
+		metadata["failed_items"] = failedItems
+		metadata["failed_item_count"] = len(failedItems)
+	}
+	if err := c.taskService.UpdateMetadata(taskID, metadata); err != nil {
+		logger.Warnf("OrganizeController[updateOrganizeTaskMetadata] 更新任务元数据失败: %v", err)
+	}
 }
 
 // BatchIdentify 批量识别文件

@@ -21,6 +21,8 @@ import (
 const (
 	defaultPreviewConcurrency = 10
 	identifyCacheRedisTTL     = 7 * 24 * time.Hour
+	cloud115ScanInterval      = 200 * time.Millisecond
+	cloud115ListCacheTTL      = 10 * time.Second
 )
 
 // OrganizeService 自动整理服务
@@ -38,6 +40,13 @@ type OrganizeService struct {
 	scrapeService        *ScrapeService
 	client               Cloud115Client
 	redisClient          *redis.Client
+	cloud115ListCacheMu  sync.RWMutex
+	cloud115ListCache    map[string]cloud115ListCacheEntry
+}
+
+type cloud115ListCacheEntry struct {
+	files     []domain.MediaFile
+	expiresAt time.Time
 }
 
 // NewOrganizeService 创建自动整理服务实例
@@ -74,6 +83,7 @@ func NewOrganizeService(
 		scrapeService:        scrapeService,
 		client:               client,
 		redisClient:          redisClient,
+		cloud115ListCache:    make(map[string]cloud115ListCacheEntry),
 	}
 }
 
@@ -134,6 +144,22 @@ type OrganizePreviewTask struct {
 	UpdatedAt  time.Time     `json:"updated_at"`
 }
 
+// OrganizeCandidateTask 异步候选扫描任务
+type OrganizeCandidateTask struct {
+	TaskID     string              `json:"task_id"`
+	SourceID   int                 `json:"source_id"`
+	SourcePath string              `json:"source_path"`
+	MediaType  string              `json:"media_type"`
+	FileIDs    []string            `json:"file_ids"`
+	Status     string              `json:"status"` // pending, processing, completed, failed
+	Progress   *TaskProgress       `json:"progress,omitempty"`
+	Result     []OrganizeCandidate `json:"result,omitempty"`
+	Total      int                 `json:"total"`
+	Error      string              `json:"error,omitempty"`
+	CreatedAt  time.Time           `json:"created_at"`
+	UpdatedAt  time.Time           `json:"updated_at"`
+}
+
 // TaskProgress 任务进度
 type TaskProgress struct {
 	Total       int    `json:"total"`
@@ -153,6 +179,16 @@ type TaskSummary struct {
 	Conflicts   int `json:"conflicts"`
 	Failed      int `json:"failed"`
 	Processable int `json:"processable"`
+}
+
+// OrganizeExecutionProgress 表示整理执行过程中的进度快照。
+type OrganizeExecutionProgress struct {
+	Total     int
+	Processed int
+	Success   int
+	Failed    int
+	Skipped   int
+	Result    *OrganizeResult
 }
 
 const (
@@ -219,6 +255,8 @@ func organizeOperationActionName(mode string) string {
 //
 // ListOrganizeCandidates 列出整理候选视频文件，不触发识别预览。
 func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, mediaType string, fileIDs []string) ([]OrganizeCandidate, error) {
+	startedAt := time.Now()
+
 	source, err := s.mediaSourceService.GetByID(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取媒体源失败: %v", err)
@@ -227,7 +265,7 @@ func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, media
 		return nil, fmt.Errorf("媒体源不存在")
 	}
 
-	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs)
+	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs, false)
 	if err != nil {
 		return nil, fmt.Errorf("扫描文件失败: %v", err)
 	}
@@ -243,6 +281,8 @@ func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, media
 			SourcePath: sourcePath,
 		})
 	}
+	logger.Infof("OrganizeService[ListOrganizeCandidates] 候选扫描完成: source_id=%d, source_type=%s, source_path=%s, selected=%d, candidates=%d, elapsed=%s",
+		sourceID, source.SourceType, sourcePath, len(fileIDs), len(candidates), time.Since(startedAt))
 	return candidates, nil
 }
 
@@ -259,7 +299,7 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 	}
 
 	// 获取文件列表 (传入想要整理的 ID 以进行扫描剪枝)
-	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs)
+	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs, true)
 	if err != nil {
 		return nil, fmt.Errorf("扫描文件失败: %v", err)
 	}
@@ -303,12 +343,7 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 			defer mu.Unlock()
 			if err != nil {
 				logger.Warnf("OrganizeService[PreviewOrganize] 预览文件失败: %s, error: %v", f.Name, err)
-				previews = append(previews, OrganizePreview{
-					FileID:        f.ID,
-					FileName:      f.Name,
-					FilePath:      f.Path,
-					IdentifyError: err.Error(),
-				})
+				previews = append(previews, s.buildPreviewErrorResult(f, err))
 			} else {
 				previews = append(previews, *preview)
 			}
@@ -316,8 +351,20 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 	}
 	wg.Wait()
 
+	previews = s.appendMissingFilePreviews(previews, files, fileIDs)
+
 	logger.Infof("OrganizeService[PreviewOrganize] 预览完成: total=%d", len(previews))
 	return previews, nil
+}
+
+func (s *OrganizeService) buildPreviewErrorResult(file domain.MediaFile, err error) OrganizePreview {
+	return OrganizePreview{
+		FileID:        file.ID,
+		CloudID:       file.CID,
+		FileName:      file.Name,
+		FilePath:      file.Path,
+		IdentifyError: err.Error(),
+	}
 }
 
 // GenerateTaskKey 生成任务Key
@@ -347,6 +394,150 @@ func (s *OrganizeService) persistPreviewTask(ctx context.Context, taskKey string
 		return fmt.Errorf("persist preview task failed: %w", err)
 	}
 	return nil
+}
+
+func (s *OrganizeService) persistCandidateTask(ctx context.Context, taskKey string, task *OrganizeCandidateTask) error {
+	if s.redisClient == nil {
+		return fmt.Errorf("redis client is not initialized")
+	}
+	if task == nil {
+		return fmt.Errorf("candidate task is nil")
+	}
+
+	task.UpdatedAt = time.Now()
+	taskJSON, err := json.Marshal(task)
+	if err != nil {
+		return fmt.Errorf("marshal candidate task failed: %w", err)
+	}
+
+	if err := s.redisClient.Set(ctx, taskKey, string(taskJSON), 24*time.Hour).Err(); err != nil {
+		return fmt.Errorf("persist candidate task failed: %w", err)
+	}
+	return nil
+}
+
+func (s *OrganizeService) StartCandidateTask(sourceID int, sourcePath, mediaType string, fileIDs []string) (string, error) {
+	if s.redisClient == nil {
+		return "", fmt.Errorf("候选扫描任务存储未初始化")
+	}
+
+	taskID := fmt.Sprintf("candidates_%d_%d", sourceID, time.Now().UnixNano())
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+	task := OrganizeCandidateTask{
+		TaskID:     taskID,
+		SourceID:   sourceID,
+		SourcePath: sourcePath,
+		MediaType:  mediaType,
+		FileIDs:    fileIDs,
+		Status:     "pending",
+		Progress:   &TaskProgress{Total: 3, Processed: 0, CurrentFile: "等待开始"},
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
+	}
+
+	ctx := context.Background()
+	if err := s.persistCandidateTask(ctx, taskKey, &task); err != nil {
+		return "", fmt.Errorf("保存候选扫描任务失败: %v", err)
+	}
+
+	go s.runCandidateTask(taskID, sourceID, sourcePath, mediaType, fileIDs)
+	return taskID, nil
+}
+
+func (s *OrganizeService) runCandidateTask(taskID string, sourceID int, sourcePath, mediaType string, fileIDs []string) {
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+	ctx := context.Background()
+
+	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
+	if err != nil {
+		logger.Errorf("OrganizeService[runCandidateTask] 获取任务失败: %v", err)
+		return
+	}
+
+	var task OrganizeCandidateTask
+	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+		task = OrganizeCandidateTask{
+			TaskID:     taskID,
+			SourceID:   sourceID,
+			SourcePath: sourcePath,
+			MediaType:  mediaType,
+			FileIDs:    fileIDs,
+			Status:     "failed",
+			Progress:   &TaskProgress{Total: 3, Processed: 0, CurrentFile: "任务初始化失败"},
+			CreatedAt:  time.Now(),
+			Error:      fmt.Sprintf("候选扫描任务数据损坏: %v", err),
+		}
+		if persistErr := s.persistCandidateTask(ctx, taskKey, &task); persistErr != nil {
+			logger.Errorf("OrganizeService[runCandidateTask] 更新任务失败: %v", persistErr)
+		}
+		return
+	}
+
+	defer func() {
+		if panicErr := recover(); panicErr != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("候选扫描任务异常中断: %v", panicErr)
+			if persistErr := s.persistCandidateTask(ctx, taskKey, &task); persistErr != nil {
+				logger.Errorf("OrganizeService[runCandidateTask] 更新异常任务失败: %v", persistErr)
+			}
+		}
+	}()
+
+	task.Status = "processing"
+	if task.Progress == nil {
+		task.Progress = &TaskProgress{Total: 3}
+	}
+	task.Progress.Total = 3
+	task.Progress.Processed = 1
+	task.Progress.CurrentFile = "正在加载媒体源"
+	if err := s.persistCandidateTask(ctx, taskKey, &task); err != nil {
+		logger.Errorf("OrganizeService[runCandidateTask] 更新任务状态失败: %v", err)
+	}
+
+	task.Progress.Processed = 2
+	task.Progress.CurrentFile = "正在扫描候选文件"
+	if err := s.persistCandidateTask(ctx, taskKey, &task); err != nil {
+		logger.Errorf("OrganizeService[runCandidateTask] 更新扫描进度失败: %v", err)
+	}
+
+	candidates, err := s.ListOrganizeCandidates(sourceID, sourcePath, mediaType, fileIDs)
+	if err != nil {
+		task.Status = "failed"
+		task.Error = err.Error()
+		task.Progress.CurrentFile = "扫描失败"
+	} else {
+		task.Progress.Processed = 3
+		task.Progress.CurrentFile = fmt.Sprintf("已完成，共 %d 项", len(candidates))
+		task.Status = "completed"
+		task.Result = candidates
+		task.Total = len(candidates)
+	}
+
+	if err := s.persistCandidateTask(ctx, taskKey, &task); err != nil {
+		logger.Errorf("OrganizeService[runCandidateTask] 保存最终任务失败: %v", err)
+	}
+}
+
+func (s *OrganizeService) GetCandidateTaskStatus(taskID string) (*OrganizeCandidateTask, error) {
+	if s.redisClient == nil {
+		return nil, fmt.Errorf("候选扫描任务存储未初始化")
+	}
+
+	taskKey := fmt.Sprintf("organize:task:%s", taskID)
+	ctx := context.Background()
+	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("获取候选扫描任务状态失败: %v", err)
+	}
+
+	var task OrganizeCandidateTask
+	if err := json.Unmarshal([]byte(taskJSON), &task); err != nil {
+		return nil, fmt.Errorf("解析候选扫描任务失败: %v", err)
+	}
+	return &task, nil
 }
 
 // StartPreviewTask 启动异步预览任务
@@ -527,7 +718,19 @@ func (s *OrganizeService) CheckRestorableTask(sourceID int, sourcePath string, f
 // 返回:
 //   - []OrganizeResult: 整理结果列表
 //   - error: 错误信息
-func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizeResult, error) {
+func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride) ([]OrganizeResult, error) {
+	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, nil, nil)
+}
+
+func (s *OrganizeService) OrganizeDirectoryWithProgress(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress)) ([]OrganizeResult, error) {
+	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, nil)
+}
+
+func (s *OrganizeService) OrganizeDirectoryWithCallbacks(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
+	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
+}
+
+func (s *OrganizeService) organizeDirectoryInternal(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
 	operationMode = normalizeOrganizeOperationMode(operationMode)
 	if operationMode == "" {
 		return nil, fmt.Errorf("unsupported organize mode")
@@ -541,37 +744,181 @@ func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath
 		return nil, err
 	}
 
+	if len(renameItems) > 0 {
+		source, err := s.mediaSourceService.GetByID(sourceID)
+		if err != nil {
+			return nil, fmt.Errorf("获取媒体源失败: %v", err)
+		}
+		if source == nil {
+			return nil, fmt.Errorf("媒体源不存在")
+		}
+		s.applyOrganizeRenameOverrides(previews, source, renameItems)
+	}
+
 	results := make([]OrganizeResult, 0, len(previews))
+	total := len(previews)
+	processed := 0
+	successCount := 0
+	failedCount := 0
+	skippedCount := 0
+
+	reportProgress := func(result *OrganizeResult) {
+		if progress == nil {
+			return
+		}
+		progress(OrganizeExecutionProgress{
+			Total:     total,
+			Processed: processed,
+			Success:   successCount,
+			Failed:    failedCount,
+			Skipped:   skippedCount,
+			Result:    result,
+		})
+	}
+
 	for _, preview := range previews {
+		if shouldStop != nil && shouldStop() {
+			return results, fmt.Errorf("任务已取消")
+		}
+
 		if preview.IdentifyError != "" {
-			results = append(results, OrganizeResult{
+			result := OrganizeResult{
 				FileID:   preview.FileID,
 				FileName: preview.FileName,
 				Success:  false,
 				Message:  preview.IdentifyError,
-			})
+			}
+			results = append(results, result)
+			processed++
+			failedCount++
+			reportProgress(&result)
 			continue
 		}
 
 		result, err := s.organizeFile(sourceID, preview, conflictPolicy, operationMode)
 		if err != nil {
 			logger.Warnf("OrganizeService[OrganizeDirectory] organize failed: %s, error: %v", preview.FileName, err)
-			results = append(results, OrganizeResult{
+			failedResult := OrganizeResult{
 				FileID:   preview.FileID,
 				FileName: preview.FileName,
 				Success:  false,
 				Message:  err.Error(),
 				OldPath:  preview.FilePath,
-			})
+			}
+			results = append(results, failedResult)
+			processed++
+			failedCount++
+			reportProgress(&failedResult)
 			continue
 		}
 
 		s.maybeScrapeOrganizedResult(sourceID, *result)
 		results = append(results, *result)
+		processed++
+		if result.Skipped {
+			skippedCount++
+		} else if result.Success {
+			successCount++
+		} else {
+			failedCount++
+		}
+		reportProgress(result)
 	}
 
 	logger.Infof("OrganizeService[OrganizeDirectory] completed: total=%d", len(results))
 	return results, nil
+}
+
+func (s *OrganizeService) buildOrganizeRenameOverrideMap(items []domain.OrganizeRenameOverride) map[string]domain.OrganizeRenameOverride {
+	if len(items) == 0 {
+		return nil
+	}
+
+	result := make(map[string]domain.OrganizeRenameOverride, len(items)*2)
+	for _, item := range items {
+		if fileID := strings.TrimSpace(item.FileID); fileID != "" {
+			result["file:"+s.normalizePath(fileID)] = item
+		}
+		if cloudID := strings.TrimSpace(item.CloudID); cloudID != "" {
+			result["cloud:"+s.normalizePath(cloudID)] = item
+		}
+	}
+	return result
+}
+
+func (s *OrganizeService) matchOrganizeRenameOverride(preview OrganizePreview, overrideMap map[string]domain.OrganizeRenameOverride) *domain.OrganizeRenameOverride {
+	if len(overrideMap) == 0 {
+		return nil
+	}
+
+	if fileID := strings.TrimSpace(preview.FileID); fileID != "" {
+		if item, ok := overrideMap["file:"+s.normalizePath(fileID)]; ok {
+			return &item
+		}
+	}
+	if cloudID := strings.TrimSpace(preview.CloudID); cloudID != "" {
+		if item, ok := overrideMap["cloud:"+s.normalizePath(cloudID)]; ok {
+			return &item
+		}
+	}
+	return nil
+}
+
+func (s *OrganizeService) applyOrganizeRenameOverrides(previews []OrganizePreview, source *domain.MediaSource, renameItems []domain.OrganizeRenameOverride) {
+	overrideMap := s.buildOrganizeRenameOverrideMap(renameItems)
+	if len(overrideMap) == 0 || source == nil {
+		return
+	}
+
+	for i := range previews {
+		override := s.matchOrganizeRenameOverride(previews[i], overrideMap)
+		if override == nil {
+			continue
+		}
+
+		newName := strings.TrimSpace(override.NewName)
+		if newName == "" {
+			continue
+		}
+
+		if source.SourceType == domain.SourceTypeCloud115 {
+			newName = pathpkg.Base(strings.ReplaceAll(newName, "\\", "/"))
+		} else {
+			newName = filepath.Base(newName)
+		}
+		if newName == "" {
+			continue
+		}
+
+		ext := filepath.Ext(previews[i].NewName)
+		if ext == "" {
+			ext = filepath.Ext(previews[i].FileName)
+		}
+		if filepath.Ext(newName) == "" && ext != "" {
+			newName += ext
+		}
+
+		previews[i].NewName = newName
+		if source.SourceType == domain.SourceTypeCloud115 {
+			baseTargetPath := filepath.ToSlash(strings.TrimSpace(previews[i].TargetPath))
+			if baseTargetPath == "" {
+				baseTargetPath = "/"
+			}
+			previews[i].NewPath = pathpkg.Join(baseTargetPath, newName)
+			previews[i].Conflict = false
+			previews[i].ConflictPath = ""
+			continue
+		}
+
+		previews[i].NewPath = filepath.Join(previews[i].TargetPath, newName)
+		if _, err := os.Stat(previews[i].NewPath); err == nil {
+			previews[i].Conflict = true
+			previews[i].ConflictPath = previews[i].NewPath
+		} else {
+			previews[i].Conflict = false
+			previews[i].ConflictPath = ""
+		}
+	}
 }
 
 func (s *OrganizeService) maybeScrapeOrganizedResult(sourceID int, result OrganizeResult) {
@@ -667,6 +1014,59 @@ func (s *OrganizeService) filterScannedFiles(source *domain.MediaSource, files [
 	return s.filterFilesByIDs(files, fileIDs)
 }
 
+func (s *OrganizeService) appendMissingFilePreviews(previews []OrganizePreview, files []domain.MediaFile, fileIDs []string) []OrganizePreview {
+	if len(fileIDs) == 0 {
+		return previews
+	}
+
+	existingPreviewKeys := make(map[string]struct{}, len(previews)*2)
+	for _, preview := range previews {
+		if fileID := strings.TrimSpace(preview.FileID); fileID != "" {
+			existingPreviewKeys["file:"+s.normalizePath(fileID)] = struct{}{}
+		}
+		if cloudID := strings.TrimSpace(preview.CloudID); cloudID != "" {
+			existingPreviewKeys["cloud:"+s.normalizePath(cloudID)] = struct{}{}
+		}
+	}
+
+	scannedFileKeys := make(map[string]struct{}, len(files)*2)
+	for _, file := range files {
+		if fileID := strings.TrimSpace(file.ID); fileID != "" {
+			scannedFileKeys["file:"+s.normalizePath(fileID)] = struct{}{}
+		}
+		if cloudID := strings.TrimSpace(file.CID); cloudID != "" {
+			scannedFileKeys["cloud:"+s.normalizePath(cloudID)] = struct{}{}
+		}
+	}
+
+	for _, fileID := range fileIDs {
+		normalizedID := s.normalizePath(fileID)
+		fileKey := "file:" + normalizedID
+		cloudKey := "cloud:" + normalizedID
+		if _, ok := scannedFileKeys[fileKey]; ok {
+			continue
+		}
+		if _, ok := scannedFileKeys[cloudKey]; ok {
+			continue
+		}
+		if _, ok := existingPreviewKeys[fileKey]; ok {
+			continue
+		}
+		if _, ok := existingPreviewKeys[cloudKey]; ok {
+			continue
+		}
+
+		previews = append(previews, OrganizePreview{
+			FileID:        fileID,
+			FileName:      filepath.Base(fileID),
+			FilePath:      fileID,
+			IdentifyError: "源文件不存在或已被移除",
+		})
+	}
+
+	return previews
+}
+
 func (s *OrganizeService) normalizePath(p string) string {
 	// 统合 slash 格式
 	p = filepath.ToSlash(p)
@@ -722,7 +1122,7 @@ func (s *OrganizeService) isPathOrIDRelevant(fPath string, ids []string, targets
 	return false, false
 }
 
-func (s *OrganizeService) scanFiles(source *domain.MediaSource, path, mediaType string, fileIDs []string) ([]domain.MediaFile, error) {
+func (s *OrganizeService) scanFiles(source *domain.MediaSource, path, mediaType string, fileIDs []string, includeMetadata bool) ([]domain.MediaFile, error) {
 	// 格式化目标 ID 以便匹配
 	targets := make([]string, 0, len(fileIDs))
 	for _, id := range fileIDs {
@@ -731,15 +1131,75 @@ func (s *OrganizeService) scanFiles(source *domain.MediaSource, path, mediaType 
 
 	// 根据媒体源类型扫描
 	if source.SourceType == domain.SourceTypeLocal {
-		return s.scanLocalFiles(source.Path, path, mediaType, targets)
+		if len(targets) > 0 {
+			directFiles, remainingTargets := s.collectLocalSelectedFiles(source.Path, mediaType, targets, includeMetadata)
+			if len(remainingTargets) == 0 {
+				return directFiles, nil
+			}
+			scannedFiles, err := s.scanLocalFiles(source.Path, path, mediaType, remainingTargets, includeMetadata)
+			if err != nil {
+				return nil, err
+			}
+			return append(directFiles, scannedFiles...), nil
+		}
+		return s.scanLocalFiles(source.Path, path, mediaType, targets, includeMetadata)
 	} else if source.SourceType == domain.SourceTypeCloud115 {
-		return s.scanCloud115Files(source, path, mediaType, targets)
+		return s.scanCloud115Files(source, path, mediaType, targets, includeMetadata)
 	}
 	return nil, fmt.Errorf("不支持的媒体源类型: %s", source.SourceType)
 }
 
+func (s *OrganizeService) collectLocalSelectedFiles(basePath, mediaType string, targets []string, includeMetadata bool) ([]domain.MediaFile, []string) {
+	if len(targets) == 0 {
+		return nil, nil
+	}
+
+	files := make([]domain.MediaFile, 0, len(targets))
+	remainingTargets := make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+
+	for _, target := range targets {
+		if _, exists := seen[target]; exists {
+			continue
+		}
+		seen[target] = struct{}{}
+
+		fullPath := filepath.Join(basePath, filepath.FromSlash(target))
+		info, err := os.Stat(fullPath)
+		if err != nil {
+			remainingTargets = append(remainingTargets, target)
+			continue
+		}
+		if info.IsDir() {
+			remainingTargets = append(remainingTargets, target)
+			continue
+		}
+
+		ext := strings.ToLower(filepath.Ext(target))
+		if !s.isOrganizeVideoFile(ext) {
+			continue
+		}
+
+		mediaFile := domain.MediaFile{
+			ID:          target,
+			Name:        filepath.Base(target),
+			Path:        target,
+			Type:        s.getFileType(ext),
+			IsDirectory: false,
+			Extension:   ext,
+		}
+		if includeMetadata {
+			mediaFile.Size = info.Size()
+			mediaFile.ModifyTime = info.ModTime()
+		}
+		files = append(files, mediaFile)
+	}
+
+	return files, remainingTargets
+}
+
 // scanLocalFiles 扫描本地文件 (已添加路径剪枝)
-func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType string, targets []string) ([]domain.MediaFile, error) {
+func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType string, targets []string, includeMetadata bool) ([]domain.MediaFile, error) {
 	fullPath := filepath.Join(basePath, relativePath)
 
 	// 读取目录
@@ -764,7 +1224,7 @@ func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType strin
 				subTargets = nil
 			}
 			// 递归扫描子目录
-			subFiles, err := s.scanLocalFiles(basePath, filePath, mediaType, subTargets)
+			subFiles, err := s.scanLocalFiles(basePath, filePath, mediaType, subTargets, includeMetadata)
 			if err != nil {
 				logger.Warnf("OrganizeService[scanLocalFiles] 扫描子目录失败: %s, error: %v", filePath, err)
 				continue
@@ -777,21 +1237,24 @@ func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType strin
 				continue
 			}
 
-			info, err := entry.Info()
-			if err != nil {
-				continue
-			}
-
-			files = append(files, domain.MediaFile{
+			mediaFile := domain.MediaFile{
 				ID:          filePath,
 				Name:        entry.Name(),
 				Path:        filePath,
-				Size:        info.Size(),
 				Type:        s.getFileType(ext),
 				IsDirectory: false,
 				Extension:   ext,
-				ModifyTime:  info.ModTime(),
-			})
+			}
+			if includeMetadata {
+				info, err := entry.Info()
+				if err != nil {
+					continue
+				}
+				mediaFile.Size = info.Size()
+				mediaFile.ModifyTime = info.ModTime()
+			}
+
+			files = append(files, mediaFile)
 		}
 	}
 
@@ -799,7 +1262,7 @@ func (s *OrganizeService) scanLocalFiles(basePath, relativePath, mediaType strin
 }
 
 // scanCloud115Files 扫描115云盘文件 (支持批量扫描剪枝)
-func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, mediaType string, targets []string) ([]domain.MediaFile, error) {
+func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, mediaType string, targets []string, includeMetadata bool) ([]domain.MediaFile, error) {
 	if source.Cloud115ID == nil {
 		return nil, fmt.Errorf("未绑定115账号")
 	}
@@ -809,7 +1272,7 @@ func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, 
 		return nil, fmt.Errorf("获取账号信息失败: %v", err)
 	}
 
-	cid := "0"
+	cid := resolveCloud115ScanRootCID(source.Path)
 	// 如果 cidStr 是路径格式，先转为 CID
 	if cidStr != "" && cidStr != "/" && (strings.Contains(cidStr, "/") || !s.isNumeric(cidStr)) {
 		realCID, err := s.client.GetCIDByPath(cidStr, cloud115.ID, cloud115.Cookie)
@@ -825,27 +1288,35 @@ func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, 
 
 	logger.Infof("OrganizeService[scanCloud115Files] 开始执行 115 智能扫描, CID=%s", cid)
 	// 115 递归扫描，起始路径设为空，ID 由 relativePath 组成
-	return s.scanCloud115Recursive(cid, "", cloud115.ID, cloud115.Cookie, mediaType, targets)
+	return s.scanCloud115RecursiveWithThrottle(cid, "", cloud115.ID, cloud115.Cookie, mediaType, targets, includeMetadata, nil)
+}
+
+func resolveCloud115ScanRootCID(sourcePath string) string {
+	cid := strings.TrimSpace(sourcePath)
+	if cid == "" || cid == "/" {
+		return "0"
+	}
+	return cid
 }
 
 // scanCloud115Recursive 递归扫描115云盘 (已添加定向扫描逻辑)
 func (s *OrganizeService) scanCloud115Recursive(currentCID, relativePath string, cloud115ID int, cookie, mediaType string, targets []string) ([]domain.MediaFile, error) {
-	cidInt, _ := strconv.Atoi(currentCID)
-	resp, err := s.client.GetFileList(cidInt, 1, 0, 1000, cloud115ID, cookie)
+	return s.scanCloud115RecursiveWithThrottle(currentCID, relativePath, cloud115ID, cookie, mediaType, targets, true, nil)
+}
+
+func (s *OrganizeService) scanCloud115RecursiveWithThrottle(currentCID, relativePath string, cloud115ID int, cookie, mediaType string, targets []string, includeMetadata bool, lastRequestAt *time.Time) ([]domain.MediaFile, error) {
+	resp, err := s.getCloud115FileList(currentCID, cloud115ID, cookie, lastRequestAt)
 	if err != nil {
 		return nil, err
 	}
 
 	files := make([]domain.MediaFile, 0)
-	for _, f := range resp.Files {
+	for _, f := range resp {
 		// 生成用于匹配的相对路径 ID
 		fPath := filepath.Join(relativePath, f.Name)
-		categoryID := string(f.CategoryID)
-		fileID := f.FileID
-		isDir := fileID == "" || f.Type == "folder"
-		if isDir && fileID == "" {
-			fileID = categoryID
-		}
+		categoryID := f.CID
+		fileID := f.ID
+		isDir := f.IsDirectory
 
 		isExact, isAncestor := s.isPathOrIDRelevant(fPath, []string{fileID, categoryID}, targets)
 		if !isExact && !isAncestor {
@@ -861,11 +1332,10 @@ func (s *OrganizeService) scanCloud115Recursive(currentCID, relativePath string,
 				subTargets = nil
 			}
 			// 递归扫子目录
-			subFiles, err := s.scanCloud115Recursive(fileID, fPath, cloud115ID, cookie, mediaType, subTargets)
+			subFiles, err := s.scanCloud115RecursiveWithThrottle(fileID, fPath, cloud115ID, cookie, mediaType, subTargets, includeMetadata, lastRequestAt)
 			if err == nil {
 				files = append(files, subFiles...)
 			}
-			time.Sleep(200 * time.Millisecond) // 防风控
 		} else {
 			ext := strings.ToLower(filepath.Ext(f.Name))
 			if !s.isOrganizeVideoFile(ext) {
@@ -879,11 +1349,105 @@ func (s *OrganizeService) scanCloud115Recursive(currentCID, relativePath string,
 				Type:        s.getFileType(ext),
 				IsDirectory: false,
 				Extension:   ext,
-				CID:         f.FileID, // 115 文件的唯一 ID
+				CID:         fileID, // 115 文件的唯一 ID
 			})
 		}
 	}
 	return files, nil
+}
+
+func (s *OrganizeService) getCloud115FileList(currentCID string, cloud115ID int, cookie string, lastRequestAt *time.Time) ([]domain.MediaFile, error) {
+	cacheKey := fmt.Sprintf("%d:%s", cloud115ID, strings.TrimSpace(currentCID))
+	if cached, ok := s.getCloud115CachedFileList(cacheKey); ok {
+		return cached, nil
+	}
+
+	s.waitCloud115ScanInterval(lastRequestAt)
+	cidInt, _ := strconv.Atoi(currentCID)
+	resp, err := s.client.GetFileList(cidInt, 1, 0, 1000, cloud115ID, cookie)
+	if err != nil {
+		return nil, err
+	}
+	if lastRequestAt != nil {
+		*lastRequestAt = time.Now()
+	}
+
+	files := make([]domain.MediaFile, 0, len(resp.Files))
+	for _, f := range resp.Files {
+		categoryID := string(f.CategoryID)
+		fileID := f.FileID
+		isDir := fileID == "" || f.Type == "folder"
+		if isDir && fileID == "" {
+			fileID = categoryID
+		}
+		files = append(files, domain.MediaFile{
+			ID:          fileID,
+			Name:        f.Name,
+			Type:        f.Type,
+			IsDirectory: isDir,
+			CID:         categoryID,
+		})
+	}
+	s.setCloud115CachedFileList(cacheKey, files)
+	return files, nil
+}
+
+func (s *OrganizeService) getCloud115CachedFileList(cacheKey string) ([]domain.MediaFile, bool) {
+	s.cloud115ListCacheMu.RLock()
+	entry, ok := s.cloud115ListCache[cacheKey]
+	s.cloud115ListCacheMu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		s.cloud115ListCacheMu.Lock()
+		delete(s.cloud115ListCache, cacheKey)
+		s.cloud115ListCacheMu.Unlock()
+		return nil, false
+	}
+	files := make([]domain.MediaFile, len(entry.files))
+	copy(files, entry.files)
+	return files, true
+}
+
+func (s *OrganizeService) setCloud115CachedFileList(cacheKey string, files []domain.MediaFile) {
+	cloned := make([]domain.MediaFile, len(files))
+	copy(cloned, files)
+
+	s.cloud115ListCacheMu.Lock()
+	if s.cloud115ListCache == nil {
+		s.cloud115ListCache = make(map[string]cloud115ListCacheEntry)
+	}
+	s.cloud115ListCache[cacheKey] = cloud115ListCacheEntry{
+		files:     cloned,
+		expiresAt: time.Now().Add(cloud115ListCacheTTL),
+	}
+	s.cloud115ListCacheMu.Unlock()
+}
+
+func (s *OrganizeService) invalidateCloud115ListCache(cloud115ID int) {
+	s.cloud115ListCacheMu.Lock()
+	defer s.cloud115ListCacheMu.Unlock()
+	if len(s.cloud115ListCache) == 0 {
+		return
+	}
+
+	prefix := fmt.Sprintf("%d:", cloud115ID)
+	for cacheKey := range s.cloud115ListCache {
+		if strings.HasPrefix(cacheKey, prefix) {
+			delete(s.cloud115ListCache, cacheKey)
+		}
+	}
+}
+
+func (s *OrganizeService) waitCloud115ScanInterval(lastRequestAt *time.Time) {
+	if lastRequestAt == nil || lastRequestAt.IsZero() {
+		return
+	}
+	wait := cloud115ScanInterval - time.Since(*lastRequestAt)
+	if wait > 0 {
+		time.Sleep(wait)
+	}
 }
 
 func (s *OrganizeService) isNumeric(str string) bool {
@@ -990,6 +1554,10 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 		FileID:    file.ID,
 		TmdbID:    identifyResult.TmdbID,
 		MediaType: identifyResult.MediaType,
+		Title:     identifyResult.Title,
+		Year:      identifyResult.Year,
+		Season:    identifyResult.SeasonNumber,
+		Episode:   identifyResult.EpisodeNumber,
 		Template:  template,
 	}
 
@@ -1050,7 +1618,7 @@ func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manu
 		return cached, nil
 	}
 
-	identifyResult, err := s.tmdbService.IdentifyFile(file.Name)
+	identifyResult, err := s.tmdbService.IdentifyFileWithPath(s.identifyInputForFile(file))
 	if err != nil {
 		return nil, fmt.Errorf("TMDB 识别失败: %v", err)
 	}
@@ -1064,6 +1632,16 @@ func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manu
 	s.saveIdentifyResultToCache(file, identifyResult, sourceID, false)
 
 	return identifyResult, nil
+}
+
+func (s *OrganizeService) identifyInputForFile(file domain.MediaFile) string {
+	if path := strings.TrimSpace(file.Path); path != "" {
+		return path
+	}
+	if id := strings.TrimSpace(file.ID); id != "" {
+		return id
+	}
+	return file.Name
 }
 
 func (s *OrganizeService) buildOrganizeManualOverrideMap(items []domain.OrganizeManualOverride) map[string]domain.OrganizeManualOverride {
@@ -1370,7 +1948,7 @@ func (s *OrganizeService) matchCategoryRuleScore(identifyResult *domain.TmdbIden
 		if !keywordMatched {
 			return false, 0
 		}
-		score += s.categoryRuleGroupScore(len(rule.Keywords), 60)
+		score += s.categoryRuleGroupScore(len(rule.Keywords), 150)
 	}
 
 	if len(rule.GenreIDs) > 0 {
@@ -1506,27 +2084,44 @@ func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, previ
 		fileID = preview.FileID // 备用
 	}
 
-	// 1. 重命名 (如果跟旧名不同)
-	if preview.NewName != "" && preview.NewName != preview.FileName {
-		err = s.client.RenameFile(fileID, preview.NewName, *source.Cloud115ID, cloud115.Cookie)
-		if err != nil {
-			return nil, fmt.Errorf("115重命名失败: %v", err)
-		}
-		time.Sleep(200 * time.Millisecond) // 防风控
-	}
+	needRename := preview.NewName != "" && preview.NewName != preview.FileName
 
-	// 2. 移动或复制
+	// 1. 移动或复制
 	switch operationMode {
 	case organizeOperationMove:
+		if needRename {
+			err = s.client.RenameFile(fileID, preview.NewName, *source.Cloud115ID, cloud115.Cookie)
+			if err != nil {
+				return nil, fmt.Errorf("115重命名失败: %v", err)
+			}
+			time.Sleep(200 * time.Millisecond) // 防风控
+		}
 		err = s.client.MoveFile115(fileID, targetCID, *source.Cloud115ID, cloud115.Cookie)
 		if err != nil {
 			return nil, fmt.Errorf("115移动文件失败: %v", err)
 		}
 		logger.Infof("OrganizeService[organizeCloud115File] 移动成功 %s -> CID %s", preview.FileName, targetCID)
 	case organizeOperationCopy:
+		var beforeFiles map[string]struct{}
+		if needRename {
+			beforeFiles, err = s.listCloud115TargetFileIDs(targetCID, *source.Cloud115ID, cloud115.Cookie)
+			if err != nil {
+				return nil, fmt.Errorf("复制前读取115目标目录失败: %v", err)
+			}
+		}
 		err = s.client.CopyFile(fileID, targetCID, *source.Cloud115ID, cloud115.Cookie)
 		if err != nil {
 			return nil, fmt.Errorf("115复制文件失败: %v", err)
+		}
+		if needRename {
+			time.Sleep(200 * time.Millisecond) // 等待副本出现在目录列表中
+			copiedFileID, findErr := s.findNewlyCopiedCloud115FileID(targetCID, beforeFiles, *source.Cloud115ID, cloud115.Cookie)
+			if findErr != nil {
+				return nil, fmt.Errorf("定位115复制后的副本失败: %v", findErr)
+			}
+			if err := s.client.RenameFile(copiedFileID, preview.NewName, *source.Cloud115ID, cloud115.Cookie); err != nil {
+				return nil, fmt.Errorf("115复制后重命名副本失败: %v", err)
+			}
 		}
 		logger.Infof("OrganizeService[organizeCloud115File] 复制成功 %s -> CID %s", preview.FileName, targetCID)
 	case organizeOperationHardLink, organizeOperationSymLink:
@@ -1535,6 +2130,7 @@ func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, previ
 		return nil, fmt.Errorf("不支持的整理方式: %s", operationMode)
 	}
 	time.Sleep(200 * time.Millisecond) // 防风控
+	s.invalidateCloud115ListCache(*source.Cloud115ID)
 
 	return &OrganizeResult{
 		FileID:   preview.FileID,
@@ -1545,6 +2141,44 @@ func (s *OrganizeService) organizeCloud115File(source *domain.MediaSource, previ
 		OldPath:  preview.FilePath,
 		NewPath:  preview.NewPath,
 	}, nil
+}
+
+func (s *OrganizeService) listCloud115TargetFileIDs(targetCID string, cloud115ID int, cookie string) (map[string]struct{}, error) {
+	targetCIDInt, err := strconv.Atoi(targetCID)
+	if err != nil {
+		return nil, fmt.Errorf("目标CID无效: %w", err)
+	}
+
+	resp, err := s.client.GetFileList(targetCIDInt, 1, 0, 1000, cloud115ID, cookie)
+	if err != nil {
+		return nil, err
+	}
+
+	fileIDs := make(map[string]struct{})
+	if resp == nil {
+		return fileIDs, nil
+	}
+	for _, file := range resp.Files {
+		if file.FileID == "" {
+			continue
+		}
+		fileIDs[file.FileID] = struct{}{}
+	}
+	return fileIDs, nil
+}
+
+func (s *OrganizeService) findNewlyCopiedCloud115FileID(targetCID string, beforeFiles map[string]struct{}, cloud115ID int, cookie string) (string, error) {
+	afterFiles, err := s.listCloud115TargetFileIDs(targetCID, cloud115ID, cookie)
+	if err != nil {
+		return "", err
+	}
+	for fileID := range afterFiles {
+		if _, exists := beforeFiles[fileID]; exists {
+			continue
+		}
+		return fileID, nil
+	}
+	return "", fmt.Errorf("未找到新增副本")
 }
 
 // organizeFile 整理单个文件
@@ -1724,7 +2358,7 @@ func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domai
 		fileName := filepath.Base(fileID)
 
 		// TMDB 识别
-		identifyResult, err := s.tmdbService.IdentifyFile(fileName)
+		identifyResult, err := s.tmdbService.IdentifyFileWithPath(fileID)
 		if err != nil {
 			logger.Warnf("OrganizeService[BatchIdentify] 识别失败: %s, error: %v", fileName, err)
 			results = append(results, domain.TmdbIdentifyResult{
@@ -1748,6 +2382,7 @@ func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domai
 // 返回:
 //   - []domain.RenamePreviewResult: 预览结果列表
 //   - error: 错误信息
+//
 // BatchIdentifyDirectory 递归扫描目录后批量识别视频文件
 func (s *OrganizeService) BatchIdentifyDirectory(sourceID int, sourcePath string, fileIDs []string) ([]domain.TmdbIdentifyResult, error) {
 	candidates, err := s.ListOrganizeCandidates(sourceID, sourcePath, "all", fileIDs)

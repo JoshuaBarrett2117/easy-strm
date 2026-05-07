@@ -7,6 +7,13 @@
     destroy-on-close
     append-to-body
   >
+    <section class="result-overview">
+      <div class="result-overview__copy">
+        <h3>整理执行回执</h3>
+        <p>这里展示本轮整理的成功、跳过与失败明细；后续还能继续重试失败项、刷新 Emby 或生成 STRM。</p>
+      </div>
+    </section>
+
     <div v-if="normalizedSummary" class="result-summary-panel">
       <div class="summary-item summary-total">
         <span class="summary-count">{{ normalizedSummary.total || 0 }}</span>
@@ -149,6 +156,7 @@ const canGenerateStrm = computed(() => {
 
 const embyRefreshing = ref(false)
 const strmGenerating = ref(false)
+const getNestedData = (response) => response?.data?.data || response?.data || {}
 
 const handleRetryFailed = () => {
   emit('retry-failed', failedItems.value)
@@ -163,7 +171,12 @@ const handleRefreshEmby = async () => {
 
   embyRefreshing.value = true
   try {
-    await refreshEmbyLibrary(libraryId)
+    const response = await refreshEmbyLibrary(libraryId)
+    const payload = getNestedData(response)
+    if (payload?.success === false) {
+      ElMessage.error(payload.message || '刷新 Emby 媒体库失败')
+      return
+    }
     ElMessage.success('Emby 媒体库刷新已触发')
   } catch (error) {
     console.error('[OrganizeResultDialog] 刷新 Emby 媒体库失败:', error)
@@ -217,6 +230,29 @@ const handleGenerateStrm = async () => {
 </script>
 
 <style scoped>
+.result-overview {
+  margin-bottom: 16px;
+}
+
+.result-overview__copy {
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+}
+
+.result-overview__copy h3 {
+  margin: 0;
+  font-size: 20px;
+  color: #17313a;
+}
+
+.result-overview__copy p {
+  margin: 10px 0 0;
+  color: #6c6259;
+  line-height: 1.7;
+}
+
 .result-summary-panel {
   display: flex;
   gap: 16px;
@@ -283,5 +319,26 @@ const handleGenerateStrm = async () => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+:global(.dark) .result-overview__copy,
+:global(.dark) .result-summary-panel {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .result-overview__copy h3 {
+  color: #e8edf4;
+}
+
+:global(.dark) .result-overview__copy p,
+:global(.dark) .summary-item .summary-label {
+  color: #9faebb;
+}
+
+@media (max-width: 768px) {
+  .result-summary-panel {
+    flex-wrap: wrap;
+  }
 }
 </style>

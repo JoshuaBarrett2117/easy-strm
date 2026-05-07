@@ -30,6 +30,38 @@ export const getMediaFiles = (params) => api.get('/media/files', { params })
 export const searchMediaFiles = (params) => api.get('/media/files/search', { params })
 
 /**
+ * 媒体库同步 API
+ */
+
+export const runFullMediaSync = (sourceId) => api.post(`/media/sources/${sourceId}/sync/full`)
+
+export const runIncrementalMediaSync = (sourceId) => api.post(`/media/sources/${sourceId}/sync/incremental`)
+
+export const getMediaSyncIndex = (sourceId, params) => api.get(`/media/sources/${sourceId}/sync/index`, { params })
+
+export const runMediaLibraryPipeline = (sourceId) => api.post(`/media/sources/${sourceId}/pipeline`)
+
+export const getMediaLibraryItems = (params) => api.get('/media/library/items', { params })
+
+export const getMediaLibraryItem = (id) => api.get(`/media/library/items/${id}`)
+
+export const runMediaLibraryItemPipeline = (id) => api.post(`/media/library/items/${id}/pipeline`)
+
+export const generateMediaLibraryItemStrm = (id) => api.post(`/media/library/items/${id}/strm`)
+
+export const refreshMediaLibraryItemServer = (id) => api.post(`/media/library/items/${id}/refresh-server`)
+
+export const getPendingMediaItems = (params) => api.get('/media/pending', { params })
+
+export const createPendingMediaItem = (data) => api.post('/media/pending', data)
+
+export const identifyPendingMediaItem = (id, data) => api.post(`/media/pending/${id}/identify`, data)
+
+export const runPendingMediaItem = (id) => api.post(`/media/pending/${id}/run`)
+
+export const ignorePendingMediaItem = (id) => api.post(`/media/pending/${id}/ignore`)
+
+/**
  * 文件操作 API（Phase 1 第二部分）
  */
 
@@ -106,6 +138,12 @@ export const getRenamePresets = (params) => api.get('/media/organize/presets', {
 // 获取整理候选文件
 export const listOrganizeCandidates = (data) => api.post('/media/organize/candidates', data)
 
+// 启动异步整理候选扫描任务
+export const startOrganizeCandidatesTaskAsync = (data) => api.post('/media/organize/candidates/async', data)
+
+// 获取异步整理候选扫描任务状态
+export const getOrganizeCandidatesTaskStatus = (taskId) => api.get('/media/organize/candidates/status', { params: { task_id: taskId } })
+
 // 预览整理结果
 export const previewOrganize = (data) => api.post('/media/organize/preview', data)
 
@@ -120,6 +158,9 @@ export const checkRestorableTask = (data) => api.post('/media/organize/preview/c
 
 // 执行整理
 export const executeOrganize = (data) => api.post('/media/organize/execute', data)
+
+// 异步执行整理
+export const executeOrganizeAsync = (data) => api.post('/media/organize/execute/async', data)
 
 // 批量识别文件（整理服务）
 export const batchIdentifyFiles = (data) => api.post('/media/organize/batch-identify', data)

@@ -6,6 +6,17 @@
     append-to-body
   >
     <div class="tmdb-container">
+      <section class="tmdb-overview">
+        <div class="tmdb-overview__copy">
+          <h3>手动搜索 TMDB</h3>
+          <p>当自动识别不够准确时，可以在这里切换电影或剧集并人工确认目标条目。</p>
+        </div>
+        <div class="tmdb-overview__meta">
+          <span>当前关键词</span>
+          <strong>{{ searchKeyword || '待输入' }}</strong>
+        </div>
+      </section>
+
       <div class="tmdb-search">
         <el-input
           v-model="searchKeyword"
@@ -167,6 +178,53 @@ defineExpose({ setKeyword })
   min-height: 400px;
 }
 
+.tmdb-overview {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.tmdb-overview__copy {
+  flex: 1;
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+}
+
+.tmdb-overview__copy h3 {
+  margin: 0;
+  color: #17313a;
+  font-size: 20px;
+}
+
+.tmdb-overview__copy p {
+  margin: 10px 0 0;
+  color: #6c6259;
+  line-height: 1.7;
+}
+
+.tmdb-overview__meta {
+  min-width: 180px;
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(244, 239, 231, 0.88);
+}
+
+.tmdb-overview__meta span {
+  display: block;
+  font-size: 12px;
+  color: #8a7b6d;
+}
+
+.tmdb-overview__meta strong {
+  display: block;
+  margin-top: 8px;
+  color: #17313a;
+  word-break: break-all;
+}
+
 .tmdb-search {
   display: flex;
   align-items: center;
@@ -257,7 +315,30 @@ defineExpose({ setKeyword })
   margin-top: 10px;
 }
 
+:global(.dark) .tmdb-overview__copy,
+:global(.dark) .tmdb-overview__meta,
+:global(.dark) .result-item,
+:global(.dark) .no-poster {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .tmdb-overview__copy h3,
+:global(.dark) .tmdb-overview__meta strong,
+:global(.dark) .result-title {
+  color: #e8edf4;
+}
+
+:global(.dark) .tmdb-overview__copy p,
+:global(.dark) .tmdb-overview__meta span,
+:global(.dark) .result-year,
+:global(.dark) .result-overview,
+:global(.dark) .no-poster {
+  color: #9faebb;
+}
+
 @media (max-width: 768px) {
+  .tmdb-overview,
   .tmdb-search {
     flex-direction: column;
     align-items: stretch;

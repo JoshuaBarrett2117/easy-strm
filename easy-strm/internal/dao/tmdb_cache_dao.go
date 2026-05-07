@@ -1,10 +1,22 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/go-redis/redis/v8"
+)
+
+const (
+	tmdbCacheRedisTTL       = 7 * 24 * time.Hour
+	tmdbQueryCacheKeyPrefix = "easy_strm:tmdb:query:"
+	tmdbIDCacheKeyPrefix    = "easy_strm:tmdb:id:"
+	mediaFileCacheKeyPrefix = "easy_strm:media_file:cache:"
 )
 
 // TmdbCacheDAO TMDB缓存数据访问层
@@ -46,6 +58,10 @@ type TmdbCache struct {
 //   - *TmdbCache: 缓存数据
 //   - error: 错误信息
 func (d *TmdbCacheDAO) GetByQueryKey(queryKey, mediaType string) (*TmdbCache, error) {
+	if cache, ok := d.getFromRedis(tmdbQueryCacheKey(queryKey, mediaType)); ok {
+		return cache, nil
+	}
+
 	cache := &TmdbCache{}
 	var year sql.NullInt32
 	var voteAverage sql.NullFloat64
@@ -102,10 +118,15 @@ func (d *TmdbCacheDAO) GetByQueryKey(queryKey, mediaType string) (*TmdbCache, er
 		cache.RawData = rawData
 	}
 
+	d.saveToRedis(cache)
 	return cache, nil
 }
 
 func (d *TmdbCacheDAO) GetByTmdbID(tmdbID int, mediaType string) (*TmdbCache, error) {
+	if cache, ok := d.getFromRedis(tmdbIDCacheKey(tmdbID, mediaType)); ok {
+		return cache, nil
+	}
+
 	cache := &TmdbCache{}
 	var year sql.NullInt32
 	var voteAverage sql.NullFloat64
@@ -163,6 +184,7 @@ func (d *TmdbCacheDAO) GetByTmdbID(tmdbID int, mediaType string) (*TmdbCache, er
 		cache.RawData = rawData
 	}
 
+	d.saveToRedis(cache)
 	return cache, nil
 }
 
@@ -189,6 +211,7 @@ func (d *TmdbCacheDAO) Create(cache *TmdbCache) error {
 	if err != nil {
 		return fmt.Errorf("TmdbCacheDAO[Create] 创建失败: %v", err)
 	}
+	d.saveToRedis(cache)
 	return nil
 }
 
@@ -216,6 +239,7 @@ func (d *TmdbCacheDAO) Update(cache *TmdbCache) error {
 	if err != nil {
 		return fmt.Errorf("TmdbCacheDAO[Update] 更新失败: %v", err)
 	}
+	d.saveToRedis(cache)
 	return nil
 }
 
@@ -229,6 +253,62 @@ func (d *TmdbCacheDAO) DeleteExpired() (int64, error) {
 		return 0, fmt.Errorf("TmdbCacheDAO[DeleteExpired] 删除失败: %v", err)
 	}
 	return result.RowsAffected()
+}
+
+func (d *TmdbCacheDAO) getFromRedis(key string) (*TmdbCache, bool) {
+	client := GetGlobalRedisClient()
+	if client == nil {
+		return nil, false
+	}
+
+	value, err := client.Get(context.Background(), key).Result()
+	if err == redis.Nil || value == "" {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	var cache TmdbCache
+	if err := json.Unmarshal([]byte(value), &cache); err != nil {
+		return nil, false
+	}
+	if !cache.ExpireAt.IsZero() && cache.ExpireAt.Before(time.Now()) {
+		_ = client.Del(context.Background(), key).Err()
+		return nil, false
+	}
+
+	return &cache, true
+}
+
+func (d *TmdbCacheDAO) saveToRedis(cache *TmdbCache) {
+	client := GetGlobalRedisClient()
+	if client == nil || cache == nil {
+		return
+	}
+
+	payload, err := json.Marshal(cache)
+	if err != nil {
+		return
+	}
+
+	ttl := time.Until(cache.ExpireAt)
+	if ttl <= 0 {
+		ttl = tmdbCacheRedisTTL
+	}
+	ctx := context.Background()
+	_ = client.Set(ctx, tmdbQueryCacheKey(cache.QueryKey, cache.MediaType), payload, ttl).Err()
+	if cache.TmdbID > 0 {
+		_ = client.Set(ctx, tmdbIDCacheKey(cache.TmdbID, cache.MediaType), payload, ttl).Err()
+	}
+}
+
+func tmdbQueryCacheKey(queryKey, mediaType string) string {
+	return tmdbQueryCacheKeyPrefix + strings.ToLower(strings.TrimSpace(mediaType)) + ":" + strings.ToLower(strings.TrimSpace(queryKey))
+}
+
+func tmdbIDCacheKey(tmdbID int, mediaType string) string {
+	return tmdbIDCacheKeyPrefix + strings.ToLower(strings.TrimSpace(mediaType)) + ":" + strconv.Itoa(tmdbID)
 }
 
 // GetByQueryKeys 批量根据查询键获取缓存
@@ -529,6 +609,10 @@ type MediaFileCache struct {
 //   - *MediaFileCache: 缓存数据
 //   - error: 错误信息
 func (d *MediaFileCacheDAO) GetByPath(sourceID int, filePath string) (*MediaFileCache, error) {
+	if cache, ok := d.getFromRedis(sourceID, filePath); ok {
+		return cache, nil
+	}
+
 	cache := &MediaFileCache{}
 	var tmdbID sql.NullInt64
 	var mediaType sql.NullString
@@ -574,6 +658,7 @@ func (d *MediaFileCacheDAO) GetByPath(sourceID int, filePath string) (*MediaFile
 		cache.IdentifiedAt = &identifiedAt.Time
 	}
 
+	d.saveToRedis(cache)
 	return cache, nil
 }
 
@@ -608,6 +693,7 @@ func (d *MediaFileCacheDAO) CreateOrUpdate(cache *MediaFileCache) error {
 	if err != nil {
 		return fmt.Errorf("MediaFileCacheDAO[CreateOrUpdate] 创建/更新失败: %v", err)
 	}
+	d.saveToRedis(cache)
 	return nil
 }
 
@@ -623,6 +709,49 @@ func (d *MediaFileCacheDAO) DeleteBySourceID(sourceID int) error {
 		return fmt.Errorf("MediaFileCacheDAO[DeleteBySourceID] 删除失败: %v", err)
 	}
 	return nil
+}
+
+func (d *MediaFileCacheDAO) getFromRedis(sourceID int, filePath string) (*MediaFileCache, bool) {
+	client := GetGlobalRedisClient()
+	if client == nil {
+		return nil, false
+	}
+
+	value, err := client.Get(context.Background(), mediaFileCacheKey(sourceID, filePath)).Result()
+	if err == redis.Nil || value == "" {
+		return nil, false
+	}
+	if err != nil {
+		return nil, false
+	}
+
+	var cache MediaFileCache
+	if err := json.Unmarshal([]byte(value), &cache); err != nil {
+		return nil, false
+	}
+	return &cache, true
+}
+
+func (d *MediaFileCacheDAO) saveToRedis(cache *MediaFileCache) {
+	client := GetGlobalRedisClient()
+	if client == nil || cache == nil {
+		return
+	}
+
+	payload, err := json.Marshal(cache)
+	if err != nil {
+		return
+	}
+	_ = client.Set(context.Background(), mediaFileCacheKey(cache.SourceID, cache.FilePath), payload, tmdbCacheRedisTTL).Err()
+}
+
+func mediaFileCacheKey(sourceID int, filePath string) string {
+	normalizedPath := strings.ToLower(strings.TrimSpace(filepathToSlash(filePath)))
+	return mediaFileCacheKeyPrefix + strconv.Itoa(sourceID) + ":" + normalizedPath
+}
+
+func filepathToSlash(path string) string {
+	return strings.ReplaceAll(path, "\\", "/")
 }
 
 // 辅助函数：创建可空字符串

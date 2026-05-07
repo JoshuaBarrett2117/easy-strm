@@ -198,6 +198,7 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 	var req struct {
 		Filename  string `json:"filename" binding:"required"`
+		FilePath  string `json:"file_path"`
 		MediaType string `json:"media_type"` // 可选：movie | tv，不传则自动判断
 	}
 
@@ -207,16 +208,21 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", req.Filename)
+	identifyInput := req.Filename
+	if req.FilePath != "" {
+		identifyInput = req.FilePath
+	}
 
-	result, err := c.tmdbService.GetCandidates(req.Filename)
+	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", identifyInput)
+
+	result, err := c.tmdbService.GetCandidatesWithPath(identifyInput)
 	if err != nil {
 		logger.Errorf("TmdbController[AutoIdentify] 获取候选失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取候选失败: "+err.Error())
 		return
 	}
 
-	logger.Infof("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", req.Filename, len(result.Candidates))
+	logger.Infof("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", identifyInput, len(result.Candidates))
 	SuccessResp(ctx, result)
 }
 
@@ -298,7 +304,7 @@ func (c *TmdbController) BatchIdentify(ctx *gin.Context) {
 
 	results := make([]*domain.TmdbIdentifyResult, 0, len(req.Filenames))
 	for _, filename := range req.Filenames {
-		result, err := c.tmdbService.IdentifyFile(filename)
+		result, err := c.tmdbService.IdentifyFileWithPath(filename)
 		if err != nil {
 			logger.Warnf("TmdbController[BatchIdentify] 识别失败: filename=%s, err=%v", filename, err)
 			results = append(results, &domain.TmdbIdentifyResult{

@@ -11,7 +11,7 @@ func (s *TmdbService) EnsureIdentifyMetadata(result *domain.TmdbIdentifyResult) 
 	if result == nil || result.TmdbID <= 0 {
 		return
 	}
-	if len(result.GenreIDs) > 0 && result.Language != "" && (result.MediaType != "tv" || len(result.Countries) > 0) {
+	if isIdentifyMetadataComplete(result) {
 		return
 	}
 
@@ -19,7 +19,7 @@ func (s *TmdbService) EnsureIdentifyMetadata(result *domain.TmdbIdentifyResult) 
 		cache, err := s.cacheDAO.GetByTmdbID(result.TmdbID, result.MediaType)
 		if err == nil && cache != nil && len(cache.RawData) > 0 {
 			applyCachedMetadata(result, cache.RawData)
-			if len(result.GenreIDs) > 0 && result.Language != "" && (result.MediaType != "tv" || len(result.Countries) > 0) {
+			if isIdentifyMetadataComplete(result) {
 				return
 			}
 		}
@@ -61,6 +61,40 @@ func applyDetailMetadata(result *domain.TmdbIdentifyResult, detail map[string]in
 	if lang, ok := detail["original_language"].(string); ok && lang != "" {
 		result.Language = lang
 	}
+	if result.Title == "" {
+		if mediaType == "tv" {
+			if title, ok := detail["name"].(string); ok && title != "" {
+				result.Title = title
+			}
+		} else if title, ok := detail["title"].(string); ok && title != "" {
+			result.Title = title
+		}
+	}
+	if result.OriginalTitle == "" {
+		if mediaType == "tv" {
+			if title, ok := detail["original_name"].(string); ok && title != "" {
+				result.OriginalTitle = title
+			}
+		} else if title, ok := detail["original_title"].(string); ok && title != "" {
+			result.OriginalTitle = title
+		}
+	}
+}
+
+func isIdentifyMetadataComplete(result *domain.TmdbIdentifyResult) bool {
+	if result == nil {
+		return true
+	}
+	if len(result.GenreIDs) == 0 || result.Language == "" {
+		return false
+	}
+	if result.MediaType == "tv" && len(result.Countries) == 0 {
+		return false
+	}
+	if result.Title == "" || result.OriginalTitle == "" {
+		return false
+	}
+	return true
 }
 
 func extractGenreIDsFromDetail(detail map[string]interface{}) []int {

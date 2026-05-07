@@ -1,0 +1,70 @@
+{
+  "date": "2026-05-06",
+  "executor": "Codex",
+  "task": "参考 MoviePilot、Symedia、cloud-media-sync 等媒体库管理工具，为 easy-strm 输出一轮功能需求新增和重构需求文档",
+  "local_context": {
+    "project_root": "C:\\Users\\a3875\\Documents\\code\\easy-strm",
+    "backend": "Go 1.25 + Gin，位于 easy-strm/",
+    "frontend": "Vue 3 + Vite + Element Plus，位于 easy-strm-front/",
+    "storage": "PostgreSQL + Redis",
+    "current_main_flow": "媒体源接入 -> 文件浏览 -> TMDB 识别 -> 重命名/整理 -> STRM 生成 -> 任务追踪",
+    "observed_modules": [
+      "media_source_service",
+      "organize_service",
+      "rename_service",
+      "scrape_service",
+      "strm_service",
+      "watch_service",
+      "task_service",
+      "tmdb_service",
+      "emby_service",
+      "dashboard_service"
+    ],
+    "frontend_pages": [
+      "Dashboard",
+      "TaskCenter",
+      "MediaManager",
+      "StrmConfig",
+      "Cloud115",
+      "CategoryStrategy",
+      "Settings"
+    ]
+  },
+  "reference_products": {
+    "summary": "MoviePilot 公开定位为 NAS 媒体库自动化管理工具，Symedia 与 cloud-media-sync 等工具更聚焦云端媒体库、STRM、同步、刮削和媒体服务器联动。本轮需求只吸收媒体库管理、115 与本地同步、STRM 映射、任务可观测能力，不接入 PT、下载器和资源站聚合。",
+    "sources": [
+      "https://github.com/jxxghp/MoviePilot",
+      "https://www.ashangg.top/docs/moviepilot/MoviePilot-Wiki/plugin",
+      "https://mattoid.top/docs/moviepilot/subscribe",
+      "https://mattoid.top/docs/moviepilot/reorganize",
+      "https://www.symedia.top/",
+      "https://hub.docker.com/r/imaliang/cloud-media-sync",
+      "https://github.com/qicfan/q115-strm",
+      "https://support.emby.media/support/articles/Strm-Files.html"
+    ]
+  },
+  "key_questions": [
+    {
+      "question": "是否应该完整复制 MoviePilot 的订阅与下载器体系？",
+      "priority": "high",
+      "answer": "不应该。用户明确不接入 PT，本仓库当前优势是媒体源、115、本地媒体库、STRM、整理和任务追踪，需求草案只借鉴自动化闭环与媒体库同步能力，不引入 PT 站点和下载器体系。"
+    },
+    {
+      "question": "现有模型中最需要重构的交汇点是什么？",
+      "priority": "high",
+      "answer": "任务模型、同步索引、媒体源自动化规则、识别结果、命名模板。当前已有字段和服务分散存在，需要统一成媒体库同步与入库流水线。"
+    },
+    {
+      "question": "如何验证后续实现？",
+      "priority": "medium",
+      "answer": "沿用 Go test、前端 npm run build 和现有 Playwright 脚本，新增自动化规则、入库流水线、待处理清单、失败重试等场景。"
+    }
+  ],
+  "sufficiency_check": {
+    "interface_contract_clear": true,
+    "technical_choice_understood": true,
+    "major_risks_identified": true,
+    "verification_known": true
+  },
+  "output": "docs/MoviePilot参考需求新增与重构.md"
+}

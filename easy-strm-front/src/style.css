@@ -1,4 +1,4 @@
-﻿/* 鍏ㄥ眬鏍峰紡閲嶇疆 */
+/* 全局样式重置 */
 * {
   margin: 0;
   padding: 0;
@@ -11,7 +11,7 @@ body {
   color: #333;
   line-height: 1.6;
 }
-
+/* 滚动条样式 */
 /* 婊氬姩鏉℃牱寮?*/
 ::-webkit-scrollbar {
   width: 8px;
@@ -32,7 +32,7 @@ body {
   background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
 }
 
-/* 閫氱敤瀹瑰櫒鏍峰紡 */
+/* 通用容器样式 */
 .container {
   width: 100%;
   max-width: 1400px;
@@ -40,7 +40,7 @@ body {
   padding: 0 20px;
 }
 
-/* 閫氱敤鎸夐挳鏍峰紡 */
+/* 通用按钮样式 */
 .btn {
   display: inline-block;
   padding: 10px 20px;
@@ -85,7 +85,7 @@ body {
   box-shadow: 0 6px 20px rgba(17, 153, 142, 0.5);
 }
 
-/* 閫氱敤琛ㄥ崟鏍峰紡 */
+/* 通用表单样式 */
 .form-group {
   margin-bottom: 20px;
 }
@@ -112,7 +112,7 @@ body {
   box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
 }
 
-/* 閫氱敤鍗＄墖鏍峰紡 */
+/* 通用卡片样式 */
 .card {
   background-color: white;
   border-radius: 12px;
@@ -138,7 +138,7 @@ body {
   color: #303133;
 }
 
-/* 閫氱敤琛ㄦ牸鏍峰紡 */
+/* 通用表格样式 */
 .table {
   width: 100%;
   border-collapse: separate;
@@ -173,7 +173,7 @@ body {
   border-bottom: none;
 }
 
-/* 閫氱敤鎻愮ず淇℃伅鏍峰紡 */
+/* 通用提示信息样式 */
 .alert {
   padding: 14px 18px;
   border-radius: 8px;
@@ -205,7 +205,7 @@ body {
   border: 1px solid #bee5eb;
 }
 
-/* Element Plus 缁勪欢鏍峰紡瑕嗙洊 */
+/* Element Plus 组件样式覆盖 */
 .el-button {
   border-radius: 8px;
   font-weight: 500;
@@ -381,7 +381,7 @@ body {
   }
 }
 
-/* ===== 鍝嶅簲寮忔柇鐐瑰伐鍏风被 ===== */
+/* ===== 响应式断点工具类 ===== */
 
 /* 浠呯Щ鍔ㄧ鏄剧ず */
 .mobile-only {
@@ -403,9 +403,9 @@ body {
   }
 }
 
-/* ===== 鍏ㄥ眬 Element-Plus 鍝嶅簲寮忚鐩?===== */
+/* ===== 全局 Element Plus 响应式覆盖 ===== */
 
-/* 绉诲姩绔璇濇鍏ㄥ睆 */
+/* 移动端对话框全屏 */
 @media (max-width: 768px) {
   .el-dialog {
     --el-dialog-width: 100% !important;
@@ -426,12 +426,12 @@ body {
     padding: 16px;
   }
 
-  /* 琛ㄦ牸鏈€灏忓搴︾‘淇濆彲妯悜婊氬姩 */
+  /* 表格最小宽度确保可横向滚动 */
   .el-table {
     min-width: unset;
   }
 
-  /* 鍒嗛〉缁勪欢绉诲姩绔畝鍖?*/
+  /* 分页组件移动端简化 */
   .el-pagination {
     flex-wrap: wrap;
     justify-content: center;
@@ -446,12 +446,12 @@ body {
     display: none;
   }
 
-  /* 琛ㄥ崟鏍囩瀹藉害閫傞厤 */
+  /* 表单标签宽度适配 */
   .el-form--label-top .el-form-item__label {
     padding-bottom: 4px;
   }
 
-  /* 鍗＄墖鍐呰竟璺濈缉灏?*/
+  /* 卡片内边距缩小 */
   .el-card__body {
     padding: 12px;
   }
@@ -466,7 +466,7 @@ body {
 
 /* ===== 鏆楄壊妯″紡鑷畾涔夋牱寮忚鐩?===== */
 html.dark {
-  /* 鍏ㄥ眬鑳屾櫙涓庢枃瀛?*/
+  /* 全局背景与文字 */
   --el-bg-color: #141414;
   --el-bg-color-overlay: #1d1d1d;
   --el-bg-color-page: #0a0a0a;
@@ -510,7 +510,7 @@ html.dark .card-title {
   color: #e5eaf3;
 }
 
-/* 閫氱敤琛ㄦ牸鏆楄壊閫傞厤 */
+/* 通用表格暗色适配 */
 html.dark .table {
   background-color: #1d1d1d;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
@@ -530,7 +530,7 @@ html.dark .table tr:hover td {
   background-color: #262627;
 }
 
-/* 琛ㄥ崟鏆楄壊閫傞厤 */
+/* 表单暗色适配 */
 html.dark .form-label {
   color: #a3a6ad;
 }
@@ -571,7 +571,7 @@ html.dark .alert-info {
   border-color: #1c3c4c;
 }
 
-/* Element Plus 琛ㄦ牸鏆楄壊澧炲己 */
+/* Element Plus 表格暗色增强 */
 html.dark .el-table th.el-table__cell {
   background-color: #262627;
   color: #cfd3dc;

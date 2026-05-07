@@ -4,6 +4,106 @@
 -->
 <template>
   <div class="media-manager-container">
+    <section class="workbench-hero">
+      <div class="hero-copy">
+        <el-tag type="success" effect="dark" round>媒体工作台</el-tag>
+        <h1>围绕媒体源完成浏览、识别、整理与刮削</h1>
+        <p>
+          旧页面逻辑已经被收束到新的工作流入口中，核心后端能力仍然通过原有接口执行。
+          先选择媒体源，再进入文件浏览器完成识别、批量整理或刮削。
+        </p>
+        <div class="hero-actions">
+          <el-button type="primary" @click="sourceListRef?.handleAdd?.()">
+            <el-icon><Plus /></el-icon>
+            新增媒体源
+          </el-button>
+          <el-button @click="openCurrentSourceBrowser" :disabled="!currentSource">
+            <el-icon><FolderOpened /></el-icon>
+            打开当前媒体源
+          </el-button>
+          <el-button type="success" plain @click="handleOpenOrganize" :disabled="selectedFiles.length === 0">
+            <el-icon><Files /></el-icon>
+            批量整理
+          </el-button>
+        </div>
+      </div>
+      <div class="hero-panel">
+        <div class="hero-panel__header">
+          <span>当前工作上下文</span>
+          <el-tag :type="currentSource ? 'success' : 'info'" round>
+            {{ currentSource ? '已锁定媒体源' : '待选择媒体源' }}
+          </el-tag>
+        </div>
+        <div class="context-list">
+          <div class="context-item">
+            <span>媒体源</span>
+            <strong>{{ currentSource?.name || '未选择' }}</strong>
+          </div>
+          <div class="context-item">
+            <span>源类型</span>
+            <strong>{{ currentSource ? (isCloud115Source ? '115 云盘' : '本地存储') : '未选择' }}</strong>
+          </div>
+          <div class="context-item">
+            <span>当前路径</span>
+            <strong>{{ currentWorkbenchPath }}</strong>
+          </div>
+          <div class="context-item">
+            <span>选中文件</span>
+            <strong>{{ selectedFiles.length }} 项</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="metric-grid">
+      <article v-for="card in mediaSummaryCards" :key="card.label" class="metric-card">
+        <span class="metric-card__label">{{ card.label }}</span>
+        <strong class="metric-card__value">{{ card.value }}</strong>
+        <p class="metric-card__hint">{{ card.hint }}</p>
+      </article>
+    </section>
+
+    <section class="command-grid">
+      <article class="command-card">
+        <div class="command-card__header">
+          <h2>快捷动作</h2>
+          <span>围绕当前选择直接进入关键流程</span>
+        </div>
+        <div class="command-list">
+          <button class="command-button" type="button" @click="openCurrentSourceBrowser" :disabled="!currentSource">
+            <span>浏览文件</span>
+            <small>进入当前媒体源目录</small>
+          </button>
+          <button class="command-button" type="button" @click="handleBatchIdentify" :disabled="selectedFiles.length === 0">
+            <span>批量识别</span>
+            <small>调用 TMDB 批量识别</small>
+          </button>
+          <button class="command-button" type="button" @click="handleBatchRename" :disabled="selectedFiles.length === 0 || isCloud115Source">
+            <span>批量重命名</span>
+            <small>生成重命名预览并执行</small>
+          </button>
+          <button class="command-button" type="button" @click="handleBatchScrape" :disabled="selectedFiles.length === 0 || isCloud115Source">
+            <span>批量刮削</span>
+            <small>为视频文件生成 NFO</small>
+          </button>
+        </div>
+      </article>
+
+      <article class="command-card">
+        <div class="command-card__header">
+          <h2>本轮选择</h2>
+          <span>{{ selectedFiles.length ? '已准备好执行批量操作' : '还没有选择文件' }}</span>
+        </div>
+        <div v-if="selectedFiles.length" class="selection-list">
+          <div v-for="item in selectionPreview" :key="item.id || item.path || item.name" class="selection-item">
+            <strong>{{ item.name || item.file_name || '未命名文件' }}</strong>
+            <span>{{ item.is_dir ? '目录' : getFileType(item.name || item.file_name) }}</span>
+          </div>
+        </div>
+        <el-empty v-else description="进入文件浏览后选择文件，即可在这里看到本轮操作对象。" :image-size="90" />
+      </article>
+    </section>
+
     <MediaSourceList ref="sourceListRef" @browse="handleBrowseFiles" />
 
     <FileBrowser
@@ -103,6 +203,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { ElMessage } from 'element-plus'
+import { Plus, FolderOpened, Files } from '@element-plus/icons-vue'
 
 import MediaSourceList from '../components/media/MediaSourceList.vue'
 import FileBrowser from '../components/media/FileBrowser.vue'
@@ -140,6 +241,46 @@ const isCloud115Source = computed(() => {
 
 const selectedFiles = ref([])
 
+const mediaSources = computed(() => {
+  const items = sourceListRef.value?.mediaSources
+  return Array.isArray(items) ? items : []
+})
+
+const currentWorkbenchPath = computed(() => {
+  if (!currentSource.value) return '请先选择媒体源'
+  return fileBrowserRef.value?.getCurrentDisplayPath?.() || currentSource.value.path || '/'
+})
+
+const mediaSummaryCards = computed(() => {
+  const items = mediaSources.value
+  const localCount = items.filter(item => item.source_type === 'local').length
+  const cloudCount = items.filter(item => item.source_type === 'cloud115').length
+  return [
+    {
+      label: '媒体源总数',
+      value: items.length,
+      hint: `${localCount} 个本地源，${cloudCount} 个 115 云源`
+    },
+    {
+      label: '当前已选',
+      value: currentSource.value?.name || '未选择',
+      hint: currentSource.value ? `当前路径 ${currentWorkbenchPath.value}` : '从下方列表进入文件浏览'
+    },
+    {
+      label: '待处理文件',
+      value: selectedFiles.value.length,
+      hint: selectedFiles.value.length ? '可直接发起识别、重命名或整理' : '进入浏览器后勾选文件'
+    },
+    {
+      label: '整理模式',
+      value: isCloud115Source.value ? '云盘整理' : '本地整理',
+      hint: currentSource.value ? (isCloud115Source.value ? '115 云盘限制已自动适配' : '支持重命名、刮削与目录整理') : '将在选择媒体源后确定'
+    }
+  ]
+})
+
+const selectionPreview = computed(() => selectedFiles.value.slice(0, 5))
+
 const tmdbDialogVisible = ref(false)
 const tmdbSelectMode = ref('cache')
 const currentIdentifyFile = ref(null)
@@ -176,6 +317,7 @@ const organizeIdentifyForm = ref({
   media_type: 'movie',
   tmdb_id: 0,
   title: '',
+  original_title: '',
   year: 0,
   season: 0,
   episode: 0,
@@ -185,6 +327,14 @@ const organizeIdentifyForm = ref({
 const handleBrowseFiles = (source) => {
   currentSource.value = source
   fileBrowserRef.value?.open(source)
+}
+
+const openCurrentSourceBrowser = () => {
+  if (!currentSource.value) {
+    ElMessage.warning('请先从下方媒体源列表选择一个媒体源')
+    return
+  }
+  fileBrowserRef.value?.open(currentSource.value)
 }
 
 const handleSelectionChange = (selection) => {
@@ -278,6 +428,7 @@ const handleTmdbSelect = async ({ item, mode, searchType }) => {
       media_type: searchType,
       tmdb_id: item.tmdb_id || item.id || 0,
       title: item.title || item.name || '',
+      original_title: item.original_title || '',
       year: item.year || 0
     }
     tmdbDialogVisible.value = false
@@ -319,7 +470,7 @@ const getBatchActionCounts = (payload, results) => {
 }
 
 const notifyBatchActionResult = (label, successCount, failedCount) => {
-  const message = `${label}氓庐聦忙聢聬茂录職忙聢聬氓聤聼 ${successCount} 茅隆鹿茂录聦氓陇卤猫麓楼 ${failedCount} 茅隆鹿`
+  const message = `${label}完成：成功 ${successCount} 项，失败 ${failedCount} 项`
   if (failedCount > 0 && successCount === 0) {
     ElMessage.error(message)
   } else if (failedCount > 0) {
@@ -494,6 +645,7 @@ const handleOrganizePreviewIdentify = (row) => {
     media_type: existing?.media_type || row.media_type || 'movie',
     tmdb_id: existing?.tmdb_id || row.tmdb_id || 0,
     title: existing?.title || row.title || '',
+    original_title: existing?.original_title || row.original_title || '',
     year: existing?.year || row.year || 0,
     season: existing?.season || row.season || 0,
     episode: existing?.episode || row.episode || 0,
@@ -643,7 +795,7 @@ const handleBatchDirectoryScrape = async () => {
 }
 const handleDeleteFile = (row) => {
   showConfirmDialog(
-    `纭畾瑕佸垹闄?"${row.name}" 鍚楋紵`,
+    `确定要删除“${row.name}”吗？`,
     '删除确认',
     {
       confirmButtonText: '确定',
@@ -683,6 +835,213 @@ const getFileType = (filename) => {
 .media-manager-container {
   padding: 20px;
   min-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.workbench-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2.1fr) minmax(320px, 1fr);
+  gap: 20px;
+  padding: 28px;
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top left, rgba(70, 167, 137, 0.16), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(244, 176, 88, 0.18), transparent 28%),
+    linear-gradient(135deg, #17313a 0%, #214852 48%, #2a6d73 100%);
+  color: #f5f7f2;
+  box-shadow: 0 28px 60px rgba(18, 39, 44, 0.24);
+}
+
+.hero-copy h1 {
+  margin: 16px 0 10px;
+  font-size: 32px;
+  line-height: 1.2;
+}
+
+.hero-copy p {
+  margin: 0;
+  max-width: 760px;
+  color: rgba(245, 247, 242, 0.82);
+  line-height: 1.75;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.hero-panel {
+  padding: 20px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.hero-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  font-weight: 600;
+}
+
+.context-list {
+  display: grid;
+  gap: 12px;
+}
+
+.context-item {
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(6, 15, 19, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.context-item span {
+  font-size: 12px;
+  color: rgba(245, 247, 242, 0.68);
+}
+
+.context-item strong {
+  font-size: 15px;
+  word-break: break-all;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.metric-card {
+  padding: 20px;
+  border-radius: 22px;
+  background: rgba(255, 252, 247, 0.88);
+  border: 1px solid rgba(120, 101, 72, 0.12);
+  box-shadow: 0 18px 40px rgba(58, 42, 24, 0.08);
+}
+
+.metric-card__label {
+  display: block;
+  color: #7d6f61;
+  font-size: 13px;
+}
+
+.metric-card__value {
+  display: block;
+  margin-top: 10px;
+  font-size: 28px;
+  color: #17313a;
+  line-height: 1.1;
+}
+
+.metric-card__hint {
+  margin: 10px 0 0;
+  color: #6c6259;
+  line-height: 1.6;
+}
+
+.command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 20px;
+}
+
+.command-card {
+  padding: 22px;
+  border-radius: 24px;
+  background: rgba(255, 252, 247, 0.84);
+  border: 1px solid rgba(120, 101, 72, 0.12);
+  box-shadow: 0 18px 40px rgba(58, 42, 24, 0.08);
+}
+
+.command-card__header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #17313a;
+}
+
+.command-card__header span {
+  display: block;
+  margin-top: 8px;
+  color: #7b6e63;
+}
+
+.command-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.command-button {
+  text-align: left;
+  padding: 16px;
+  border: 1px solid rgba(31, 111, 120, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 239, 231, 0.92));
+  border-radius: 18px;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.command-button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(30, 55, 62, 0.1);
+}
+
+.command-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.command-button span,
+.command-button small {
+  display: block;
+}
+
+.command-button span {
+  font-size: 16px;
+  font-weight: 700;
+  color: #17313a;
+}
+
+.command-button small {
+  margin-top: 8px;
+  color: #7f7469;
+  line-height: 1.5;
+}
+
+.selection-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.selection-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f8f3eb;
+}
+
+.selection-item strong {
+  color: #17313a;
+  word-break: break-all;
+}
+
+.selection-item span {
+  color: #8a7b6d;
+  white-space: nowrap;
 }
 
 .dialog-footer {
@@ -695,6 +1054,25 @@ const getFileType = (filename) => {
   .media-manager-container {
     padding: 12px;
     min-height: calc(100vh - 60px);
+  }
+
+  .workbench-hero,
+  .metric-grid,
+  .command-grid,
+  .command-list {
+    grid-template-columns: 1fr;
+  }
+
+  .workbench-hero {
+    padding: 20px;
+  }
+
+  .hero-copy h1 {
+    font-size: 26px;
+  }
+
+  .selection-item {
+    flex-direction: column;
   }
 }
 </style>

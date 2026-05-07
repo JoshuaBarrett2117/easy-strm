@@ -239,17 +239,12 @@ func (t *TaskRedisDAO) GetAll() ([]map[string]interface{}, error) {
 		}
 	}
 
-	sort.Slice(tasks, func(i, j int) bool {
-		t1 := tasks[i]["create_time"].(string)
-		t2 := tasks[j]["create_time"].(string)
-		return t1 > t2
-	})
+	sortTasksByCreateTimeDesc(tasks)
 
 	return tasks, nil
 }
 
-// GetUnified 获取统一格式的任务列表（按优先级和创建时间排序）
-// 优先级数值越小越靠前，同优先级按创建时间降序
+// GetUnified 获取统一格式的任务列表（按创建时间降序）
 func (t *TaskRedisDAO) GetUnified() ([]map[string]interface{}, error) {
 	tasks, err := t.GetAll()
 	if err != nil {
@@ -259,18 +254,16 @@ func (t *TaskRedisDAO) GetUnified() ([]map[string]interface{}, error) {
 		return []map[string]interface{}{}, nil
 	}
 
-	sort.Slice(tasks, func(i, j int) bool {
-		p1, _ := tasks[i]["priority"].(float64)
-		p2, _ := tasks[j]["priority"].(float64)
-		if p1 != p2 {
-			return p1 < p2
-		}
-		t1 := tasks[i]["create_time"].(string)
-		t2 := tasks[j]["create_time"].(string)
-		return t1 > t2
-	})
+	sortTasksByCreateTimeDesc(tasks)
 
 	return tasks, nil
+}
+
+// sortTasksByCreateTimeDesc 统一保证任务中心按任务创建时间倒序展示。
+func sortTasksByCreateTimeDesc(tasks []map[string]interface{}) {
+	sort.SliceStable(tasks, func(i, j int) bool {
+		return fmt.Sprint(tasks[i]["create_time"]) > fmt.Sprint(tasks[j]["create_time"])
+	})
 }
 
 // save 保存任务到Redis

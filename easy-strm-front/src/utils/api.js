@@ -116,7 +116,7 @@ const handleLoginSuccess = (response) => {
     localStorage.removeItem('redirectUrl')
     window.location.replace(redirectUrl)
   } else {
-    window.location.replace('/dashboard/user-info')
+    window.location.replace('/dashboard/home')
   }
 }
 

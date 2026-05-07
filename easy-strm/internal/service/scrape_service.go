@@ -190,7 +190,7 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath string) (mediaTyp
 	}
 
 	filename := filepath.Base(filePath)
-	identifyResult, identifyErr := s.tmdbService.IdentifyFile(filename)
+	identifyResult, identifyErr := s.tmdbService.IdentifyFileWithPath(filePath)
 	if identifyErr != nil {
 		return "", nil, 0, 0, fmt.Errorf("文件未识别且自动识别失败: %v", identifyErr)
 	}
@@ -200,11 +200,54 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath string) (mediaTyp
 
 	cacheKey := s.tmdbService.buildCacheKey(filename, identifyResult.MediaType)
 	cache, cacheErr := s.tmdbCacheDAO.GetByQueryKey(cacheKey, identifyResult.MediaType)
-	if cacheErr != nil || cache == nil || len(cache.RawData) == 0 {
-		return "", nil, 0, 0, fmt.Errorf("TMDB缓存数据为空，无法生成NFO")
+	if cacheErr == nil && cache != nil && len(cache.RawData) > 0 {
+		return identifyResult.MediaType, cache.RawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
 	}
 
-	return identifyResult.MediaType, cache.RawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
+	fallbackRawData, buildErr := buildFallbackRawData(identifyResult)
+	if buildErr != nil || len(fallbackRawData) == 0 {
+		return "", nil, 0, 0, fmt.Errorf("TMDB缓存数据为空，且无法基于识别结果生成刮削数据")
+	}
+
+	return identifyResult.MediaType, fallbackRawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
+}
+
+func buildFallbackRawData(result *domain.TmdbIdentifyResult) (json.RawMessage, error) {
+	if result == nil || result.TmdbID <= 0 {
+		return nil, fmt.Errorf("识别结果不完整")
+	}
+
+	payload := map[string]interface{}{
+		"id": result.TmdbID,
+	}
+
+	if result.MediaType == "tv" {
+		if title := strings.TrimSpace(result.Title); title != "" {
+			payload["name"] = title
+		}
+		if originalTitle := strings.TrimSpace(result.OriginalTitle); originalTitle != "" {
+			payload["original_name"] = originalTitle
+		}
+		if result.Year > 0 {
+			payload["first_air_date"] = fmt.Sprintf("%04d-01-01", result.Year)
+		}
+	} else {
+		if title := strings.TrimSpace(result.Title); title != "" {
+			payload["title"] = title
+		}
+		if originalTitle := strings.TrimSpace(result.OriginalTitle); originalTitle != "" {
+			payload["original_title"] = originalTitle
+		}
+		if result.Year > 0 {
+			payload["release_date"] = fmt.Sprintf("%04d-01-01", result.Year)
+		}
+	}
+
+	rawData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return rawData, nil
 }
 
 type nfoUniqueID struct {

@@ -137,12 +137,11 @@ async function run() {
     });
 
     const routeChecks = [
-      { id: "TC-NAV-001", path: "/dashboard/user-info", name: "用户信息页可达" },
-      { id: "TC-NAV-002", path: "/dashboard/cloud115", name: "115管理页可达" },
-      { id: "TC-NAV-003", path: "/dashboard/strm-config", name: "STRM配置页可达" },
-      { id: "TC-NAV-004", path: "/dashboard/media-manager", name: "媒体管理页可达" },
-      { id: "TC-NAV-005", path: "/dashboard/category-strategy", name: "分类策略页可达" },
-      { id: "TC-NAV-006", path: "/dashboard/settings", name: "系统配置页可达" }
+      { id: "TC-NAV-001", path: "/dashboard/cloud115", name: "115管理页可达" },
+      { id: "TC-NAV-002", path: "/dashboard/strm-config", name: "STRM配置页可达" },
+      { id: "TC-NAV-003", path: "/dashboard/media-manager", name: "媒体管理页可达" },
+      { id: "TC-NAV-004", path: "/dashboard/category-strategy", name: "分类策略页可达" },
+      { id: "TC-NAV-005", path: "/dashboard/settings", name: "系统配置页可达" }
     ];
 
     for (let i = 0; i < routeChecks.length; i++) {
@@ -259,12 +258,14 @@ async function run() {
       await sourceRow.waitFor({ timeout: 15000 });
       await sourceRow.locator("button").first().click();
 
-      const browserDialog = page.locator(".el-dialog").last();
+      const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
       await browserDialog.waitFor({ timeout: 15000 });
-      await browserDialog.locator(".el-table__body-wrapper tbody .el-checkbox").first().click();
+      const videoRow = browserDialog.locator(".el-table__row").filter({ hasText: ".mkv" }).first();
+      await videoRow.waitFor({ timeout: 15000 });
+      await videoRow.locator(".el-checkbox").first().click();
       await browserDialog.locator(".organize-primary-btn").click();
 
-      const organizeDialog = page.locator(".el-dialog").last();
+      const organizeDialog = page.locator(".el-dialog").filter({ has: page.locator(".organize-container") }).last();
       await organizeDialog.waitFor({ timeout: 15000 });
       const previewButton = organizeDialog.locator(".dialog-footer button").nth(1);
       await previewButton.click();
@@ -281,7 +282,8 @@ async function run() {
         const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
         const hasPreviewState = dialog.textContent?.includes("识别失败")
           || dialog.textContent?.includes("可处理")
-          || dialog.textContent?.includes("原文件名");
+          || dialog.textContent?.includes("原文件名")
+          || dialog.textContent?.includes("手动识别");
 
         return !button.classList.contains("is-loading") && !loadingMask && hasPreviewState;
       }, { timeout: 20000 });
@@ -294,12 +296,13 @@ async function run() {
         return {
           hasLoadingMask: Boolean(dialog.querySelector(".organize-container .el-loading-mask")),
           hasPreviewTable: Boolean(dialog.querySelector(".el-table")),
+          hasManualAction: (dialog.textContent || "").includes("手动识别"),
           refreshButtonClass: footerButtons[1]?.className || ""
         };
       });
 
       const pass = !previewState.hasLoadingMask
-        && previewState.hasPreviewTable
+        && (previewState.hasPreviewTable || previewState.hasManualAction)
         && !previewState.refreshButtonClass.includes("is-loading");
 
       addCase(

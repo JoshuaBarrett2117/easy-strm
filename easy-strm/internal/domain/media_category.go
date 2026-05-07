@@ -31,8 +31,41 @@ type CategoryMatchRule struct {
 // GetMatchRule 解析并返回匹配规则
 func (c *MediaCategory) GetMatchRule() *CategoryMatchRule {
 	rule := &CategoryMatchRule{}
-	if len(c.MatchRules) > 0 {
-		_ = json.Unmarshal(c.MatchRules, rule)
+	if normalized := normalizeCategoryMatchRules(c.MatchRules); len(normalized) > 0 {
+		_ = json.Unmarshal(normalized, rule)
 	}
 	return rule
+}
+
+// NormalizeMatchRules 统一兼容对象型和字符串型 match_rules，避免历史脏数据失效。
+func (c *MediaCategory) NormalizeMatchRules() {
+	c.MatchRules = normalizeCategoryMatchRules(c.MatchRules)
+}
+
+func normalizeCategoryMatchRules(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return raw
+	}
+
+	var object map[string]interface{}
+	if err := json.Unmarshal(raw, &object); err == nil {
+		normalized, marshalErr := json.Marshal(object)
+		if marshalErr == nil {
+			return normalized
+		}
+		return raw
+	}
+
+	var encoded string
+	if err := json.Unmarshal(raw, &encoded); err == nil && encoded != "" {
+		var decoded map[string]interface{}
+		if decodeErr := json.Unmarshal([]byte(encoded), &decoded); decodeErr == nil {
+			normalized, marshalErr := json.Marshal(decoded)
+			if marshalErr == nil {
+				return normalized
+			}
+		}
+	}
+
+	return raw
 }

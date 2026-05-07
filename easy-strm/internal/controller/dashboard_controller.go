@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 
 	"easy-strm/internal/pkg/logger"
@@ -35,4 +36,57 @@ func (c *DashboardController) GetStats(ctx *gin.Context) {
 	}
 
 	SuccessResp(ctx, stats)
+}
+
+// GetOverview 获取 Dashboard 首页总览
+// Route: GET /api/dashboard/overview
+func (c *DashboardController) GetOverview(ctx *gin.Context) {
+	logger.Debugf("DashboardController[GetOverview] 获取Dashboard总览 from %s", ctx.ClientIP())
+
+	overview, err := c.dashboardService.GetDashboardOverview()
+	if err != nil {
+		logger.Errorf("DashboardController[GetOverview] 获取总览失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "获取总览数据失败")
+		return
+	}
+
+	SuccessResp(ctx, overview)
+}
+
+// GetResourceMonitor 获取 Dashboard 资源监控
+// Route: GET /api/dashboard/resource-monitor
+func (c *DashboardController) GetResourceMonitor(ctx *gin.Context) {
+	logger.Debugf("DashboardController[GetResourceMonitor] 获取Dashboard资源监控 from %s", ctx.ClientIP())
+
+	monitor, err := c.dashboardService.GetDashboardResourceMonitor()
+	if err != nil {
+		logger.Errorf("DashboardController[GetResourceMonitor] 获取资源监控失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "获取资源监控失败")
+		return
+	}
+
+	SuccessResp(ctx, monitor)
+}
+
+// GetTrend 获取 Dashboard 趋势数据
+// Route: GET /api/dashboard/trends/:kind?days=7
+func (c *DashboardController) GetTrend(ctx *gin.Context) {
+	kind := ctx.Param("kind")
+	days := 7
+	if value := ctx.Query("days"); value != "" {
+		if _, err := fmt.Sscanf(value, "%d", &days); err != nil {
+			days = 7
+		}
+	}
+
+	logger.Debugf("DashboardController[GetTrend] 获取Dashboard趋势 kind=%s days=%d from %s", kind, days, ctx.ClientIP())
+
+	trend, err := c.dashboardService.GetDashboardTrend(kind, days)
+	if err != nil {
+		logger.Errorf("DashboardController[GetTrend] 获取趋势失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "获取趋势数据失败")
+		return
+	}
+
+	SuccessResp(ctx, trend)
 }

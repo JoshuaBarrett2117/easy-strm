@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"encoding/json"
@@ -30,6 +30,44 @@ func TestParseFilenameTV(t *testing.T) {
 
 	if parsed.MediaType != "tv" || parsed.Season != 1 || parsed.Episode != 2 {
 		t.Fatalf("unexpected tv parse: %+v", parsed)
+	}
+}
+
+func TestParseFilenameUsesParentDirectoryContext(t *testing.T) {
+	svc := NewTmdbService("fake-key", nil)
+	parsed := svc.parseFilename("默杀 2160P 高码率 非60帧版/默杀.A.Place.Called.Silence.2024.2160p.WEB-DL.H265.HQ.DDP5.1.mkv")
+
+	if parsed.Title != "默杀 A Place Called Silence" {
+		t.Fatalf("unexpected primary title: %q", parsed.Title)
+	}
+	if parsed.Year != 2024 {
+		t.Fatalf("unexpected year: %d", parsed.Year)
+	}
+
+	foundParentTitle := false
+	for _, title := range parsed.SearchTitles {
+		if title == "默杀" {
+			foundParentTitle = true
+			break
+		}
+	}
+	if !foundParentTitle {
+		t.Fatalf("expected parent directory title to be included, got=%v", parsed.SearchTitles)
+	}
+}
+
+func TestParseFilenameEnglishReleaseName(t *testing.T) {
+	svc := NewTmdbService("fake-key", nil)
+	parsed := svc.parseFilename("Maze.Runner.The.Death.Cure.2018.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-老K.mkv")
+
+	if parsed.Title != "Maze Runner The Death Cure" {
+		t.Fatalf("unexpected primary title: %q", parsed.Title)
+	}
+	if parsed.Year != 2018 {
+		t.Fatalf("unexpected year: %d", parsed.Year)
+	}
+	if parsed.MediaType != "movie" {
+		t.Fatalf("unexpected media type: %q", parsed.MediaType)
 	}
 }
 
@@ -178,10 +216,10 @@ func TestIdentifyFileSearchFallback(t *testing.T) {
 		query := r.URL.Query().Get("query")
 		resp := map[string]interface{}{"results": []map[string]interface{}{}}
 
-        if query == "Doraemon Nobita's Dinosaur" {
+		if query == "Doraemon Nobita's Dinosaur" {
 			resp["results"] = []map[string]interface{}{
 				{
-                    "id": 10515, "title": "Doraemon: Nobita's Dinosaur", "original_title": "Doraemon: Nobita's Dinosaur",
+					"id": 10515, "title": "Doraemon: Nobita's Dinosaur", "original_title": "Doraemon: Nobita's Dinosaur",
 					"release_date": "1980-03-15", "poster_path": "/poster.jpg", "overview": "desc", "vote_average": 8.1,
 				},
 			}
@@ -195,7 +233,7 @@ func TestIdentifyFileSearchFallback(t *testing.T) {
 	svc := NewTmdbService("test-api-key", nil)
 	svc.baseURL = mockServer.URL
 
-    result, err := svc.GetCandidates("Doraemon Nobita's Dinosaur.mp4")
+	result, err := svc.GetCandidates("Doraemon Nobita's Dinosaur.mp4")
 	if err != nil {
 		t.Fatalf("get candidates failed: %v", err)
 	}
@@ -205,9 +243,95 @@ func TestIdentifyFileSearchFallback(t *testing.T) {
 	if result.TmdbID != 10515 {
 		t.Fatalf("unexpected tmdb id: %d", result.TmdbID)
 	}
-    if result.Title != "Doraemon: Nobita's Dinosaur" {
+	if result.Title != "Doraemon: Nobita's Dinosaur" {
 		t.Fatalf("unexpected title: %q", result.Title)
 	}
 }
 
+func TestGetCandidatesSearchesParentDirectoryWhenFileTitleMisses(t *testing.T) {
+	queries := make([]string, 0)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/movie" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
 
+		query := r.URL.Query().Get("query")
+		queries = append(queries, query)
+		resp := map[string]interface{}{"results": []map[string]interface{}{}}
+
+		if query == "默杀" {
+			if r.URL.Query().Get("year") != "2024" {
+				t.Fatalf("expected year context to be sent, got %q", r.URL.Query().Get("year"))
+			}
+			resp["results"] = []map[string]interface{}{
+				{
+					"id": 1263186, "title": "默杀", "original_title": "默杀",
+					"release_date": "2024-07-03", "poster_path": "/poster.jpg", "overview": "desc", "vote_average": 7.0,
+				},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer mockServer.Close()
+
+	svc := NewTmdbService("test-api-key", nil)
+	svc.baseURL = mockServer.URL
+	svc.httpClient = mockServer.Client()
+
+	result, err := svc.GetCandidatesWithPath("默杀 2160P 高码率 非60帧版/默杀.A.Place.Called.Silence.2024.2160p.WEB-DL.H265.HQ.DDP5.1.mkv")
+	if err != nil {
+		t.Fatalf("get candidates failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("search should succeed, got message: %s, queries=%v", result.Message, queries)
+	}
+	if result.TmdbID != 1263186 || result.Title != "默杀" || result.Year != 2024 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestGetCandidatesEnglishReleaseNameReturnsChineseMovieTitle(t *testing.T) {
+	queries := make([]string, 0)
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/movie" {
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+
+		query := r.URL.Query().Get("query")
+		queries = append(queries, query)
+		resp := map[string]interface{}{"results": []map[string]interface{}{}}
+
+		if query == "Maze Runner The Death Cure" {
+			if r.URL.Query().Get("year") != "2018" {
+				t.Fatalf("expected year context to be sent, got %q", r.URL.Query().Get("year"))
+			}
+			resp["results"] = []map[string]interface{}{
+				{
+					"id": 336843, "title": "移动迷宫3：死亡解药", "original_title": "Maze Runner: The Death Cure",
+					"release_date": "2018-01-10", "poster_path": "/poster.jpg", "overview": "desc", "vote_average": 7.1,
+				},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer mockServer.Close()
+
+	svc := NewTmdbService("test-api-key", nil)
+	svc.baseURL = mockServer.URL
+	svc.httpClient = mockServer.Client()
+
+	result, err := svc.GetCandidates("Maze.Runner.The.Death.Cure.2018.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-老K.mkv")
+	if err != nil {
+		t.Fatalf("get candidates failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("search should succeed, got message: %s, queries=%v", result.Message, queries)
+	}
+	if result.TmdbID != 336843 || result.Title != "移动迷宫3：死亡解药" || result.Year != 2018 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}

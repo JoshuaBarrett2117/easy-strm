@@ -3,6 +3,7 @@
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 
@@ -378,6 +379,39 @@ func TestTaskServiceGetUnified(t *testing.T) {
 	}
 	if len(tasks) < 2 {
 		t.Fatalf("Expected at least 2 tasks, got %d", len(tasks))
+	}
+}
+
+func TestTaskServiceGetUnifiedOrdersByCreateTimeDesc(t *testing.T) {
+	client := setupTaskRedisMock(t)
+	defer client.Close()
+
+	taskDAO := dao.NewTaskRedisDAO(client)
+	svc := NewTaskService(taskDAO)
+
+	if err := svc.CreateWithPriority("task-old-high-priority", "strm_generate", "旧任务", 1); err != nil {
+		t.Fatalf("CreateWithPriority failed: %v", err)
+	}
+
+	time.Sleep(1100 * time.Millisecond)
+
+	if err := svc.CreateWithPriority("task-new-low-priority", "strm_generate", "新任务", 9); err != nil {
+		t.Fatalf("CreateWithPriority failed: %v", err)
+	}
+
+	tasks, err := svc.GetUnified()
+	if err != nil {
+		t.Fatalf("GetUnified failed: %v", err)
+	}
+	if len(tasks) < 2 {
+		t.Fatalf("Expected at least 2 tasks, got %d", len(tasks))
+	}
+
+	if got := tasks[0]["task_id"]; got != "task-new-low-priority" {
+		t.Fatalf("Expected newest task first, got %v", got)
+	}
+	if got := tasks[1]["task_id"]; got != "task-old-high-priority" {
+		t.Fatalf("Expected older task second, got %v", got)
 	}
 }
 

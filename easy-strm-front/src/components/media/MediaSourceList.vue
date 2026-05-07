@@ -18,6 +18,50 @@
       </div>
     </template>
 
+    <section class="source-overview">
+      <div class="source-overview__copy">
+        <h2>媒体源编排区</h2>
+        <p>本地目录和 115 云盘媒体源统一在这里管理。新增、编辑、浏览和自动整理配置仍然沿用现有后端接口。</p>
+      </div>
+      <div class="source-overview__grid">
+        <article v-for="card in sourceOverviewCards" :key="card.label" class="overview-card">
+          <span class="overview-card__label">{{ card.label }}</span>
+          <strong class="overview-card__value">{{ card.value }}</strong>
+          <p class="overview-card__hint">{{ card.hint }}</p>
+        </article>
+      </div>
+    </section>
+
+    <section v-if="mediaSources.length" class="source-highlight">
+      <div class="source-highlight__header">
+        <div>
+          <h3>最近媒体源</h3>
+          <span>优先从这里进入浏览和整理</span>
+        </div>
+      </div>
+      <div class="source-highlight__grid">
+        <button
+          v-for="source in highlightedSources"
+          :key="source.id"
+          type="button"
+          class="source-spotlight"
+          @click="emit('browse', source)"
+        >
+          <div class="source-spotlight__top">
+            <strong>{{ source.name }}</strong>
+            <el-tag :type="source.source_type === 'local' ? 'success' : 'primary'" size="small" round>
+              {{ source.source_type === 'local' ? '本地存储' : '115 云盘' }}
+            </el-tag>
+          </div>
+          <div class="source-spotlight__path">{{ source.path || '/' }}</div>
+          <div class="source-spotlight__meta">
+            <span>{{ getOrganizeDefaultsSummary(source) }}</span>
+            <span>{{ getWatchStatusLabel(source) }}</span>
+          </div>
+        </button>
+      </div>
+    </section>
+
     <div class="table-wrapper">
       <el-table :data="mediaSources" border style="width: 100%" stripe class="custom-table">
         <el-table-column prop="id" label="ID" width="60" align="center" />
@@ -49,9 +93,9 @@
             <span class="organize-default-summary">{{ getOrganizeDefaultsSummary(scope.row) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="115监控" min-width="220" align="center">
+        <el-table-column label="监控状态" min-width="220" align="center">
           <template #default="scope">
-            <div v-if="scope.row.source_type === 'cloud115'" class="watch-status-cell">
+            <div class="watch-status-cell">
               <el-tag :type="getWatchStatusType(scope.row)" size="small">
                 {{ getWatchStatusLabel(scope.row) }}
               </el-tag>
@@ -59,7 +103,6 @@
                 {{ getWatchStatusDescription(scope.row) }}
               </span>
             </div>
-            <span v-else class="text-muted">本地源</span>
           </template>
         </el-table-column>
         <el-table-column prop="cloud115_name" label="关联账号" width="120" align="center">
@@ -352,11 +395,15 @@ const getWatchStatusType = (source) => {
 const getWatchStatusLabel = (source) => {
   if (!source?.watch_enabled) return '未开启'
   if (source.auto_organize) return '自动整理中'
-  return '仅监控'
+  return source?.source_type === 'local' ? '自动监控中' : '仅监控'
 }
 
 const getWatchStatusDescription = (source) => {
   if (!source?.watch_enabled) return '未监控新增文件'
+  if (source?.source_type === 'local') {
+    if (source.auto_organize) return '本地目录实时监控并自动整理'
+    return '本地目录实时监控，当前仅监控不整理'
+  }
   if (source.auto_organize) {
     const interval = source.watch_interval || 1800
     if (interval >= 3600 && interval % 3600 === 0) {
@@ -429,7 +476,35 @@ const cloud115FeatureStatus = computed(() => {
   }
 })
 
-// --- 鏂规硶 ---
+const localSourceCount = computed(() => mediaSources.value.filter(item => item.source_type === 'local').length)
+const cloudSourceCount = computed(() => mediaSources.value.filter(item => item.source_type === 'cloud115').length)
+const watchEnabledCount = computed(() => mediaSources.value.filter(item => item.watch_enabled).length)
+const autoOrganizeCount = computed(() => mediaSources.value.filter(item => item.auto_organize).length)
+const sourceOverviewCards = computed(() => [
+  {
+    label: '媒体源总数',
+    value: mediaSources.value.length,
+    hint: `${localSourceCount.value} 个本地源，${cloudSourceCount.value} 个云源`
+  },
+  {
+    label: '已开启监控',
+    value: watchEnabledCount.value,
+    hint: autoOrganizeCount.value ? `${autoOrganizeCount.value} 个会继续自动整理` : '当前没有自动整理中的媒体源'
+  },
+  {
+    label: '115 关联账号',
+    value: cloud115List.value.length,
+    hint: cloud115List.value.length ? '可用于创建 115 云盘媒体源' : '当前没有可选的 115 账号'
+  },
+  {
+    label: 'Emby 媒体库',
+    value: embyLibraries.value.length || '-',
+    hint: embyLibraries.value.length ? '可选绑定到整理后的刷新动作' : '打开编辑弹窗时会静默加载'
+  }
+])
+const highlightedSources = computed(() => mediaSources.value.slice(0, 3))
+
+// --- 方法 ---
 
 const fetchMediaSources = async () => {
   try {
@@ -612,9 +687,13 @@ onUnmounted(() => {
 })
 
 /**
- * 暴露刷新方法供父组件调用
+ * 暴露刷新方法和列表状态供父组件构建工作台摘要
  */
-defineExpose({ fetchMediaSources })
+defineExpose({
+  fetchMediaSources,
+  mediaSources,
+  handleAdd
+})
 </script>
 
 <style scoped>
@@ -627,13 +706,18 @@ defineExpose({ fetchMediaSources })
 
 .source-card {
   margin-bottom: 20px;
-  border-radius: 12px;
+  border-radius: 24px;
   overflow: hidden;
+  border: 1px solid rgba(120, 101, 72, 0.12);
+  background: rgba(255, 252, 247, 0.86);
+  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
 }
 
 .source-card :deep(.el-card__header) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 16px 20px;
+  background:
+    radial-gradient(circle at top right, rgba(242, 166, 90, 0.24), transparent 30%),
+    linear-gradient(135deg, #17313a 0%, #24535f 55%, #1f6f78 100%);
+  padding: 20px 24px;
 }
 
 .card-header {
@@ -655,6 +739,132 @@ defineExpose({ fetchMediaSources })
   font-size: 22px;
 }
 
+.source-overview {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.source-overview__copy {
+  padding: 20px;
+  border-radius: 22px;
+  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
+  border: 1px solid rgba(31, 111, 120, 0.12);
+}
+
+.source-overview__copy h2 {
+  margin: 0;
+  font-size: 24px;
+  color: #17313a;
+}
+
+.source-overview__copy p {
+  margin: 12px 0 0;
+  color: #6c6259;
+  line-height: 1.7;
+}
+
+.source-overview__grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 241, 231, 0.94));
+  border: 1px solid rgba(120, 101, 72, 0.1);
+}
+
+.overview-card__label {
+  display: block;
+  color: #8a7b6d;
+  font-size: 13px;
+}
+
+.overview-card__value {
+  display: block;
+  margin-top: 12px;
+  font-size: 28px;
+  color: #17313a;
+  line-height: 1.1;
+}
+
+.overview-card__hint {
+  margin: 10px 0 0;
+  color: #73675d;
+  line-height: 1.6;
+}
+
+.source-highlight {
+  margin-bottom: 22px;
+}
+
+.source-highlight__header h3 {
+  margin: 0;
+  font-size: 18px;
+  color: #17313a;
+}
+
+.source-highlight__header span {
+  display: block;
+  margin-top: 6px;
+  color: #7b6e63;
+}
+
+.source-highlight__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+
+.source-spotlight {
+  border: 1px solid rgba(31, 111, 120, 0.12);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 239, 231, 0.92));
+  border-radius: 20px;
+  padding: 18px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.source-spotlight:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 24px rgba(30, 55, 62, 0.1);
+}
+
+.source-spotlight__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.source-spotlight__top strong {
+  color: #17313a;
+  font-size: 16px;
+}
+
+.source-spotlight__path {
+  margin-top: 12px;
+  font-family: 'Courier New', monospace;
+  color: #6b6258;
+  word-break: break-all;
+  font-size: 13px;
+}
+
+.source-spotlight__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: #87786b;
+  font-size: 12px;
+}
+
 /* 表格水平滚动容器 */
 .table-wrapper {
   overflow-x: auto;
@@ -662,7 +872,7 @@ defineExpose({ fetchMediaSources })
 }
 
 .custom-table {
-  border-radius: 8px;
+  border-radius: 18px;
   overflow: hidden;
 }
 
@@ -748,8 +958,45 @@ defineExpose({ fetchMediaSources })
   flex-wrap: nowrap;
 }
 
+:global(.dark) .source-card {
+  background: rgba(14, 21, 32, 0.86);
+  border-color: rgba(139, 163, 185, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
+}
+
+:global(.dark) .source-overview__copy,
+:global(.dark) .overview-card,
+:global(.dark) .source-spotlight {
+  background: rgba(16, 26, 37, 0.88);
+  border-color: rgba(139, 163, 185, 0.12);
+}
+
+:global(.dark) .source-overview__copy h2,
+:global(.dark) .overview-card__value,
+:global(.dark) .source-highlight__header h3,
+:global(.dark) .source-spotlight__top strong {
+  color: #e8edf4;
+}
+
+:global(.dark) .source-overview__copy p,
+:global(.dark) .overview-card__hint,
+:global(.dark) .overview-card__label,
+:global(.dark) .source-highlight__header span,
+:global(.dark) .source-spotlight__path,
+:global(.dark) .source-spotlight__meta,
+:global(.dark) .feature-panel__subtitle,
+:global(.dark) .form-tip {
+  color: #9faebb;
+}
+
 /* ===== 响应式：移动端(< 768px) ===== */
 @media (max-width: 768px) {
+  .source-overview,
+  .source-overview__grid,
+  .source-highlight__grid {
+    grid-template-columns: 1fr;
+  }
+
   .source-card :deep(.el-card__header) {
     padding: 12px 16px;
   }
@@ -773,7 +1020,7 @@ defineExpose({ fetchMediaSources })
     display: block;
   }
 
-  /* 琛ㄦ牸鏈€灏忓搴︾‘淇濆彲妯悜婊氬姩 */
+  /* 表格最小宽度确保可横向滚动 */
   .custom-table {
     min-width: 800px;
   }

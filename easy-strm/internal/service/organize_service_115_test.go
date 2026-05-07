@@ -1,9 +1,11 @@
-﻿package service
+package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,18 +17,35 @@ import (
 )
 
 type fakeOrganizeCloud115Client struct {
-	fileList   *driver.FileListResp
-	fileLists  map[int]*driver.FileListResp
-	renameFile string
-	renameName string
-	moveFile   string
-	moveTarget string
-	copyFile   string
-	copyTarget string
-	mkdirPath  string
+	fileList          *driver.FileListResp
+	fileLists         map[int]*driver.FileListResp
+	fileListSequences map[int][]*driver.FileListResp
+	fileListCalls     map[int]int
+	renameFile        string
+	renameName        string
+	renameHistory     []string
+	renameNames       []string
+	moveFile          string
+	moveTarget        string
+	copyFile          string
+	copyTarget        string
+	mkdirPath         string
 }
 
 func (f *fakeOrganizeCloud115Client) GetFileList(cid int, showDir int, offset int, limit int, cloud115ID int, cookie string) (*driver.FileListResp, error) {
+	if f.fileListSequences != nil {
+		if sequence, ok := f.fileListSequences[cid]; ok && len(sequence) > 0 {
+			if f.fileListCalls == nil {
+				f.fileListCalls = make(map[int]int)
+			}
+			index := f.fileListCalls[cid]
+			if index >= len(sequence) {
+				index = len(sequence) - 1
+			}
+			f.fileListCalls[cid]++
+			return sequence[index], nil
+		}
+	}
 	if f.fileLists != nil {
 		if resp, ok := f.fileLists[cid]; ok {
 			return resp, nil
@@ -49,6 +68,8 @@ func (f *fakeOrganizeCloud115Client) GetCIDByPath(path string, cloud115ID int, c
 func (f *fakeOrganizeCloud115Client) RenameFile(fileID, newName string, cloud115ID int, cookie string) error {
 	f.renameFile = fileID
 	f.renameName = newName
+	f.renameHistory = append(f.renameHistory, fileID)
+	f.renameNames = append(f.renameNames, newName)
 	return nil
 }
 
@@ -164,6 +185,72 @@ func TestOrganizeService_Resolve115CIDSupportsNumericCID(t *testing.T) {
 	}
 }
 
+func TestOrganizeService_OrganizeCloud115CopyRenamesCopiedFileOnly(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+
+	expectCloud115Account(t, mock)
+
+	targetCID := 2001
+	client := &fakeOrganizeCloud115Client{
+		fileListSequences: map[int][]*driver.FileListResp{
+			targetCID: {
+				{Files: []driver.FileInfo{}},
+				{
+					Files: []driver.FileInfo{
+						{
+							CategoryID: driver.IntString(strconv.Itoa(targetCID)),
+							FileID:     "copied-file-id",
+							Name:       "Doraemon.mp4",
+							Type:       "mp4",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	svc := &OrganizeService{
+		cloud115DAO: dao.NewCloud115DAO(),
+		client:      client,
+	}
+
+	result, err := svc.organizeCloud115File(&domain.MediaSource{
+		ID:         1,
+		SourceType: domain.SourceTypeCloud115,
+		Cloud115ID: intPtr(1),
+	}, OrganizePreview{
+		FileID:     "movies/Doraemon.mp4",
+		CloudID:    "source-file-id",
+		FileName:   "Doraemon.mp4",
+		NewName:    "Doraemon - COPY.mkv",
+		TargetPath: strconv.Itoa(targetCID),
+		NewPath:    strconv.Itoa(targetCID) + "/Doraemon - COPY.mkv",
+	}, "skip", organizeOperationCopy)
+	if err != nil {
+		t.Fatalf("expected copy organize to succeed: %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("expected successful organize result, got %+v", result)
+	}
+	if client.copyFile != "source-file-id" || client.copyTarget != strconv.Itoa(targetCID) {
+		t.Fatalf("expected copy to use source file id, got file=%q target=%q", client.copyFile, client.copyTarget)
+	}
+	if len(client.renameHistory) != 1 {
+		t.Fatalf("expected one rename after copy, got %d", len(client.renameHistory))
+	}
+	if client.renameHistory[0] != "copied-file-id" {
+		t.Fatalf("expected copied file to be renamed, got %q", client.renameHistory[0])
+	}
+	if client.renameNames[0] != "Doraemon - COPY.mkv" {
+		t.Fatalf("expected copied file rename target, got %q", client.renameNames[0])
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestOrganizeService_ScanCloud115MatchesSelectedFileID(t *testing.T) {
 	client := &fakeOrganizeCloud115Client{
 		fileList: &driver.FileListResp{
@@ -188,6 +275,58 @@ func TestOrganizeService_ScanCloud115MatchesSelectedFileID(t *testing.T) {
 	}
 	if files[0].CID != "fid-1" {
 		t.Fatalf("expected cloud file id to be preserved, got %q", files[0].CID)
+	}
+}
+
+func TestOrganizeService_ScanCloud115UsesShortTermDirectoryCache(t *testing.T) {
+	client := &fakeOrganizeCloud115Client{
+		fileListSequences: map[int][]*driver.FileListResp{
+			0: {
+				{
+					Files: []driver.FileInfo{
+						{
+							CategoryID: driver.IntString("0"),
+							FileID:     "fid-1",
+							Name:       "Movie.mkv",
+							Type:       "mkv",
+						},
+					},
+				},
+				{
+					Files: []driver.FileInfo{
+						{
+							CategoryID: driver.IntString("0"),
+							FileID:     "fid-2",
+							Name:       "Changed.mkv",
+							Type:       "mkv",
+						},
+					},
+				},
+			},
+		},
+	}
+	svc := &OrganizeService{
+		client:            client,
+		cloud115ListCache: make(map[string]cloud115ListCacheEntry),
+	}
+
+	first, err := svc.scanCloud115Recursive("0", "", 1, "cookie", "all", []string{"fid-1"})
+	if err != nil {
+		t.Fatalf("expected first scan to succeed: %v", err)
+	}
+	second, err := svc.scanCloud115Recursive("0", "", 1, "cookie", "all", []string{"fid-1"})
+	if err != nil {
+		t.Fatalf("expected second scan to succeed: %v", err)
+	}
+
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("expected cached scans to return one file each, got first=%d second=%d", len(first), len(second))
+	}
+	if first[0].CID != "fid-1" || second[0].CID != "fid-1" {
+		t.Fatalf("expected cached result to preserve first response, got first=%q second=%q", first[0].CID, second[0].CID)
+	}
+	if calls := client.fileListCalls[0]; calls != 1 {
+		t.Fatalf("expected cached scan to hit remote once, got %d", calls)
 	}
 }
 
@@ -348,9 +487,11 @@ func TestOrganizeService_OrganizeCloud115MovesFile(t *testing.T) {
 	client := &fakeOrganizeCloud115Client{}
 	cloudID := 1
 	svc := &OrganizeService{
-		cloud115DAO: dao.NewCloud115DAO(),
-		client:      client,
+		cloud115DAO:       dao.NewCloud115DAO(),
+		client:            client,
+		cloud115ListCache: make(map[string]cloud115ListCacheEntry),
 	}
+	svc.setCloud115CachedFileList("1:stale-cid", []domain.MediaFile{{ID: "old-file", Name: "Old.mkv"}})
 
 	result, err := svc.organizeCloud115File(&domain.MediaSource{
 		ID:         1,
@@ -382,6 +523,9 @@ func TestOrganizeService_OrganizeCloud115MovesFile(t *testing.T) {
 	}
 	if client.copyFile != "" || client.copyTarget != "" {
 		t.Fatalf("expected move mode not to copy, got file=%q target=%q", client.copyFile, client.copyTarget)
+	}
+	if len(svc.cloud115ListCache) != 0 {
+		t.Fatalf("expected successful 115 organize to invalidate account cache, got %#v", svc.cloud115ListCache)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -482,8 +626,51 @@ func TestOrganizeService_MatchOrganizeManualOverrideSupportsCloudID(t *testing.T
 	}
 }
 
+func TestOrganizeService_BuildPreviewErrorResultKeepsCloudID(t *testing.T) {
+	svc := &OrganizeService{}
 
+	result := svc.buildPreviewErrorResult(domain.MediaFile{
+		ID:   "电影/示例.mp4",
+		CID:  "cloud-file-id",
+		Name: "示例.mp4",
+		Path: "电影/示例.mp4",
+	}, fmt.Errorf("识别失败"))
 
+	if result.FileID != "电影/示例.mp4" {
+		t.Fatalf("expected file_id to be preserved, got %q", result.FileID)
+	}
+	if result.CloudID != "cloud-file-id" {
+		t.Fatalf("expected cloud_id to be preserved, got %q", result.CloudID)
+	}
+	if result.IdentifyError != "识别失败" {
+		t.Fatalf("expected identify error to be preserved, got %q", result.IdentifyError)
+	}
+}
 
+func TestResolveCloud115ScanRootCID(t *testing.T) {
+	t.Parallel()
 
+	cases := []struct {
+		name       string
+		sourcePath string
+		expected   string
+	}{
+		{name: "空路径回退根目录", sourcePath: "", expected: "0"},
+		{name: "斜杠回退根目录", sourcePath: "/", expected: "0"},
+		{name: "保留媒体源CID", sourcePath: "2977269469445485999", expected: "2977269469445485999"},
+	}
 
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if actual := resolveCloud115ScanRootCID(tc.sourcePath); actual != tc.expected {
+				t.Fatalf("resolveCloud115ScanRootCID(%q) = %q, want %q", tc.sourcePath, actual, tc.expected)
+			}
+		})
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}

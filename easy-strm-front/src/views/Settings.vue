@@ -660,19 +660,24 @@ onMounted(() => {
 
 <style scoped>
 .settings-container {
-  padding: 20px;
+  padding: 8px 0 0;
   min-height: calc(100vh - 100px);
 }
 
 .main-card {
-  border-radius: 12px;
+  border-radius: 24px;
   overflow: hidden;
-  max-width: 900px;
+  max-width: 980px;
+  border: 1px solid rgba(120, 101, 72, 0.12);
+  background: rgba(255, 252, 247, 0.84);
+  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
 }
 
 .main-card :deep(.el-card__header) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 16px 20px;
+  background:
+    radial-gradient(circle at top right, rgba(242, 166, 90, 0.28), transparent 32%),
+    linear-gradient(135deg, #1f6f78 0%, #24535f 55%, #17313a 100%);
+  padding: 20px 24px;
 }
 
 .card-header {
@@ -686,16 +691,16 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
   color: white;
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 22px;
+  font-weight: 700;
 }
 
 .header-icon {
-  font-size: 22px;
+  font-size: 24px;
 }
 
 .settings-form {
-  padding: 20px 0;
+  padding: 12px 6px 8px;
 }
 
 .form-tip {
@@ -706,7 +711,7 @@ onMounted(() => {
 }
 
 .alist-help {
-  margin: 20px 40px;
+  margin: 20px 8px;
 }
 
 .alist-help-list {
@@ -744,5 +749,11 @@ onMounted(() => {
 .form-actions :deep(.el-form-item__content) {
   justify-content: flex-start;
   gap: 10px;
+}
+
+:global(.dark) .main-card {
+  background: rgba(14, 21, 32, 0.86);
+  border-color: rgba(139, 163, 185, 0.12);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
 }
 </style>

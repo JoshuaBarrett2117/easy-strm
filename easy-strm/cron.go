@@ -453,6 +453,7 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	result := &FullGenerateResult{}
 
 	client := NewClient(&Config{ServerURL: "http://localhost:8082"})
+	Info("[cron] STRM output directory: %s", strmConfig.LocalPath)
 
 	cid, err := client.GetCIDByPath(strmConfig.NetDiskPath, cloud115.ID, cloud115.Cookie)
 	if err != nil {
@@ -536,6 +537,7 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 
 	result.Total = len(collection.Videos)
 	Info("[cron] Found %d files for full STRM generation", result.Total)
+	UpdateTaskProgress(taskID, result.Total, 0, 0, 0)
 
 	if result.Total == 0 {
 		return result, nil
@@ -546,9 +548,9 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	}
 
 	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
-	generator.ProgressCallback = func(totalFiles, processedFiles, successFiles, failedFiles int) {
-		UpdateTaskProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles)
-	}
+	processedFiles := 0
+	successFiles := 0
+	failedFiles := 0
 
 	for i, video := range collection.Videos {
 		// 协作式取消检查：每次迭代前检查取消标记
@@ -568,12 +570,17 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 		}
 
 		localStrmPath, err := generator.GenerateSingleStrmFile(video, strmConfig.NetDiskPath)
+		processedFiles++
 		if err != nil {
+			failedFiles++
+			UpdateTaskProgress(taskID, result.Total, processedFiles, successFiles, failedFiles)
 			Warn("[cron] 生成STRM文件失败 %s: %v", video.Name, err)
 			continue
 		}
 
 		UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath)
+		successFiles++
+		UpdateTaskProgress(taskID, result.Total, processedFiles, successFiles, failedFiles)
 		Debug("[cron] 生成STRM文件: %s", localStrmPath)
 
 		// 记录已处理的文件ID，用于恢复时跳过
@@ -586,6 +593,6 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 		}
 	}
 
-	Info("[cron] Full STRM generation completed: %d files", result.Total)
+	Info("[cron] Full STRM generation completed: total=%d success=%d failed=%d output=%s", result.Total, successFiles, failedFiles, strmConfig.LocalPath)
 	return result, nil
 }

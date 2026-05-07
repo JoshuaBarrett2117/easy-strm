@@ -241,7 +241,10 @@ func (s *StrmService) FindMatchingConfigByCloud115ID(cloud115ID int, targetPath 
 	if err != nil {
 		return nil, fmt.Errorf("查询STRM配置列表失败: %v", err)
 	}
+	return findBestMatchingStrmConfig(configs, cloud115ID, targetPath), nil
+}
 
+func findBestMatchingStrmConfig(configs []*domain.StrmConfig, cloud115ID int, targetPath string) *domain.StrmConfig {
 	// 筛选同一 115 账号下的配置
 	var matched []*domain.StrmConfig
 	for _, cfg := range configs {
@@ -251,27 +254,43 @@ func (s *StrmService) FindMatchingConfigByCloud115ID(cloud115ID int, targetPath 
 	}
 
 	if len(matched) == 0 {
-		return nil, nil
+		return nil
+	}
+
+	normalizedTargetPath := normalizeStrmPath(targetPath)
+	if normalizedTargetPath == "" {
+		return nil
 	}
 
 	// 优先匹配 net_disk_path 为 targetPath 前缀的配置（路径最精确的优先）
-	var bestMatch *domain.StrmConfig
-	bestLen := 0
+	var bestExactMatch *domain.StrmConfig
+	bestExactLen := 0
+	var bestParentMatch *domain.StrmConfig
+	bestParentLen := 0
 	for _, cfg := range matched {
-		if strings.HasPrefix(targetPath, cfg.NetDiskPath) {
-			if len(cfg.NetDiskPath) > bestLen {
-				bestMatch = cfg
-				bestLen = len(cfg.NetDiskPath)
+		normalizedConfigPath := normalizeStrmPath(cfg.NetDiskPath)
+		if normalizedConfigPath == "" {
+			continue
+		}
+		if normalizedConfigPath == normalizedTargetPath {
+			if len(normalizedConfigPath) > bestExactLen {
+				bestExactMatch = cfg
+				bestExactLen = len(normalizedConfigPath)
+			}
+			continue
+		}
+		if hasStrmPathPrefix(normalizedTargetPath, normalizedConfigPath) {
+			if len(normalizedConfigPath) > bestParentLen {
+				bestParentMatch = cfg
+				bestParentLen = len(normalizedConfigPath)
 			}
 		}
 	}
 
-	if bestMatch != nil {
-		return bestMatch, nil
+	if bestExactMatch != nil {
+		return bestExactMatch
 	}
-
-	// 无前缀匹配时返回该账号下第一个配置
-	return matched[0], nil
+	return bestParentMatch
 }
 
 // UpdateNetDiskPath 更新 STRM 配置的网盘路径
@@ -297,4 +316,32 @@ func (s *StrmService) UpdateNetDiskPath(configID int, netDiskPath string) error 
 
 	logger.Infof("StrmService[UpdateNetDiskPath] 已更新配置 ID %d 的网盘路径为: %s", configID, netDiskPath)
 	return nil
+}
+
+func normalizeStrmPath(value string) string {
+	normalized := strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if normalized == "" {
+		return ""
+	}
+	normalized = strings.TrimSuffix(normalized, "/")
+	if normalized == "" {
+		return "/"
+	}
+	if !strings.HasPrefix(normalized, "/") {
+		normalized = "/" + normalized
+	}
+	return normalized
+}
+
+func hasStrmPathPrefix(targetPath, configPath string) bool {
+	if configPath == "/" {
+		return targetPath == "/"
+	}
+	if !strings.HasPrefix(targetPath, configPath) {
+		return false
+	}
+	if len(targetPath) == len(configPath) {
+		return true
+	}
+	return targetPath[len(configPath)] == '/'
 }

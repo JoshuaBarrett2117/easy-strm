@@ -1,125 +1,91 @@
 # easy-strm
 
-[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?style=flat-square&logo=go)](https://go.dev/)
-[![Vue.js](https://img.shields.io/badge/Vue%203-4FC08D?style=flat-square&logo=vue.js)](https://vuejs.org/)
-[![Gin](https://img.shields.io/badge/Gin-1.11-00A1D9?style=flat-square)](https://gin-gonic.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat-square&logo=postgresql)](https://postgresql.org/)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis)](https://redis.io/)
+轻量级媒体整理与 `.strm` 生成工具，当前仓库采用 Go 后端 + Vue 3 前端，围绕以下主链路工作：
 
-轻量级 115 网盘直链提取与 `.strm` 媒体文件生成工具，支持 Emby / Jellyfin / Plex 无缝接入。
+`媒体源接入 -> 文件浏览 -> TMDB 识别 -> 重命名/整理 -> STRM 生成 -> 任务追踪`
 
-## 技术架构
+## 项目结构
 
-| 组件 | 技术选型 | 作用 |
-| :--- | :--- | :--- |
-| 前端 | Vue 3 + Element-Plus | 响应式交互与美观 UI |
-| 后端 | Golang + Gin | 高并发任务处理 |
-| 存储 | PostgreSQL + Redis | 数据持久化与任务队列 |
+```text
+easy-strm/
+├── easy-strm/         # Go 后端
+├── easy-strm-front/   # Vue 3 前端
+├── deploy/            # Docker 部署文件
+├── docs/              # 合并后的长期维护文档
+└── debug/             # 本地调试与 E2E 产物
+```
 
-## 快速开始
+## 技术栈
 
-### 环境依赖
+| 组件 | 技术 |
+| --- | --- |
+| 后端 | Go 1.25 + Gin |
+| 前端 | Vue 3 + Vite + Element Plus |
+| 存储 | PostgreSQL + Redis |
+| 测试 | Go test + 前端构建 + Playwright 脚本 |
 
-- Go 1.24+
-- Node.js 18+
-- PostgreSQL 14+
-- Redis 7+
+## 本地开发
 
-### 本地开发
+### 1. 启动后端
 
 ```powershell
-# 前端
-cd easy-strm-front
-npm install
-npm run dev
-
-# 后端
-cd easy-strm
+Set-Location .\easy-strm
 go mod tidy
 go run .
 ```
 
-### Docker 部署
+### 2. 启动前端
 
-```bash
-cd deploy
-cp .env.example .env
-# 编辑 .env 配置
-docker-compose up -d
+```powershell
+Set-Location .\easy-strm-front
+npm install
+npm run dev
 ```
 
-## 项目结构
+默认开发地址以本地实际启动结果为准。
 
-```
-easy-strm/
-├── easy-strm/                 # Golang 后端
-│   ├── internal/              # 分层架构
-│   │   ├── domain/           # 领域模型
-│   │   ├── dao/              # 数据访问层
-│   │   ├── service/          # 业务逻辑层
-│   │   └── controller/       # 接口控制层
-│   ├── migrations/           # 数据库迁移
-│   └── main.go               # 入口
-├── easy-strm-front/          # Vue 前端
-│   └── src/
-│       ├── utils/api/        # API 模块化
-│       ├── views/            # 页面组件
-│       └── components/       # 公共组件
-├── deploy/                   # 部署配置
-├── docker/                   # Docker 配置
-└── docs/                     # 文档
+## Docker 部署
+
+```powershell
+Set-Location .\deploy
+Copy-Item .env.example .env
+# 按需修改 .env
+docker compose up -d
 ```
 
-## 核心功能
+常用命令：
 
-| 功能 | 说明 |
-| :--- | :--- |
-| 115 扫码登录 | 多渠道扫码授权，自动续期 |
-| 直链解析 | 精准提取 115 网盘真实下载直链 |
-| STRM 全量生成 | 一键批量生成 .strm 挂载文件 |
-| STRM 增量同步 | 仅对新增/变更文件生成 |
-| 定时任务 | Cron 调度自动执行 |
-| 任务监控 | 实时进度与状态查看 |
-| 秒传同步 | 跨账号 SHA1 秒传文件 |
-
-## API 概览
-
-| 端点 | 方法 | 功能 |
-| :--- | :--- | :--- |
-| /api/user/login | POST | 用户登录 |
-| /api/cloud115 | GET | 账号列表 |
-| /api/strm/config | GET/POST | STRM 配置管理 |
-| /api/strm/config/:id/generate/full | POST | 全量生成 |
-| /api/strm/config/:id/generate/incremental | POST | 增量生成 |
-| /api/task | GET | 任务列表 |
-| /api/setting | GET/PUT | 系统设置 |
-
-## 开发规范
-
-### 重构原则
-
-遵循 Martin Fowler 《重构》核心思想：单一职责、消除代码坏味道、保持函数短小精悍。
-
-### 日志追踪
-
-```
-[INFO]  2026-03-25 17:16:22 [模块名] 中文日志说明
-[DEBUG] 2026-03-25 17:16:22 [模块名] 详细调试信息
-[ERROR] 2026-03-25 17:16:22 [模块名] 异常错误堆栈
+```powershell
+docker compose up -d
+docker compose logs -f
+docker compose restart
+docker compose down
 ```
 
-## 默认账号
+部署目录位于 [deploy](/C:/Users/a3875/Documents/code/easy-strm/deploy)。
 
-| 字段 | 值 |
-| :--- | :--- |
-| 用户名 | admin |
-| 密码 | admin |
+## 核心文档
 
-## 文档
+文档已收敛为以下 2 份长期维护文档：
 
-- [需求总览（按迭代）](./docs/需求总览_按迭代.md)
-- [测试与回归总报告](./docs/测试与回归总报告_20260418.md)
+- [产品与架构](/C:/Users/a3875/Documents/code/easy-strm/docs/产品与架构.md)
+- [开发与测试](/C:/Users/a3875/Documents/code/easy-strm/docs/开发与测试.md)
 
-## License
+## 当前能力概览
 
-MIT
+- 媒体源管理：本地与 115 媒体源
+- 文件浏览：目录浏览、筛选、批量选择
+- 元数据处理：TMDB 识别、手动修正、命名模板
+- 整理能力：预览、复制/移动、冲突策略、结果回看
+- STRM：配置管理、生成任务、任务追踪
+- 自动化：监控、自动整理、统一任务中心
+
+## 验证基线
+
+日常改动至少应覆盖：
+
+- Go 单元测试
+- 前端 `npm run build`
+- 关键浏览器主流程回归
+
+详细规范与测试现状见 [开发与测试](/C:/Users/a3875/Documents/code/easy-strm/docs/开发与测试.md)。

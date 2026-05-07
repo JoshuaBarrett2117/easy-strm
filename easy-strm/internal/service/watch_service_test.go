@@ -299,7 +299,7 @@ func TestCreateAutoOrganizeTaskForCloud115(t *testing.T) {
 	if manager.createdTaskType != watchAutoOrganizeTaskType {
 		t.Fatalf("unexpected task type: got %s", manager.createdTaskType)
 	}
-	if manager.createdTaskName != "115鑷姩鏁寸悊-cloud-source" {
+	if manager.createdTaskName != "115自动整理-cloud-source" {
 		t.Fatalf("unexpected task name: got %s", manager.createdTaskName)
 	}
 	if len(manager.progressCalls) != 1 {
@@ -337,7 +337,7 @@ func TestCreateAutoOrganizeTaskForLocalSource(t *testing.T) {
 	if taskID == "" {
 		t.Fatal("expected task id to be created")
 	}
-	if manager.createdTaskName != "鏈湴鑷姩鏁寸悊-local-source" {
+	if manager.createdTaskName != "本地自动整理-local-source" {
 		t.Fatalf("unexpected local task name: got %s", manager.createdTaskName)
 	}
 	if manager.metadata["trigger_mode"] != "fsnotify" {
@@ -345,6 +345,84 @@ func TestCreateAutoOrganizeTaskForLocalSource(t *testing.T) {
 	}
 	if manager.metadata["source_path"] != "C:\\media" {
 		t.Fatalf("unexpected source_path metadata: got %#v", manager.metadata["source_path"])
+	}
+}
+
+func TestBuildLocalWatchOrganizeTarget(t *testing.T) {
+	source := &domain.MediaSource{
+		Path:      `C:\media`,
+		WatchPath: `C:\media\incoming`,
+	}
+
+	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, `C:\media\incoming\Movie.2024.mkv`)
+	if err != nil {
+		t.Fatalf("expected local watch organize target to build successfully: %v", err)
+	}
+	if sourcePath != `incoming` {
+		t.Fatalf("unexpected sourcePath: got %q", sourcePath)
+	}
+	if fileID != `incoming\Movie.2024.mkv` {
+		t.Fatalf("unexpected fileID: got %q", fileID)
+	}
+}
+
+func TestBuildLocalWatchOrganizeTargetForRootWatchPath(t *testing.T) {
+	source := &domain.MediaSource{
+		Path:      `C:\media`,
+		WatchPath: `C:\media`,
+	}
+
+	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, `C:\media\Movie.2024.mkv`)
+	if err != nil {
+		t.Fatalf("expected root watch path to build successfully: %v", err)
+	}
+	if sourcePath != "" {
+		t.Fatalf("expected empty sourcePath for root watch path, got %q", sourcePath)
+	}
+	if fileID != `Movie.2024.mkv` {
+		t.Fatalf("unexpected fileID: got %q", fileID)
+	}
+}
+
+func TestBuildLocalWatchOrganizeTargetRejectsOutsideFile(t *testing.T) {
+	source := &domain.MediaSource{
+		Path:      `C:\media`,
+		WatchPath: `C:\media\incoming`,
+	}
+
+	_, _, err := buildLocalWatchOrganizeTarget(source, `C:\other\Movie.2024.mkv`)
+	if err == nil {
+		t.Fatal("expected outside file to be rejected")
+	}
+}
+
+func TestResolveRetrySourcePathPreservesEmptyRootForLocalWatch(t *testing.T) {
+	source := &domain.MediaSource{
+		SourceType: domain.SourceTypeLocal,
+		Path:       `C:\media`,
+		WatchPath:  `C:\media`,
+	}
+
+	actual := resolveRetrySourcePath(map[string]interface{}{
+		"watch_path":  "",
+		"source_path": "",
+	}, source, []string{`Inception.2010.1080p.mkv`})
+
+	if actual != "" {
+		t.Fatalf("expected empty retry source path to be preserved, got %q", actual)
+	}
+}
+
+func TestResolveRetrySourcePathFallsBackToRelativeDirForLocalFile(t *testing.T) {
+	source := &domain.MediaSource{
+		SourceType: domain.SourceTypeLocal,
+		Path:       `C:\media`,
+		WatchPath:  `C:\media\incoming`,
+	}
+
+	actual := resolveRetrySourcePath(nil, source, []string{`incoming\Inception.2010.1080p.mkv`})
+	if actual != `incoming` {
+		t.Fatalf("expected retry source path to use file directory, got %q", actual)
 	}
 }
 
@@ -490,8 +568,8 @@ func TestCloud115AuthFailureMessage(t *testing.T) {
 		message string
 		want    bool
 	}{
-		{name: "cookie invalid", message: "cookie 鏃犳晥", want: true},
-		{name: "account expired", message: "115璐﹀彿澶辨晥锛岃閲嶆柊鐧诲綍", want: true},
+		{name: "cookie invalid", message: "cookie 无效", want: true},
+		{name: "account expired", message: "115账号失效，请重新登录", want: true},
 		{name: "account absent", message: "账号不存在", want: true},
 		{name: "unrelated", message: "network timeout", want: false},
 	}

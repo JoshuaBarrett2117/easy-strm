@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +18,62 @@ type DashboardStats struct {
 	StrmFiles    StrmFileStats    `json:"strm_files"`
 	Tasks        TaskStats        `json:"tasks"`
 	Storage      StorageStats     `json:"storage"`
+}
+
+// DashboardOverview Dashboard 首页总览结果
+type DashboardOverview struct {
+	Stats        DashboardStats     `json:"stats"`
+	StrmTask     TaskOverview       `json:"strm_task"`
+	ArchiveTask  TaskOverview       `json:"archive_task"`
+	RecentTasks  []map[string]any   `json:"recent_tasks"`
+	RecentIngest []RecentIngestItem `json:"recent_ingest"`
+}
+
+// TaskOverview 首页任务摘要
+type TaskOverview struct {
+	Pending   int  `json:"pending"`
+	FileCount int  `json:"file_count"`
+	Running   bool `json:"running"`
+	Total     int  `json:"total"`
+}
+
+// RecentIngestItem 最近入库项
+type RecentIngestItem struct {
+	TaskID      string `json:"task_id"`
+	TaskName    string `json:"task_name"`
+	TaskType    string `json:"task_type"`
+	Status      string `json:"status"`
+	UpdateTime  string `json:"update_time"`
+	SourceName  string `json:"source_name"`
+	ResultBrief string `json:"result_brief"`
+}
+
+// DashboardResourceMonitor Dashboard 资源监控结果
+type DashboardResourceMonitor struct {
+	MemoryBytes    uint64 `json:"memory_bytes"`
+	HeapAllocBytes uint64 `json:"heap_alloc_bytes"`
+	SystemBytes    uint64 `json:"system_bytes"`
+	Goroutines     int    `json:"goroutines"`
+	CPUCores       int    `json:"cpu_cores"`
+	RunningTasks   int    `json:"running_tasks"`
+	ActiveAccounts int    `json:"active_accounts"`
+	EnabledSources int    `json:"enabled_sources"`
+	SampledAt      string `json:"sampled_at"`
+}
+
+// DashboardTrendPoint Dashboard 趋势点
+type DashboardTrendPoint struct {
+	Date    string `json:"date"`
+	Value   int    `json:"value"`
+	Success int    `json:"success"`
+	Failed  int    `json:"failed"`
+}
+
+// DashboardTrend Dashboard 趋势结果
+type DashboardTrend struct {
+	Days   int                   `json:"days"`
+	Type   string                `json:"type"`
+	Points []DashboardTrendPoint `json:"points"`
 }
 
 // AccountStats 115账号统计
@@ -37,13 +94,13 @@ type MediaSourceStats struct {
 
 // StrmFileStats STRM文件统计
 type StrmFileStats struct {
-	Total             int        `json:"total"`
-	LastGenerationTime *string   `json:"last_generation_time"`
+	Total              int     `json:"total"`
+	LastGenerationTime *string `json:"last_generation_time"`
 }
 
 // TaskStats 任务统计
 type TaskStats struct {
-	Running       int `json:"running"`
+	Running        int `json:"running"`
 	CompletedToday int `json:"completed_today"`
 	FailedToday    int `json:"failed_today"`
 }
@@ -108,6 +165,135 @@ func (s *DashboardService) GetDashboardStats() (*DashboardStats, error) {
 	}
 
 	return stats, nil
+}
+
+// GetDashboardOverview 获取首页总览数据
+func (s *DashboardService) GetDashboardOverview() (*DashboardOverview, error) {
+	stats, err := s.GetDashboardStats()
+	if err != nil {
+		return nil, err
+	}
+
+	tasks, err := s.taskRedisDAO.GetUnified()
+	if err != nil {
+		return nil, fmt.Errorf("查询任务总览失败: %v", err)
+	}
+
+	overview := &DashboardOverview{
+		Stats:        *stats,
+		StrmTask:     s.buildTaskOverview(tasks, []string{"strm_generate"}),
+		ArchiveTask:  s.buildTaskOverview(tasks, []string{"organize", "watch_auto_organize", "scrape"}),
+		RecentTasks:  s.limitTasks(tasks, 8),
+		RecentIngest: s.buildRecentIngest(tasks, 8),
+	}
+
+	return overview, nil
+}
+
+// GetDashboardResourceMonitor 获取 Dashboard 资源监控数据
+func (s *DashboardService) GetDashboardResourceMonitor() (*DashboardResourceMonitor, error) {
+	stats, err := s.GetDashboardStats()
+	if err != nil {
+		return nil, err
+	}
+
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+
+	return &DashboardResourceMonitor{
+		MemoryBytes:    mem.Alloc,
+		HeapAllocBytes: mem.HeapAlloc,
+		SystemBytes:    mem.Sys,
+		Goroutines:     runtime.NumGoroutine(),
+		CPUCores:       runtime.NumCPU(),
+		RunningTasks:   stats.Tasks.Running,
+		ActiveAccounts: stats.Accounts.Active,
+		EnabledSources: stats.MediaSources.Enabled,
+		SampledAt:      time.Now().Format(time.RFC3339),
+	}, nil
+}
+
+// GetDashboardTrend 获取 Dashboard 趋势数据
+func (s *DashboardService) GetDashboardTrend(kind string, days int) (*DashboardTrend, error) {
+	if days <= 0 {
+		days = 7
+	}
+
+	tasks, err := s.taskRedisDAO.GetAll()
+	if err != nil {
+		return nil, fmt.Errorf("查询任务趋势失败: %v", err)
+	}
+
+	type pointCounter struct {
+		value   int
+		success int
+		failed  int
+	}
+
+	acceptedTypes := map[string]bool{}
+	switch kind {
+	case "archive":
+		acceptedTypes["organize"] = true
+		acceptedTypes["watch_auto_organize"] = true
+		acceptedTypes["scrape"] = true
+	default:
+		kind = "strm"
+		acceptedTypes["strm_generate"] = true
+	}
+
+	start := time.Now().AddDate(0, 0, -(days - 1))
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, start.Location())
+
+	buckets := make(map[string]*pointCounter, days)
+	for i := 0; i < days; i++ {
+		current := start.AddDate(0, 0, i)
+		key := current.Format("2006-01-02")
+		buckets[key] = &pointCounter{}
+	}
+
+	for _, task := range tasks {
+		taskType, _ := task["task_type"].(string)
+		if !acceptedTypes[taskType] {
+			continue
+		}
+
+		createTime, _ := task["create_time"].(string)
+		if len(createTime) < 10 {
+			continue
+		}
+		key := createTime[:10]
+		counter, exists := buckets[key]
+		if !exists {
+			continue
+		}
+
+		counter.value++
+		status, _ := task["status"].(string)
+		if status == "completed" {
+			counter.success++
+		} else if status == "failed" {
+			counter.failed++
+		}
+	}
+
+	points := make([]DashboardTrendPoint, 0, days)
+	for i := 0; i < days; i++ {
+		current := start.AddDate(0, 0, i)
+		key := current.Format("2006-01-02")
+		counter := buckets[key]
+		points = append(points, DashboardTrendPoint{
+			Date:    key,
+			Value:   counter.value,
+			Success: counter.success,
+			Failed:  counter.failed,
+		})
+	}
+
+	return &DashboardTrend{
+		Days:   days,
+		Type:   kind,
+		Points: points,
+	}, nil
 }
 
 // fillAccountStats 填充115账号统计：按状态分组计数
@@ -234,4 +420,97 @@ func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 	}
 	stats.Storage = StorageStats{Accounts: accountStorages}
 	return nil
+}
+
+func (s *DashboardService) buildTaskOverview(tasks []map[string]interface{}, acceptedTypes []string) TaskOverview {
+	typeSet := make(map[string]bool, len(acceptedTypes))
+	for _, item := range acceptedTypes {
+		typeSet[item] = true
+	}
+
+	overview := TaskOverview{}
+	for _, task := range tasks {
+		taskType, _ := task["task_type"].(string)
+		if !typeSet[taskType] {
+			continue
+		}
+		overview.Total++
+
+		status, _ := task["status"].(string)
+		if status == "pending" || status == "running" {
+			overview.Pending++
+		}
+		if status == "running" {
+			overview.Running = true
+		}
+
+		switch value := task["total_files"].(type) {
+		case float64:
+			overview.FileCount += int(value)
+		case int:
+			overview.FileCount += value
+		}
+	}
+
+	return overview
+}
+
+func (s *DashboardService) limitTasks(tasks []map[string]interface{}, limit int) []map[string]any {
+	if limit <= 0 || len(tasks) == 0 {
+		return []map[string]any{}
+	}
+	if len(tasks) < limit {
+		limit = len(tasks)
+	}
+
+	result := make([]map[string]any, 0, limit)
+	for _, task := range tasks[:limit] {
+		result = append(result, task)
+	}
+	return result
+}
+
+func (s *DashboardService) buildRecentIngest(tasks []map[string]interface{}, limit int) []RecentIngestItem {
+	if limit <= 0 {
+		return []RecentIngestItem{}
+	}
+
+	result := make([]RecentIngestItem, 0, limit)
+	for _, task := range tasks {
+		taskType, _ := task["task_type"].(string)
+		status, _ := task["status"].(string)
+		if status != "completed" {
+			continue
+		}
+		if taskType != "organize" && taskType != "watch_auto_organize" && taskType != "strm_generate" {
+			continue
+		}
+
+		metadata, _ := task["metadata"].(map[string]interface{})
+		sourceName, _ := metadata["source_name"].(string)
+		resultBrief, _ := metadata["result_summary"].(string)
+		if resultBrief == "" {
+			resultBrief = "任务已完成"
+		}
+
+		taskID, _ := task["task_id"].(string)
+		taskName, _ := task["task_name"].(string)
+		updateTime, _ := task["update_time"].(string)
+
+		result = append(result, RecentIngestItem{
+			TaskID:      taskID,
+			TaskName:    taskName,
+			TaskType:    taskType,
+			Status:      status,
+			UpdateTime:  updateTime,
+			SourceName:  sourceName,
+			ResultBrief: resultBrief,
+		})
+
+		if len(result) >= limit {
+			break
+		}
+	}
+
+	return result
 }

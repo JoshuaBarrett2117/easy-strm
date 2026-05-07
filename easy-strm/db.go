@@ -969,6 +969,29 @@ END $$;
 	if err != nil {
 		Warn("Failed to create idx_identify_cache_file_hash: %v", err)
 	}
+	_, err = db.Exec(`
+		WITH duplicated_rows AS (
+			SELECT id
+			FROM (
+				SELECT id,
+				       ROW_NUMBER() OVER (
+				           PARTITION BY file_hash
+				           ORDER BY is_manual DESC, updated_at DESC, created_at DESC, id DESC
+				       ) AS row_num
+				FROM t_identify_cache
+			) ranked
+			WHERE ranked.row_num > 1
+		)
+		DELETE FROM t_identify_cache
+		WHERE id IN (SELECT id FROM duplicated_rows)
+	`)
+	if err != nil {
+		Warn("Failed to cleanup duplicated identify cache rows: %v", err)
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_identify_cache_file_hash ON t_identify_cache(file_hash)`)
+	if err != nil {
+		Warn("Failed to create uq_identify_cache_file_hash: %v", err)
+	}
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_identify_cache_is_manual ON t_identify_cache(is_manual)`)
 	if err != nil {
 		Warn("Failed to create idx_identify_cache_is_manual: %v", err)
@@ -1706,13 +1729,18 @@ func GetEnabledCronTasks() ([]*CronTask, error) {
 // CreateCronTask 创建定时任务
 func CreateCronTask(taskName, taskType string, cloud115ID, strmConfigID int, cronExpr string) (*CronTask, error) {
 	Debug("Creating cron task: %s", taskName)
-	task := &CronTask{}
+	var taskID int
 	err := db.QueryRow(
-		"INSERT INTO t_cron_task (task_name, task_type, cloud115_id, strm_config_id, cron_expr, status) VALUES ($1, $2, $3, $4, $5, 'enabled') RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status, last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time",
+		"INSERT INTO t_cron_task (task_name, task_type, cloud115_id, strm_config_id, cron_expr, status) VALUES ($1, $2, $3, $4, $5, 'enabled') RETURNING id",
 		taskName, taskType, cloud115ID, strmConfigID, cronExpr,
-	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID, &task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime, &task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
+	).Scan(&taskID)
 	if err != nil {
 		Error("Failed to create cron task: %v", err)
+		return nil, err
+	}
+	task, err := GetCronTaskByID(taskID)
+	if err != nil {
+		Error("Failed to reload cron task after create: %v", err)
 		return nil, err
 	}
 	Info("Created cron task: %s (ID: %d)", taskName, task.ID)
@@ -1722,13 +1750,18 @@ func CreateCronTask(taskName, taskType string, cloud115ID, strmConfigID int, cro
 // UpdateCronTask 更新定时任务
 func UpdateCronTask(id int, taskName, taskType, cronExpr, status string) (*CronTask, error) {
 	Debug("Updating cron task with ID: %d", id)
-	task := &CronTask{}
+	var taskID int
 	err := db.QueryRow(
-		"UPDATE t_cron_task SET task_name = $1, task_type = $2, cron_expr = $3, status = $4 WHERE id = $5 RETURNING id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status, last_run_time, next_run_time, last_run_status, last_run_message, create_time, update_time",
+		"UPDATE t_cron_task SET task_name = $1, task_type = $2, cron_expr = $3, status = $4 WHERE id = $5 RETURNING id",
 		taskName, taskType, cronExpr, status, id,
-	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID, &task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime, &task.LastRunStatus, &task.LastRunMessage, &task.CreateTime, &task.UpdateTime)
+	).Scan(&taskID)
 	if err != nil {
 		Error("Failed to update cron task with ID %d: %v", id, err)
+		return nil, err
+	}
+	task, err := GetCronTaskByID(taskID)
+	if err != nil {
+		Error("Failed to reload cron task after update: %v", err)
 		return nil, err
 	}
 	Info("Updated cron task (ID: %d)", task.ID)
