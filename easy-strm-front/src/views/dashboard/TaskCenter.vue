@@ -144,11 +144,14 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import TaskCard from '../../components/TaskCard.vue'
 import { cancelTask, getTaskDetail, getUnifiedTaskList, resumeTask } from '../../utils/api/task'
+
+const route = useRoute()
 
 const taskLoading = ref(false)
 const taskList = ref([])
@@ -460,6 +463,13 @@ const handleResumeTask = async (taskId) => {
   }
 }
 
+const openRouteTask = async () => {
+  const taskId = route.query.task_id
+  if (taskId) {
+    await handleTaskDetail(String(taskId))
+  }
+}
+
 watch(autoRefresh, (value) => {
   if (value) startAutoRefresh()
   else stopAutoRefresh()
@@ -474,12 +484,21 @@ watch(taskDetailVisible, (value) => {
   }
 })
 
+watch(() => route.query.task_id, async (taskId) => {
+  if (taskId) {
+    await handleTaskDetail(String(taskId))
+  }
+})
+
 onBeforeUnmount(() => {
   stopAutoRefresh()
   stopTaskDetailRefresh()
 })
 
-loadTasks()
+onMounted(async () => {
+  await loadTasks()
+  await openRouteTask()
+})
 </script>
 
 <style scoped>

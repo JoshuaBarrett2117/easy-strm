@@ -98,13 +98,13 @@ func (c *MediaLibraryController) GenerateStrm(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的媒体库条目ID")
 		return
 	}
-	if err := c.pipeline.GenerateStrmForItem(id, "manual_generate_strm"); err != nil {
+	result, err := c.pipeline.GenerateStrmForItemTask(id)
+	if err != nil {
 		logger.Errorf("MediaLibraryController[GenerateStrm] 执行失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-	item, _ := c.indexDAO.GetByID(id)
-	SuccessResp(ctx, item)
+	SuccessResp(ctx, result)
 }
 
 func (c *MediaLibraryController) RefreshServer(ctx *gin.Context) {
@@ -113,16 +113,13 @@ func (c *MediaLibraryController) RefreshServer(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的媒体库条目ID")
 		return
 	}
-	message, err := c.pipeline.RefreshMediaServerForItem(id)
+	result, err := c.pipeline.RefreshMediaServerForItemTask(id)
 	if err != nil {
 		logger.Errorf("MediaLibraryController[RefreshServer] 执行失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-	if message == "" {
-		message = "媒体服务器未启用或未配置媒体库"
-	}
-	SuccessResp(ctx, gin.H{"message": message})
+	SuccessResp(ctx, result)
 }
 
 func resolveHealthStatus(index *domain.MediaSyncIndex) string {

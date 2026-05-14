@@ -387,7 +387,7 @@ import {
   Connection,
 } from "@element-plus/icons-vue";
 import { ElMessage } from "element-plus";
-import { getSettings, updateSettings } from "../utils/api";
+import { getSettings, updateSettings } from "../utils/api/setting";
 import { getTmdbConfig, updateTmdbApiKey } from "../utils/api/media";
 import { getEmbyStatus } from "../utils/api/emby";
 

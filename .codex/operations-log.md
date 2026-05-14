@@ -114,3 +114,13 @@
 - 补充一次媒体库三页浏览器仿真：创建临时本地媒体源，在“同步任务”页点击全量同步并看到 `扫描 1，写入 1，失效 0`，在“媒体库”页确认同步条目显示，在“待处理”页确认页面正常加载；测试结束删除临时媒体源。
 - 单独验证 `/dashboard/cloud115`，确认“账号池总览”正常加载且表格显示 2 个账号。
 - 执行 `npm run e2e:organize-preview-cancel`，通过，确认预览任务取消链路仍可用。
+
+## 2026-05-14 Codex 资源整理平台首版重构收尾
+
+- 按用户给定计划，将后台信息架构收敛为“媒体源 -> 同步索引 -> 媒体资产台账 -> 入库/STRM/刷新库 -> 任务中心 -> 待处理修正”的主流程。
+- 重排 Dashboard 导航：资源整理入口前置为首页、资产台账、同步入库、待处理、任务中心；115 云管理、STRM 配置、整理规则、系统设置和日志/网络/缓存降级为支撑与运维入口。
+- 强化 `MediaLibrary.vue`、`SyncTasks.vue`、`PendingMedia.vue` 三个页面，补齐 source_id 深链、状态摘要、任务跳转和主流程动作反馈。
+- 删除已失效的 `StrmGenerator.vue`、旧 `src/utils/api.js`，并移除指向旧接口的 `/strm/task/all`、`/strm/config/:id/files` API 封装。
+- 后端将单条资产的 STRM 生成和媒体服务器刷新包装为可追踪任务，接口返回 `task_id`，并补充单元测试。
+- 新增 `npm run e2e:resource-platform`，用 Playwright + 模拟 API 覆盖同步入库、资产台账、STRM 任务深链、待处理修正并入库。
+- 移除 `docker-compose.yml` 顶层废弃 `version` 字段，`docker compose config` 已无 obsolete warning。

@@ -80,3 +80,11 @@
 - 媒体库新增页面补充仿真通过：临时本地媒体源在“同步任务”页执行全量同步后，页面回显 `扫描 1，写入 1，失效 0`；“媒体库”页能显示同步条目；“待处理”页可正常加载。
 - 115 管理页补充仿真通过：`/dashboard/cloud115` 正常加载“账号池总览”，表格显示 `2` 个账号。
 - 未发现浏览器 `pageerror` 或 console error。临时测试媒体源均已删除。
+
+## 2026-05-14 资源整理平台首版重构结论
+
+- 首版资源整理平台主闭环已完成：同步入库页负责媒体源同步和入库流水线触发，媒体资产台账负责资产状态与单条入库/STRM/刷新动作，待处理页负责识别失败项修正并重新入库，任务中心支持 `task_id` 深链追踪。
+- 旧入口清理完成：已删除无路由且调用失效 `/strm/generate` 的 `StrmGenerator.vue`，删除旧 `src/utils/api.js` 重复入口，清理旧 STRM 任务/配置文件 API 封装。
+- 后端接口保持现有 schema，单条 STRM 与刷新库动作已返回可追踪 `task_id`，满足“动作成功后可进入任务中心查看详情”的首版契约。
+- 自动化验证通过：`go test ./...`、`npm run build`、`npm run e2e:resource-platform`、`docker compose config`。
+- 部署侧残余风险：本机 Docker Desktop Linux daemon 未运行，`docker build -t easy-strm:codex-check .` 无法连接 `npipe:////./pipe/dockerDesktopLinuxEngine`，需要启动 Docker daemon 后复跑镜像构建。

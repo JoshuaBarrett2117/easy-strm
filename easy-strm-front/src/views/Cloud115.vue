@@ -289,7 +289,7 @@ import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { Plus, Edit, Delete, RefreshRight, Key, Loading, WarningFilled, View, Hide, Cloudy } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { showConfirmDialog } from '../utils/ui/messageBox'
-import { request } from '../utils/api'
+import { request } from '../utils/api/request'
 import { get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api/cloud115'
 
 /**

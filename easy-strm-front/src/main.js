@@ -34,7 +34,7 @@ const routes = [
         component: DashboardHome,
         meta: {
           title: '仪表盘',
-          description: '围绕任务、STRM、媒体源和网络探针重组后的新首页。'
+          description: '资源整理平台首页，聚合媒体源、同步入库、资产台账与任务态势。'
         }
       },
       {
@@ -42,7 +42,7 @@ const routes = [
         component: TaskCenter,
         meta: {
           title: '任务中心',
-          description: '统一任务列表、任务详情、取消恢复与失败文件排查。'
+          description: '同步、入库、STRM、刷新等资源整理任务的统一追踪入口。'
         }
       },
       {
@@ -73,16 +73,16 @@ const routes = [
         path: 'media-manager',
         component: MediaManager,
         meta: {
-          title: '文件管理',
-          description: '媒体源浏览、识别、整理、刮削等核心业务工作台。'
+          title: '文件工作台',
+          description: '保留手动浏览、识别、整理、刮削等细粒度文件操作。'
         }
       },
       {
         path: 'media-library',
         component: MediaLibrary,
         meta: {
-          title: '媒体库',
-          description: '媒体条目、STRM 状态、元数据完整度与失效诊断。'
+          title: '媒体资产台账',
+          description: '从同步索引追踪源文件、入库状态、STRM、元数据与最近任务。'
         }
       },
       {
@@ -90,23 +90,23 @@ const routes = [
         component: PendingMedia,
         meta: {
           title: '待处理',
-          description: '识别失败、人工修正、重新入库与批量处理入口。'
+          description: '承接识别失败资源，完成人工修正、重新入库与忽略。'
         }
       },
       {
         path: 'sync-tasks',
         component: SyncTasks,
         meta: {
-          title: '同步任务',
-          description: '媒体源全量同步、增量同步与同步索引查看。'
+          title: '同步入库',
+          description: '媒体源全量/增量同步、索引查看与入库流水线触发。'
         }
       },
       {
         path: 'strm-config',
         component: StrmConfig,
         meta: {
-          title: 'STRM 生成',
-          description: 'STRM 配置、全量生成、定时任务与执行状态。'
+          title: 'STRM 配置',
+          description: '维护入库流水线使用的 STRM 输出规则、定时任务与生成配置。'
         }
       },
       {

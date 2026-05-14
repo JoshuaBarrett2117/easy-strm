@@ -174,6 +174,24 @@
 - 115 管理页浏览器验证：进入 `/dashboard/cloud115`，确认“账号池总览”加载成功，账号表格显示 `2` 行，截图目录 `debug/e2e-screenshots/global-browser-cloud115/20260507061019`。
 - 命令：`npm run e2e:organize-preview-cancel`
 - 结果：通过，输出 `ok=true`，截图 `debug/preview_cancel_20260507_141028.png`。
+
+## 2026-05-14 资源整理平台首版重构验证
+
+- 命令：`go test ./...`
+- 工作目录：`easy-strm`
+- 结果：通过，controller、dao、domain、service 测试均通过。
+- 命令：`npm run build`
+- 工作目录：`easy-strm-front`
+- 结果：通过，Vite 生产构建完成，`1653 modules transformed`。
+- 命令：`npm run e2e:resource-platform`
+- 工作目录：`easy-strm-front`
+- 结果：通过，输出 `ok=true`，覆盖 `sync`、`ledger`、`strm task link`、`pending identify and run`。
+- 命令：`docker compose config`
+- 工作目录：项目根目录
+- 结果：通过，Compose 配置可解析，已无 `version` 字段废弃警告。
+- 命令：`docker build -t easy-strm:codex-check .`
+- 工作目录：项目根目录
+- 结果：未执行成功，环境阻塞为 Docker Desktop Linux daemon 未运行：`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`。
 ## 2026-04-19
 
 - 命令：`npm run build`

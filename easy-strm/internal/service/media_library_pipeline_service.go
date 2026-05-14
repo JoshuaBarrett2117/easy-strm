@@ -36,6 +36,13 @@ type MediaLibraryPipelineResult struct {
 	Failed     int    `json:"failed"`
 }
 
+type MediaLibraryActionResult struct {
+	TaskID  string                 `json:"task_id"`
+	ItemID  int                    `json:"item_id"`
+	Message string                 `json:"message"`
+	Item    *domain.MediaSyncIndex `json:"item,omitempty"`
+}
+
 func NewMediaLibraryPipelineService(mediaSourceDAO *dao.MediaSourceDAO, indexDAO *dao.MediaSyncIndexDAO, pendingDAO *dao.PendingMediaDAO, strmConfigDAO *dao.StrmConfigDAO, strmFileDAO *dao.StrmFileDAO, systemConfigDAO *dao.SystemConfigDAO, tmdbService *TmdbService, taskService *TaskService, embyService *EmbyService) *MediaLibraryPipelineService {
 	return &MediaLibraryPipelineService{
 		mediaSourceDAO:  mediaSourceDAO,
@@ -200,6 +207,108 @@ func (s *MediaLibraryPipelineService) ProcessPendingItem(id int) (*MediaLibraryP
 		return result, err
 	}
 	_, _ = s.pendingDAO.UpdateStatus(id, "completed", "已重新入库", result.TaskID)
+	return result, nil
+}
+
+func (s *MediaLibraryPipelineService) GenerateStrmForItemTask(itemID int) (*MediaLibraryActionResult, error) {
+	item, err := s.indexDAO.GetByID(itemID)
+	if err != nil || item == nil {
+		return nil, fmt.Errorf("媒体库条目不存在")
+	}
+	taskID := fmt.Sprintf("library_strm_item_%d_%d", itemID, time.Now().UnixNano())
+	result := &MediaLibraryActionResult{
+		TaskID: taskID,
+		ItemID: itemID,
+	}
+	if s.taskService != nil {
+		_ = s.taskService.Create(taskID, string(domain.TaskTypeStrmGenerate), fmt.Sprintf("生成 STRM-%s", item.SourceName))
+		_, _ = s.taskService.CreateStep(taskID, "generate_strm", "生成 STRM", 10, item.SourceName)
+		_ = s.taskService.UpdateStatus(taskID, domain.TaskStatusRunning)
+		_ = s.taskService.StartStep(taskID, "generate_strm")
+	}
+	if err := s.GenerateStrmForItem(itemID, taskID); err != nil {
+		if s.taskService != nil {
+			_ = s.taskService.FailStep(taskID, "generate_strm", err.Error())
+			_ = s.taskService.UpdateProgress(taskID, 1, 1, 0, 1)
+			_ = s.taskService.SetError(taskID, err.Error())
+		}
+		return result, err
+	}
+	refreshed, _ := s.indexDAO.GetByID(itemID)
+	result.Item = refreshed
+	if refreshed != nil && strings.TrimSpace(refreshed.StrmPath) != "" {
+		result.Message = "STRM 已生成并写入资产台账"
+	} else {
+		result.Message = "资源无需生成 STRM 或未配置 STRM 输出目录"
+	}
+	if s.taskService != nil {
+		_ = s.taskService.CompleteStep(taskID, "generate_strm", result.Message)
+		_ = s.taskService.UpdateProgress(taskID, 1, 1, 1, 0)
+		_ = s.taskService.UpdateMetadata(taskID, map[string]interface{}{
+			"item_id":     itemID,
+			"source_id":   item.SourceID,
+			"source_name": item.SourceName,
+			"strm_path":   "",
+		})
+		if refreshed != nil {
+			_ = s.taskService.UpdateMetadata(taskID, map[string]interface{}{
+				"item_id":     itemID,
+				"source_id":   refreshed.SourceID,
+				"source_name": refreshed.SourceName,
+				"strm_path":   refreshed.StrmPath,
+			})
+		}
+		_ = s.taskService.UpdateStatus(taskID, domain.TaskStatusCompleted)
+	}
+	return result, nil
+}
+
+func (s *MediaLibraryPipelineService) RefreshMediaServerForItemTask(itemID int) (*MediaLibraryActionResult, error) {
+	item, err := s.indexDAO.GetByID(itemID)
+	if err != nil || item == nil {
+		return nil, fmt.Errorf("媒体库条目不存在")
+	}
+	taskID := fmt.Sprintf("library_refresh_item_%d_%d", itemID, time.Now().UnixNano())
+	result := &MediaLibraryActionResult{
+		TaskID: taskID,
+		ItemID: itemID,
+	}
+	if s.taskService != nil {
+		_ = s.taskService.Create(taskID, string(domain.TaskTypeEmbyRefresh), fmt.Sprintf("刷新媒体库-%s", item.SourceName))
+		_, _ = s.taskService.CreateStep(taskID, "refresh_server", "刷新媒体服务器", 10, item.SourceName)
+		_ = s.taskService.UpdateStatus(taskID, domain.TaskStatusRunning)
+		_ = s.taskService.StartStep(taskID, "refresh_server")
+	}
+	message, err := s.RefreshMediaServerForItem(itemID)
+	if err != nil {
+		if s.taskService != nil {
+			_ = s.taskService.FailStep(taskID, "refresh_server", err.Error())
+			_ = s.taskService.UpdateProgress(taskID, 1, 1, 0, 1)
+			_ = s.taskService.SetError(taskID, err.Error())
+		}
+		return result, err
+	}
+	if message == "" {
+		message = "媒体服务器未启用或未配置媒体库"
+		if s.taskService != nil {
+			_ = s.taskService.SkipStep(taskID, "refresh_server", message)
+		}
+	} else if s.taskService != nil {
+		_ = s.taskService.CompleteStep(taskID, "refresh_server", message)
+	}
+	result.Message = message
+	refreshed, _ := s.indexDAO.GetByID(itemID)
+	result.Item = refreshed
+	if s.taskService != nil {
+		_ = s.taskService.UpdateProgress(taskID, 1, 1, 1, 0)
+		_ = s.taskService.UpdateMetadata(taskID, map[string]interface{}{
+			"item_id":     itemID,
+			"source_id":   item.SourceID,
+			"source_name": item.SourceName,
+			"message":     message,
+		})
+		_ = s.taskService.UpdateStatus(taskID, domain.TaskStatusCompleted)
+	}
 	return result, nil
 }
 

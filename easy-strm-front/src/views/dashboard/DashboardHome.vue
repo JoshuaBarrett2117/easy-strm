@@ -2,18 +2,27 @@
   <div class="dashboard-home">
     <section class="hero-panel">
       <div class="hero-copy">
-        <div class="hero-kicker">Control Deck</div>
-        <h2>核心后端能力已接入，新首页围绕任务、媒体源与 STRM 工作流重组。</h2>
+        <div class="hero-kicker">Resource Hub</div>
+        <h2>以媒体资产台账为中心，串起同步、入库、STRM 与任务追踪。</h2>
         <p>
-          当前首页直接消费现有 `dashboard`、`tasks`、`network` 等接口，旧页面逻辑已经不再作为依赖。
+          首版主链路固定为媒体源同步索引、媒体库台账、入库流水线、任务中心和待处理修正。
         </p>
       </div>
 
       <div class="hero-actions">
-        <router-link to="/dashboard/tasks" class="hero-action hero-action-primary">打开任务中心</router-link>
-        <router-link to="/dashboard/media-manager" class="hero-action">进入文件管理</router-link>
-        <router-link to="/dashboard/strm-config" class="hero-action">管理 STRM 配置</router-link>
+        <router-link to="/dashboard/media-library" class="hero-action hero-action-primary">打开资产台账</router-link>
+        <router-link to="/dashboard/sync-tasks" class="hero-action">同步入库</router-link>
+        <router-link to="/dashboard/pending-media" class="hero-action">处理失败项</router-link>
+        <router-link to="/dashboard/tasks" class="hero-action">查看任务中心</router-link>
       </div>
+    </section>
+
+    <section class="workflow-strip">
+      <article v-for="step in workflowSteps" :key="step.title" class="workflow-step">
+        <span>{{ step.index }}</span>
+        <strong>{{ step.title }}</strong>
+        <small>{{ step.desc }}</small>
+      </article>
     </section>
 
     <section class="metric-grid">
@@ -29,7 +38,7 @@
         <div class="surface-header">
           <div>
             <div class="surface-kicker">Task Flow</div>
-            <h3>任务态势</h3>
+            <h3>资源整理任务</h3>
           </div>
           <router-link to="/dashboard/tasks" class="surface-link">查看全部</router-link>
         </div>
@@ -71,9 +80,9 @@
         <div class="surface-header">
           <div>
             <div class="surface-kicker">Source</div>
-            <h3>媒体源概况</h3>
+            <h3>同步入口</h3>
           </div>
-          <router-link to="/dashboard/media-manager" class="surface-link">进入管理</router-link>
+          <router-link to="/dashboard/sync-tasks" class="surface-link">进入同步</router-link>
         </div>
 
         <div class="stat-stack">
@@ -152,11 +161,11 @@
         <div class="surface-header">
           <div>
             <div class="surface-kicker">Trend</div>
-            <h3>近 7 天任务趋势</h3>
+            <h3>近 7 天整理趋势</h3>
           </div>
           <div class="trend-legend">
             <span><i class="legend-dot legend-dot-primary"></i>STRM</span>
-            <span><i class="legend-dot legend-dot-secondary"></i>整理/监控</span>
+            <span><i class="legend-dot legend-dot-secondary"></i>入库/整理</span>
           </div>
         </div>
 
@@ -205,7 +214,7 @@
             <div class="surface-kicker">Recent Ingest</div>
             <h3>最近入库</h3>
           </div>
-          <router-link to="/dashboard/tasks" class="surface-link">按任务查看</router-link>
+          <router-link to="/dashboard/media-library" class="surface-link">查看台账</router-link>
         </div>
 
         <div v-if="recentIngest.length === 0" class="empty-state">暂无最近入库记录</div>
@@ -252,6 +261,13 @@ const probes = ref([])
 const probeLoading = ref(false)
 const strmTrend = ref({ points: [] })
 const archiveTrend = ref({ points: [] })
+
+const workflowSteps = [
+  { index: '01', title: '媒体源', desc: '本地与 115 统一接入' },
+  { index: '02', title: '同步索引', desc: '全量或增量扫描资源' },
+  { index: '03', title: '资产台账', desc: '追踪识别、STRM 与元数据' },
+  { index: '04', title: '任务闭环', desc: '失败进入待处理修正' }
+]
 
 const stats = computed(() => ({
   accounts: {
@@ -301,12 +317,12 @@ const monitor = computed(() => ({
 const metricCards = computed(() => {
   return [
     {
-      label: 'STRM 文件',
+      label: 'STRM 资产',
       value: stats.value.strm_files.total || 0,
       foot: stats.value.strm_files.last_generation_time ? `最近生成 ${formatDateTime(stats.value.strm_files.last_generation_time)}` : '暂无最近生成记录'
     },
     {
-      label: '115 账号',
+      label: '云盘账号',
       value: stats.value.accounts.total || 0,
       foot: `可用 ${stats.value.accounts.active || 0} / 冷却 ${stats.value.accounts.cooling || 0}`
     },
@@ -316,7 +332,7 @@ const metricCards = computed(() => {
       foot: `今日完成 ${stats.value.tasks.completed_today || 0} 项`
     },
     {
-      label: '已启用媒体源',
+      label: '启用媒体源',
       value: stats.value.media_sources.enabled || 0,
       foot: `总数 ${stats.value.media_sources.total || 0}`
     }
@@ -438,6 +454,7 @@ onMounted(async () => {
 }
 
 .hero-panel,
+.workflow-step,
 .surface-card,
 .metric-card {
   background: rgba(255, 252, 247, 0.84);
@@ -447,6 +464,7 @@ onMounted(async () => {
 }
 
 :global(.dark) .hero-panel,
+:global(.dark) .workflow-step,
 :global(.dark) .surface-card,
 :global(.dark) .metric-card {
   background: rgba(14, 21, 32, 0.86);
@@ -521,6 +539,43 @@ onMounted(async () => {
 .hero-action-primary {
   background: linear-gradient(135deg, #1f6f78, #f2a65a);
   color: #fff;
+}
+
+.workflow-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.workflow-step {
+  display: grid;
+  gap: 8px;
+  min-height: 128px;
+  padding: 20px;
+  border-radius: 18px;
+}
+
+.workflow-step span {
+  color: #1f6f78;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.workflow-step strong {
+  font-size: 20px;
+}
+
+.workflow-step small {
+  color: #776c60;
+  line-height: 1.6;
+}
+
+:global(.dark) .workflow-step span {
+  color: #77c3d4;
+}
+
+:global(.dark) .workflow-step small {
+  color: #8fa1b5;
 }
 
 .metric-grid {
@@ -890,6 +945,7 @@ onMounted(async () => {
 
 @media (max-width: 860px) {
   .hero-panel,
+  .workflow-strip,
   .metric-grid,
   .main-grid,
   .task-panels {

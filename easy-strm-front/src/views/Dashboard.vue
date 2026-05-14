@@ -51,6 +51,10 @@
         </div>
 
         <div class="header-actions">
+          <router-link to="/dashboard/media-library" class="header-chip">
+            <el-icon><Film /></el-icon>
+            <span>资产台账</span>
+          </router-link>
           <router-link to="/dashboard/tasks" class="header-chip">
             <el-icon><List /></el-icon>
             <span>任务中心</span>
@@ -107,31 +111,31 @@ const isMobile = ref(window.innerWidth <= 960)
 
 const menuSections = [
   {
-    title: '总览',
+    title: '资源整理',
     items: [
-      { path: '/dashboard/home', label: '仪表盘', desc: '运行概况与快捷入口', icon: HomeFilled },
-      { path: '/dashboard/tasks', label: '任务中心', desc: '任务队列与执行详情', icon: List },
+      { path: '/dashboard/home', label: '首页', desc: '资源整理总览与快捷入口', icon: HomeFilled },
+      { path: '/dashboard/media-library', label: '资产台账', desc: '资源状态、STRM 与任务追踪', icon: Film },
+      { path: '/dashboard/sync-tasks', label: '同步入库', desc: '同步索引与入库流水线', icon: Refresh },
+      { path: '/dashboard/pending-media', label: '待处理', desc: '识别失败与人工修正', icon: Tickets },
+      { path: '/dashboard/tasks', label: '任务中心', desc: '同步、入库、刷新任务详情', icon: List }
+    ]
+  },
+  {
+    title: '支撑配置',
+    items: [
+      { path: '/dashboard/media-manager', label: '文件工作台', desc: '手动浏览、识别、整理', icon: FolderOpened },
+      { path: '/dashboard/strm-config', label: 'STRM 配置', desc: '流水线输出规则与定时任务', icon: DataLine },
+      { path: '/dashboard/cloud115', label: '115 云管理', desc: '账号、配额与能力接入', icon: Files },
+      { path: '/dashboard/category-strategy', label: '整理规则', desc: '分类策略与归档规则', icon: Tools },
+      { path: '/dashboard/settings', label: '系统设置', desc: 'TMDB、Emby 与系统参数', icon: Setting }
+    ]
+  },
+  {
+    title: '运维观察',
+    items: [
       { path: '/dashboard/system-logs', label: '系统日志', desc: '日志文件与保留策略', icon: Document },
       { path: '/dashboard/network', label: '网络测试', desc: '连通性探测与错误定位', icon: Connection },
-      { path: '/dashboard/cache', label: '缓存管理', desc: '查看缓存命中面与手动清理', icon: Brush }
-    ]
-  },
-  {
-    title: '业务',
-    items: [
-      { path: '/dashboard/media-manager', label: '文件管理', desc: '媒体源浏览与整理执行', icon: FolderOpened },
-      { path: '/dashboard/media-library', label: '媒体库', desc: '条目台账与健康诊断', icon: Film },
-      { path: '/dashboard/pending-media', label: '待处理', desc: '识别失败与人工修正', icon: Tickets },
-      { path: '/dashboard/sync-tasks', label: '同步任务', desc: '全量/增量同步与索引', icon: Refresh },
-      { path: '/dashboard/strm-config', label: 'STRM 生成', desc: '配置与任务生成入口', icon: DataLine },
-      { path: '/dashboard/cloud115', label: '115 云管理', desc: '账号、配额与能力接入', icon: Files },
-      { path: '/dashboard/category-strategy', label: '整理规则', desc: '分类策略与规则维护', icon: Tools }
-    ]
-  },
-  {
-    title: '系统',
-    items: [
-      { path: '/dashboard/settings', label: '系统设置', desc: 'TMDB、Emby 与系统参数', icon: Setting }
+      { path: '/dashboard/cache', label: '缓存管理', desc: '缓存命中面与手动清理', icon: Brush }
     ]
   }
 ]

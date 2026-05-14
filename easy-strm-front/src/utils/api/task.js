@@ -4,11 +4,6 @@ import { api } from './request'
  * 任务管理 API
  */
 
-// 获取所有任务
-export const getTaskList = () => {
-  return api.get('/strm/task/all')
-}
-
 // 获取统一任务列表（按优先级排序）
 export const getUnifiedTaskList = () => {
   return api.get('/tasks/unified')
@@ -32,9 +27,4 @@ export const cancelTask = (taskId) => {
 // 恢复已取消或失败的任务
 export const resumeTask = (taskId) => {
   return api.post(`/tasks/${taskId}/resume`)
-}
-
-// 删除任务
-export const deleteTask = (taskId) => {
-  return api.delete(`/strm/task/${taskId}`, { params: { task_id: taskId } })
 }

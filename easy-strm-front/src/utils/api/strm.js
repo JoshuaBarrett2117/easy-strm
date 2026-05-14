@@ -20,10 +20,6 @@ export const deleteStrmConfig = (id) => {
   return api.delete(`/strm/config/${id}`)
 }
 
-export const getStrmFilesByConfigId = (id) => {
-  return api.get(`/strm/config/${id}/files`)
-}
-
 /**
  * 从整理结果生成 STRM 文件
  * 整理完成后触发，根据媒体源和目标路径自动匹配 STRM 配置并异步生成
