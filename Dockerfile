@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # ==================== 构建阶段 ====================
 
 # 阶段1: 构建前端
@@ -6,7 +7,12 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /app/frontend
 
 COPY easy-strm-front/package*.json ./
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm \
+    npm config set fetch-retries 5 && \
+    npm config set fetch-retry-factor 2 && \
+    npm config set fetch-retry-mintimeout 10000 && \
+    npm config set fetch-retry-maxtimeout 120000 && \
+    npm ci --prefer-offline --no-audit --no-fund
 
 COPY easy-strm-front/ ./
 RUN npm run build
