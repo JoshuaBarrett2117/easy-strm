@@ -20,6 +20,14 @@ export const deleteStrmConfig = (id) => {
   return api.delete(`/strm/config/${id}`)
 }
 
+export const generateFullStrmConfig = (id) => {
+  return api.post(`/strm/config/${id}/generate/full`)
+}
+
+export const getStrmTaskStatus = (taskId) => {
+  return api.get(`/strm/task/${taskId}`)
+}
+
 /**
  * 从整理结果生成 STRM 文件
  * 整理完成后触发，根据媒体源和目标路径自动匹配 STRM 配置并异步生成

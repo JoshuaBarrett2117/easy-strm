@@ -1,4 +1,4 @@
-﻿package controller
+package controller
 
 import "testing"
 
@@ -46,4 +46,3 @@ func TestNormalizeDeleteFileIDs(t *testing.T) {
 		})
 	}
 }
-

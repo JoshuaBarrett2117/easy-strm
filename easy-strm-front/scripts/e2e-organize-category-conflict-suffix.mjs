@@ -55,18 +55,18 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout: 20000 });
 }
 
 async function findDialogByTitle(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.locator('[role="dialog"]').filter({ hasText: title }).last();
   await dialog.waitFor({ timeout: 15000 });
   return dialog;
 }
 
 function labeledField(dialog, label) {
-  return dialog.locator(".el-form-item").filter({ hasText: label });
+  return dialog.locator(".n-form-item").filter({ hasText: label });
 }
 
 async function setInputValue(locator, value) {
@@ -123,7 +123,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-ORG-CAT-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -187,33 +187,33 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: mediaSourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: mediaSourceName }).first();
     await sourceRow.waitFor({ timeout: 15000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
-    const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: "Codex.Category.Conflict.Release.mkv" }).first();
+    const fileRow = browserDialog.locator("tbody tr").filter({ hasText: "Codex.Category.Conflict.Release.mkv" }).first();
     await fileRow.waitFor({ timeout: 15000 });
-    await fileRow.locator(".el-checkbox").click();
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await fileRow.locator('[role="checkbox"]').click();
+    await browserDialog.locator("button").filter({ hasText: "批量整理" }).click();
 
     const organizeDialog = await findDialogByTitle(page, "批量整理");
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成");
 
-    await organizeDialog.locator(".el-table__row .el-button").filter({ hasText: "手动识别" }).first().click();
+    await organizeDialog.locator("tbody tr button").filter({ hasText: "手动识别" }).first().click();
     const manualDialog = await findDialogByTitle(page, "手动识别修正");
-    await manualDialog.locator(".dialog-footer .el-button").filter({ hasText: "从 TMDB 选择" }).click();
+    await manualDialog.locator("button").filter({ hasText: "从 TMDB 选择" }).click();
 
     const tmdbDialog = await findDialogByTitle(page, "TMDB 手动搜索");
-    await setInputValue(tmdbDialog.locator(".tmdb-search input").first(), "Breaking Bad");
-    await tmdbDialog.locator(".search-type-select").click();
-    await page.locator(".el-select-dropdown__item").filter({ hasText: "剧集" }).last().click();
-    await tmdbDialog.locator(".search-btn").click();
+    await setInputValue(tmdbDialog.locator('input[placeholder="输入电影或剧集名称搜索"]').first(), "Breaking Bad");
+    await tmdbDialog.locator(".n-select").click();
+    await page.locator(".n-base-select-option").filter({ hasText: "剧集" }).last().click();
+    await tmdbDialog.getByRole("button", { name: "搜索" }).click();
     await page.waitForTimeout(2500);
 
-    const resultCards = tmdbDialog.locator(".result-item");
+    const resultCards = tmdbDialog.getByTestId("tmdb-result-item");
     const resultCount = await resultCards.count();
     if (resultCount === 0) {
       throw new Error("TMDB 搜索未返回 Breaking Bad 结果");
@@ -223,7 +223,7 @@ async function run() {
     await manualDialog.waitFor({ state: "visible", timeout: 15000 });
 
     const titleInputValue = await labeledField(manualDialog, "标题").locator("input").first().inputValue();
-    const tmdbIdValue = await labeledField(manualDialog, "TMDB ID").locator(".el-input-number input").first().inputValue();
+    const tmdbIdValue = await labeledField(manualDialog, "TMDB ID").locator(".n-input-number input").first().inputValue();
     const tmdbBackfillPass = titleInputValue.trim() !== "" && tmdbIdValue.trim() === "1396";
     addCase(
       "TC-ORG-CAT-001",
@@ -233,9 +233,9 @@ async function run() {
       await saveShot(page, "02_tmdb_selected")
     );
 
-    await setInputValue(labeledField(manualDialog, "季数").locator(".el-input-number input").first(), 1);
-    await setInputValue(labeledField(manualDialog, "集数").locator(".el-input-number input").first(), 2);
-    await manualDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "应用到预览" }).click();
+    await setInputValue(labeledField(manualDialog, "季数").locator(".n-input-number input").first(), 1);
+    await setInputValue(labeledField(manualDialog, "集数").locator(".n-input-number input").first(), 2);
+    await manualDialog.locator("button").filter({ hasText: "应用到预览" }).click();
     await manualDialog.waitFor({ state: "hidden", timeout: 25000 });
     await waitForMessage(page, "预览完成");
     const previewText = await waitForPreviewReady(organizeDialog, "绝命毒师");
@@ -254,9 +254,9 @@ async function run() {
     const conflictFile = path.join(conflictDir, "绝命毒师 - S01E02.mkv");
     await fs.writeFile(conflictFile, "existing conflict\n", "utf8");
 
-    await organizeDialog.locator(".el-form-item").filter({ hasText: "冲突策略" }).locator(".el-select").click();
-    await page.locator(".el-select-dropdown__item").filter({ hasText: "追加序号" }).last().click();
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator(".n-form-item").filter({ hasText: "冲突策略" }).locator(".n-select").click();
+    await page.locator(".n-base-select-option").filter({ hasText: "追加序号" }).last().click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成");
     const conflictPreviewText = await waitForPreviewReady(organizeDialog, "绝命毒师");
     const conflictPreviewPass = conflictPreviewText.includes("存在冲突");
@@ -268,7 +268,7 @@ async function run() {
       await saveShot(page, "04_conflict_preview")
     );
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "执行整理" }).click();
     await waitForMessage(page, "整理完成");
     await page.waitForTimeout(1200);
 

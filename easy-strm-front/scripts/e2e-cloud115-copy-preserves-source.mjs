@@ -57,12 +57,12 @@ async function saveShot(page, name) {
 }
 
 async function waitForMessage(page, text, timeout = 60000) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout });
 }
 
 async function findDialogByTitle(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.locator('[role="dialog"]').filter({ hasText: title }).last();
   await dialog.waitFor({ timeout: 20000 });
   return dialog;
 }
@@ -131,7 +131,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-CLOUD-COPY-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -180,33 +180,33 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: sourceName }).first();
     await sourceRow.waitFor({ timeout: 20000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 20000 });
-    const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: candidateFile.name }).first();
+    const fileRow = browserDialog.locator("tbody tr").filter({ hasText: candidateFile.name }).first();
     await fileRow.waitFor({ timeout: 20000 });
     const selectedFileName = candidateFile.name;
     if (!selectedFileName) {
       throw new Error("未在 115 浏览器中找到可用于 copy 测试的视频文件");
     }
-    await fileRow.locator(".el-checkbox").click();
+    await fileRow.locator('[role="checkbox"]').click();
     addCase("TC-CLOUD-COPY-UI-001", "文件浏览器可选中待整理的 115 文件", "PASS", selectedFileName, await saveShot(page, "02_source_browser"));
 
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await browserDialog.locator("button").filter({ hasText: "批量整理" }).click();
     const organizeDialog = await findDialogByTitle(page, "批量整理");
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成", 90000);
 
-    const previewRow = organizeDialog.locator(".el-table__body .el-table__row").first();
+    const previewRow = organizeDialog.locator("tbody tr").first();
     await previewRow.waitFor({ timeout: 20000 });
     const previewText = (await organizeDialog.textContent()) || "";
     const originalPreviewName = ((await previewRow.locator("td").nth(2).textContent()) || "").replace(/\s+/g, " ").trim();
     const extension = path.extname(selectedFileName) || ".mp4";
     const manualNewName = `COPY-PROBE-${stamp}${extension}`;
-    await previewRow.locator(".edit-name-btn").click();
+    await previewRow.getByRole("button", { name: "编辑新文件名" }).click();
     const editInput = previewRow.locator("input").first();
     await editInput.fill(manualNewName);
     await editInput.press("Enter");
@@ -224,7 +224,7 @@ async function run() {
       throw new Error(`预览手动改名未生效: source=${selectedFileName} preview=${previewNewName}`);
     }
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "执行整理" }).click();
     await waitForMessage(page, "整理完成", 180000);
     const resultDialog = await findDialogByTitle(page, "整理结果");
     const resultText = (await resultDialog.textContent()) || "";

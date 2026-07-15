@@ -229,21 +229,21 @@ async function main() {
 
     await page.waitForURL("**/dashboard/media-library?source_id=1");
     await page.getByRole("heading", { name: "媒体资产台账" }).waitFor();
-    const ledgerRow = page.locator(".el-table__row").filter({ hasText: "Movie.Ready.2026.mkv" }).first();
+    const ledgerRow = page.getByRole("row").filter({ hasText: "Movie.Ready.2026.mkv" });
     await ledgerRow.getByRole("button", { name: "STRM" }).click();
     await page.getByText("library_strm_item_101_e2e").first().waitFor();
     await page.getByRole("button", { name: "查看任务" }).click();
 
     await page.waitForURL("**/dashboard/tasks?task_id=library_strm_item_101_e2e");
-    await page.getByText("生成 STRM-Movie.Ready.2026.mkv").waitFor();
+    await page.getByText("生成 STRM-Movie.Ready.2026.mkv").first().waitFor();
 
     await page.goto(`${FRONTEND_URL}/dashboard/pending-media?source_id=1`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "待处理资源" }).waitFor();
-    const pendingRow = page.locator(".el-table__row").filter({ hasText: "Unknown Show" }).first();
+    const pendingRow = page.getByRole("row").filter({ hasText: "Unknown Show" });
     await pendingRow.getByRole("button", { name: "修正" }).click();
-    const dialog = page.locator(".el-dialog").last();
-    await dialog.locator("input").nth(0).fill("Unknown Show");
-    await dialog.locator("input").nth(1).fill("12345");
+    const dialog = page.getByRole("dialog").filter({ hasText: "修正识别" });
+    await dialog.locator(".n-form-item").filter({ hasText: "标题" }).locator("input").fill("Unknown Show");
+    await dialog.locator(".n-form-item").filter({ hasText: "TMDB ID" }).locator("input").fill("12345");
     await dialog.getByRole("button", { name: "保存并入库" }).click();
     await page.getByText("library_pipeline_pending_301").waitFor();
 

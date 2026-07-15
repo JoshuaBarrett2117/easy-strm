@@ -38,9 +38,9 @@ async function main() {
     const page = await context.newPage();
 
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
-    await page.locator('input[type="text"]').first().fill("admin");
-    await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByPlaceholder("用户名").fill("admin");
+    await page.getByPlaceholder("密码").fill("admin");
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
 
     const token = await page.evaluate(() => localStorage.getItem("token"));
@@ -105,35 +105,32 @@ async function main() {
     });
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const row = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const row = page.getByRole("row").filter({ hasText: sourceName });
     await row.waitFor({ timeout: 15000 });
-    await row.locator("button").first().click();
+    await row.getByRole("button", { name: "浏览" }).click();
 
-    const browserDialog = page.locator(".el-dialog").last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
 
-    await browserDialog.locator(".el-table__body-wrapper tbody .el-checkbox").first().click();
-    await browserDialog.locator(".organize-primary-btn").click();
+    const fileRow = browserDialog.getByRole("row").filter({ hasText: "Movie.Cancel.2024.1080p.mkv" });
+    await fileRow.getByRole("checkbox").click();
+    await browserDialog.getByRole("button", { name: /批量整理/ }).click();
 
-    let organizeDialog = page.locator(".el-dialog").last();
+    let organizeDialog = page.getByRole("dialog").filter({ hasText: "批量整理工作流" });
     await organizeDialog.waitFor({ timeout: 15000 });
 
-    const previewButton = organizeDialog.locator(".dialog-footer button").nth(1);
+    const previewButton = organizeDialog.getByRole("button", { name: "刷新预览" });
     await previewButton.click();
 
-    await page.waitForFunction(() => {
-      const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
-      const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
-      if (!dialog) return false;
-      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button"));
-      return footerButtons[1]?.classList.contains("is-loading");
-    }, { timeout: 10000 });
-
+    const pollingDeadline = Date.now() + 10000;
     while (statusPollCount < 2) {
+      if (Date.now() > pollingDeadline) {
+        fail(`预览状态轮询未启动，当前计数 ${statusPollCount}`);
+      }
       await page.waitForTimeout(300);
     }
 
-    await organizeDialog.locator(".dialog-footer button").first().click();
+    await organizeDialog.getByRole("button", { name: "取消" }).click();
     await page.waitForTimeout(2600);
     const countAfterClose = statusPollCount;
     await page.waitForTimeout(2200);
@@ -141,37 +138,35 @@ async function main() {
       fail(`关闭弹窗后轮询未停止，关闭后计数 ${countAfterClose}，当前 ${statusPollCount}`);
     }
 
-    const browserDialogAgain = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialogAgain = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialogAgain.waitFor({ timeout: 15000 });
 
-    await browserDialogAgain.locator(".organize-primary-btn").click();
-    organizeDialog = page.locator(".el-dialog").last();
+    await browserDialogAgain.getByRole("button", { name: /批量整理/ }).click();
+    organizeDialog = page.getByRole("dialog").filter({ hasText: "批量整理工作流" });
     await organizeDialog.waitFor({ timeout: 15000 });
 
     await page.waitForFunction(() => {
-      const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
-      const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+      const dialog = dialogs.find((item) => item.textContent?.includes("批量整理工作流"));
       if (!dialog) return false;
-      const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
-      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button"));
-      return !loadingMask && !footerButtons[1]?.classList.contains("is-loading");
+      const button = Array.from(dialog.querySelectorAll("button"))
+        .find((item) => item.textContent?.includes("刷新预览"));
+      return Boolean(button && !button.disabled);
     }, { timeout: 15000 });
 
     const dialogState = await organizeDialog.evaluate((dialog) => {
-      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button")).map((button) => ({
-        text: button.textContent || "",
-        className: button.className
-      }));
+      const refreshButton = Array.from(dialog.querySelectorAll("button"))
+        .find((button) => button.textContent?.includes("刷新预览"));
       return {
-        hasLoadingMask: Boolean(dialog.querySelector(".organize-container .el-loading-mask")),
-        refreshButtonClass: footerButtons[1]?.className || ""
+        hasLoadingMask: Boolean(dialog.querySelector('[aria-busy="true"]')),
+        refreshButtonDisabled: Boolean(refreshButton?.disabled)
       };
     });
 
     if (dialogState.hasLoadingMask) {
       fail("重新打开整理弹窗后仍残留 loading 遮罩");
     }
-    if (dialogState.refreshButtonClass.includes("is-loading")) {
+    if (dialogState.refreshButtonDisabled) {
       fail("重新打开整理弹窗后刷新预览按钮仍处于 loading 状态");
     }
 

@@ -1,107 +1,117 @@
-﻿<!--
+<!--
   MediaManager - 媒体源管理主页面
   负责协调文件浏览、TMDB 识别、重命名预览、批量整理、手动识别修正与整理结果展示等子对话框。
 -->
 <template>
-  <div class="media-manager-container">
-    <section class="workbench-hero">
-      <div class="hero-copy">
-        <el-tag type="success" effect="dark" round>媒体工作台</el-tag>
-        <h1>围绕媒体源完成浏览、识别、整理与刮削</h1>
-        <p>
-          旧页面逻辑已经被收束到新的工作流入口中，核心后端能力仍然通过原有接口执行。
-          先选择媒体源，再进入文件浏览器完成识别、批量整理或刮削。
+  <div class="space-y-4">
+    <!-- 工作台头部 -->
+    <section class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] lg:p-6">
+      <div>
+        <n-tag type="success" size="small" round>媒体工作台</n-tag>
+        <h1 class="mt-3 text-xl font-bold text-slate-800 dark:text-white lg:text-2xl">
+          围绕媒体源完成浏览、识别、整理与刮削
+        </h1>
+        <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400 dark:text-slate-500">
+          先选择媒体源，再进入文件浏览器完成识别、批量整理或刮削。核心后端能力均通过原有接口执行。
         </p>
-        <div class="hero-actions">
-          <el-button type="primary" @click="sourceListRef?.handleAdd?.()">
-            <el-icon><Plus /></el-icon>
+        <div class="mt-5 flex flex-wrap items-center gap-2">
+          <n-button type="primary" @click="sourceListRef?.handleAdd?.()">
+            <template #icon>
+              <n-icon :component="AddOutline" />
+            </template>
             新增媒体源
-          </el-button>
-          <el-button @click="openCurrentSourceBrowser" :disabled="!currentSource">
-            <el-icon><FolderOpened /></el-icon>
+          </n-button>
+          <n-button :disabled="!currentSource" @click="openCurrentSourceBrowser">
+            <template #icon>
+              <n-icon :component="FolderOpenOutline" />
+            </template>
             打开当前媒体源
-          </el-button>
-          <el-button type="success" plain @click="handleOpenOrganize" :disabled="selectedFiles.length === 0">
-            <el-icon><Files /></el-icon>
+          </n-button>
+          <n-button type="success" ghost :disabled="selectedFiles.length === 0" @click="handleOpenOrganize">
+            <template #icon>
+              <n-icon :component="FileTrayFullOutline" />
+            </template>
             批量整理
-          </el-button>
+          </n-button>
         </div>
       </div>
-      <div class="hero-panel">
-        <div class="hero-panel__header">
-          <span>当前工作上下文</span>
-          <el-tag :type="currentSource ? 'success' : 'info'" round>
+
+      <!-- 当前工作上下文 -->
+      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-ink-800/60">
+        <div class="mb-3 flex items-center justify-between gap-3">
+          <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">当前工作上下文</span>
+          <n-tag :type="currentSource ? 'success' : 'default'" size="small" round>
             {{ currentSource ? '已锁定媒体源' : '待选择媒体源' }}
-          </el-tag>
+          </n-tag>
         </div>
-        <div class="context-list">
-          <div class="context-item">
-            <span>媒体源</span>
-            <strong>{{ currentSource?.name || '未选择' }}</strong>
-          </div>
-          <div class="context-item">
-            <span>源类型</span>
-            <strong>{{ currentSource ? (isCloud115Source ? '115 云盘' : '本地存储') : '未选择' }}</strong>
-          </div>
-          <div class="context-item">
-            <span>当前路径</span>
-            <strong>{{ currentWorkbenchPath }}</strong>
-          </div>
-          <div class="context-item">
-            <span>选中文件</span>
-            <strong>{{ selectedFiles.length }} 项</strong>
+        <div class="space-y-2">
+          <div
+            v-for="ctx in contextItems"
+            :key="ctx.label"
+            class="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm dark:bg-ink-900/70"
+          >
+            <span class="shrink-0 text-slate-400 dark:text-slate-500">{{ ctx.label }}</span>
+            <strong class="truncate font-semibold text-slate-700 dark:text-slate-200">{{ ctx.value }}</strong>
           </div>
         </div>
       </div>
     </section>
 
-    <section class="metric-grid">
-      <article v-for="card in mediaSummaryCards" :key="card.label" class="metric-card">
-        <span class="metric-card__label">{{ card.label }}</span>
-        <strong class="metric-card__value">{{ card.value }}</strong>
-        <p class="metric-card__hint">{{ card.hint }}</p>
-      </article>
+    <!-- 概览指标 -->
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in mediaSummaryCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.hint"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
     </section>
 
-    <section class="command-grid">
-      <article class="command-card">
-        <div class="command-card__header">
-          <h2>快捷动作</h2>
-          <span>围绕当前选择直接进入关键流程</span>
-        </div>
-        <div class="command-list">
-          <button class="command-button" type="button" @click="openCurrentSourceBrowser" :disabled="!currentSource">
-            <span>浏览文件</span>
-            <small>进入当前媒体源目录</small>
-          </button>
-          <button class="command-button" type="button" @click="handleBatchIdentify" :disabled="selectedFiles.length === 0">
-            <span>批量识别</span>
-            <small>调用 TMDB 批量识别</small>
-          </button>
-          <button class="command-button" type="button" @click="handleBatchRename" :disabled="selectedFiles.length === 0 || isCloud115Source">
-            <span>批量重命名</span>
-            <small>生成重命名预览并执行</small>
-          </button>
-          <button class="command-button" type="button" @click="handleBatchScrape" :disabled="selectedFiles.length === 0 || isCloud115Source">
-            <span>批量刮削</span>
-            <small>为视频文件生成 NFO</small>
+    <!-- 快捷动作 + 本轮选择 -->
+    <section class="grid gap-4 lg:grid-cols-2">
+      <PageCard title="快捷动作" subtitle="围绕当前选择直接进入关键流程">
+        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            v-for="action in quickActions"
+            :key="action.label"
+            type="button"
+            class="flex flex-col gap-1 rounded-xl border border-slate-200 px-4 py-3 text-left transition-colors enabled:hover:border-cyan-400/60 enabled:hover:bg-cyan-500/5 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
+            :disabled="action.disabled"
+            @click="action.handler"
+          >
+            <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">{{ action.label }}</span>
+            <small class="text-xs text-slate-400 dark:text-slate-500">{{ action.hint }}</small>
           </button>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="command-card">
-        <div class="command-card__header">
-          <h2>本轮选择</h2>
-          <span>{{ selectedFiles.length ? '已准备好执行批量操作' : '还没有选择文件' }}</span>
-        </div>
-        <div v-if="selectedFiles.length" class="selection-list">
-          <div v-for="item in selectionPreview" :key="item.id || item.path || item.name" class="selection-item">
-            <strong>{{ item.name || item.file_name || '未命名文件' }}</strong>
-            <span>{{ item.is_dir ? '目录' : getFileType(item.name || item.file_name) }}</span>
+      <PageCard title="本轮选择" :subtitle="selectedFiles.length ? '已准备好执行批量操作' : '还没有选择文件'">
+        <div v-if="selectedFiles.length" class="space-y-2">
+          <div
+            v-for="item in selectionPreview"
+            :key="item.id || item.path || item.name"
+            class="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-ink-800/60"
+          >
+            <strong class="truncate font-medium text-slate-700 dark:text-slate-200">
+              {{ item.name || item.file_name || '未命名文件' }}
+            </strong>
+            <n-tag size="small" :bordered="false">
+              {{ item.is_dir ? '目录' : getFileType(item.name || item.file_name) }}
+            </n-tag>
           </div>
+          <p v-if="selectedFiles.length > selectionPreview.length" class="text-xs text-slate-400 dark:text-slate-500">
+            等共 {{ selectedFiles.length }} 项…
+          </p>
         </div>
-        <el-empty v-else description="进入文件浏览后选择文件，即可在这里看到本轮操作对象。" :image-size="90" />
-      </article>
+        <EmptyState
+          v-else
+          title="暂无选中文件"
+          description="进入文件浏览后选择文件，即可在这里看到本轮操作对象。"
+        />
+      </PageCard>
     </section>
 
     <MediaSourceList ref="sourceListRef" @browse="handleBrowseFiles" />
@@ -148,27 +158,28 @@
       @execute-success="handleRenameSuccess"
     />
 
-    <el-dialog
-      v-model="singleRenameDialogVisible"
+    <!-- 单文件重命名 -->
+    <n-modal
+      v-model:show="singleRenameDialogVisible"
+      preset="card"
       title="重命名单个文件"
-      width="500px"
-      append-to-body
+      class="w-[92vw] max-w-lg"
     >
-      <el-form :model="singleRenameForm" label-width="100px">
-        <el-form-item label="原文件名">
-          <el-input v-model="singleRenameForm.original_name" disabled />
-        </el-form-item>
-        <el-form-item label="新文件名">
-          <el-input v-model="singleRenameForm.new_name" placeholder="请输入新文件名" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="singleRenameDialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleExecuteSingleRename" :loading="singleRenameLoading">确定</el-button>
-        </span>
+      <n-form :model="singleRenameForm" label-placement="top">
+        <n-form-item label="原文件名">
+          <n-input v-model:value="singleRenameForm.original_name" disabled />
+        </n-form-item>
+        <n-form-item label="新文件名">
+          <n-input v-model:value="singleRenameForm.new_name" placeholder="请输入新文件名" />
+        </n-form-item>
+      </n-form>
+      <template #action>
+        <div class="flex justify-end gap-2">
+          <n-button @click="singleRenameDialogVisible = false">取消</n-button>
+          <n-button type="primary" :loading="singleRenameLoading" @click="handleExecuteSingleRename">确定</n-button>
+        </div>
       </template>
-    </el-dialog>
+    </n-modal>
 
     <OrganizeDialog
       ref="organizeDialogRef"
@@ -202,9 +213,20 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, FolderOpened, Files } from '@element-plus/icons-vue'
+import { NButton, NTag, NIcon, NModal, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
+import {
+  AddOutline,
+  FolderOpenOutline,
+  FileTrayFullOutline,
+  ServerOutline,
+  LocateOutline,
+  CheckboxOutline,
+  OptionsOutline
+} from '@vicons/ionicons5'
 
+import PageCard from '../components/common/PageCard.vue'
+import StatCard from '../components/common/StatCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 import MediaSourceList from '../components/media/MediaSourceList.vue'
 import FileBrowser from '../components/media/FileBrowser.vue'
 import TmdbCandidatesDialog from '../components/media/TmdbCandidatesDialog.vue'
@@ -227,6 +249,8 @@ import {
   scrapeFiles,
   scrapeDirectoryFiles
 } from '../utils/api/media'
+
+const message = useMessage()
 
 const sourceListRef = ref(null)
 const fileBrowserRef = ref(null)
@@ -251,6 +275,13 @@ const currentWorkbenchPath = computed(() => {
   return fileBrowserRef.value?.getCurrentDisplayPath?.() || currentSource.value.path || '/'
 })
 
+const contextItems = computed(() => [
+  { label: '媒体源', value: currentSource.value?.name || '未选择' },
+  { label: '源类型', value: currentSource.value ? (isCloud115Source.value ? '115 云盘' : '本地存储') : '未选择' },
+  { label: '当前路径', value: currentWorkbenchPath.value },
+  { label: '选中文件', value: `${selectedFiles.value.length} 项` }
+])
+
 const mediaSummaryCards = computed(() => {
   const items = mediaSources.value
   const localCount = items.filter(item => item.source_type === 'local').length
@@ -259,27 +290,62 @@ const mediaSummaryCards = computed(() => {
     {
       label: '媒体源总数',
       value: items.length,
-      hint: `${localCount} 个本地源，${cloudCount} 个 115 云源`
+      hint: `${localCount} 个本地源，${cloudCount} 个 115 云源`,
+      icon: ServerOutline,
+      tone: 'cyan'
     },
     {
       label: '当前已选',
       value: currentSource.value?.name || '未选择',
-      hint: currentSource.value ? `当前路径 ${currentWorkbenchPath.value}` : '从下方列表进入文件浏览'
+      hint: currentSource.value ? `当前路径 ${currentWorkbenchPath.value}` : '从下方列表进入文件浏览',
+      icon: LocateOutline,
+      tone: 'violet'
     },
     {
       label: '待处理文件',
       value: selectedFiles.value.length,
-      hint: selectedFiles.value.length ? '可直接发起识别、重命名或整理' : '进入浏览器后勾选文件'
+      hint: selectedFiles.value.length ? '可直接发起识别、重命名或整理' : '进入浏览器后勾选文件',
+      icon: CheckboxOutline,
+      tone: 'amber'
     },
     {
       label: '整理模式',
       value: isCloud115Source.value ? '云盘整理' : '本地整理',
-      hint: currentSource.value ? (isCloud115Source.value ? '115 云盘限制已自动适配' : '支持重命名、刮削与目录整理') : '将在选择媒体源后确定'
+      hint: currentSource.value ? (isCloud115Source.value ? '115 云盘限制已自动适配' : '支持重命名、刮削与目录整理') : '将在选择媒体源后确定',
+      icon: OptionsOutline,
+      tone: 'green'
     }
   ]
 })
 
 const selectionPreview = computed(() => selectedFiles.value.slice(0, 5))
+
+const quickActions = computed(() => [
+  {
+    label: '浏览文件',
+    hint: '进入当前媒体源目录',
+    disabled: !currentSource.value,
+    handler: openCurrentSourceBrowser
+  },
+  {
+    label: '批量识别',
+    hint: '调用 TMDB 批量识别',
+    disabled: selectedFiles.value.length === 0,
+    handler: handleBatchIdentify
+  },
+  {
+    label: '批量重命名',
+    hint: '生成重命名预览并执行',
+    disabled: selectedFiles.value.length === 0 || isCloud115Source.value,
+    handler: handleBatchRename
+  },
+  {
+    label: '批量刮削',
+    hint: '为视频文件生成 NFO',
+    disabled: selectedFiles.value.length === 0 || isCloud115Source.value,
+    handler: handleBatchScrape
+  }
+])
 
 const tmdbDialogVisible = ref(false)
 const tmdbSelectMode = ref('cache')
@@ -329,9 +395,9 @@ const handleBrowseFiles = (source) => {
   fileBrowserRef.value?.open(source)
 }
 
-const openCurrentSourceBrowser = () => {
+function openCurrentSourceBrowser() {
   if (!currentSource.value) {
-    ElMessage.warning('请先从下方媒体源列表选择一个媒体源')
+    message.warning('请先从下方媒体源列表选择一个媒体源')
     return
   }
   fileBrowserRef.value?.open(currentSource.value)
@@ -345,7 +411,7 @@ const handleIdentify = async (row) => {
   currentIdentifyFile.value = row
   const filename = row.name || row.file_name || ''
   if (!filename) {
-    ElMessage.warning('文件名为空，无法识别')
+    message.warning('文件名为空，无法识别')
     return
   }
 
@@ -359,7 +425,7 @@ const handleIdentify = async (row) => {
 
     if (!result.success) {
       candidatesDialogVisible.value = false
-      ElMessage.warning(result.message || '自动识别未找到结果，请尝试手动搜索')
+      message.warning(result.message || '自动识别未找到结果，请尝试手动搜索')
       openTmdbIdentifyDialog(row)
       return
     }
@@ -369,14 +435,14 @@ const handleIdentify = async (row) => {
 
     if (candidatesList.value.length === 0) {
       candidatesDialogVisible.value = false
-      ElMessage.warning('未找到匹配的候选结果，请尝试手动搜索')
+      message.warning('未找到匹配的候选结果，请尝试手动搜索')
       openTmdbIdentifyDialog(row)
     }
   } catch (error) {
     console.error('[MediaManager] 自动识别失败:', error)
     candidatesDialogVisible.value = false
     const errorMsg = error.response?.data?.error || error.message || '自动识别失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
     openTmdbIdentifyDialog(row)
   } finally {
     candidatesLoading.value = false
@@ -403,7 +469,7 @@ const handleSelectCandidate = async (candidate) => {
       year: candidate.year,
       poster_url: candidate.poster_path
     })
-    ElMessage.success('识别成功')
+    message.success('识别成功')
     candidatesDialogVisible.value = false
     fileBrowserRef.value?.fetchFileList()
     if (organizeDialogVisible.value) {
@@ -412,7 +478,7 @@ const handleSelectCandidate = async (candidate) => {
   } catch (error) {
     console.error('[MediaManager] 绑定识别结果失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '识别失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   }
 }
 
@@ -449,7 +515,7 @@ const handleTmdbSelect = async ({ item, mode, searchType }) => {
       year: item.year,
       poster_url: item.poster_path
     })
-    ElMessage.success('识别成功')
+    message.success('识别成功')
     tmdbDialogVisible.value = false
     fileBrowserRef.value?.fetchFileList()
     if (organizeDialogVisible.value) {
@@ -458,31 +524,31 @@ const handleTmdbSelect = async ({ item, mode, searchType }) => {
   } catch (error) {
     console.error('[MediaManager] 识别失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '识别失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   }
 }
 
 const getBatchActionCounts = (payload, results) => {
   const safeResults = Array.isArray(results) ? results : []
-  const successCount = typeof payload?.success === "number" ? payload.success : safeResults.filter(r => r.success).length
-  const failedCount = typeof payload?.failed === "number" ? payload.failed : safeResults.filter(r => !r.success).length
+  const successCount = typeof payload?.success === 'number' ? payload.success : safeResults.filter(r => r.success).length
+  const failedCount = typeof payload?.failed === 'number' ? payload.failed : safeResults.filter(r => !r.success).length
   return { successCount, failedCount }
 }
 
 const notifyBatchActionResult = (label, successCount, failedCount) => {
-  const message = `${label}完成：成功 ${successCount} 项，失败 ${failedCount} 项`
+  const text = `${label}完成：成功 ${successCount} 项，失败 ${failedCount} 项`
   if (failedCount > 0 && successCount === 0) {
-    ElMessage.error(message)
+    message.error(text)
   } else if (failedCount > 0) {
-    ElMessage.warning(message)
+    message.warning(text)
   } else {
-    ElMessage.success(message)
+    message.success(text)
   }
 }
 
-const handleBatchIdentify = async () => {
+function handleBatchIdentify() {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要识别的文件')
+    message.warning('请先选择要识别的文件')
     return
   }
 
@@ -504,20 +570,19 @@ const handleBatchIdentify = async () => {
       const results = response.data.data?.data || response.data.data || []
       const successCount = Array.isArray(results) ? results.filter(r => r.success).length : 0
       const failedCount = Array.isArray(results) ? results.filter(r => !r.success).length : 0
-      ElMessage.success(`批量识别完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
+      message.success(`批量识别完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
       fileBrowserRef.value?.fetchFileList()
     } catch (error) {
       console.error('[MediaManager] 批量识别失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '批量识别失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
 
-
-const handleBatchDirectoryIdentify = async () => {
+const handleBatchDirectoryIdentify = () => {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要识别的目录')
+    message.warning('请先选择要识别的目录')
     return
   }
 
@@ -545,10 +610,11 @@ const handleBatchDirectoryIdentify = async () => {
     } catch (error) {
       console.error('[MediaManager] 整目录识别失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '整目录识别失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
+
 const handleRename = (row) => {
   singleRenameForm.value = {
     source_id: currentSource.value.id,
@@ -561,7 +627,7 @@ const handleRename = (row) => {
 
 const handleExecuteSingleRename = async () => {
   if (!singleRenameForm.value.new_name.trim()) {
-    ElMessage.warning('请输入新文件名')
+    message.warning('请输入新文件名')
     return
   }
 
@@ -572,21 +638,21 @@ const handleExecuteSingleRename = async () => {
       file_id: singleRenameForm.value.file_id,
       new_name: singleRenameForm.value.new_name
     })
-    ElMessage.success('重命名成功')
+    message.success('重命名成功')
     singleRenameDialogVisible.value = false
     fileBrowserRef.value?.fetchFileList()
   } catch (error) {
     console.error('[MediaManager] 重命名失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '重命名失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   } finally {
     singleRenameLoading.value = false
   }
 }
 
-const handleBatchRename = async () => {
+async function handleBatchRename() {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要重命名的文件')
+    message.warning('请先选择要重命名的文件')
     return
   }
 
@@ -603,7 +669,7 @@ const handleBatchRename = async () => {
   } catch (error) {
     console.error('[MediaManager] 预览重命名失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '预览重命名失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   } finally {
     renameLoading.value = false
   }
@@ -613,9 +679,9 @@ const handleRenameSuccess = () => {
   fileBrowserRef.value?.fetchFileList()
 }
 
-const handleOpenOrganize = async () => {
+function handleOpenOrganize() {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要整理的文件')
+    message.warning('请先选择要整理的文件')
     return
   }
 
@@ -628,7 +694,12 @@ const handleSingleOrganize = (row) => {
   handleOpenOrganize()
 }
 
-const handleOrganizeSuccess = ({ summary, resultList }) => {
+const handleOrganizeSuccess = ({ async: asyncTask, summary, resultList }) => {
+  if (asyncTask) {
+    // 异步整理只提交任务，结果统一在任务中心追踪，避免打开空的同步结果弹窗。
+    fileBrowserRef.value?.fetchFileList()
+    return
+  }
   organizeResultList.value = resultList
   organizeExecuteSummary.value = summary
   organizeResultDialogVisible.value = true
@@ -705,20 +776,20 @@ const handleScrapeFile = async (row) => {
     })
     const data = response.data.data
     if (data?.success) {
-      ElMessage.success(`刮削成功：${data.nfo_path || row.name}`)
+      message.success(`刮削成功：${data.nfo_path || row.name}`)
     } else {
-      ElMessage.warning('刮削未生成 NFO 文件')
+      message.warning('刮削未生成 NFO 文件')
     }
   } catch (error) {
     console.error('[MediaManager] 刮削失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '刮削失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   }
 }
 
-const handleBatchScrape = async () => {
+function handleBatchScrape() {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要刮削的文件')
+    message.warning('请先选择要刮削的文件')
     return
   }
 
@@ -726,7 +797,7 @@ const handleBatchScrape = async () => {
     f => !f.is_dir && getFileType(f.name) === 'video'
   )
   if (videoFiles.length === 0) {
-    ElMessage.warning('选中的文件中没有可刮削的视频文件')
+    message.warning('选中的文件中没有可刮削的视频文件')
     return
   }
 
@@ -748,20 +819,19 @@ const handleBatchScrape = async () => {
       const data = response.data.data
       const successCount = data?.success || 0
       const failedCount = data?.failed || 0
-      ElMessage.success(`批量刮削完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
+      message.success(`批量刮削完成：成功 ${successCount} 项，失败 ${failedCount} 项`)
       fileBrowserRef.value?.fetchFileList()
     } catch (error) {
       console.error('[MediaManager] 批量刮削失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '批量刮削失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
 
-
-const handleBatchDirectoryScrape = async () => {
+const handleBatchDirectoryScrape = () => {
   if (selectedFiles.value.length === 0) {
-    ElMessage.warning('请先选择要刮削的目录')
+    message.warning('请先选择要刮削的目录')
     return
   }
 
@@ -789,10 +859,11 @@ const handleBatchDirectoryScrape = async () => {
     } catch (error) {
       console.error('[MediaManager] 整目录刮削失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '整目录刮削失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
+
 const handleDeleteFile = (row) => {
   showConfirmDialog(
     `确定要删除“${row.name}”吗？`,
@@ -808,12 +879,12 @@ const handleDeleteFile = (row) => {
         source_id: currentSource.value.id,
         file_ids: [row.id || row.path].filter(Boolean)
       })
-      ElMessage.success('删除成功')
+      message.success('删除成功')
       fileBrowserRef.value?.fetchFileList()
     } catch (error) {
       console.error('[MediaManager] 删除文件失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '删除失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
@@ -830,251 +901,3 @@ const getFileType = (filename) => {
   return 'other'
 }
 </script>
-
-<style scoped>
-.media-manager-container {
-  padding: 20px;
-  min-height: calc(100vh - 100px);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.workbench-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 2.1fr) minmax(320px, 1fr);
-  gap: 20px;
-  padding: 28px;
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at top left, rgba(70, 167, 137, 0.16), transparent 30%),
-    radial-gradient(circle at bottom right, rgba(244, 176, 88, 0.18), transparent 28%),
-    linear-gradient(135deg, #17313a 0%, #214852 48%, #2a6d73 100%);
-  color: #f5f7f2;
-  box-shadow: 0 28px 60px rgba(18, 39, 44, 0.24);
-}
-
-.hero-copy h1 {
-  margin: 16px 0 10px;
-  font-size: 32px;
-  line-height: 1.2;
-}
-
-.hero-copy p {
-  margin: 0;
-  max-width: 760px;
-  color: rgba(245, 247, 242, 0.82);
-  line-height: 1.75;
-}
-
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 24px;
-}
-
-.hero-panel {
-  padding: 20px;
-  border-radius: 24px;
-  background: rgba(255, 255, 255, 0.1);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-}
-
-.hero-panel__header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 18px;
-  font-weight: 600;
-}
-
-.context-list {
-  display: grid;
-  gap: 12px;
-}
-
-.context-item {
-  padding: 12px 14px;
-  border-radius: 18px;
-  background: rgba(6, 15, 19, 0.18);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.context-item span {
-  font-size: 12px;
-  color: rgba(245, 247, 242, 0.68);
-}
-
-.context-item strong {
-  font-size: 15px;
-  word-break: break-all;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.metric-card {
-  padding: 20px;
-  border-radius: 22px;
-  background: rgba(255, 252, 247, 0.88);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 18px 40px rgba(58, 42, 24, 0.08);
-}
-
-.metric-card__label {
-  display: block;
-  color: #7d6f61;
-  font-size: 13px;
-}
-
-.metric-card__value {
-  display: block;
-  margin-top: 10px;
-  font-size: 28px;
-  color: #17313a;
-  line-height: 1.1;
-}
-
-.metric-card__hint {
-  margin: 10px 0 0;
-  color: #6c6259;
-  line-height: 1.6;
-}
-
-.command-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  gap: 20px;
-}
-
-.command-card {
-  padding: 22px;
-  border-radius: 24px;
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 18px 40px rgba(58, 42, 24, 0.08);
-}
-
-.command-card__header h2 {
-  margin: 0;
-  font-size: 20px;
-  color: #17313a;
-}
-
-.command-card__header span {
-  display: block;
-  margin-top: 8px;
-  color: #7b6e63;
-}
-
-.command-list {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 18px;
-}
-
-.command-button {
-  text-align: left;
-  padding: 16px;
-  border: 1px solid rgba(31, 111, 120, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 239, 231, 0.92));
-  border-radius: 18px;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.command-button:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(30, 55, 62, 0.1);
-}
-
-.command-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-.command-button span,
-.command-button small {
-  display: block;
-}
-
-.command-button span {
-  font-size: 16px;
-  font-weight: 700;
-  color: #17313a;
-}
-
-.command-button small {
-  margin-top: 8px;
-  color: #7f7469;
-  line-height: 1.5;
-}
-
-.selection-list {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.selection-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: #f8f3eb;
-}
-
-.selection-item strong {
-  color: #17313a;
-  word-break: break-all;
-}
-
-.selection-item span {
-  color: #8a7b6d;
-  white-space: nowrap;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-@media (max-width: 768px) {
-  .media-manager-container {
-    padding: 12px;
-    min-height: calc(100vh - 60px);
-  }
-
-  .workbench-hero,
-  .metric-grid,
-  .command-grid,
-  .command-list {
-    grid-template-columns: 1fr;
-  }
-
-  .workbench-hero {
-    padding: 20px;
-  }
-
-  .hero-copy h1 {
-    font-size: 26px;
-  }
-
-  .selection-item {
-    flex-direction: column;
-  }
-}
-</style>
-
-

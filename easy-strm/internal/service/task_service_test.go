@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"context"
@@ -435,4 +435,3 @@ func TestTaskServiceMultiplePriorities(t *testing.T) {
 		t.Logf("Task: %s, Priority: %v", task["task_id"], task["priority"])
 	}
 }
-

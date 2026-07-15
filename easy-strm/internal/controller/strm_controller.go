@@ -448,15 +448,15 @@ func (c *StrmController) GenerateFull(ctx *gin.Context) {
 
 // GenerateIncremental 增量生成STRM文件
 // Route: POST /strm/config/:id/generate/incremental
-// TODO: 实现增量生成逻辑 - 目前返回占位响应
 func (c *StrmController) GenerateIncremental(ctx *gin.Context) {
 	idStr := ctx.Param("id")
 	var id int
 	fmt.Sscanf(idStr, "%d", &id)
 	logger.Debugf("StrmController[GenerateIncremental] 增量生成STRM, ID: %d", id)
 
-	ctx.JSON(http.StatusOK, gin.H{
-		"message": "Incremental STRM generation is not yet implemented, please use full generation",
+	ctx.JSON(http.StatusNotImplemented, gin.H{
+		"error":   "增量 STRM 生成尚未接入真实执行链路",
+		"message": "请使用全量生成，避免接口返回与实际执行结果不一致",
 	})
 }
 

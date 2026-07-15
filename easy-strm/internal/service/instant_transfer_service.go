@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+	"github.com/go-redis/redis/v8"
 )
 
 const (
-	sha1CachePrefix    = "easy_strm:sha1:cache:"
-	sha1CacheTTL        = 7 * 24 * time.Hour
-	transferBlockTime  = 200 * time.Millisecond
+	sha1CachePrefix   = "easy_strm:sha1:cache:"
+	sha1CacheTTL      = 7 * 24 * time.Hour
+	transferBlockTime = 200 * time.Millisecond
 )
 
 type InstantTransferService struct {
@@ -34,14 +34,14 @@ func NewInstantTransferService(hashService *HashService, bloomFilter *BloomFilte
 }
 
 type TransferResult struct {
-	Success     bool
-	Skip        bool
-	SHA1        string
-	FileName    string
-	FileSize    int64
-	Message     string
-	Error       error
-	NeedRetry   bool
+	Success   bool
+	Skip      bool
+	SHA1      string
+	FileName  string
+	FileSize  int64
+	Message   string
+	Error     error
+	NeedRetry bool
 }
 
 func (s *InstantTransferService) Transfer(sourceFile *domain.FileInfo, sourceAccount *domain.Cloud115, targetAccount *domain.Cloud115, targetDir string) *TransferResult {
@@ -86,7 +86,7 @@ func (s *InstantTransferService) Transfer(sourceFile *domain.FileInfo, sourceAcc
 	}
 
 	return &TransferResult{
-		Success:  true,
+		Success: true,
 		SHA1:    sha1,
 		Message: "transfer initiated",
 	}

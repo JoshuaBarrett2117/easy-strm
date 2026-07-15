@@ -8,14 +8,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+	"github.com/go-redis/redis/v8"
 )
 
 const (
-	circuitBreakerKey       = "easy_strm:circuit:"
-	coolingDuration         = 5 * time.Minute
+	circuitBreakerKey      = "easy_strm:circuit:"
+	coolingDuration        = 5 * time.Minute
 	maxConsecutiveFailures = 5
 )
 
@@ -41,13 +41,13 @@ func (s CircuitState) String() string {
 }
 
 type CircuitBreaker struct {
-	accountID            int
-	state                CircuitState
-	failures             int32
-	lastFailure          time.Time
-	consecutiveFailures  int32
-	coolingStartTime     *time.Time
-	mu                   sync.RWMutex
+	accountID           int
+	state               CircuitState
+	failures            int32
+	lastFailure         time.Time
+	consecutiveFailures int32
+	coolingStartTime    *time.Time
+	mu                  sync.RWMutex
 }
 
 func NewCircuitBreaker(accountID int) *CircuitBreaker {
@@ -139,17 +139,17 @@ func (cb *CircuitBreaker) Reset() {
 }
 
 type TransferScheduler struct {
-	redisClient      *redis.Client
-	circuitBreakers  map[int]*CircuitBreaker
-	circuitMu        sync.RWMutex
-	transferQueue    chan *TransferTask
-	workerCount      int
-	wg               sync.WaitGroup
-	stopCh           chan struct{}
-	priorityQueues   map[int]chan *TransferTask
-	priorityMu       sync.RWMutex
-	maxConcurrency   int
-	ctx              context.Context
+	redisClient     *redis.Client
+	circuitBreakers map[int]*CircuitBreaker
+	circuitMu       sync.RWMutex
+	transferQueue   chan *TransferTask
+	workerCount     int
+	wg              sync.WaitGroup
+	stopCh          chan struct{}
+	priorityQueues  map[int]chan *TransferTask
+	priorityMu      sync.RWMutex
+	maxConcurrency  int
+	ctx             context.Context
 }
 
 type TransferTask struct {
@@ -409,9 +409,9 @@ func (s *TransferScheduler) SetMaxConcurrency(max int) {
 
 func (s *TransferScheduler) GetStats() map[string]interface{} {
 	stats := map[string]interface{}{
-		"worker_count":   s.workerCount,
+		"worker_count":    s.workerCount,
 		"max_concurrency": s.maxConcurrency,
-		"queue_size":     len(s.transferQueue),
+		"queue_size":      len(s.transferQueue),
 	}
 
 	s.circuitMu.RLock()

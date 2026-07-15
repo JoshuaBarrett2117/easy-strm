@@ -24,10 +24,10 @@ var DefaultRetryConfig = RetryConfig{
 // Retry 执行带有重试机制的函数
 func Retry(fn func() error, config RetryConfig) error {
 	var lastErr error
-	
+
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
 		Debug("Attempt %d of %d", attempt, config.MaxAttempts)
-		
+
 		err := fn()
 		if err == nil {
 			// 操作成功
@@ -36,16 +36,16 @@ func Retry(fn func() error, config RetryConfig) error {
 			}
 			return nil
 		}
-		
+
 		// 操作失败，记录错误
 		lastErr = err
 		Debug("Attempt %d failed: %v", attempt, err)
-		
+
 		// 检查是否还有重试机会
 		if attempt >= config.MaxAttempts {
 			break
 		}
-		
+
 		// 计算重试延迟
 		delay := config.Delay
 		if config.Backoff {
@@ -54,12 +54,12 @@ func Retry(fn func() error, config RetryConfig) error {
 				delay = config.MaxDelay
 			}
 		}
-		
+
 		// 等待后重试
 		Debug("Waiting %v before next attempt", delay)
 		time.Sleep(delay)
 	}
-	
+
 	Error("Operation failed after %d attempts: %v", config.MaxAttempts, lastErr)
 	return fmt.Errorf("operation failed after %d attempts: %w", config.MaxAttempts, lastErr)
 }
@@ -68,10 +68,10 @@ func Retry(fn func() error, config RetryConfig) error {
 func RetryWithResult[T any](fn func() (T, error), config RetryConfig) (T, error) {
 	var lastErr error
 	var result T
-	
+
 	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
 		Debug("Attempt %d of %d", attempt, config.MaxAttempts)
-		
+
 		currentResult, err := fn()
 		if err == nil {
 			// 操作成功
@@ -80,17 +80,17 @@ func RetryWithResult[T any](fn func() (T, error), config RetryConfig) (T, error)
 			}
 			return currentResult, nil
 		}
-		
+
 		// 操作失败，记录错误
 		lastErr = err
 		result = currentResult
 		Debug("Attempt %d failed: %v", attempt, err)
-		
+
 		// 检查是否还有重试机会
 		if attempt >= config.MaxAttempts {
 			break
 		}
-		
+
 		// 计算重试延迟
 		delay := config.Delay
 		if config.Backoff {
@@ -99,12 +99,12 @@ func RetryWithResult[T any](fn func() (T, error), config RetryConfig) (T, error)
 				delay = config.MaxDelay
 			}
 		}
-		
+
 		// 等待后重试
 		Debug("Waiting %v before next attempt", delay)
 		time.Sleep(delay)
 	}
-	
+
 	Error("Operation failed after %d attempts: %v", config.MaxAttempts, lastErr)
 	return result, fmt.Errorf("operation failed after %d attempts: %w", config.MaxAttempts, lastErr)
 }
@@ -114,7 +114,7 @@ func IsRetryableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	
+
 	// 检查常见的可重试错误
 	errorStr := err.Error()
 	retryableErrors := []string{
@@ -128,13 +128,13 @@ func IsRetryableError(err error) bool {
 		"503 Service Unavailable",
 		"504 Gateway Timeout",
 	}
-	
+
 	for _, retryable := range retryableErrors {
 		if containsIgnoreCase(errorStr, retryable) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 

@@ -120,7 +120,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-LOCAL-WATCH-RETRY-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -174,12 +174,12 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/tasks`, { waitUntil: "networkidle" });
-    const failedCard = page.locator(".task-card").filter({ hasText: mediaSourceName }).first();
+    const failedCard = page.getByTestId("task-card").filter({ hasText: mediaSourceName }).first();
     await failedCard.waitFor({ timeout: 20000 });
     addCase(
       "TC-LOCAL-WATCH-RETRY-002",
       "失败任务卡片可见恢复任务按钮",
-      await failedCard.locator(".el-button").filter({ hasText: "恢复任务" }).count() > 0 ? "PASS" : "FAIL",
+      await failedCard.locator("button").filter({ hasText: "恢复任务" }).count() > 0 ? "PASS" : "FAIL",
       ((await failedCard.textContent()) || "").replace(/\s+/g, " ").slice(0, 260),
       await saveShot(page, "02_failed_card")
     );
@@ -194,7 +194,7 @@ async function run() {
     }
     addCase("TC-LOCAL-WATCH-RETRY-003", "通过接口修复媒体源目标路径", "PASS", fixedTargetDir);
 
-    await failedCard.locator(".el-button").filter({ hasText: "恢复任务" }).click();
+    await failedCard.locator("button").filter({ hasText: "恢复任务" }).click();
     await page.waitForTimeout(1500);
     addCase("TC-LOCAL-WATCH-RETRY-004", "在任务中心触发失败任务重试", "PASS", failedTask.task_id, await saveShot(page, "03_retry_clicked"));
 
@@ -211,7 +211,7 @@ async function run() {
     }
 
     await page.reload({ waitUntil: "networkidle" });
-    const successCard = page.locator(".task-card").filter({ hasText: mediaSourceName }).first();
+    const successCard = page.getByTestId("task-card").filter({ hasText: mediaSourceName }).first();
     await successCard.waitFor({ timeout: 20000 });
     const successCardText = (await successCard.textContent()) || "";
     addCase(

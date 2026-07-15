@@ -1,254 +1,236 @@
-﻿<template>
-  <div class="strm-config-container">
-    <el-card shadow="hover" class="main-card">
-      <template #header>
-        <div class="card-header">
-          <div class="header-title">
-            <el-icon class="header-icon"><Setting /></el-icon>
-            <span>STRM 文件配置中心</span>
-          </div>
-          <el-button type="primary" @click="handleAdd">
-            <el-icon><Plus /></el-icon>
-            新增配置
-          </el-button>
+<template>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">STRM Center</div>
+          <h2 class="mt-1.5 text-2xl font-extrabold text-slate-800 dark:text-white">STRM 文件配置中心</h2>
+          <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            STRM 配置、Cron 状态、全量生成任务和即时执行入口都保留原有后端流程。
+          </p>
         </div>
-      </template>
+        <n-button type="primary" @click="handleAdd">
+          <template #icon>
+            <n-icon :component="AddOutline" />
+          </template>
+          新增配置
+        </n-button>
+      </div>
+    </div>
 
-      <section class="overview-panel">
-        <div class="overview-copy">
-          <h2>配置与任务总览</h2>
-          <p>STRM 配置、Cron 状态、全量生成任务和即时执行入口都保留原有后端流程，这里只重构首屏组织方式。</p>
-        </div>
-        <div class="overview-grid">
-          <article v-for="card in configOverviewCards" :key="card.label" class="overview-card">
-            <span class="overview-card__label">{{ card.label }}</span>
-            <strong class="overview-card__value">{{ card.value }}</strong>
-            <p class="overview-card__hint">{{ card.hint }}</p>
-          </article>
-        </div>
-      </section>
+    <!-- 配置与任务总览 -->
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in configOverviewCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.hint"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
+    </div>
 
-      <section class="status-rail">
-        <div class="status-rail__item">
-          <span>Cron 已启用</span>
-          <strong>{{ enabledCronCount }} / {{ cronTaskList.length || 0 }}</strong>
-        </div>
-        <div class="status-rail__item">
-          <span>下一次计划执行</span>
-          <strong>{{ nextRunSnapshot }}</strong>
-        </div>
-        <div class="status-rail__item">
-          <span>最近聚焦账号</span>
-          <strong>{{ primaryCloudAccountText }}</strong>
-        </div>
-      </section>
-      
-      <el-table :data="strmConfigList" style="width: 100%" border stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
-        <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
-        <el-table-column label="115账号" min-width="120" align="center" sortable="custom" prop="cloud115_id">
-          <template #default="scope">
-            <el-tag type="info">{{ getCloud115Name(scope.row.cloud115_id) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="net_disk_path" label="网盘目录" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="local_path" label="本地目录" min-width="180" show-overflow-tooltip />
-        <el-table-column prop="cron" label="Cron 配置" width="120" align="center">
-          <template #default="scope">
-            <el-tag v-if="scope.row.cron" type="warning">{{ scope.row.cron }}</el-tag>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="定时任务" width="100" align="center">
-          <template #default="scope">
-            <el-tag v-if="getCronTask(scope.row.id)" :type="getCronTask(scope.row.id).status === 'enabled' ? 'success' : 'info'">
-              {{ getCronTask(scope.row.id).status === 'enabled' ? '已启用' : '已禁用' }}
-            </el-tag>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="下次执行" width="160" align="center">
-          <template #default="scope">
-            <span v-if="getCronTask(scope.row.id) && getCronTask(scope.row.id).next_run_time">
-              {{ formatTime(getCronTask(scope.row.id).next_run_time) }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="extension" label="后缀名" min-width="200" show-overflow-tooltip>
-          <template #default="scope">
-            <span class="extension-text">{{ scope.row.extension || '-' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
-        <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
-        <el-table-column label="操作" min-width="320" fixed="right" align="center">
-          <template #default="scope">
-            <div class="action-buttons">
-              <el-button size="small" type="primary" @click="handleEdit(scope.row)">
-                <el-icon><Edit /></el-icon>
-                编辑
-              </el-button>
-              <el-button size="small" type="danger" @click="handleDelete(scope.row.id)">
-                <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
-              <el-button size="small" type="warning" @click="handleFullGenerate(scope.row.id)"
-                :loading="isGenerating(scope.row.id)" :disabled="isGenerating(scope.row.id)">
-                <el-icon v-if="!isGenerating(scope.row.id)"><Refresh /></el-icon>
-                {{ isGenerating(scope.row.id) ? '生成中...' : '全量生成' }}
-              </el-button>
-              <el-dropdown v-if="getCronTask(scope.row.id)" trigger="click" @command="(cmd) => handleCronCommand(cmd, scope.row)">
-                <el-button size="small" type="info">
-                  <el-icon><Timer /></el-icon>
-                  定时任务
-                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item :command="'toggle'" :disabled="cronTaskLoading">
-                      {{ getCronTask(scope.row.id).status === 'enabled' ? '禁用定时任务' : '启用定时任务' }}
-                    </el-dropdown-item>
-                    <el-dropdown-item :command="'run'" :disabled="cronTaskLoading">
-                      立即执行
-                    </el-dropdown-item>
-                    <el-dropdown-item :command="'status'" divided>
-                      查看详情
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <!-- 状态速览 -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
+      <div
+        v-for="item in statusRailItems"
+        :key="item.label"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-ink-900"
+      >
+        <p class="text-xs text-slate-400 dark:text-slate-500">{{ item.label }}</p>
+        <p class="mt-1.5 text-sm font-bold text-slate-800 dark:text-white">{{ item.value }}</p>
+      </div>
+    </div>
 
     <!-- 任务进度卡片 -->
-    <transition name="slide-fade">
-      <el-card v-if="taskInfo" shadow="hover" class="task-card">
-        <template #header>
-          <div class="task-header">
-            <div class="task-title">
-              <el-icon class="task-icon" :class="{ 'spin': taskInfo.status === 'running' }">
-                <component :is="taskStatusIcon" />
-              </el-icon>
-              <span>{{ taskInfo.status === 'running' ? '正在生成 STRM 文件...' : taskStatusLabel }}</span>
-            </div>
-            <el-button circle text @click="clearTask">
-              <el-icon><Close /></el-icon>
-            </el-button>
+    <Transition
+      enter-active-class="transition duration-300 ease-out"
+      enter-from-class="-translate-y-4 opacity-0"
+      leave-active-class="transition duration-200 ease-in"
+      leave-to-class="-translate-y-2 opacity-0"
+    >
+      <div
+        v-if="taskInfo"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-5"
+      >
+        <div class="mb-4 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <n-icon
+              size="20"
+              :component="taskStatusIcon"
+              :class="[taskStatusIconClass, { 'animate-spin': taskInfo.status === 'running' }]"
+            />
+            <span class="text-sm font-bold text-slate-800 dark:text-white">
+              {{ taskInfo.status === 'running' ? '正在生成 STRM 文件...' : taskStatusLabel }}
+            </span>
           </div>
-        </template>
-
-        <div class="task-body">
-          <!-- 进度条 -->
-          <el-progress
-            :percentage="taskProgress"
-            :status="taskProgressStatus"
-            :stroke-width="14"
-            class="task-progress"
-            :format="progressFormat"
-          />
-
-          <!-- 统计数据 -->
-          <div class="task-stats">
-            <div class="stat-item">
-              <div class="stat-value total">{{ taskInfo.total_files || 0 }}</div>
-              <div class="stat-label">总文件数</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value success">{{ taskInfo.success_files || 0 }}</div>
-              <div class="stat-label">成功</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value failed">{{ taskInfo.failed_files || 0 }}</div>
-              <div class="stat-label">失败</div>
-            </div>
-            <div class="stat-item">
-              <div class="stat-value pending">{{ pendingCount }}</div>
-              <div class="stat-label">待处理</div>
-            </div>
-          </div>
-
-          <!-- 错误信息 -->
-          <el-alert v-if="taskInfo.error_message" type="error" :title="taskInfo.error_message" show-icon :closable="false" class="task-error" />
+          <n-button text circle @click="clearTask">
+            <template #icon>
+              <n-icon :component="CloseOutline" />
+            </template>
+          </n-button>
         </div>
-      </el-card>
-    </transition>
+
+        <!-- 进度条 -->
+        <n-progress type="line" :percentage="taskProgress" :status="taskProgressStatus" :height="14" processing>
+          {{ progressText }}
+        </n-progress>
+
+        <!-- 统计数据 -->
+        <div class="mt-5 grid grid-cols-4 gap-2 text-center">
+          <div>
+            <div class="text-2xl font-bold tabular-nums text-cyan-600 dark:text-cyan-400">{{ taskInfo.total_files || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">总文件数</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{{ taskInfo.success_files || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">成功</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold tabular-nums text-red-500">{{ taskInfo.failed_files || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">失败</div>
+          </div>
+          <div>
+            <div class="text-2xl font-bold tabular-nums text-amber-500">{{ pendingCount }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">待处理</div>
+          </div>
+        </div>
+
+        <!-- 错误信息 -->
+        <n-alert v-if="taskInfo.error_message" type="error" :title="taskInfo.error_message" class="mt-4" />
+      </div>
+    </Transition>
+
+    <!-- 配置列表 -->
+    <PageCard title="配置列表" subtitle="支持编辑、全量生成与定时任务管理">
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="columns"
+          :data="strmConfigList"
+          :row-key="(row) => row.id"
+          :scroll-x="1660"
+          size="small"
+          @update:sorter="handleSorterChange"
+        >
+          <template #empty>
+            <EmptyState title="暂无 STRM 配置" description="点击右上角「新增配置」创建第一个生成任务">
+              <n-button type="primary" size="small" @click="handleAdd">新增配置</n-button>
+            </EmptyState>
+          </template>
+        </n-data-table>
+      </div>
+    </PageCard>
 
     <!-- 新增/编辑配置对话框 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="600px" append-to-body>
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="115账号" prop="cloud115_id">
-          <el-select v-model="form.cloud115_id" placeholder="请选择115账号">
-            <el-option
-              v-for="account in cloud115List"
-              :key="account.id"
-              :label="account.name"
-              :value="account.id"
-            />
-          </el-select>
-        </el-form-item>
-        
-        <el-form-item label="网盘目录" prop="net_disk_path">
-          <el-input v-model="form.net_disk_path" placeholder="请输入网盘目录路径" />
-        </el-form-item>
-        
-        <el-form-item label="本地目录" prop="local_path">
-          <el-input v-model="form.local_path" placeholder="请输入本地目录路径" />
-        </el-form-item>
-        
-        <el-form-item label="Cron表达式" prop="cron">
-          <el-input v-model="form.cron" placeholder="请输入 Cron 表达式，例如：0 0 * * *" />
-          <el-button type="text" @click="showCronPicker = true">快捷生成</el-button>
-        </el-form-item>
-        
-        <el-form-item label="后缀名" prop="extension">
-          <el-input v-model="form.extension" placeholder="请输入文件后缀名，多个用逗号分隔，如：.mp4,.mkv,.avi" />
-        </el-form-item>
-      </el-form>
-      
-      <!-- Cron 表达式快捷生成器 -->
-      <el-dialog v-model="showCronPicker" title="Cron表达式快捷生成" width="400px">
-        <el-form :model="cronForm">
-          <el-form-item label="执行周期">
-            <el-radio-group v-model="cronForm.period">
-              <el-radio label="daily">每天</el-radio>
-              <el-radio label="weekly">每周</el-radio>
-              <el-radio label="monthly">每月</el-radio>
-            </el-radio-group>
-          </el-form-item>
-          
-          <el-form-item label="执行时间">
-            <el-time-picker v-model="cronForm.time" type="time" format="HH:mm" value-format="HH:mm" placeholder="请选择执行时间" />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <span class="dialog-footer">
-            <el-button @click="showCronPicker = false">取消</el-button>
-            <el-button type="primary" @click="generateCronExpression">生成</el-button>
-          </span>
-        </template>
-      </el-dialog>
-      
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
+    <n-modal v-model:show="dialogVisible" preset="card" :title="dialogTitle" class="w-[92vw] max-w-2xl">
+      <n-form ref="formRef" :model="form" :rules="rules" label-placement="left" label-width="100">
+        <n-form-item label="115账号" path="cloud115_id">
+          <n-select v-model:value="form.cloud115_id" placeholder="请选择115账号" :options="cloud115Options" />
+        </n-form-item>
+
+        <n-form-item label="网盘目录" path="net_disk_path">
+          <n-input v-model:value="form.net_disk_path" placeholder="请输入网盘目录路径" />
+        </n-form-item>
+
+        <n-form-item label="本地目录" path="local_path">
+          <n-input v-model:value="form.local_path" placeholder="请输入本地目录路径" />
+        </n-form-item>
+
+        <n-form-item label="Cron表达式" path="cron">
+          <div class="flex w-full items-center gap-2">
+            <n-input v-model:value="form.cron" placeholder="请输入 Cron 表达式，例如：0 0 * * *" />
+            <n-button text type="primary" @click="showCronPicker = true">快捷生成</n-button>
+          </div>
+        </n-form-item>
+
+        <n-form-item label="后缀名" path="extension">
+          <n-input v-model:value="form.extension" placeholder="请输入文件后缀名，多个用逗号分隔，如：.mp4,.mkv,.avi" />
+        </n-form-item>
+      </n-form>
+
+      <div class="mt-2 flex justify-end gap-2">
+        <n-button @click="dialogVisible = false">取消</n-button>
+        <n-button type="primary" @click="handleSubmit">确定</n-button>
+      </div>
+    </n-modal>
+
+    <!-- Cron 表达式快捷生成器 -->
+    <n-modal v-model:show="showCronPicker" preset="card" title="Cron表达式快捷生成" class="w-[92vw] max-w-sm">
+      <n-form :model="cronForm" label-placement="left" label-width="80">
+        <n-form-item label="执行周期">
+          <n-radio-group v-model:value="cronForm.period">
+            <n-radio value="daily">每天</n-radio>
+            <n-radio value="weekly">每周</n-radio>
+            <n-radio value="monthly">每月</n-radio>
+          </n-radio-group>
+        </n-form-item>
+
+        <n-form-item label="执行时间">
+          <n-time-picker
+            v-model:formatted-value="cronForm.time"
+            format="HH:mm"
+            value-format="HH:mm"
+            placeholder="请选择执行时间"
+            class="w-full"
+          />
+        </n-form-item>
+      </n-form>
+      <div class="mt-2 flex justify-end gap-2">
+        <n-button @click="showCronPicker = false">取消</n-button>
+        <n-button type="primary" @click="generateCronExpression">生成</n-button>
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, computed, onBeforeUnmount } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Setting, Plus, Edit, Delete, Refresh, Close, CircleCheck, CircleClose, Loading, Timer, ArrowDown } from '@element-plus/icons-vue'
-import { request } from '../utils/api/request'
+import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
+import {
+  NAlert,
+  NButton,
+  NDataTable,
+  NDropdown,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NModal,
+  NProgress,
+  NRadio,
+  NRadioGroup,
+  NSelect,
+  NTag,
+  NTimePicker,
+  useMessage
+} from 'naive-ui'
+import {
+  AddOutline,
+  AlarmOutline,
+  CheckmarkCircleOutline,
+  ChevronDownOutline,
+  CloseCircleOutline,
+  CloseOutline,
+  CreateOutline,
+  LayersOutline,
+  PulseOutline,
+  RefreshOutline,
+  SyncOutline,
+  TimeOutline,
+  TrashOutline
+} from '@vicons/ionicons5'
+import PageCard from '../components/common/PageCard.vue'
+import StatCard from '../components/common/StatCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
+import { getCloud115List } from '../utils/api/cloud115'
+import { getCronTasks, runCronTask, updateCronTask } from '../utils/api/cron'
+import { createStrmConfig, deleteStrmConfig, generateFullStrmConfig, getStrmConfigList, getStrmTaskStatus, updateStrmConfig } from '../utils/api/strm'
 import { showAlertDialog, showConfirmDialog } from '../utils/ui/messageBox'
 
 const DEFAULT_EXTENSION = '.mp4,.avi,.mkv,.mov,.wmv,.flv,.webm,.m4v,.mpeg,.mpg,.3gp,.rmvb,.rm,.vob,.ts,.m2ts,.divx,.asf'
+
+const message = useMessage()
 
 // STRM 配置列表
 const strmConfigList = ref([])
@@ -291,12 +273,12 @@ const taskProgress = computed(() => {
   return p === 0 && taskInfo.value.status === 'running' ? 5 : p
 })
 
-// Element Plus progress status
+// Naive UI progress status
 const taskProgressStatus = computed(() => {
-  if (!taskInfo.value) return ''
+  if (!taskInfo.value) return 'default'
   if (taskInfo.value.status === 'completed') return 'success'
-  if (taskInfo.value.status === 'failed') return 'exception'
-  return ''
+  if (taskInfo.value.status === 'failed') return 'error'
+  return 'default'
 })
 
 // 待处理数量
@@ -310,10 +292,18 @@ const pendingCount = computed(() => {
 
 // 任务状态图标
 const taskStatusIcon = computed(() => {
-  if (!taskInfo.value) return Loading
-  if (taskInfo.value.status === 'completed') return CircleCheck
-  if (taskInfo.value.status === 'failed') return CircleClose
-  return Loading
+  if (!taskInfo.value) return SyncOutline
+  if (taskInfo.value.status === 'completed') return CheckmarkCircleOutline
+  if (taskInfo.value.status === 'failed') return CloseCircleOutline
+  return SyncOutline
+})
+
+// 任务状态图标颜色
+const taskStatusIconClass = computed(() => {
+  if (!taskInfo.value) return 'text-cyan-500'
+  if (taskInfo.value.status === 'completed') return 'text-emerald-500'
+  if (taskInfo.value.status === 'failed') return 'text-red-500'
+  return 'text-cyan-500'
 })
 
 // 任务状态标签
@@ -324,13 +314,13 @@ const taskStatusLabel = computed(() => {
   return '生成中...'
 })
 
-// 进度文本格式化
-const progressFormat = (percentage) => {
-  if (!taskInfo.value) return `${percentage}%`
+// 进度文本
+const progressText = computed(() => {
+  if (!taskInfo.value) return `${taskProgress.value}%`
   if (taskInfo.value.status === 'completed') return '完成'
   if (taskInfo.value.status === 'running' && taskInfo.value.total_files === 0) return '准备中...'
-  return `${percentage}%`
-}
+  return `${taskProgress.value}%`
+})
 
 const enabledCronCount = computed(() => cronTaskList.value.filter(task => task.status === 'enabled').length)
 const nextRunSnapshot = computed(() => {
@@ -351,39 +341,184 @@ const configOverviewCards = computed(() => {
     {
       label: '配置总数',
       value: strmConfigList.value.length,
-      hint: `${accounts.size} 个 115 账号参与 STRM 生成`
+      hint: `${accounts.size} 个 115 账号参与 STRM 生成`,
+      icon: LayersOutline,
+      tone: 'cyan'
     },
     {
       label: 'Cron 任务',
       value: cronTaskList.value.length,
-      hint: `${enabledCronCount.value} 个处于启用状态`
+      hint: `${enabledCronCount.value} 个处于启用状态`,
+      icon: AlarmOutline,
+      tone: 'violet'
     },
     {
       label: '当前生成状态',
       value: runningTaskLabel,
-      hint: taskInfo.value ? `成功 ${taskInfo.value.success_files || 0}，失败 ${taskInfo.value.failed_files || 0}` : '暂无正在跟踪的生成任务'
+      hint: taskInfo.value ? `成功 ${taskInfo.value.success_files || 0}，失败 ${taskInfo.value.failed_files || 0}` : '暂无正在跟踪的生成任务',
+      icon: PulseOutline,
+      tone: taskInfo.value?.status === 'failed' ? 'red' : taskInfo.value?.status === 'running' ? 'amber' : 'green'
     },
     {
       label: '默认后缀示例',
       value: strmConfigList.value[0]?.extension || DEFAULT_EXTENSION,
-      hint: '沿用原有扩展名配置提交到后端'
+      hint: '沿用原有扩展名配置提交到后端',
+      icon: TimeOutline,
+      tone: 'slate'
     }
   ]
 })
+const statusRailItems = computed(() => [
+  { label: 'Cron 已启用', value: `${enabledCronCount.value} / ${cronTaskList.value.length || 0}` },
+  { label: '下一次计划执行', value: nextRunSnapshot.value },
+  { label: '最近聚焦账号', value: primaryCloudAccountText.value }
+])
+
+// 115 账号下拉选项
+const cloud115Options = computed(() => cloud115List.value.map(item => ({ label: item.name, value: item.id })))
+
+// 定时任务下拉菜单选项
+const cronDropdownOptions = (task) => [
+  { key: 'toggle', label: task.status === 'enabled' ? '禁用定时任务' : '启用定时任务', disabled: cronTaskLoading.value },
+  { key: 'run', label: '立即执行', disabled: cronTaskLoading.value },
+  { type: 'divider', key: 'd1' },
+  { key: 'status', label: '查看详情' }
+]
+
+// 表格列定义
+const columns = computed(() => [
+  { title: 'ID', key: 'id', width: 64, align: 'center', sorter: true, defaultSortOrder: 'ascend' },
+  {
+    title: '115账号',
+    key: 'cloud115_id',
+    minWidth: 120,
+    align: 'center',
+    sorter: true,
+    render: (row) => h(NTag, { type: 'info', size: 'small' }, { default: () => getCloud115Name(row.cloud115_id) })
+  },
+  { title: '网盘目录', key: 'net_disk_path', minWidth: 180, ellipsis: { tooltip: true } },
+  { title: '本地目录', key: 'local_path', minWidth: 180, ellipsis: { tooltip: true } },
+  {
+    title: 'Cron 配置',
+    key: 'cron',
+    width: 120,
+    align: 'center',
+    render: (row) => row.cron
+      ? h(NTag, { type: 'warning', size: 'small' }, { default: () => row.cron })
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
+  },
+  {
+    title: '定时任务',
+    key: 'cron_status',
+    width: 100,
+    align: 'center',
+    render: (row) => {
+      const task = getCronTask(row.id)
+      if (!task) return h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
+      return h(
+        NTag,
+        { type: task.status === 'enabled' ? 'success' : 'info', size: 'small' },
+        { default: () => (task.status === 'enabled' ? '已启用' : '已禁用') }
+      )
+    }
+  },
+  {
+    title: '下次执行',
+    key: 'next_run_time',
+    width: 160,
+    align: 'center',
+    render: (row) => {
+      const task = getCronTask(row.id)
+      if (task && task.next_run_time) return formatTime(task.next_run_time)
+      return h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
+    }
+  },
+  {
+    title: '后缀名',
+    key: 'extension',
+    minWidth: 200,
+    ellipsis: { tooltip: true },
+    render: (row) => h('span', { class: 'font-mono text-xs text-slate-500 dark:text-slate-400' }, row.extension || '-')
+  },
+  { title: '创建时间', key: 'create_time', width: 160, align: 'center', sorter: true },
+  { title: '更新时间', key: 'update_time', width: 160, align: 'center', sorter: true },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 360,
+    align: 'center',
+    fixed: 'right',
+    render: (row) => {
+      const task = getCronTask(row.id)
+      const buttons = [
+        h(
+          NButton,
+          { type: 'primary', size: 'small', onClick: () => handleEdit(row) },
+          { icon: () => h(NIcon, { component: CreateOutline }), default: () => '编辑' }
+        ),
+        h(
+          NButton,
+          { type: 'error', size: 'small', onClick: () => handleDelete(row.id) },
+          { icon: () => h(NIcon, { component: TrashOutline }), default: () => '删除' }
+        ),
+        h(
+          NButton,
+          {
+            type: 'warning',
+            size: 'small',
+            loading: isGenerating(row.id),
+            disabled: isGenerating(row.id),
+            onClick: () => handleFullGenerate(row.id)
+          },
+          {
+            icon: isGenerating(row.id) ? undefined : () => h(NIcon, { component: RefreshOutline }),
+            default: () => (isGenerating(row.id) ? '生成中...' : '全量生成')
+          }
+        )
+      ]
+      if (task) {
+        buttons.push(
+          h(
+            NDropdown,
+            {
+              trigger: 'click',
+              options: cronDropdownOptions(task),
+              onSelect: (key) => handleCronCommand(key, row)
+            },
+            {
+              default: () => h(
+                NButton,
+                { type: 'info', size: 'small' },
+                {
+                  icon: () => h(NIcon, { component: AlarmOutline }),
+                  default: () => [
+                    '定时任务',
+                    h(NIcon, { component: ChevronDownOutline, class: 'ml-1' })
+                  ]
+                }
+              )
+            }
+          )
+        )
+      }
+      return h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' }, buttons)
+    }
+  }
+])
 
 // 开始轮询任务状态
 const startPolling = (taskId) => {
   stopPolling()
   pollTimer = setInterval(async () => {
     try {
-      const resp = await request(`/strm/task/${taskId}`)
+      const resp = await getStrmTaskStatus(taskId)
       taskInfo.value = resp.data.data
       if (taskInfo.value.status === 'completed') {
-        ElMessage.success('STRM 文件全量生成完成')
+        message.success('STRM 文件全量生成完成')
         generatingConfigId.value = null
         stopPolling()
       } else if (taskInfo.value.status === 'failed') {
-        ElMessage.error(`STRM 文件生成失败：${taskInfo.value.error_message || '未知错误'}`)
+        message.error(`STRM 文件生成失败：${taskInfo.value.error_message || '未知错误'}`)
         generatingConfigId.value = null
         stopPolling()
       }
@@ -432,41 +567,41 @@ const cronForm = ref({
 
 // 表单验证规则
 const rules = {
-  cloud115_id: [{ required: true, message: '请选择115账号', trigger: 'change' }],
-  net_disk_path: [{ required: true, message: '请输入网盘目录', trigger: 'blur' }],
-  local_path: [{ required: true, message: '请输入本地目录', trigger: 'blur' }],
-  cron: [{ required: true, message: '请输入 Cron 表达式', trigger: 'blur' }],
-  extension: [{ required: true, message: '请输入后缀名', trigger: 'blur' }]
+  cloud115_id: [{ required: true, type: 'number', message: '请选择115账号', trigger: 'change', validator: (rule, value) => !!value }],
+  net_disk_path: [{ required: true, message: '请输入网盘目录', trigger: ['blur', 'input'] }],
+  local_path: [{ required: true, message: '请输入本地目录', trigger: ['blur', 'input'] }],
+  cron: [{ required: true, message: '请输入 Cron 表达式', trigger: ['blur', 'input'] }],
+  extension: [{ required: true, message: '请输入后缀名', trigger: ['blur', 'input'] }]
 }
 
 // 获取 115 账号列表
 const fetchCloud115List = async () => {
   try {
-    const response = await request('/cloud115')
+    const response = await getCloud115List()
     cloud115List.value = response.data.data || []
   } catch (error) {
-    ElMessage.error('获取115账号列表失败')
+    message.error('获取115账号列表失败')
   }
 }
 
 // 获取 STRM 配置列表
 const fetchStrmConfigList = async () => {
   try {
-    const params = new URLSearchParams()
-    params.append('sort_field', sortField.value)
-    params.append('sort_order', sortOrder.value)
-    const response = await request(`/strm/config?${params.toString()}`)
+    const response = await getStrmConfigList({
+      sort_field: sortField.value,
+      sort_order: sortOrder.value
+    })
     const apiData = response.data.data
     strmConfigList.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
   } catch (error) {
-    ElMessage.error('获取 STRM 配置列表失败')
+    message.error('获取 STRM 配置列表失败')
   }
 }
 
 // 获取 Cron 任务列表
 const fetchCronTaskList = async () => {
   try {
-    const response = await request('/cron/tasks')
+    const response = await getCronTasks()
     cronTaskList.value = response.data.data || []
   } catch (error) {
     console.error('获取 Cron 任务列表失败', error)
@@ -492,15 +627,13 @@ const formatTime = (time) => {
 }
 
 /**
- * 处理表格排序变化
- * @param {Object} column - 列信息
- * @param {string} prop - 排序字段
- * @param {string} order - 排序方式
+ * 处理表格排序变化（服务端排序）
+ * @param {Object|null} sorter - Naive UI sorter 状态
  */
-const handleSortChange = ({ prop, order }) => {
-  if (prop && order) {
-    sortField.value = prop
-    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+const handleSorterChange = (sorter) => {
+  if (sorter && sorter.order) {
+    sortField.value = sorter.columnKey
+    sortOrder.value = sorter.order === 'ascend' ? 'asc' : 'desc'
   } else {
     sortField.value = 'id'
     sortOrder.value = 'asc'
@@ -544,8 +677,8 @@ const handleEdit = (row) => {
 
 // 提交表单
 const handleSubmit = () => {
-  formRef.value.validate((valid) => {
-    if (valid) {
+  formRef.value.validate((errors) => {
+    if (!errors) {
       void submitConfig()
     }
   })
@@ -563,24 +696,18 @@ const submitConfig = async () => {
 
   try {
     if (form.value.id) {
-      await request(`/strm/config/${form.value.id}`, {
-        method: 'PUT',
-        data: requestData
-      })
-      ElMessage.success('配置更新成功')
+      await updateStrmConfig(form.value.id, requestData)
+      message.success('配置更新成功')
     } else {
-      await request('/strm/config', {
-        method: 'POST',
-        data: requestData
-      })
-      ElMessage.success('配置创建成功')
+      await createStrmConfig(requestData)
+      message.success('配置创建成功')
     }
 
     dialogVisible.value = false
     await fetchStrmConfigList()
     await fetchCronTaskList()
   } catch (error) {
-    ElMessage.error(form.value.id ? '配置更新失败' : '配置创建失败')
+    message.error(form.value.id ? '配置更新失败' : '配置创建失败')
   }
 }
 
@@ -592,14 +719,12 @@ const handleDelete = (id) => {
     type: 'warning'
   }).then(async () => {
     try {
-      await request(`/strm/config/${id}`, {
-        method: 'DELETE'
-      })
-      ElMessage.success('配置删除成功')
+      await deleteStrmConfig(id)
+      message.success('配置删除成功')
       await fetchStrmConfigList()
       await fetchCronTaskList()
     } catch (error) {
-      ElMessage.error('配置删除失败')
+      message.error('配置删除失败')
     }
   }).catch(() => {})
 }
@@ -616,19 +741,17 @@ const handleFullGenerate = (id) => {
     // 初始化任务状态为 running
     taskInfo.value = { status: 'running', total_files: 0, processed_files: 0, success_files: 0, failed_files: 0 }
 
-    request(`/strm/config/${id}/generate/full`, {
-      method: 'POST'
-    }).then((resp) => {
+    generateFullStrmConfig(id).then((resp) => {
       const taskId = resp.data.task_id
       if (taskId) {
         currentTaskId.value = taskId
         startPolling(taskId)
       } else {
-        ElMessage.success('全量生成 STRM 文件成功')
+        message.success('全量生成 STRM 文件成功')
         clearTask()
       }
     }).catch(() => {
-      ElMessage.error('全量生成 STRM 文件失败')
+      message.error('全量生成 STRM 文件失败')
       clearTask()
     })
   }).catch(() => {})
@@ -656,20 +779,17 @@ const handleCronCommand = (command, row) => {
 const handleToggleCronTask = async (task) => {
   const newStatus = task.status === 'enabled' ? 'disabled' : 'enabled'
   const actionText = newStatus === 'enabled' ? '启用' : '禁用'
-  
+
   try {
     cronTaskLoading.value = true
-    await request(`/cron/task/${task.id}`, {
-      method: 'PUT',
-      data: {
-        cron_expr: task.cron_expr,
-        status: newStatus
-      }
+    await updateCronTask(task.id, {
+      cron_expr: task.cron_expr,
+      status: newStatus
     })
-    ElMessage.success(`定时任务已${actionText}`)
+    message.success(`定时任务已${actionText}`)
     await fetchCronTaskList()
   } catch (error) {
-    ElMessage.error(`${actionText}定时任务失败`)
+    message.error(`${actionText}定时任务失败`)
   } finally {
     cronTaskLoading.value = false
   }
@@ -679,14 +799,12 @@ const handleToggleCronTask = async (task) => {
 const handleRunCronTask = async (task) => {
   try {
     cronTaskLoading.value = true
-    await request(`/cron/task/${task.id}/run`, {
-      method: 'POST'
-    })
-    ElMessage.success('定时任务已触发执行，请查看任务进度')
+    await runCronTask(task.id)
+    message.success('定时任务已触发执行，请查看任务进度')
     // 刷新任务列表
     await fetchCronTaskList()
   } catch (error) {
-    ElMessage.error('执行定时任务失败')
+    message.error('执行定时任务失败')
   } finally {
     cronTaskLoading.value = false
   }
@@ -699,20 +817,25 @@ const showCronTaskStatus = (task) => {
   const nextRunTime = task.next_run_time ? formatTime(task.next_run_time) : '-'
   const lastRunStatus = task.last_run_status || '-'
   const lastRunMessage = task.last_run_message || '-'
-  
+
+  const detailRow = (label, value) => h('p', { class: 'leading-loose' }, [
+    h('strong', null, `${label}：`),
+    String(value)
+  ])
+
+  // Naive dialog 的 content 支持渲染函数，替代旧版 dangerouslyUseHTMLString
   showAlertDialog(
-    `<div style="line-height: 2;">
-      <p><strong>任务名称：</strong>${task.task_name}</p>
-      <p><strong>任务状态：</strong>${statusText}</p>
-      <p><strong>Cron表达式：</strong>${task.cron_expr}</p>
-      <p><strong>上次执行时间：</strong>${lastRunTime}</p>
-      <p><strong>上次执行状态：</strong>${lastRunStatus}</p>
-      <p><strong>上次执行结果：</strong>${lastRunMessage}</p>
-      <p><strong>下次执行时间：</strong>${nextRunTime}</p>
-    </div>`,
+    () => h('div', null, [
+      detailRow('任务名称', task.task_name),
+      detailRow('任务状态', statusText),
+      detailRow('Cron表达式', task.cron_expr),
+      detailRow('上次执行时间', lastRunTime),
+      detailRow('上次执行状态', lastRunStatus),
+      detailRow('上次执行结果', lastRunMessage),
+      detailRow('下次执行时间', nextRunTime)
+    ]),
     '定时任务详情',
     {
-      dangerouslyUseHTMLString: true,
       confirmButtonText: '关闭'
     }
   )
@@ -722,19 +845,19 @@ const showCronTaskStatus = (task) => {
 const generateCronExpression = () => {
   const time = cronForm.value.time
   if (!time || typeof time !== 'string') {
-    ElMessage.error('请选择执行时间')
+    message.error('请选择执行时间')
     return
   }
-  
+
   try {
     const parts = time.split(':')
     if (parts.length !== 2) {
-      ElMessage.error('时间格式错误')
+      message.error('时间格式错误')
       return
     }
     const [hour, minute] = parts
     let cronExpression = ''
-    
+
     switch (cronForm.value.period) {
       case 'daily':
         cronExpression = `${minute} ${hour} * * *`
@@ -749,11 +872,11 @@ const generateCronExpression = () => {
         cronExpression = `${minute} ${hour} * * *`
         break
     }
-    
+
     form.value.cron = cronExpression
     showCronPicker.value = false
   } catch (error) {
-    ElMessage.error('生成 Cron 表达式失败')
+    message.error('生成 Cron 表达式失败')
     console.error('Error generating cron expression:', error)
   }
 }
@@ -770,326 +893,3 @@ onBeforeUnmount(() => {
   stopPolling()
 })
 </script>
-
-<style scoped>
-.strm-config-container {
-  padding: 8px 0 0;
-  min-height: calc(100vh - 100px);
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.main-card {
-  border-radius: 24px;
-  overflow: hidden;
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  background: rgba(255, 252, 247, 0.84);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-.main-card :deep(.el-card__header) {
-  background:
-    radial-gradient(circle at top right, rgba(242, 166, 90, 0.28), transparent 32%),
-    linear-gradient(135deg, #1f6f78 0%, #24535f 55%, #17313a 100%);
-  padding: 20px 24px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: white;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.header-icon {
-  font-size: 24px;
-}
-
-.custom-table {
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.overview-panel {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
-  gap: 18px;
-  margin-bottom: 22px;
-}
-
-.overview-copy {
-  padding: 20px;
-  border-radius: 22px;
-  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-}
-
-.overview-copy h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #17313a;
-}
-
-.overview-copy p {
-  margin: 12px 0 0;
-  line-height: 1.7;
-  color: #6c6259;
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.overview-card {
-  padding: 18px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 241, 231, 0.92));
-  border: 1px solid rgba(120, 101, 72, 0.1);
-}
-
-.overview-card__label {
-  display: block;
-  color: #8a7b6d;
-  font-size: 13px;
-}
-
-.overview-card__value {
-  display: block;
-  margin-top: 12px;
-  color: #17313a;
-  font-size: 28px;
-  line-height: 1.2;
-  word-break: break-all;
-}
-
-.overview-card__hint {
-  margin: 10px 0 0;
-  color: #73675d;
-  line-height: 1.6;
-}
-
-.status-rail {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-bottom: 22px;
-}
-
-.status-rail__item {
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: rgba(244, 239, 231, 0.88);
-  border: 1px solid rgba(120, 101, 72, 0.08);
-}
-
-.status-rail__item span {
-  display: block;
-  color: #8a7b6d;
-  font-size: 12px;
-}
-
-.status-rail__item strong {
-  display: block;
-  margin-top: 8px;
-  color: #17313a;
-  font-size: 18px;
-  line-height: 1.5;
-}
-
-.custom-table :deep(.el-table__header th) {
-  background-color: #f7f1e7 !important;
-  color: #4d453d;
-  font-weight: 600;
-}
-
-.custom-table :deep(.el-table__row:hover > td) {
-  background-color: #f8f2e8 !important;
-}
-
-.extension-text {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  color: #606266;
-}
-
-.action-buttons {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.dialog-footer {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* 任务进度卡片 */
-.task-card {
-  border-radius: 20px;
-  overflow: hidden;
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  background: rgba(255, 252, 247, 0.84);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-.task-card :deep(.el-card__header) {
-  background: linear-gradient(135deg, #17313a 0%, #24535f 100%);
-  padding: 14px 20px;
-}
-
-.task-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.task-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: white;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.task-icon {
-  font-size: 20px;
-  color: #38ef7d;
-}
-
-.task-icon.spin {
-  animation: spin 1.2s linear infinite;
-}
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.task-body {
-  padding: 20px 10px 8px;
-}
-
-.task-progress {
-  margin-bottom: 24px;
-}
-
-.task-progress :deep(.el-progress-bar__outer) {
-  border-radius: 8px;
-  background-color: #eef0f5;
-}
-
-.task-progress :deep(.el-progress-bar__inner) {
-  border-radius: 8px;
-  background: linear-gradient(90deg, #11998e, #38ef7d);
-  transition: width 0.5s ease;
-}
-
-.task-stats {
-  display: flex;
-  justify-content: space-around;
-  padding: 12px 0 4px;
-}
-
-.stat-item {
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 1.1;
-}
-
-.stat-value.total { color: #409eff; }
-.stat-value.success { color: #67c23a; }
-.stat-value.failed { color: #f56c6c; }
-.stat-value.pending { color: #e6a23c; }
-
-.stat-label {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-}
-
-.task-error {
-  margin-top: 16px;
-}
-
-/* 过渡动画 */
-.slide-fade-enter-active {
-  transition: all 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.slide-fade-leave-active {
-  transition: all 0.25s ease;
-}
-.slide-fade-enter-from {
-  opacity: 0;
-  transform: translateY(-16px);
-}
-.slide-fade-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
-
-:global(.dark) .main-card,
-:global(.dark) .task-card {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-:global(.dark) .overview-copy,
-:global(.dark) .overview-card,
-:global(.dark) .status-rail__item {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .overview-copy h2,
-:global(.dark) .overview-card__value,
-:global(.dark) .status-rail__item strong,
-:global(.dark) .extension-text {
-  color: #e8edf4;
-}
-
-:global(.dark) .overview-copy p,
-:global(.dark) .overview-card__hint,
-:global(.dark) .overview-card__label,
-:global(.dark) .status-rail__item span,
-:global(.dark) .stat-label {
-  color: #9faebb;
-}
-
-:global(.dark) .custom-table :deep(.el-table__header th) {
-  background-color: #182231 !important;
-  color: #d6deea;
-}
-
-:global(.dark) .custom-table :deep(.el-table__row:hover > td) {
-  background-color: #14202d !important;
-}
-
-@media (max-width: 960px) {
-  .overview-panel,
-  .overview-grid,
-  .status-rail {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
-

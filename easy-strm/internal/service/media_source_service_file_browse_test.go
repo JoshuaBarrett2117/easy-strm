@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"os"
@@ -417,7 +417,3 @@ func TestMediaSourceServiceGetFilesInvalidPath(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
-
-
-
-

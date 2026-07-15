@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"encoding/json"
@@ -66,7 +66,7 @@ func TestEnsureIdentifyMetadataTVOriginalTitle(t *testing.T) {
 			"genres": []map[string]interface{}{
 				{"id": 18},
 			},
-			"origin_country":   []string{"US"},
+			"origin_country":    []string{"US"},
 			"original_language": "en",
 			"name":              "绝命毒师",
 			"original_name":     "Breaking Bad",
@@ -123,4 +123,3 @@ func TestExtractMetadataFromDetailFallbackFields(t *testing.T) {
 		t.Fatalf("unexpected tv countries: %+v", tvCountries)
 	}
 }
-

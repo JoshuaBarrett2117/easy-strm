@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"fmt"
@@ -723,4 +723,3 @@ func TestUpdateTaskResultMetadata(t *testing.T) {
 		t.Fatalf("unexpected failed item category: %#v", items[0].Category)
 	}
 }
-

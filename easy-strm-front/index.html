@@ -4,7 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Easy Stream - STRM文件管理</title>
+    <title>Easy Stream - 影视资源管理平台</title>
+    <script>
+      // 首屏防闪白:在 CSS 加载前根据本地主题设置 dark class(默认为深色)
+      if ((localStorage.getItem('theme') ?? 'dark') === 'dark') {
+        document.documentElement.classList.add('dark')
+      }
+    </script>
   </head>
   <body>
     <div id="app"></div>

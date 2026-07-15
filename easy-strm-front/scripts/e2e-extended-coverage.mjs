@@ -56,7 +56,7 @@ function settingsToPayload(raw = {}) {
 }
 
 async function confirmPrimaryAction(page) {
-  const primary = page.locator(".el-message-box__btns .el-button--primary").last();
+  const primary = page.locator(".n-dialog__action button").last();
   await primary.waitFor({ timeout: 10000 });
   await primary.click();
 }
@@ -78,7 +78,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
     addCase("TC-EXT-AUTH-001", "登录进入控制台", "PASS", "", await saveShot(page, "01_login_success"));
 
@@ -98,13 +98,13 @@ async function run() {
     originalSettingsPayload = settingsToPayload(normalizeData(settingsData) || {});
 
     await page.goto(`${FRONTEND_URL}/dashboard/settings`, { waitUntil: "networkidle" });
-    await page.locator(".header-title").filter({ hasText: "系统配置" }).waitFor({ timeout: 15000 });
+    await page.getByRole("heading", { name: "系统配置", exact: true }).waitFor({ timeout: 15000 });
     const alistValue = `http://127.0.0.1:${Math.floor(4000 + Math.random() * 500)}`;
     const proxyDomainsValue = "github,tmdb";
     await page.locator('input[placeholder*="192.168.1.100:5244"]').fill(alistValue);
-    await page.locator('.el-input-number input').first().fill("9");
+    await page.locator('.n-input-number input').first().fill("9");
     await page.locator('textarea[placeholder*="tg,github"]').fill(proxyDomainsValue);
-    await page.locator(".form-actions .el-button--primary").last().click();
+    await page.getByRole("button", { name: "保存配置" }).first().click();
     await page.waitForTimeout(1000);
 
     const savedSettingsResp = await api.get("/settings");
@@ -121,13 +121,13 @@ async function run() {
     );
 
     await page.goto(`${FRONTEND_URL}/dashboard/category-strategy`, { waitUntil: "networkidle" });
-    await page.locator(".category-hero").waitFor({ timeout: 15000 });
-    await page.locator(".hero-actions .el-button--primary").click();
+    await page.getByRole("heading", { name: "分类策略", exact: true }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "新增分类" }).click();
     const categoryName = `扩展覆盖分类_${stamp}`;
     const categoryPath = `/电影/扩展覆盖_${stamp}`;
     await page.locator('input[placeholder="例如：国漫"]').fill(categoryName);
     await page.locator('input[placeholder="/电视剧/国漫"]').fill(categoryPath);
-    await page.locator(".editor-footer .el-button--primary").click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
     await page.waitForTimeout(1000);
 
     const categoryListResp = await api.get("/media/categories");
@@ -145,11 +145,11 @@ async function run() {
     );
 
     if (createdCategory) {
-      await page.locator(".strategy-item").filter({ hasText: categoryName }).click();
+      await page.getByRole("button").filter({ hasText: categoryName }).click();
       const editedPath = `${categoryPath}_编辑`;
       await page.locator('input[placeholder="/电视剧/国漫"]').fill(editedPath);
-      await page.locator('.editor-actions .el-switch').click();
-      await page.locator(".editor-footer .el-button--primary").click();
+      await page.getByRole("switch").click();
+      await page.getByRole("button", { name: "保存", exact: true }).click();
       await page.waitForTimeout(1000);
 
       const updatedResp = await api.get("/media/categories");
@@ -164,7 +164,7 @@ async function run() {
         await saveShot(page, "04_category_updated")
       );
 
-      await page.locator(".editor-actions .el-button--danger").click();
+      await page.getByRole("button", { name: "删除", exact: true }).click();
       await confirmPrimaryAction(page);
       await page.waitForTimeout(1000);
 
@@ -187,12 +187,12 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/strm-config`, { waitUntil: "networkidle" });
-    await page.locator(".header-title").filter({ hasText: "STRM 文件配置中心" }).waitFor({ timeout: 15000 });
-    await page.locator(".card-header .el-button--primary").click();
-    const strmDialog = page.locator(".el-dialog").filter({ hasText: "新增配置" }).last();
+    await page.getByRole("heading", { name: "STRM 文件配置中心", exact: true }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "新增配置" }).click();
+    const strmDialog = page.locator('[role="dialog"]').filter({ hasText: "新增配置" }).last();
     await strmDialog.waitFor({ timeout: 10000 });
     addCase("TC-EXT-STRM-001", "STRM 配置页新增弹窗可打开", "PASS", "", await saveShot(page, "06_strm_dialog"));
-    await strmDialog.locator(".dialog-footer .el-button").first().click();
+    await strmDialog.locator("button").first().click();
 
     const summary = {
       runId,

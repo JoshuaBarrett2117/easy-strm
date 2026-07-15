@@ -1,5 +1,21 @@
 # Operations Log
 
+## 2026-07-15 Codex 重构验收与发布
+
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，分别改用结构化上下文扫描、`update_plan`、`rg`/`git diff`；本任务无外部资料需求，未调用网络搜索。
+- 使用 `git status -sb`、`git diff --stat`、`rg --files` 扫描工作区、重构范围、运行入口与 E2E 脚本。
+- 确认前端开发服务为 `npm run dev`（Vite 3001），后端为 `go run .`（Gin 8082），Vite 将 `/api` 代理到后端。
+- 确认前端已迁移到 Naive UI，而多个 `scripts/e2e-*.mjs` 仍依赖 `.el-*` 旧 DOM 选择器，是本轮主要回归风险。
+- GitHub 发布前置检查通过：`gh` 已安装且已登录，远程为 `JoshuaBarrett2117/easy-strm`。
+- 首次执行 `go test ./...` 失败：历史临时工具 `easy-strm/codex_e2e_user.go` 与正式入口 `main.go` 重复定义 `main()`；该文件仅用于一次性创建测试用户且未被版本控制，已删除以恢复标准 Go 构建入口。
+- 启动真实后端 `go run .`（8082）与前端 `npm run dev -- --host 127.0.0.1`（3001），使用现有忽略配置连接 PostgreSQL、Redis 与 115 账号。
+- 浏览器真实验证通过登录、文件工作台、媒体源浏览、视频选择、TMDB 候选/手动搜索入口；项目 Playwright 继续完成真实整理和 STRM 闭环。
+- 将全部 `easy-strm-front/scripts/e2e-*.mjs` 从 Element Plus `.el-*` 私有类迁移到 Naive UI DOM、ARIA 角色、业务文本和稳定 `data-testid`；执行 `node --check` 确认全部脚本语法有效，`rg '\.el-'` 结果为空。
+- 为 `TaskCard`、TMDB 搜索结果、整理预览新文件名编辑动作补充稳定测试/可访问属性，降低脚本对框架内部 class 的依赖。
+- 修复异步整理成功事件仍打开空同步结果弹窗的问题：异步任务提交后刷新文件列表并交由任务中心追踪。
+- 真实 115 主流程通过：浏览源目录、TMDB 识别、复制整理、任务完成、STRM 配置自动匹配、STRM 任务完成、本地文件落盘；测试创建的远端目录已删除。
+- 清理本轮运行产生的时间戳报告，恢复后端启动时改写的 `easy-strm/debug_directory_tree.txt`，避免提交运行时产物。
+
 ## 2026-04-13 Codex
 
 - 发现浏览器全流程脚本默认前端地址仍是 `http://localhost:5173`，而项目实际 Vite 端口是 `3001`。
@@ -124,3 +140,50 @@
 - 后端将单条资产的 STRM 生成和媒体服务器刷新包装为可追踪任务，接口返回 `task_id`，并补充单元测试。
 - 新增 `npm run e2e:resource-platform`，用 Playwright + 模拟 API 覆盖同步入库、资产台账、STRM 任务深链、待处理修正并入库。
 - 移除 `docker-compose.yml` 顶层废弃 `version` 字段，`docker compose config` 已无 obsolete warning。
+
+## 2026-05-15 Codex 大文件深拆与上线验证
+
+- 后端深拆：`organize_service.go` 拆分为任务、扫描、识别缓存、分类匹配、路径处理、执行与 115 云盘整理等职责文件；`115client.go` 拆分为事件流、文件操作、目录树、开放平台和秒传模块；`db.go` 拆分为用户、115账号、STRM配置、系统配置、STRM文件、定时任务、通知配置和 DB 实例模块；`auth.go` 拆分出 Token、公开路由、转换器和目录树辅助函数。
+- 前端深拆：`Cloud115.vue` 抽离纯展示映射、脱敏、二维码状态、渠道提示和排序逻辑到 `src/utils/cloud115Display.js`，页面继续保留交互编排。
+- 细粒度测试：新增 `115_life_events_test.go` 覆盖 115 事件流 JSON 辅助函数；新增 `auth_tokens_test.go` 覆盖 JWT 生成、校验与错误密钥拒绝。
+- 上线验证：`go test ./...`、`go vet ./...`、`npm run build`、`npm run e2e:resource-platform`、`npm run e2e:organize-preview-refresh`、`npm run e2e:organize-preview-cancel` 均通过。
+- 体积变化：`organize_service.go` 从约 2200 行降至 549 行；`115client.go` 从约 1800 行降至基础客户端文件；`db.go` 从约 1900 行降至 936 行；`auth.go` 降至 815 行；`Cloud115.vue` 从 1335 行降至 1212 行。
+
+## 2026-05-15 Codex 大文件继续深拆
+
+- 继续按“同包拆分、保持公开签名、先拆低风险边界”的策略推进：`cloud115_controller.go` 拆出登录、文件操作和通知配置处理；`organize_controller.go` 拆出执行任务与识别/更名处理；`media_source_controller.go` 拆出文件浏览和纯辅助函数。
+- DAO 继续拆分：`tmdb_cache_dao.go` 拆出 `rename_preset_dao.go`、`media_file_cache_dao.go`、`dao_nullable.go`，保留原 SQL 行为和缓存 key 语义。
+- 服务层继续拆分：`media_source_service.go` 拆出文件浏览与辅助函数；`rename_service.go` 拆出模板渲染、文件名解析、生成名归一化；`tmdb_service.go`、`watch_service.go`、`scrape_service.go` 已按前序拆分继续保持包级测试通过。
+- 根包继续拆分：`db.go` 先抽出模型结构体到 `db_models.go`，降低初始化文件职责混杂度。
+- 新增细粒度测试：controller 层覆盖媒体源文件 helper、整理执行请求默认值与失败分类；service 层覆盖媒体源文件 helper、文件类型、排序、过滤和面包屑。
+- E2E 修正：`e2e-resource-platform.mjs` 中任务标题断言改为 `.first()`，避免同一标题同时出现在任务卡片和详情表格时触发 Playwright strict mode 冲突。
+
+## 2026-05-27 Codex 功能盘点与浏览器验证
+
+- 按用户要求对当前项目功能面做一轮整理，先读取 `README.md`、`docs/产品与架构.md`、`docs/开发与测试.md`，再对齐前端路由、页面入口、API 封装和后端路由注册。
+- 确认当前后台共有 13 个主要前端入口：首页、资产台账、同步入库、待处理、任务中心、文件工作台、STRM 配置、115 云管理、整理规则、系统设置、系统日志、网络测试、缓存管理。
+- 确认后端业务 API 覆盖 Dashboard、认证、媒体分类、115 登录/账号/文件/直链、通知配置、系统配置、网络测试、STRM、任务、Cron、媒体源、媒体库、待处理、文件操作、自动整理、TMDB、刮削、Emby、日志和缓存。
+- 环境检查发现 Docker Desktop Linux daemon 未运行，`127.0.0.1:5432` 和 `127.0.0.1:6379` 均不可连接，因此真实后端无法启动完成真实数据浏览器全链路。
+- 已执行 `go test ./...`，结果通过。
+- 已执行 `npm run build`，结果通过。
+- 已执行 `npm run e2e:resource-platform`，结果通过，覆盖同步、台账、STRM 任务深链、待处理识别与入库。
+- 已尝试 Codex in-app Browser 访问 `http://127.0.0.1:3001`，被企业网络策略拦截；按 Browser 策略停止，不使用绕行方式。
+
+## 2026-05-27 Codex 真实后端本地启动浏览器验证
+
+- 使用用户提供的远端 PostgreSQL/Redis 连接信息启动后端；连接均成功，后端完成数据库初始化、Redis 初始化、Cron 加载和路由注册，监听 `:8082`。
+- 启动前端 Vite 开发服务，监听 `127.0.0.1:3001`。
+- 发现 `admin/admin` 在远端库中不是有效登录；为避免修改 admin，创建临时测试用户用于浏览器登录，测试完成后删除。
+- 新增一次性验证脚本 `.codex/real-backend-browser-e2e-2026-05-27.mjs`，使用真实前后端执行登录、全路由巡检和临时媒体源同步链路。
+- 浏览器验证结果 `ok=true`：13 个后台路由标题均匹配，无页面级网络错误，临时本地媒体源能在同步入库页显示，触发全量同步后资产台账能显示测试文件。
+- 截图输出到 `debug/real-backend-browser-20260527/`。
+- 清理：临时测试用户已删除；临时媒体源由脚本通过 API 删除；临时 Go 用户管理 helper 已删除。
+
+## 2026-05-27 Codex 按钮矩阵浏览器验证
+
+- 用户要求继续验证按钮，新增 `.codex/button-matrix-e2e-2026-05-27.mjs`。
+- 按“安全真实点击 + 高副作用确认/取消路径 + 临时对象 CRUD”策略执行，避免删除真实账号、真实文件或清空真实缓存。
+- 首轮脚本暴露多处 Playwright 严格模式定位问题，已收紧到顶部区、主内容区、确认框或精确按钮名后复跑。
+- 最终结果 `ok=true`，通过 15 个按钮组：登录、顶部快捷、首页入口、同步入库、资产台账、待处理、任务中心、文件工作台、115、整理规则、STRM、系统设置、日志、网络、缓存。
+- 清理：临时测试用户删除后再次登录确认失败；临时媒体源、分类和 STRM 配置均由脚本删除。
+- 残余 warning：任务中心“详情”按钮可点击，但本轮未观察到详情抽屉打开，需要单独排查。

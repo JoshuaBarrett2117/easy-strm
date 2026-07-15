@@ -1,15 +1,14 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/pkg/logger"
+	"easy-strm/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,7 +16,7 @@ import (
 // LogController 日志管理控制器
 // 负责日志文件列表查看、内容读取、配置管理
 type LogController struct {
-	systemConfigDAO *dao.SystemConfigDAO
+	systemConfigService *service.SystemConfigService
 	// logDir: 日志文件目录路径，由路由层注入
 	logDir string
 	// keepDaysUpdater: 更新日志保留天数的回调，由路由层注入
@@ -29,10 +28,10 @@ type LogController struct {
 }
 
 // NewLogController 创建日志管理控制器实例
-func NewLogController(systemConfigDAO *dao.SystemConfigDAO) *LogController {
+func NewLogController(systemConfigService *service.SystemConfigService) *LogController {
 	return &LogController{
-		systemConfigDAO: systemConfigDAO,
-		logDir:          "logs", // 默认日志目录
+		systemConfigService: systemConfigService,
+		logDir:              "logs", // 默认日志目录
 	}
 }
 
@@ -202,23 +201,11 @@ func (lc *LogController) GetConfig(ctx *gin.Context) {
 		return
 	}
 
-	config, err := lc.systemConfigDAO.GetByKey("log_save_day_limit")
-	if err != nil || config == nil {
-		ctx.JSON(http.StatusOK, gin.H{
-			"data": map[string]interface{}{
-				"key":   "log_save_day_limit",
-				"value": 1,
-			},
-		})
-		return
-	}
-
-	var days int
-	fmt.Sscanf(config.ConfigVal, "%d", &days)
+	key, days, _ := lc.systemConfigService.GetLogSaveDayLimit()
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": map[string]interface{}{
-			"key":   config.ConfigKey,
+			"key":   key,
 			"value": days,
 		},
 	})
@@ -246,7 +233,7 @@ func (lc *LogController) UpdateConfig(ctx *gin.Context) {
 	}
 
 	// 更新数据库配置
-	if err := lc.systemConfigDAO.Upsert("log_save_day_limit", fmt.Sprintf("%d", configData.Value)); err != nil {
+	if err := lc.systemConfigService.UpdateLogSaveDayLimit(configData.Value); err != nil {
 		logger.Errorf("LogController[UpdateConfig] 更新失败: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update config"})
 		return

@@ -1,164 +1,190 @@
 <template>
-  <el-card v-if="task" class="task-card" shadow="hover" :class="['task-type-' + (task.task_type || 'unknown')]">
-    <template #header>
-      <div class="task-header">
-        <div class="task-title">
-          <el-icon class="task-icon" :class="{ spin: task.status === 'running' }">
-            <component :is="taskStatusIcon" />
-          </el-icon>
-          <span class="task-name">{{ taskDisplayName }}</span>
-          <el-tag :type="taskStatusType" size="small" class="status-tag">
-            {{ taskStatusText }}
-          </el-tag>
-          <el-tag v-if="task.priority && task.priority < 5" type="danger" size="small" effect="dark" class="priority-tag">
-            P{{ task.priority }}
-          </el-tag>
-        </div>
-        <div class="task-actions">
-          <el-button type="primary" size="small" plain @click="handleDetail">详情</el-button>
-          <el-button v-if="canCancel" type="danger" size="small" plain @click="handleCancel">取消任务</el-button>
-          <el-button v-if="canResume" type="warning" size="small" plain @click="handleResume">恢复任务</el-button>
-          <span class="task-time">{{ task.create_time || '' }}</span>
-        </div>
+  <div
+    v-if="task"
+    data-testid="task-card"
+    class="rounded-2xl border border-slate-200 border-l-4 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:border-white/5 dark:bg-ink-900 lg:p-5"
+    :class="taskAccentClass"
+  >
+    <!-- 头部：任务名 / 状态 / 操作 -->
+    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-white/5">
+      <div class="flex min-w-0 flex-wrap items-center gap-2">
+        <n-icon
+          size="18"
+          :component="taskStatusIcon"
+          class="shrink-0 text-slate-500 dark:text-slate-400"
+          :class="{ 'animate-spin': task.status === 'running' }"
+        />
+        <span class="truncate text-sm font-bold text-slate-800 dark:text-white">{{ taskDisplayName }}</span>
+        <n-tag :type="taskStatusType" size="small" round>{{ taskStatusText }}</n-tag>
+        <n-tag v-if="task.priority && task.priority < 5" type="error" size="small" round>
+          P{{ task.priority }}
+        </n-tag>
       </div>
-    </template>
+      <div class="flex flex-wrap items-center gap-2">
+        <n-button type="primary" size="small" secondary @click="handleDetail">详情</n-button>
+        <n-button v-if="canCancel" type="error" size="small" secondary @click="handleCancel">取消任务</n-button>
+        <n-button v-if="canResume" type="warning" size="small" secondary @click="handleResume">恢复任务</n-button>
+        <span class="text-xs text-slate-400 dark:text-slate-500">{{ task.create_time || '' }}</span>
+      </div>
+    </div>
 
-    <div class="task-body">
-      <div class="task-type-info">
-        <el-tag :type="taskTypeTagType" size="default" effect="plain">
-          {{ taskTypeName }}
-        </el-tag>
-        <span v-if="task.config_name" class="config-name">{{ task.config_name }}</span>
-        <el-tag
+    <div class="pt-3">
+      <!-- 任务类型信息 -->
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <n-tag :type="taskTypeTagType" size="small">{{ taskTypeName }}</n-tag>
+        <span v-if="task.config_name" class="text-sm text-slate-500 dark:text-slate-400">{{ task.config_name }}</span>
+        <n-tag
           v-if="watchFailureCategoryTag"
           :type="watchFailureCategoryTag.type"
           size="small"
-          effect="light"
-          class="failure-tag"
+          class="ml-auto"
         >
           {{ watchFailureCategoryTag.label }}
-        </el-tag>
+        </n-tag>
       </div>
 
-      <div v-if="taskSummaryItems.length > 0" class="task-summary">
-        <div v-for="item in taskSummaryItems" :key="item.label" class="task-summary-item">
-          <span class="task-summary-label">{{ item.label }}</span>
-          <span class="task-summary-value">{{ item.value }}</span>
+      <!-- 摘要信息 -->
+      <div v-if="taskSummaryItems.length > 0" class="mb-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          v-for="item in taskSummaryItems"
+          :key="item.label"
+          class="rounded-xl bg-slate-50 px-3 py-2.5 dark:bg-white/5"
+        >
+          <span class="block text-xs text-slate-400 dark:text-slate-500">{{ item.label }}</span>
+          <span class="mt-0.5 block break-words text-sm font-medium text-slate-700 dark:text-slate-200">{{ item.value }}</span>
         </div>
       </div>
 
-      <div v-if="task.task_type === 'watch_auto_organize'" class="watch-result-strip">
-        <div class="watch-result-stat">
-          <span class="watch-result-stat-label">检测</span>
-          <span class="watch-result-stat-value">{{ watchDetectedCount }}</span>
+      <!-- watch_auto_organize 结果条 -->
+      <div
+        v-if="task.task_type === 'watch_auto_organize'"
+        class="mb-3 grid grid-cols-3 gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3"
+      >
+        <div class="flex flex-col gap-1 text-center">
+          <span class="text-xs text-slate-400 dark:text-slate-500">检测</span>
+          <span class="text-sm font-bold tabular-nums text-slate-700 dark:text-slate-200">{{ watchDetectedCount }}</span>
         </div>
-        <div class="watch-result-stat">
-          <span class="watch-result-stat-label">成功</span>
-          <span class="watch-result-stat-value success">{{ watchSuccessCount }}</span>
+        <div class="flex flex-col gap-1 text-center">
+          <span class="text-xs text-slate-400 dark:text-slate-500">成功</span>
+          <span class="text-sm font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{{ watchSuccessCount }}</span>
         </div>
-        <div class="watch-result-stat">
-          <span class="watch-result-stat-label">失败</span>
-          <span class="watch-result-stat-value failed">{{ watchFailedCount }}</span>
+        <div class="flex flex-col gap-1 text-center">
+          <span class="text-xs text-slate-400 dark:text-slate-500">失败</span>
+          <span class="text-sm font-bold tabular-nums text-red-500 dark:text-red-400">{{ watchFailedCount }}</span>
         </div>
-        <div class="watch-result-text">
+        <div
+          v-if="watchResultSummaryText || watchFailureReasonText"
+          class="col-span-3 flex flex-col gap-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400"
+        >
           <span v-if="watchResultSummaryText">{{ watchResultSummaryText }}</span>
           <span v-if="watchFailureReasonText">{{ watchFailureReasonText }}</span>
         </div>
       </div>
 
-      <div v-if="watchFailedItems.length > 0" class="watch-failed-panel">
-        <div class="watch-failed-header">
-          <div class="watch-failed-title">
+      <!-- 失败文件面板 -->
+      <div
+        v-if="watchFailedItems.length > 0"
+        class="mb-3 rounded-xl border border-red-200 bg-red-50/50 p-3 dark:border-red-500/20 dark:bg-red-500/5"
+      >
+        <div class="mb-2.5 flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2 text-xs font-bold text-slate-700 dark:text-slate-200">
             <span>失败文件</span>
-            <el-tag size="small" type="danger">{{ watchFailedItemCount }}</el-tag>
+            <n-tag size="small" type="error">{{ watchFailedItemCount }}</n-tag>
           </div>
-          <el-button type="primary" link size="small" @click="toggleWatchFailedItems">
+          <n-button text type="primary" size="small" @click="toggleWatchFailedItems">
             {{ watchFailedItemsExpanded ? '收起' : '展开全部' }}
-          </el-button>
+          </n-button>
         </div>
-        <div class="watch-failed-list">
+        <div class="flex flex-col gap-2">
           <div
             v-for="item in watchFailedItemsVisible"
             :key="`${item.file_id || item.file_name}-${item.reason}`"
-            class="watch-failed-item"
+            class="rounded-lg border border-slate-100 bg-white px-3 py-2.5 dark:border-white/5 dark:bg-white/5"
           >
-            <div class="watch-failed-item-main">
-              <span class="watch-failed-item-name">{{ item.file_name }}</span>
-              <span v-if="item.file_id" class="watch-failed-item-id">{{ item.file_id }}</span>
-              <el-tag v-if="item.category" :type="watchFailureTagType(item.category)" size="small">
+            <div class="mb-1 flex flex-wrap items-center gap-2">
+              <span class="break-all text-sm font-semibold text-slate-800 dark:text-white">{{ item.file_name }}</span>
+              <span v-if="item.file_id" class="break-all text-xs text-slate-400 dark:text-slate-500">{{ item.file_id }}</span>
+              <n-tag v-if="item.category" :type="watchFailureTagType(item.category)" size="small">
                 {{ watchFailureTagLabel(item.category) }}
-              </el-tag>
+              </n-tag>
             </div>
-            <div class="watch-failed-item-reason">
+            <div class="break-words text-xs leading-relaxed text-red-500 dark:text-red-400">
               {{ item.reason || '未提供失败原因' }}
             </div>
           </div>
         </div>
-        <div v-if="watchFailedItemsHiddenCount > 0" class="watch-failed-more">
+        <div v-if="watchFailedItemsHiddenCount > 0" class="mt-2 text-xs text-slate-400 dark:text-slate-500">
           还有 {{ watchFailedItemsHiddenCount }} 项失败文件未展开
         </div>
       </div>
 
-      <el-progress
+      <!-- 进度条 -->
+      <n-progress
         v-if="showProgress"
+        type="line"
+        class="mb-3"
         :percentage="task.progress || 0"
         :status="progressStatus"
-        :stroke-width="14"
-        class="task-progress"
-        :format="progressFormat"
-      />
+        :height="14"
+        indicator-placement="outside"
+      >
+        {{ progressFormat(task.progress || 0) }}
+      </n-progress>
 
-      <div v-if="showFileStats" class="task-stats">
-        <div class="stat-item">
-          <div class="stat-value total">{{ task.total_files || 0 }}</div>
-          <div class="stat-label">总文件</div>
+      <!-- 文件统计 -->
+      <div v-if="showFileStats" class="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        <div class="rounded-xl bg-slate-50 p-3 text-center dark:bg-white/5">
+          <div class="text-lg font-bold tabular-nums text-cyan-600 dark:text-cyan-400">{{ task.total_files || 0 }}</div>
+          <div class="text-xs text-slate-400 dark:text-slate-500">总文件</div>
         </div>
-        <div class="stat-item">
-          <div class="stat-value success">{{ task.success_files || 0 }}</div>
-          <div class="stat-label">成功</div>
+        <div class="rounded-xl bg-slate-50 p-3 text-center dark:bg-white/5">
+          <div class="text-lg font-bold tabular-nums text-emerald-600 dark:text-emerald-400">{{ task.success_files || 0 }}</div>
+          <div class="text-xs text-slate-400 dark:text-slate-500">成功</div>
         </div>
-        <div class="stat-item">
-          <div class="stat-value failed">{{ task.failed_files || 0 }}</div>
-          <div class="stat-label">失败</div>
+        <div class="rounded-xl bg-slate-50 p-3 text-center dark:bg-white/5">
+          <div class="text-lg font-bold tabular-nums text-red-500 dark:text-red-400">{{ task.failed_files || 0 }}</div>
+          <div class="text-xs text-slate-400 dark:text-slate-500">失败</div>
         </div>
-        <div class="stat-item">
-          <div class="stat-value pending">{{ pendingCount }}</div>
-          <div class="stat-label">处理中</div>
+        <div class="rounded-xl bg-slate-50 p-3 text-center dark:bg-white/5">
+          <div class="text-lg font-bold tabular-nums text-amber-600 dark:text-amber-400">{{ pendingCount }}</div>
+          <div class="text-xs text-slate-400 dark:text-slate-500">处理中</div>
         </div>
       </div>
 
-      <div v-if="task.scheduled_time" class="scheduled-info">
-        <el-icon><Clock /></el-icon>
+      <!-- 计划执行时间 -->
+      <div v-if="task.scheduled_time" class="mt-2 flex items-center gap-1.5 text-xs text-slate-400 dark:text-slate-500">
+        <n-icon size="14" :component="TimeOutline" />
         <span>计划执行时间: {{ task.scheduled_time }}</span>
       </div>
 
-      <el-alert
+      <!-- 错误信息 -->
+      <n-alert
         v-if="task.error_message"
         type="error"
         :title="task.error_message"
-        show-icon
         :closable="false"
-        class="task-error"
+        class="mt-3"
       />
     </div>
-  </el-card>
+  </div>
 </template>
 
 <script setup>
 import { computed, ref, toRef } from 'vue'
+import { NAlert, NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import {
-  Clock,
-  Loading,
-  CircleCheck,
-  CircleClose,
-  Timer,
-  Document,
-  Refresh,
-  VideoCamera,
-  Film,
-  Search,
-  Connection
-} from '@element-plus/icons-vue'
+  TimeOutline,
+  SyncOutline,
+  CheckmarkCircleOutline,
+  CloseCircleOutline,
+  TimerOutline,
+  DocumentTextOutline,
+  RefreshOutline,
+  VideocamOutline,
+  FilmOutline,
+  SearchOutline,
+  LinkOutline
+} from '@vicons/ionicons5'
 
 const props = defineProps({
   task: {
@@ -187,34 +213,54 @@ const taskTypeNames = {
 }
 
 const taskTypeIcons = {
-  strm_generate: Document,
-  incremental_sync: Timer,
-  sync_full: Timer,
-  sync_transfer: Timer,
-  cleanup: Refresh,
-  proxy_refresh: Refresh,
-  organize: VideoCamera,
-  watch_auto_organize: Film,
-  scrape: Search,
-  emby_refresh: Connection,
-  log_clean: Refresh,
-  sync_files: Timer
+  strm_generate: DocumentTextOutline,
+  incremental_sync: TimerOutline,
+  sync_full: TimerOutline,
+  sync_transfer: TimerOutline,
+  cleanup: RefreshOutline,
+  proxy_refresh: RefreshOutline,
+  organize: VideocamOutline,
+  watch_auto_organize: FilmOutline,
+  scrape: SearchOutline,
+  emby_refresh: LinkOutline,
+  log_clean: RefreshOutline,
+  sync_files: TimerOutline
 }
 
 const taskTypeTagTypes = {
   strm_generate: 'primary',
   incremental_sync: 'success',
   sync_full: 'success',
-  sync_transfer: '',
+  sync_transfer: 'default',
   cleanup: 'warning',
   proxy_refresh: 'info',
   organize: 'primary',
   watch_auto_organize: 'success',
   scrape: 'warning',
-  emby_refresh: 'danger',
+  emby_refresh: 'error',
   log_clean: 'warning',
   sync_files: 'info'
 }
+
+// 任务类型左侧强调色
+const taskAccentClasses = {
+  strm_generate: 'border-l-cyan-500',
+  incremental_sync: 'border-l-green-500',
+  sync_full: 'border-l-green-500',
+  sync_transfer: 'border-l-cyan-500',
+  cleanup: 'border-l-amber-500',
+  proxy_refresh: 'border-l-sky-500',
+  organize: 'border-l-violet-500',
+  watch_auto_organize: 'border-l-emerald-500',
+  scrape: 'border-l-orange-500',
+  emby_refresh: 'border-l-teal-500',
+  log_clean: 'border-l-amber-500',
+  sync_files: 'border-l-slate-400'
+}
+
+const taskAccentClass = computed(() => {
+  return taskAccentClasses[task.value?.task_type] || 'border-l-cyan-500'
+})
 
 const taskTypeName = computed(() => {
   const t = task.value
@@ -235,9 +281,9 @@ const taskStatusType = computed(() => {
     pending: 'info',
     running: 'warning',
     completed: 'success',
-    failed: 'danger',
+    failed: 'error',
     cancelled: 'info',
-    scheduled: ''
+    scheduled: 'default'
   }
   return task.value ? (statusMap[task.value.status] || 'info') : 'info'
 })
@@ -256,12 +302,12 @@ const taskStatusText = computed(() => {
 
 const taskStatusIcon = computed(() => {
   const t = task.value
-  if (!t) return Timer
-  if (t.status === 'running') return Loading
-  if (t.status === 'completed') return CircleCheck
-  if (t.status === 'failed' || t.status === 'cancelled') return CircleClose
-  if (t.status === 'scheduled') return Clock
-  return taskTypeIcons[t.task_type] || Timer
+  if (!t) return TimerOutline
+  if (t.status === 'running') return SyncOutline
+  if (t.status === 'completed') return CheckmarkCircleOutline
+  if (t.status === 'failed' || t.status === 'cancelled') return CloseCircleOutline
+  if (t.status === 'scheduled') return TimeOutline
+  return taskTypeIcons[t.task_type] || TimerOutline
 })
 
 const canCancel = computed(() => {
@@ -286,11 +332,11 @@ const showFileStats = computed(() => {
 
 const progressStatus = computed(() => {
   const t = task.value
-  if (!t) return ''
+  if (!t) return 'default'
   if (t.status === 'completed') return 'success'
-  if (t.status === 'failed') return 'exception'
+  if (t.status === 'failed') return 'error'
   if (t.status === 'cancelled') return 'warning'
-  return ''
+  return 'default'
 })
 
 const progressFormat = (percentage) => {
@@ -360,7 +406,7 @@ const watchFailureTagLabel = (category) => {
 const watchFailureTagType = (category) => {
   const key = String(category || '').trim()
   if (key === 'identify_failed' || key === 'scan_failed' || key === 'target_path') return 'warning'
-  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'danger'
+  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'error'
   if (key === 'partial_failed') return 'warning'
   return 'info'
 }
@@ -398,14 +444,14 @@ const watchFailureCategoryTag = computed(() => {
 
   const categoryMap = {
     target_path: { label: '目标目录异常', type: 'warning' },
-    scan_failed: { label: '扫描失败', type: 'danger' },
+    scan_failed: { label: '扫描失败', type: 'error' },
     identify_failed: { label: '识别失败', type: 'warning' },
-    cloud115_auth_failed: { label: '115 账号失效', type: 'danger' },
-    cloud115_failed: { label: '115 操作失败', type: 'danger' },
+    cloud115_auth_failed: { label: '115 账号失效', type: 'error' },
+    cloud115_failed: { label: '115 操作失败', type: 'error' },
     conflict_skipped: { label: '目标冲突', type: 'warning' },
-    organize_failed: { label: '整理失败', type: 'danger' },
+    organize_failed: { label: '整理失败', type: 'error' },
     partial_failed: { label: '部分失败', type: 'warning' },
-    panic: { label: '异常中断', type: 'danger' }
+    panic: { label: '异常中断', type: 'error' }
   }
 
   return categoryMap[category] || { label: '处理异常', type: 'info' }
@@ -506,220 +552,3 @@ const toggleWatchFailedItems = () => {
   watchFailedItemsExpanded.value = !watchFailedItemsExpanded.value
 }
 </script>
-
-<style scoped>
-.task-card {
-  border-radius: 8px;
-  margin-bottom: 12px;
-  transition: all 0.3s ease;
-}
-
-.task-card:hover {
-  transform: translateY(-2px);
-}
-
-.task-type-strm_generate,
-.task-type-organize,
-.task-type-watch_auto_organize,
-.task-type-scrape,
-.task-type-emby_refresh,
-.task-type-log_clean,
-.task-type-sync_files,
-.task-type-incremental_sync,
-.task-type-sync_full {
-  border-left: 4px solid #409eff;
-}
-
-.task-type-organize { border-left-color: #9b59b6; }
-.task-type-watch_auto_organize { border-left-color: #2f9e44; }
-.task-type-scrape { border-left-color: #e67e22; }
-.task-type-emby_refresh { border-left-color: #52b788; }
-.task-type-log_clean { border-left-color: #e6a23c; }
-.task-type-sync_files { border-left-color: #909399; }
-.task-type-incremental_sync, .task-type-sync_full { border-left-color: #67c23a; }
-
-.task-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.task-title,
-.task-actions,
-.task-type-info,
-.watch-result-stat {
-  display: flex;
-  align-items: center;
-}
-
-.task-title { gap: 10px; }
-.task-actions { gap: 10px; }
-.task-type-info { gap: 10px; margin-bottom: 15px; }
-.watch-result-stat { flex-direction: column; gap: 4px; }
-
-.task-icon { font-size: 18px; }
-.task-icon.spin { animation: spin 1s linear infinite; }
-
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.task-name {
-  font-weight: 600;
-  font-size: 15px;
-  color: #303133;
-}
-
-.status-tag { margin-left: 8px; }
-.priority-tag { margin-left: 4px; }
-.task-time { font-size: 12px; color: #909399; }
-.task-body { padding: 10px 0; }
-.config-name { color: #606266; font-size: 14px; }
-.failure-tag { margin-left: auto; }
-
-.task-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.task-summary-item,
-.watch-failed-item {
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f7f8fa;
-}
-
-.task-summary-label,
-.watch-result-stat-label {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 12px;
-  color: #909399;
-}
-
-.task-summary-value,
-.watch-result-stat-value {
-  color: #303133;
-  font-size: 14px;
-  font-weight: 500;
-}
-
-.watch-result-strip {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  gap: 10px;
-  margin-bottom: 15px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(47, 158, 68, 0.08), rgba(47, 158, 68, 0.02));
-  border: 1px solid rgba(47, 158, 68, 0.16);
-}
-
-.watch-result-text,
-.watch-failed-list,
-.watch-failed-more {
-  font-size: 12px;
-  line-height: 1.6;
-}
-
-.watch-result-text {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: #606266;
-}
-
-.watch-result-stat-value.success { color: #67c23a; }
-.watch-result-stat-value.failed { color: #f56c6c; }
-
-.watch-failed-panel {
-  margin-bottom: 15px;
-  padding: 12px 14px;
-  border: 1px solid #fde2e2;
-  border-radius: 10px;
-  background: linear-gradient(180deg, #fff9f9 0%, #fff 100%);
-}
-
-.watch-failed-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.watch-failed-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.watch-failed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.watch-failed-item {
-  background: #fff;
-  border: 1px solid #f2f2f2;
-}
-
-.watch-failed-item-main {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 4px;
-}
-
-.watch-failed-item-name { font-weight: 600; color: #303133; word-break: break-all; }
-.watch-failed-item-id { font-size: 12px; color: #909399; word-break: break-all; }
-.watch-failed-item-reason { font-size: 12px; line-height: 1.5; color: #f56c6c; word-break: break-word; }
-.watch-failed-more { margin-top: 8px; color: #909399; }
-
-.task-progress { margin-bottom: 15px; }
-
-.task-stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-  gap: 10px;
-  margin-bottom: 15px;
-}
-
-.stat-item {
-  padding: 12px;
-  border-radius: 8px;
-  background: #f8f9fb;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
-.stat-value.total { color: #409eff; }
-.stat-value.success { color: #67c23a; }
-.stat-value.failed { color: #f56c6c; }
-.stat-value.pending { color: #e6a23c; }
-
-.stat-label { font-size: 12px; color: #909399; }
-.scheduled-info {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #909399;
-  font-size: 13px;
-  margin-top: 8px;
-}
-.task-error { margin-top: 12px; }
-</style>

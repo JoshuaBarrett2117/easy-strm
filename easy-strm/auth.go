@@ -4,14 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	driver "github.com/SheltonZhu/115driver/pkg/driver"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 
 	"easy-strm/internal/controller"
@@ -19,206 +16,6 @@ import (
 	"easy-strm/internal/domain"
 	"easy-strm/internal/service"
 )
-
-// JWTClaims 定义JWT声明
-type JWTClaims struct {
-	UserID int `json:"user_id"`
-	jwt.RegisteredClaims
-}
-
-// GenerateToken 生成JWT token
-func GenerateToken(userID int, secret string) (string, error) {
-	claims := JWTClaims{
-		UserID: userID,
-		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			NotBefore: jwt.NewNumericDate(time.Now()),
-		},
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString([]byte(secret))
-}
-
-// VerifyToken 验证JWT token
-func VerifyToken(tokenString string, secret string) (*JWTClaims, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-		}
-		return []byte(secret), nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if claims, ok := token.Claims.(*JWTClaims); ok && token.Valid {
-		return claims, nil
-	}
-	return nil, fmt.Errorf("invalid token")
-}
-
-// SetupAuthRoutes 设置认证相关路由（公开接口，不需要认证）
-func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
-	// --- 初始化 AuthController ---
-	userDAO := dao.NewUserDAO()
-	authService := service.NewAuthService(userDAO, config.JWTSecret)
-	authController := controller.NewAuthController(authService)
-
-	// 注入 AuthController 回调依赖
-	authController.SetGetUserByName(func(name string) (*controller.UserInfo, error) {
-		user, err := GetUserByName(name)
-		if err != nil {
-			return nil, err
-		}
-		return &controller.UserInfo{
-			ID:         user.ID,
-			Name:       user.Name,
-			Password:   user.Password,
-			CreateTime: user.CreateTime,
-			UpdateTime: user.UpdateTime,
-		}, nil
-	})
-	authController.SetGetUserByID(func(id int) (*controller.UserInfo, error) {
-		user, err := GetUserByID(id)
-		if err != nil {
-			return nil, err
-		}
-		return &controller.UserInfo{
-			ID:         user.ID,
-			Name:       user.Name,
-			Password:   user.Password,
-			CreateTime: user.CreateTime,
-			UpdateTime: user.UpdateTime,
-		}, nil
-	})
-	authController.SetVerifyPassword(func(hashedPassword, password string) error {
-		return VerifyPassword(hashedPassword, password)
-	})
-	authController.SetGenerateToken(func(userID int, secret string) (string, error) {
-		return GenerateToken(userID, secret)
-	})
-	authController.SetSetToken(func(userID int, token string) error {
-		return SetToken(userID, token)
-	})
-	authController.SetGetToken(func(userID int) (string, error) {
-		return GetToken(userID)
-	})
-	authController.SetJWTSecret(config.JWTSecret)
-	authController.SetVerifyTokenAndReturnUserID(func(tokenString string, secret string) (int, error) {
-		claims, err := VerifyToken(tokenString, secret)
-		if err != nil {
-			return 0, err
-		}
-		return claims.UserID, nil
-	})
-
-	// --- 初始化 DirectLinkController ---
-	directLinkController := controller.NewDirectLinkController()
-	directLinkController.SetGetCloud115ByID(func(id int) (*controller.Cloud115AccountBrief, error) {
-		cloud115, err := GetCloud115ByID(id)
-		if err != nil {
-			return nil, err
-		}
-		return convertCloud115ToBrief(cloud115), nil
-	})
-	directLinkController.SetGetAllCloud115(func(sortField, sortOrder string) ([]*controller.Cloud115AccountBrief, error) {
-		list, err := GetAllCloud115(sortField, sortOrder)
-		if err != nil {
-			return nil, err
-		}
-		result := make([]*controller.Cloud115AccountBrief, len(list))
-		for i, acc := range list {
-			result[i] = convertCloud115ToBrief(acc)
-		}
-		return result, nil
-	})
-	directLinkController.SetGetPickCodeByPath(func(path string, cloud115ID int, cookie string) (string, error) {
-		return client.GetPickCodeByPath(path, cloud115ID, cookie)
-	})
-	directLinkController.SetGetFileDirectLink(func(uid int, pickCode string, cloud115ID int, cookie string, userAgent string) (interface{}, error) {
-		directLink, err := client.GetFileDirectLink(uid, pickCode, cloud115ID, cookie, userAgent)
-		if err != nil {
-			return nil, err
-		}
-		// 返回 URL 字符串，由 controller 负责重定向
-		directLinkURL := directLink.Url.Url
-		if directLinkURL == "" || !strings.HasPrefix(directLinkURL, "http") {
-			return nil, fmt.Errorf("invalid direct link URL")
-		}
-		return directLinkURL, nil
-	})
-	directLinkController.SetRapidTransferByMethod(func(pickCode, decodedPath string, sourceID int, sourceCookie string, targetDirCID string, targetID int, targetCookie string, targetDir string, transferMethod string, alistUrl string, alistToken string) (string, error) {
-		return client.RapidTransferByMethod(pickCode, decodedPath, sourceID, sourceCookie, targetDirCID, targetID, targetCookie, targetDir, transferMethod, alistUrl, alistToken)
-	})
-	directLinkController.SetGetCIDByPath(func(path string, cloud115ID int, cookie string) (string, error) {
-		return client.GetCIDByPath(path, cloud115ID, cookie)
-	})
-	directLinkController.SetRedisGet(func(key string) (string, error) {
-		return redisClient.Get(ctx, key).Result()
-	})
-	directLinkController.SetRedisSet(func(key string, value string, expirationSec int) error {
-		return redisClient.Set(ctx, key, value, time.Duration(expirationSec)*time.Second).Err()
-	})
-	directLinkController.SetGetDefaultUA(func() string {
-		return driver.UA115Disk
-	})
-
-	// --- 注册公开路由 ---
-	r.POST("/login", authController.Login)
-	r.POST("/auth/login", authController.Login)
-	r.GET("/direct-link", directLinkController.GetDirectLink)
-}
-
-// convertCloud115ToBrief 将 main.Cloud115 转换为 controller.Cloud115AccountBrief
-// NOTE: 两个结构体字段一致，但属于不同包的类型定义，需要手动转换
-func convertCloud115ToBrief(acc *Cloud115) *controller.Cloud115AccountBrief {
-	if acc == nil {
-		return nil
-	}
-	return &controller.Cloud115AccountBrief{
-		ID:                acc.ID,
-		Name:              acc.Name,
-		Cookie:            acc.Cookie,
-		RefreshToken:      acc.RefreshToken,
-		AccessToken:       acc.AccessToken,
-		ExpiresIn:         acc.ExpiresIn,
-		TransferAccountID: acc.TransferAccountID,
-		TransferDirectory: acc.TransferDirectory,
-		AccountType:       acc.AccountType,
-		Priority:          acc.Priority,
-		Status:            acc.Status,
-		TransferMethod:    acc.TransferMethod,
-		AlistUrl:          acc.AlistUrl,
-		AlistToken:        acc.AlistToken,
-		CreateTime:        acc.CreateTime,
-		UpdateTime:        acc.UpdateTime,
-	}
-}
-
-// convertStrmConfigToDetail 将 main.StrmConfig 转换为 controller.StrmConfigDetail
-func convertStrmConfigToDetail(cfg *StrmConfig) *controller.StrmConfigDetail {
-	if cfg == nil {
-		return nil
-	}
-	return &controller.StrmConfigDetail{
-		ID:               cfg.ID,
-		Cloud115Id:       cfg.Cloud115Id,
-		NetDiskPath:      cfg.NetDiskPath,
-		LocalPath:        cfg.LocalPath,
-		Cron:             cfg.Cron,
-		Extension:        cfg.Extension,
-		SyncMode:         cfg.SyncMode,
-		SourceAccount:    cfg.SourceAccount,
-		TargetAccount:    cfg.TargetAccount,
-		TargetDirectory:  cfg.TargetDirectory,
-		AutoCleanup:      cfg.AutoCleanup,
-		CleanupThreshold: cfg.CleanupThreshold,
-		CleanupPolicy:    cfg.CleanupPolicy,
-		MaxConcurrency:   cfg.MaxConcurrency,
-		CreateTime:       cfg.CreateTime,
-		UpdateTime:       cfg.UpdateTime,
-	}
-}
 
 // SetupAuthProtectedRoutes 设置需要认证的路由组
 func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
@@ -244,7 +41,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	// 初始化 Service
 	mediaSourceService := service.NewMediaSourceService(mediaSourceDAO, cloud115DAO)
 	cloud115Service := service.NewCloud115Service(cloud115DAO, notificationConfigDAO)
-	fileOperationService := service.NewFileOperationService(mediaSourceService, cloud115DAO)
+	fileOperationService := service.NewFileOperationService(mediaSourceService, cloud115DAO, client)
 	notificationService := service.NewNotificationService(notificationConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
 	tmdbAPIKey := ""
 	if apiKeyConfig, err := GetSystemConfigByKey("tmdb_api_key"); err == nil {
@@ -267,6 +64,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	mediaSyncService.SetSystemConfigDAO(systemConfigDAO)
 	mediaLibraryPipelineService := service.NewMediaLibraryPipelineService(mediaSourceDAO, mediaSyncIndexDAO, pendingMediaDAO, strmConfigDAO, strmFileDAO, systemConfigDAO, tmdbService, taskService, embyService)
 	mediaSyncService.SetPipeline(mediaLibraryPipelineService)
+	mediaCategoryService := service.NewMediaCategoryService(mediaCategoryDAO)
+	pendingMediaService := service.NewPendingMediaService(pendingMediaDAO, mediaLibraryPipelineService)
+	mediaLibraryService := service.NewMediaLibraryService(mediaSyncIndexDAO)
+	systemConfigService := service.NewSystemConfigService(systemConfigDAO)
 
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)
@@ -274,21 +75,21 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	organizeController := controller.NewOrganizeController(organizeService)
 	organizeController.SetTaskService(taskService)
 	tmdbController := controller.NewTmdbController(tmdbService)
-	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryDAO)
+	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)
 	scrapeController := controller.NewScrapeController(scrapeService, organizeService)
 	strmController := controller.NewStrmController(strmService)
 	cloud115Controller := controller.NewCloud115Controller(cloud115Service, notificationService)
-	settingsController := controller.NewSettingsController(systemConfigDAO)
+	settingsController := controller.NewSettingsController(systemConfigService)
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
-	logController := controller.NewLogController(systemConfigDAO)
+	logController := controller.NewLogController(systemConfigService)
 	taskController := controller.NewTaskController(taskService)
 	networkController := controller.NewNetworkController()
 	embyController := controller.NewEmbyController(embyService)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
 	mediaSyncController := controller.NewMediaSyncController(mediaSyncService, mediaLibraryPipelineService)
-	pendingMediaController := controller.NewPendingMediaController(pendingMediaDAO, mediaLibraryPipelineService)
-	mediaLibraryController := controller.NewMediaLibraryController(mediaSyncIndexDAO, mediaLibraryPipelineService)
+	pendingMediaController := controller.NewPendingMediaController(pendingMediaService)
+	mediaLibraryController := controller.NewMediaLibraryController(mediaLibraryService, mediaLibraryPipelineService)
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
@@ -1074,200 +875,4 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			}
 		}
 	}()
-}
-
-// buildDirTreeFromEntries 从目录树文件条目构建目录树结构
-func buildDirTreeFromEntries(entries []DirTreeEntry, rootName string) *DirectoryNode {
-	Debug("Building directory tree from %d entries, root name: %s", len(entries), rootName)
-
-	root := &DirectoryNode{
-		CID:      "0",
-		Name:     rootName,
-		Type:     "dir",
-		Files:    []driver.FileInfo{},
-		Children: []*DirectoryNode{},
-	}
-
-	pathToNode := make(map[string]*DirectoryNode)
-	pathToNode[""] = root
-
-	for _, entry := range entries {
-		if entry.IsDir {
-			node := &DirectoryNode{
-				CID:      "0",
-				Name:     entry.Name,
-				Type:     "dir",
-				Files:    []driver.FileInfo{},
-				Children: []*DirectoryNode{},
-			}
-			fullPath := entry.Path
-			if fullPath != "" {
-				fullPath = filepath.Join(fullPath, entry.Name)
-			} else {
-				fullPath = entry.Name
-			}
-			pathToNode[fullPath] = node
-			Debug("Added directory node: %s at path: %s", entry.Name, fullPath)
-		}
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir {
-			fileInfo := driver.FileInfo{
-				Name:     entry.Name,
-				Size:     driver.StringInt64(entry.Size),
-				PickCode: entry.Pc,
-				FileID:   entry.Fid,
-				Sha1:     entry.Sha1,
-			}
-			parentPath := entry.Path
-			parentNode, exists := pathToNode[parentPath]
-			if !exists {
-				parentNode = root
-			}
-			parentNode.Files = append(parentNode.Files, fileInfo)
-			Debug("Added file: %s to directory at path: %s", entry.Name, parentPath)
-		}
-	}
-
-	for fullPath, node := range pathToNode {
-		if fullPath == "" {
-			continue
-		}
-		parentPath := filepath.Dir(fullPath)
-		if parentPath == "." {
-			parentPath = ""
-		}
-		parentNode, exists := pathToNode[parentPath]
-		if exists && parentNode != node {
-			parentNode.Children = append(parentNode.Children, node)
-			Debug("Added child: %s to parent at path: %s", node.Name, parentPath)
-		}
-	}
-
-	return root
-}
-
-// extractVideoFiles 从目录树中递归提取视频文件
-func extractVideoFiles(node *DirectoryNode, currentPath string, netDiskPath string, cid string, targetExts []string, collection *VideoCollection, cloud115Id int, isRoot bool) {
-	Debug("Extracting video files from directory: %s, currentPath: %s, isRoot: %v", node.Name, currentPath, isRoot)
-
-	for _, file := range node.Files {
-		fileExt := strings.ToLower(strings.TrimPrefix(filepath.Ext(file.Name), "."))
-
-		matched := false
-		for _, targetExt := range targetExts {
-			if fileExt == targetExt {
-				matched = true
-				break
-			}
-		}
-
-		if matched {
-			netDiskFullPath := filepath.Join(netDiskPath, currentPath, file.Name)
-			filePickCode := file.PickCode
-			if filePickCode == "" {
-				filePickCode = file.FileID
-			}
-
-			relativePath := currentPath
-			if relativePath == "" {
-				relativePath = file.Name
-			} else {
-				relativePath = filepath.Join(currentPath, file.Name)
-			}
-
-			videoFile := VideoFile{
-				Path:         currentPath,
-				Filename:     file.Name,
-				CID:          cid,
-				FID:          filePickCode,
-				Size:         int(file.Size),
-				Extension:    filepath.Ext(file.Name),
-				Sha1:         netDiskFullPath,
-				Cloud115ID:   cloud115Id,
-				RelativePath: relativePath,
-				PickCode:     filePickCode,
-				Name:         file.Name,
-			}
-
-			collection.Videos = append(collection.Videos, videoFile)
-			Debug("Added video file: %s (PickCode: %s, Size: %d, cloud115_id: %d)", netDiskFullPath, filePickCode, file.Size, cloud115Id)
-		}
-	}
-
-	for _, child := range node.Children {
-		childPath := child.Name
-		if !isRoot && currentPath != "" {
-			childPath = filepath.Join(currentPath, child.Name)
-		}
-		extractVideoFiles(child, childPath, netDiskPath, cid, targetExts, collection, cloud115Id, false)
-	}
-}
-
-// readLastNLines 读取文件的最后N行，返回倒序结果
-func readLastNLines(filePath string, n int) (string, error) {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return "", err
-	}
-	fileSize := stat.Size()
-
-	var lines []string
-	var lineBuffer []byte
-	var offset int64 = fileSize - 1
-	newlineCount := 0
-
-	for offset >= 0 && newlineCount < n {
-		b := make([]byte, 1)
-		_, err := file.ReadAt(b, offset)
-		if err != nil {
-			break
-		}
-
-		if b[0] == '\n' {
-			if len(lineBuffer) > 0 {
-				line := reverseBytes(lineBuffer)
-				lines = append(lines, string(line))
-				lineBuffer = lineBuffer[:0]
-				newlineCount++
-			}
-		} else {
-			lineBuffer = append(lineBuffer, b[0])
-		}
-		offset--
-	}
-
-	if len(lineBuffer) > 0 && newlineCount < n {
-		line := reverseBytes(lineBuffer)
-		lines = append(lines, string(line))
-	}
-
-	return strings.Join(lines, "\n"), nil
-}
-
-// reverseBytes 反转字节切片
-func reverseBytes(b []byte) []byte {
-	result := make([]byte, len(b))
-	for i := range b {
-		result[len(b)-1-i] = b[i]
-	}
-	return result
-}
-
-// truncateString 截断字符串到指定长度
-func truncateString(s string, maxLen int) string {
-	if s == "" {
-		return "<empty>"
-	}
-	if len(s) <= maxLen {
-		return s
-	}
-	return s[:maxLen]
 }

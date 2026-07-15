@@ -1,118 +1,131 @@
 <template>
-  <div class="sync-page">
-    <section class="page-hero">
-      <div>
-        <div class="page-kicker">Sync & Ingest</div>
-        <h2>同步入库工作台</h2>
-        <p>对本地和 115 媒体源执行同步索引，随后触发入库、STRM 与媒体服务器刷新。</p>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">Sync &amp; Ingest</div>
+          <h2 class="mt-1.5 text-2xl font-extrabold text-slate-800 dark:text-white">同步入库工作台</h2>
+          <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            对本地和 115 媒体源执行同步索引，随后触发入库、STRM 与媒体服务器刷新。
+          </p>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <n-button :disabled="!selectedSource" @click="goLibrary">查看资产台账</n-button>
+          <n-button :loading="loading" @click="loadSources">
+            <template #icon>
+              <n-icon :component="RefreshOutline" />
+            </template>
+            刷新媒体源
+          </n-button>
+        </div>
       </div>
-      <div class="hero-actions">
-        <el-button @click="goLibrary" :disabled="!selectedSource">查看资产台账</el-button>
-        <el-button :icon="Refresh" @click="loadSources" :loading="loading">刷新媒体源</el-button>
-      </div>
-    </section>
+    </div>
 
-    <section class="summary-grid">
-      <article v-for="card in summaryCards" :key="card.label" class="summary-card">
-        <span>{{ card.label }}</span>
-        <strong>{{ card.value }}</strong>
-        <small>{{ card.hint }}</small>
-      </article>
-    </section>
+    <!-- 统计卡 -->
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in summaryCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.hint"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
+    </div>
 
-    <section class="sync-layout">
-      <aside class="source-panel">
-        <div class="panel-title">媒体源</div>
-        <div v-if="sources.length" class="source-list">
+    <!-- 主体:媒体源列表 + 同步面板 -->
+    <div class="grid grid-cols-1 items-start gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+      <!-- 媒体源列表 -->
+      <PageCard title="媒体源">
+        <div v-if="sources.length" class="flex flex-col gap-3">
           <button
             v-for="source in sources"
             :key="source.id"
             type="button"
-            class="source-item"
-            :class="{ active: selectedSource?.id === source.id }"
+            class="flex flex-col gap-1 rounded-xl border p-3 text-left transition-colors"
+            :class="selectedSource?.id === source.id
+              ? 'border-cyan-500/60 bg-cyan-500/10'
+              : 'border-slate-200 bg-white hover:border-cyan-500/40 dark:border-white/10 dark:bg-ink-800'"
             @click="selectSource(source)"
           >
-            <strong>{{ source.name }}</strong>
-            <span>{{ source.source_type === 'cloud115' ? '115 云盘' : '本地目录' }}</span>
-            <small>{{ source.path || '-' }}</small>
+            <strong class="text-sm font-bold text-slate-800 dark:text-white">{{ source.name }}</strong>
+            <span class="text-xs text-slate-500 dark:text-slate-400">
+              {{ source.source_type === 'cloud115' ? '115 云盘' : '本地目录' }}
+            </span>
+            <small class="truncate text-xs text-slate-400 dark:text-slate-500">{{ source.path || '-' }}</small>
           </button>
         </div>
-        <el-empty v-else description="暂无媒体源" />
-      </aside>
+        <EmptyState v-else title="暂无媒体源" />
+      </PageCard>
 
-      <main class="sync-panel">
-        <div class="panel-header">
+      <!-- 同步面板 -->
+      <PageCard>
+        <div class="mb-4 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <div class="panel-title">{{ selectedSource?.name || '请选择媒体源' }}</div>
-            <p v-if="selectedSource">路径：{{ selectedSource.path || '-' }}</p>
+            <div class="text-base font-bold text-slate-800 dark:text-white">
+              {{ selectedSource?.name || '请选择媒体源' }}
+            </div>
+            <p v-if="selectedSource" class="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+              路径：{{ selectedSource.path || '-' }}
+            </p>
           </div>
-          <div class="panel-actions">
-            <el-button :disabled="!selectedSource" :loading="syncing" @click="runSync('full')">全量同步</el-button>
-            <el-button :disabled="!selectedSource" :loading="syncing" type="primary" @click="runSync('incremental')">增量同步</el-button>
-            <el-button :disabled="!selectedSource" :loading="syncing" type="success" plain @click="runPipeline">执行入库</el-button>
+          <div class="flex flex-wrap items-center gap-2">
+            <n-button :disabled="!selectedSource" :loading="syncing" @click="runSync('full')">全量同步</n-button>
+            <n-button :disabled="!selectedSource" :loading="syncing" type="primary" @click="runSync('incremental')">增量同步</n-button>
+            <n-button :disabled="!selectedSource" :loading="syncing" type="success" ghost @click="runPipeline">执行入库</n-button>
           </div>
         </div>
 
-        <el-alert
-          v-if="lastResult"
-          class="sync-result"
-          type="success"
-          show-icon
-          :closable="false"
-          :title="formatLastResult(lastResult)"
-        >
-          <template #default>
-            <div class="result-actions">
-              <el-button v-if="lastResult.task_id" size="small" text @click="goTask(lastResult.task_id)">查看任务</el-button>
-              <el-button size="small" text @click="goLibrary">查看资产台账</el-button>
-              <el-button size="small" text @click="goPending">查看待处理</el-button>
-            </div>
-          </template>
-        </el-alert>
+        <n-alert v-if="lastResult" type="success" :title="formatLastResult(lastResult)" class="mb-4 rounded-2xl">
+          <div class="flex flex-wrap items-center gap-3">
+            <n-button v-if="lastResult.task_id" size="small" text type="primary" @click="goTask(lastResult.task_id)">
+              查看任务
+            </n-button>
+            <n-button size="small" text type="primary" @click="goLibrary">查看资产台账</n-button>
+            <n-button size="small" text type="primary" @click="goPending">查看待处理</n-button>
+          </div>
+        </n-alert>
 
-        <el-table :data="indexRows" v-loading="indexLoading" border>
-          <el-table-column prop="source_name" label="文件名" min-width="220" />
-          <el-table-column prop="source_path" label="源路径" min-width="260" show-overflow-tooltip />
-          <el-table-column prop="target_path" label="目标路径" min-width="240" show-overflow-tooltip />
-          <el-table-column label="同步状态" width="110">
-            <template #default="{ row }">
-              <el-tag :type="syncTagType(row.sync_status)" size="small">{{ syncLabel(row.sync_status) }}</el-tag>
+        <div class="overflow-x-auto">
+          <n-data-table
+            :columns="columns"
+            :data="indexRows"
+            :loading="indexLoading"
+            :row-key="(row) => row.id ?? row.source_path"
+            :scroll-x="1240"
+            size="small"
+          >
+            <template #empty>
+              <EmptyState title="暂无索引条目" description="执行全量或增量同步后将在此展示" />
             </template>
-          </el-table-column>
-          <el-table-column label="识别状态" width="110">
-            <template #default="{ row }">
-              <el-tag :type="identityTagType(row.identity_status)" size="small">{{ identityLabel(row.identity_status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="last_change_type" label="变更" width="120" />
-          <el-table-column label="最近任务" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">
-              <button
-                v-if="row.last_task_id"
-                type="button"
-                class="task-link"
-                @click="goTask(row.last_task_id)"
-              >
-                {{ row.last_task_id }}
-              </button>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-        </el-table>
-      </main>
-    </section>
+          </n-data-table>
+        </div>
+      </PageCard>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { NAlert, NButton, NDataTable, NIcon, NTag, useMessage } from 'naive-ui'
+import {
+  AlertCircleOutline,
+  CheckmarkCircleOutline,
+  LayersOutline,
+  PulseOutline,
+  RefreshOutline
+} from '@vicons/ionicons5'
+import PageCard from '../components/common/PageCard.vue'
+import StatCard from '../components/common/StatCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 import { getMediaSources, getMediaSyncIndex, runFullMediaSync, runIncrementalMediaSync, runMediaLibraryPipeline } from '../utils/api/media'
 
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
 
 const loading = ref(false)
 const syncing = ref(false)
@@ -127,12 +140,84 @@ const summaryCards = computed(() => {
   const failed = indexRows.value.filter(item => item.identity_status === 'failed').length
   const identified = indexRows.value.filter(item => item.identity_status === 'identified').length
   return [
-    { label: '索引条目', value: indexRows.value.length, hint: '当前媒体源已记录资源' },
-    { label: '有效资源', value: active, hint: '源端仍存在的同步资产' },
-    { label: '已识别', value: identified, hint: '可进入后续入库动作' },
-    { label: '待修正', value: failed, hint: '会进入待处理页面承接' }
+    { label: '索引条目', value: indexRows.value.length, hint: '当前媒体源已记录资源', icon: LayersOutline, tone: 'cyan' },
+    { label: '有效资源', value: active, hint: '源端仍存在的同步资产', icon: PulseOutline, tone: 'green' },
+    { label: '已识别', value: identified, hint: '可进入后续入库动作', icon: CheckmarkCircleOutline, tone: 'violet' },
+    { label: '待修正', value: failed, hint: '会进入待处理页面承接', icon: AlertCircleOutline, tone: 'amber' }
   ]
 })
+
+const syncLabel = (value) => ({
+  active: '有效',
+  missing: '源端缺失',
+  deleted: '已删除'
+})[value] || value || '-'
+
+const syncTagType = (value) => value === 'active' ? 'success' : value === 'missing' ? 'warning' : value === 'deleted' ? 'error' : 'info'
+
+const identityLabel = (value) => ({
+  identified: '已识别',
+  failed: '失败',
+  pending: '待识别'
+})[value] || value || '未知'
+
+const identityTagType = (value) => value === 'identified' ? 'success' : value === 'failed' ? 'warning' : 'info'
+
+const columns = [
+  {
+    title: '文件名',
+    key: 'source_name',
+    minWidth: 220
+  },
+  {
+    title: '源路径',
+    key: 'source_path',
+    minWidth: 260,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: '目标路径',
+    key: 'target_path',
+    minWidth: 240,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: '同步状态',
+    key: 'sync_status',
+    width: 110,
+    render: (row) => h(NTag, { type: syncTagType(row.sync_status), size: 'small' }, { default: () => syncLabel(row.sync_status) })
+  },
+  {
+    title: '识别状态',
+    key: 'identity_status',
+    width: 110,
+    render: (row) => h(NTag, { type: identityTagType(row.identity_status), size: 'small' }, { default: () => identityLabel(row.identity_status) })
+  },
+  {
+    title: '变更',
+    key: 'last_change_type',
+    width: 120
+  },
+  {
+    title: '最近任务',
+    key: 'last_task_id',
+    minWidth: 180,
+    render: (row) => {
+      if (row.last_task_id) {
+        return h(
+          'button',
+          {
+            type: 'button',
+            class: 'max-w-full truncate text-left text-cyan-600 hover:underline dark:text-cyan-400',
+            onClick: () => goTask(row.last_task_id)
+          },
+          row.last_task_id
+        )
+      }
+      return '-'
+    }
+  }
+]
 
 const loadSources = async () => {
   loading.value = true
@@ -179,7 +264,7 @@ const runSync = async (mode) => {
       ? await runFullMediaSync(selectedSource.value.id)
       : await runIncrementalMediaSync(selectedSource.value.id)
     lastResult.value = response.data?.data || response.data
-    ElMessage.success(mode === 'full' ? '全量同步完成' : '增量同步完成')
+    message.success(mode === 'full' ? '全量同步完成' : '增量同步完成')
     await loadIndex()
   } finally {
     syncing.value = false
@@ -200,7 +285,7 @@ const runPipeline = async () => {
   try {
     const response = await runMediaLibraryPipeline(selectedSource.value.id)
     lastResult.value = response.data?.data || response.data
-    ElMessage.success('入库流水线已完成')
+    message.success('入库流水线已完成')
     await loadIndex()
   } finally {
     syncing.value = false
@@ -219,173 +304,5 @@ const goTask = (taskId) => {
   router.push({ path: '/dashboard/tasks', query: { task_id: taskId } })
 }
 
-const syncLabel = (value) => ({
-  active: '有效',
-  missing: '源端缺失',
-  deleted: '已删除'
-})[value] || value || '-'
-
-const syncTagType = (value) => value === 'active' ? 'success' : value === 'missing' ? 'warning' : value === 'deleted' ? 'danger' : 'info'
-
-const identityLabel = (value) => ({
-  identified: '已识别',
-  failed: '失败',
-  pending: '待识别'
-})[value] || value || '未知'
-
-const identityTagType = (value) => value === 'identified' ? 'success' : value === 'failed' ? 'warning' : 'info'
-
 onMounted(loadSources)
 </script>
-
-<style scoped>
-.sync-page,
-.sync-layout,
-.source-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-hero,
-.summary-card,
-.source-panel,
-.sync-panel {
-  background: rgba(255, 252, 247, 0.86);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  border-radius: 18px;
-  box-shadow: 0 18px 44px rgba(58, 42, 24, 0.08);
-}
-
-.page-hero,
-.panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.page-hero {
-  padding: 24px;
-}
-
-.hero-actions,
-.panel-actions,
-.result-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.summary-card {
-  display: grid;
-  gap: 8px;
-  padding: 18px;
-}
-
-.summary-card span,
-.summary-card small {
-  color: #6f6457;
-}
-
-.summary-card strong {
-  font-size: 32px;
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.page-hero h2 {
-  margin: 8px 0 6px;
-  font-size: 30px;
-}
-
-.sync-layout {
-  display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
-  align-items: start;
-}
-
-.source-panel,
-.sync-panel {
-  padding: 18px;
-}
-
-.panel-title {
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.source-item {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 12px;
-  border: 1px solid #e4e7ed;
-  border-radius: 10px;
-  background: #fff;
-  text-align: left;
-  cursor: pointer;
-}
-
-.source-item.active {
-  border-color: #1f6f78;
-  background: rgba(31, 111, 120, 0.08);
-}
-
-.source-item span,
-.source-item small,
-.panel-header p {
-  margin: 0;
-  color: #6f6457;
-  font-size: 13px;
-}
-
-.sync-result {
-  margin: 16px 0;
-}
-
-.task-link {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #1f6f78;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-@media (max-width: 900px) {
-  .page-hero,
-  .panel-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .sync-layout {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 560px) {
-  .summary-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

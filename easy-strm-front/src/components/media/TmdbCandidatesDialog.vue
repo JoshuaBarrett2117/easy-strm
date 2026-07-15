@@ -1,80 +1,95 @@
 <template>
-  <el-dialog
-    v-model="visible"
+  <n-modal
+    v-model:show="visible"
+    preset="card"
     title="TMDB 候选结果"
-    width="760px"
-    append-to-body
+    class="w-[96vw] max-w-[760px]"
   >
-    <div class="candidates-container" v-loading="loading">
-      <section class="candidates-overview">
-        <div class="candidates-hint">
-          <el-icon style="margin-right: 4px;"><InfoFilled /></el-icon>
-          为您找到了以下匹配结果，请选择正确的条目；如果都不匹配，可以切换到手动搜索。
-        </div>
-        <div class="overview-chip">
-          <span>候选数量</span>
-          <strong>{{ candidatesList.length }}</strong>
-        </div>
-      </section>
-
-      <div v-if="candidatesList.length > 0" class="candidates-grid">
-        <div
-          v-for="(item, index) in candidatesList"
-          :key="item.tmdb_id || index"
-          class="candidate-card"
-          @click="handleSelect(item)"
-        >
-          <div class="candidate-rank">{{ index + 1 }}</div>
-
-          <div class="candidate-poster">
-            <img v-if="item.poster_path" :src="item.poster_path.trim()" alt="poster" />
-            <div v-else class="no-poster-sm">无海报</div>
+    <n-spin :show="loading">
+      <div class="min-h-[200px]">
+        <section class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div class="flex flex-1 items-center gap-2 rounded-xl border border-cyan-500/10 bg-gradient-to-br from-cyan-500/10 to-amber-400/10 px-4 py-3 text-[13px] leading-relaxed text-slate-600 dark:text-slate-300">
+            <n-icon :component="InformationCircleOutline" size="18" class="shrink-0 text-cyan-500" />
+            <span>为您找到了以下匹配结果，请选择正确的条目；如果都不匹配，可以切换到手动搜索。</span>
           </div>
+          <div class="min-w-[110px] rounded-xl bg-slate-100 px-4 py-3 text-center dark:bg-white/5">
+            <span class="block text-xs text-slate-400 dark:text-slate-500">候选数量</span>
+            <strong class="mt-1.5 block text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ candidatesList.length }}</strong>
+          </div>
+        </section>
 
-          <div class="candidate-info">
-            <div class="candidate-title">{{ item.title || item.original_title || '-' }}</div>
+        <div v-if="candidatesList.length > 0" class="flex flex-col gap-3">
+          <div
+            v-for="(item, index) in candidatesList"
+            :key="item.tmdb_id || index"
+            class="relative flex cursor-pointer items-start gap-3.5 rounded-xl border-2 border-slate-200 bg-white p-3.5 transition hover:-translate-y-px hover:border-cyan-400 hover:shadow-lg hover:shadow-cyan-500/10 dark:border-white/10 dark:bg-ink-800"
+            @click="handleSelect(item)"
+          >
+            <div class="absolute -left-px -top-px flex h-[26px] w-[26px] items-center justify-center rounded-tl-xl rounded-br-xl bg-cyan-500 text-[13px] font-bold text-white">
+              {{ index + 1 }}
+            </div>
 
-            <div class="candidate-meta">
-              <span v-if="item.year" class="candidate-year">{{ item.year }}</span>
-              <span v-if="item.media_type" class="candidate-type">
-                <el-tag size="small" :type="item.media_type === 'tv' ? 'warning' : 'primary'">
+            <div class="w-20 shrink-0">
+              <img
+                v-if="item.poster_path"
+                :src="item.poster_path.trim()"
+                alt="poster"
+                class="h-[114px] w-20 rounded-md bg-slate-100 object-cover dark:bg-white/5"
+              />
+              <div v-else class="flex h-[114px] w-20 items-center justify-center rounded-md bg-slate-100 text-xs text-slate-400 dark:bg-white/5 dark:text-slate-500">
+                无海报
+              </div>
+            </div>
+
+            <div class="min-w-0 flex-1">
+              <div class="mb-2 text-base font-bold text-slate-800 dark:text-white">{{ item.title || item.original_title || '-' }}</div>
+
+              <div class="mb-2 flex flex-wrap items-center gap-2 text-[13px] text-slate-500 dark:text-slate-400">
+                <span v-if="item.year">{{ item.year }}</span>
+                <n-tag v-if="item.media_type" size="small" :type="item.media_type === 'tv' ? 'warning' : 'primary'">
                   {{ item.media_type === 'tv' ? '剧集' : '电影' }}
-                </el-tag>
-              </span>
-              <span v-if="item.vote_average" class="candidate-rating">
-                <el-icon style="color: #f7ba2a; margin-right: 2px;"><StarFilled /></el-icon>
-                {{ item.vote_average.toFixed(1) }}
-              </span>
-            </div>
+                </n-tag>
+                <span v-if="item.vote_average" class="flex items-center gap-0.5">
+                  <n-icon :component="Star" class="text-amber-400" />
+                  {{ item.vote_average.toFixed(1) }}
+                </span>
+              </div>
 
-            <div v-if="item.overview" class="candidate-overview">{{ item.overview }}</div>
-            <div
-              v-if="item.original_title && item.original_title !== item.title"
-              class="candidate-original-title"
-            >
-              {{ item.original_title }}
+              <div v-if="item.overview" class="mb-1.5 line-clamp-3 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+                {{ item.overview }}
+              </div>
+              <div
+                v-if="item.original_title && item.original_title !== item.title"
+                class="text-xs text-slate-400 dark:text-slate-500"
+              >
+                {{ item.original_title }}
+              </div>
             </div>
           </div>
         </div>
+
+        <EmptyState v-else-if="!loading" title="未找到候选结果" />
       </div>
+    </n-spin>
 
-      <el-empty v-else-if="!loading" description="未找到候选结果" />
-    </div>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="handleManualSearch">
-          <el-icon><Search /></el-icon>
+    <template #action>
+      <div class="flex flex-wrap justify-end gap-2">
+        <n-button @click="handleManualSearch">
+          <template #icon>
+            <n-icon :component="SearchOutline" />
+          </template>
           手动搜索
-        </el-button>
-        <el-button @click="visible = false">取消</el-button>
-      </span>
+        </n-button>
+        <n-button @click="visible = false">取消</n-button>
+      </div>
     </template>
-  </el-dialog>
+  </n-modal>
 </template>
 
 <script setup>
-import { InfoFilled, StarFilled, Search } from '@element-plus/icons-vue'
+import { NModal, NSpin, NButton, NTag, NIcon } from 'naive-ui'
+import { InformationCircleOutline, Star, SearchOutline } from '@vicons/ionicons5'
+import EmptyState from '../common/EmptyState.vue'
 
 defineProps({
   candidatesList: {
@@ -100,189 +115,3 @@ const handleManualSearch = () => {
   emit('manual-search')
 }
 </script>
-
-<style scoped>
-.candidates-container {
-  min-height: 200px;
-}
-
-.candidates-overview {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.candidates-hint {
-  display: flex;
-  align-items: center;
-  padding: 12px 16px;
-  background: linear-gradient(135deg, rgba(31, 111, 120, 0.1), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-  border-radius: 14px;
-  font-size: 13px;
-  color: #24535f;
-  line-height: 1.5;
-  flex: 1;
-}
-
-.overview-chip {
-  padding: 12px 16px;
-  border-radius: 14px;
-  background: rgba(244, 239, 231, 0.88);
-  min-width: 110px;
-  text-align: center;
-}
-
-.overview-chip span {
-  display: block;
-  font-size: 12px;
-  color: #8a7b6d;
-}
-
-.overview-chip strong {
-  display: block;
-  margin-top: 6px;
-  font-size: 24px;
-  color: #17313a;
-}
-
-.candidates-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.candidate-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 14px;
-  border: 2px solid #e4e7ed;
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.25s ease;
-  background: #fff;
-  position: relative;
-}
-
-.candidate-card:hover {
-  border-color: #409eff;
-  box-shadow: 0 4px 16px rgba(64, 158, 255, 0.18);
-  transform: translateY(-1px);
-}
-
-.candidate-rank {
-  position: absolute;
-  top: -1px;
-  left: -1px;
-  width: 26px;
-  height: 26px;
-  border-radius: 10px 0 10px 0;
-  background: #409eff;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.candidate-poster {
-  width: 80px;
-  flex-shrink: 0;
-}
-
-.candidate-poster img {
-  width: 80px;
-  height: 114px;
-  object-fit: cover;
-  border-radius: 6px;
-  background: #f5f7fa;
-}
-
-.no-poster-sm {
-  width: 80px;
-  height: 114px;
-  border-radius: 6px;
-  background: #f5f7fa;
-  color: #909399;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-}
-
-.candidate-info {
-  flex: 1;
-  min-width: 0;
-}
-
-.candidate-title {
-  font-size: 16px;
-  font-weight: 700;
-  color: #303133;
-  margin-bottom: 8px;
-}
-
-.candidate-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 8px;
-  color: #606266;
-  font-size: 13px;
-}
-
-.candidate-overview {
-  color: #606266;
-  font-size: 13px;
-  line-height: 1.6;
-  margin-bottom: 6px;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  -webkit-line-clamp: 3;
-}
-
-.candidate-original-title {
-  color: #909399;
-  font-size: 12px;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-:global(.dark) .candidates-hint,
-:global(.dark) .overview-chip,
-:global(.dark) .candidate-card {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .candidate-title,
-:global(.dark) .overview-chip strong {
-  color: #e8edf4;
-}
-
-:global(.dark) .candidate-meta,
-:global(.dark) .candidate-overview,
-:global(.dark) .candidate-original-title,
-:global(.dark) .candidates-hint,
-:global(.dark) .overview-chip span,
-:global(.dark) .no-poster-sm {
-  color: #9faebb;
-}
-
-@media (max-width: 768px) {
-  .candidates-overview {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-</style>

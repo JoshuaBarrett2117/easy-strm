@@ -18,6 +18,7 @@ type RenameController struct {
 // NewRenameController 创建更名控制器实例
 // 参数:
 //   - renameService: 更名服务
+//
 // 返回:
 //   - *RenameController: 更名控制器实例
 func NewRenameController(renameService *service.RenameService) *RenameController {

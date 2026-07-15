@@ -1,52 +1,83 @@
 <template>
-  <div class="network-center">
-    <section class="network-hero">
-      <div>
-        <div class="page-kicker">Network Probe</div>
-        <h2>网络连通性测试</h2>
-        <p>直接复用现有 `/api/network/test` 能力，对 Telegram、GitHub、TMDB 等关键站点进行逐一探测。</p>
-      </div>
-      <el-button :icon="Refresh" @click="loadNetworkResults" :loading="networkLoading">重新探测</el-button>
-    </section>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <PageCard title="网络连通性测试" subtitle="Network Probe">
+      <template #action>
+        <n-button :loading="networkLoading" @click="loadNetworkResults">
+          <template #icon>
+            <n-icon :component="RefreshOutline" />
+          </template>
+          重新探测
+        </n-button>
+      </template>
+      <p class="text-sm text-slate-400 dark:text-slate-500">
+        直接复用现有 `/api/network/test` 能力，对 Telegram、GitHub、TMDB 等关键站点进行逐一探测。
+      </p>
+    </PageCard>
 
-    <section class="network-panel">
-      <el-table :data="networkResults" v-loading="networkLoading" stripe border>
-        <el-table-column prop="name" label="站点" min-width="130" />
-        <el-table-column prop="url" label="地址" min-width="240" />
-        <el-table-column label="连通状态" width="110">
-          <template #default="{ row }">
-            <el-tag :type="getNetworkStatusTag(row)">{{ getNetworkStatusText(row) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="代理路径" width="120">
-          <template #default="{ row }">
-            <el-tag v-if="row.via_proxy !== null && row.via_proxy !== undefined" :type="row.via_proxy ? 'warning' : 'info'">
-              {{ row.via_proxy ? '代理' : '直连' }}
-            </el-tag>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status_code" label="HTTP" width="90" />
-        <el-table-column prop="duration_ms" label="耗时(ms)" width="110" />
-        <el-table-column label="错误信息" min-width="220">
-          <template #default="{ row }">
-            {{ row.error || row.status_message || '-' }}
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
+    <!-- 探测结果 -->
+    <PageCard>
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="networkColumns"
+          :data="networkResults"
+          :loading="networkLoading"
+          :row-key="(row) => `${row.name}-${row.url}`"
+          :scroll-x="900"
+        />
+      </div>
+    </PageCard>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { h, ref } from 'vue'
+import { NButton, NDataTable, NIcon, NTag, useMessage } from 'naive-ui'
+import { RefreshOutline } from '@vicons/ionicons5'
+import PageCard from '../../components/common/PageCard.vue'
 import { getNetworkProbeSites, testNetworkConnectivity } from '../../utils/api/setting'
+
+const message = useMessage()
 
 const networkLoading = ref(false)
 const networkResults = ref([])
 let runId = 0
+
+const networkColumns = [
+  { title: '站点', key: 'name', minWidth: 130 },
+  { title: '地址', key: 'url', minWidth: 240, ellipsis: { tooltip: true } },
+  {
+    title: '连通状态',
+    key: 'status',
+    width: 110,
+    render: (row) => h(
+      NTag,
+      { type: getNetworkStatusTag(row), size: 'small' },
+      { default: () => getNetworkStatusText(row) }
+    )
+  },
+  {
+    title: '代理路径',
+    key: 'via_proxy',
+    width: 120,
+    render: (row) => {
+      if (row.via_proxy === null || row.via_proxy === undefined) return '-'
+      return h(
+        NTag,
+        { type: row.via_proxy ? 'warning' : 'info', size: 'small' },
+        { default: () => (row.via_proxy ? '代理' : '直连') }
+      )
+    }
+  },
+  { title: 'HTTP', key: 'status_code', width: 90, render: (row) => row.status_code ?? '-' },
+  { title: '耗时(ms)', key: 'duration_ms', width: 110, render: (row) => row.duration_ms ?? '-' },
+  {
+    title: '错误信息',
+    key: 'error',
+    minWidth: 220,
+    render: (row) => row.error || row.status_message || '-'
+  }
+]
 
 const normalizeSites = (payload) => {
   if (Array.isArray(payload)) return payload
@@ -103,7 +134,7 @@ const loadNetworkResults = async () => {
     }
   } catch (error) {
     networkResults.value = []
-    ElMessage.error('加载网络测试结果失败')
+    message.error('加载网络测试结果失败')
   } finally {
     if (currentRun === runId) {
       networkLoading.value = false
@@ -119,64 +150,9 @@ const getNetworkStatusText = (row) => {
 
 const getNetworkStatusTag = (row) => {
   if (row.ok === true) return 'success'
-  if (row.ok === false) return 'danger'
+  if (row.ok === false) return 'error'
   return 'info'
 }
 
 loadNetworkResults()
 </script>
-
-<style scoped>
-.network-center {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.network-hero,
-.network-panel {
-  padding: 24px;
-  border-radius: 24px;
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-:global(.dark) .network-hero,
-:global(.dark) .network-panel {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-.network-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.network-hero h2 {
-  margin: 10px 0 6px;
-  font-size: 30px;
-}
-
-.network-hero p {
-  color: #6f6457;
-}
-
-@media (max-width: 860px) {
-  .network-hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-</style>

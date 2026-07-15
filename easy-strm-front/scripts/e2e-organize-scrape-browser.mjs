@@ -157,44 +157,44 @@ async function main() {
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
     artifacts.mediaManager = await saveShot(page, "02_media_manager");
 
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: sourceName }).first();
     await sourceRow.waitFor({ timeout: 15000 });
     await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
     artifacts.fileBrowser = await saveShot(page, "03_file_browser");
 
-    const movieRow = browserDialog.locator(".el-table__row").filter({ hasText: movieFileName }).first();
+    const movieRow = browserDialog.locator("tbody tr").filter({ hasText: movieFileName }).first();
     await movieRow.waitFor({ timeout: 15000 });
-    await movieRow.locator(".el-checkbox").first().click();
+    await movieRow.locator('[role="checkbox"]').first().click();
     artifacts.fileSelected = await saveShot(page, "04_file_selected");
 
-    await browserDialog.locator(".organize-primary-btn").click();
+    await browserDialog.getByRole("button", { name: /批量整理/ }).click();
 
-    const organizeDialog = page.locator(".el-dialog").filter({ has: page.locator(".organize-container") }).last();
+    const organizeDialog = page.getByRole("dialog").filter({ hasText: "批量整理工作流" });
     await organizeDialog.waitFor({ timeout: 15000 });
     artifacts.organizeDialog = await saveShot(page, "05_organize_dialog");
 
-    const previewButton = organizeDialog.locator(".dialog-footer button").nth(1);
+    const previewButton = organizeDialog.getByRole("button", { name: "刷新预览" });
     await previewButton.click();
 
     await page.waitForFunction(() => {
-      const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
-      const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+      const dialog = dialogs.find((item) => item.textContent?.includes("批量整理工作流"));
       if (!dialog) return false;
-      const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
-      const headers = Array.from(dialog.querySelectorAll(".el-table th")).map((item) => (item.textContent || "").trim());
+      const loadingMask = dialog.querySelector('[aria-busy="true"]');
+      const headers = Array.from(dialog.querySelectorAll("table th")).map((item) => (item.textContent || "").trim());
       const hasPreviewHeaders = headers.length >= 5;
       const hasCandidateInfo = (dialog.textContent || "").includes("Inception");
       return !loadingMask && hasPreviewHeaders && hasCandidateInfo;
     }, { timeout: 120000 });
     artifacts.previewDone = await saveShot(page, "06_preview_done");
 
-    const executeButton = organizeDialog.locator(".dialog-footer button").nth(2);
+    const executeButton = organizeDialog.getByRole("button", { name: "执行整理" });
     await executeButton.click();
 
-    const resultDialog = page.locator(".el-dialog").filter({ has: page.locator(".result-summary-panel") }).last();
+    const resultDialog = page.getByRole("dialog").filter({ hasText: "整理结果" });
     await resultDialog.waitFor({ timeout: 120000 });
     artifacts.resultDialog = await saveShot(page, "07_result_dialog");
 

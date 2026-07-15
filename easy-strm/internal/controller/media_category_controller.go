@@ -6,23 +6,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+	"easy-strm/internal/service"
 )
 
 type MediaCategoryController struct {
-	dao *dao.MediaCategoryDAO
+	mediaCategoryService *service.MediaCategoryService
 }
 
-func NewMediaCategoryController(d *dao.MediaCategoryDAO) *MediaCategoryController {
+func NewMediaCategoryController(mediaCategoryService *service.MediaCategoryService) *MediaCategoryController {
 	return &MediaCategoryController{
-		dao: d,
+		mediaCategoryService: mediaCategoryService,
 	}
 }
 
 func (c *MediaCategoryController) GetAll(ctx *gin.Context) {
-	categories, err := c.dao.GetAll()
+	categories, err := c.mediaCategoryService.GetAll()
 	if err != nil {
 		logger.Errorf("MediaCategoryController[GetAll] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取媒体分类失败")
@@ -37,8 +37,7 @@ func (c *MediaCategoryController) Create(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "参数错误")
 		return
 	}
-	cat.NormalizeMatchRules()
-	if err := c.dao.Create(&cat); err != nil {
+	if err := c.mediaCategoryService.Create(&cat); err != nil {
 		logger.Errorf("MediaCategoryController[Create] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "创建媒体分类失败")
 		return
@@ -60,8 +59,7 @@ func (c *MediaCategoryController) Update(ctx *gin.Context) {
 		return
 	}
 	cat.ID = id
-	cat.NormalizeMatchRules()
-	if err := c.dao.Update(&cat); err != nil {
+	if err := c.mediaCategoryService.Update(&cat); err != nil {
 		logger.Errorf("MediaCategoryController[Update] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "更新媒体分类失败")
 		return
@@ -77,7 +75,7 @@ func (c *MediaCategoryController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.dao.Delete(id); err != nil {
+	if err := c.mediaCategoryService.Delete(id); err != nil {
 		logger.Errorf("MediaCategoryController[Delete] err: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "删除媒体分类失败")
 		return

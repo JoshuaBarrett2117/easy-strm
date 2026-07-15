@@ -6,24 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 )
 
 type PendingMediaController struct {
-	pendingDAO *dao.PendingMediaDAO
-	pipeline   *service.MediaLibraryPipelineService
+	pendingMediaService *service.PendingMediaService
 }
 
-func NewPendingMediaController(pendingDAO *dao.PendingMediaDAO, pipeline *service.MediaLibraryPipelineService) *PendingMediaController {
-	return &PendingMediaController{pendingDAO: pendingDAO, pipeline: pipeline}
+func NewPendingMediaController(pendingMediaService *service.PendingMediaService) *PendingMediaController {
+	return &PendingMediaController{pendingMediaService: pendingMediaService}
 }
 
 func (c *PendingMediaController) List(ctx *gin.Context) {
 	sourceID, _ := strconv.Atoi(ctx.Query("source_id"))
-	list, err := c.pendingDAO.List(ctx.Query("status"), ctx.Query("media_type"), sourceID)
+	list, err := c.pendingMediaService.List(ctx.Query("status"), ctx.Query("media_type"), sourceID)
 	if err != nil {
 		logger.Errorf("PendingMediaController[List] 查询失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "查询待处理清单失败")
@@ -41,7 +39,7 @@ func (c *PendingMediaController) Create(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
 		return
 	}
-	item, err := c.pendingDAO.Create(&req)
+	item, err := c.pendingMediaService.Create(&req)
 	if err != nil {
 		logger.Errorf("PendingMediaController[Create] 创建失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
@@ -68,7 +66,7 @@ func (c *PendingMediaController) Identify(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
 		return
 	}
-	item, err := c.pendingDAO.UpdateIdentify(id, req.TmdbID, req.Year, req.Season, req.Episode, req.Title, req.MediaType)
+	item, err := c.pendingMediaService.Identify(id, req.TmdbID, req.Year, req.Season, req.Episode, req.Title, req.MediaType)
 	if err != nil {
 		logger.Errorf("PendingMediaController[Identify] 更新失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
@@ -83,25 +81,16 @@ func (c *PendingMediaController) Run(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的待处理项ID")
 		return
 	}
-	item, err := c.pendingDAO.UpdateStatus(id, "running", "", "")
-	if err != nil {
-		logger.Errorf("PendingMediaController[Run] 更新失败: %v", err)
-		ErrorResp(ctx, http.StatusBadRequest, err.Error())
-		return
-	}
-	result, err := c.pipeline.ProcessPendingItem(id)
+	result, err := c.pendingMediaService.Run(id)
 	if err != nil {
 		logger.Errorf("PendingMediaController[Run] 入库失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
-	if refreshed, refreshErr := c.pendingDAO.GetByID(id); refreshErr == nil && refreshed != nil {
-		item = refreshed
-	}
 	SuccessResp(ctx, gin.H{
 		"message": "待处理项已重新入库",
-		"data":    item,
-		"task":    result,
+		"data":    result.Item,
+		"task":    result.Task,
 	})
 }
 
@@ -111,7 +100,7 @@ func (c *PendingMediaController) Ignore(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的待处理项ID")
 		return
 	}
-	item, err := c.pendingDAO.UpdateStatus(id, "ignored", "用户忽略", "")
+	item, err := c.pendingMediaService.Ignore(id)
 	if err != nil {
 		logger.Errorf("PendingMediaController[Ignore] 更新失败: %v", err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())

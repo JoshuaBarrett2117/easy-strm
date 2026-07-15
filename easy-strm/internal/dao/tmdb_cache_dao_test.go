@@ -1,4 +1,4 @@
-﻿package dao
+package dao
 
 import (
 	"encoding/json"
@@ -61,4 +61,3 @@ func TestTmdbCacheDAOGetByTmdbID(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
-

@@ -1,31 +1,44 @@
-import { ElMessageBox } from 'element-plus'
-import 'element-plus/es/components/message-box/style/css'
+import { dialog } from './feedback'
 
-const MESSAGE_BOX_Z_INDEX = 4000
+/**
+ * 确认/提示对话框(基于 Naive UI 离散 dialog API)
+ * 保持与旧版 ElMessageBox 封装相同的 Promise 语义:
+ * 确认 -> resolve,取消/关闭 -> reject
+ */
 
-const getAppendTarget = () => {
-  if (typeof document === 'undefined') {
-    return undefined
-  }
-  return document.body
+const TYPE_MAP = {
+  warning: 'warning',
+  error: 'error',
+  success: 'success',
+  info: 'info'
 }
 
-const buildOptions = (options = {}) => ({
-  appendTo: getAppendTarget(),
-  customClass: 'app-message-box',
-  modalClass: 'app-message-box-overlay',
-  closeOnClickModal: false,
-  closeOnPressEscape: false,
-  distinguishCancelAndClose: true,
-  lockScroll: false,
-  zIndex: MESSAGE_BOX_Z_INDEX,
-  ...options
-})
-
 export const showConfirmDialog = (message, title = '提示', options = {}) => {
-  return ElMessageBox.confirm(message, title, buildOptions(options))
+  const type = TYPE_MAP[options.type] || 'warning'
+  return new Promise((resolve, reject) => {
+    dialog[type]({
+      title,
+      content: message,
+      positiveText: options.confirmButtonText || '确定',
+      negativeText: options.cancelButtonText || '取消',
+      maskClosable: false,
+      onPositiveClick: () => resolve('confirm'),
+      onNegativeClick: () => reject('cancel'),
+      onClose: () => reject('close')
+    })
+  })
 }
 
 export const showAlertDialog = (message, title = '提示', options = {}) => {
-  return ElMessageBox.alert(message, title, buildOptions(options))
+  const type = TYPE_MAP[options.type] || 'info'
+  return new Promise((resolve) => {
+    dialog[type]({
+      title,
+      content: message,
+      positiveText: options.confirmButtonText || '确定',
+      maskClosable: false,
+      onPositiveClick: () => resolve('confirm'),
+      onClose: () => resolve('close')
+    })
+  })
 }

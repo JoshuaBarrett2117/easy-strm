@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	taskKeyPrefix          = "easy_strm:task:"
-	taskListKey            = "easy_strm:task:list"
-	taskCancelKeyPrefix    = "easy_strm:task:cancel:"    // 取消标记 key
-	taskProgressKeyPrefix  = "easy_strm:task:progress:"  // 已处理文件ID集合 key
+	taskKeyPrefix         = "easy_strm:task:"
+	taskListKey           = "easy_strm:task:list"
+	taskCancelKeyPrefix   = "easy_strm:task:cancel:"   // 取消标记 key
+	taskProgressKeyPrefix = "easy_strm:task:progress:" // 已处理文件ID集合 key
 )
 
 // TaskRedisDAO 任务状态Redis数据访问层
@@ -66,20 +66,20 @@ func (t *TaskRedisDAO) Create(taskID string, taskType, taskName string) error {
 func (t *TaskRedisDAO) CreateWithPriority(taskID string, taskType, taskName string, priority int) error {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	task := map[string]interface{}{
-		"task_id":          taskID,
-		"task_type":        taskType,
-		"task_name":        taskName,
-		"status":           "pending",
-		"priority":         priority,
-		"progress":         0,
-		"total_files":      0,
-		"processed_files":  0,
-		"success_files":    0,
-		"failed_files":     0,
-		"metadata":         map[string]interface{}{},
-		"error_message":    "",
-		"create_time":      now,
-		"update_time":      now,
+		"task_id":         taskID,
+		"task_type":       taskType,
+		"task_name":       taskName,
+		"status":          "pending",
+		"priority":        priority,
+		"progress":        0,
+		"total_files":     0,
+		"processed_files": 0,
+		"success_files":   0,
+		"failed_files":    0,
+		"metadata":        map[string]interface{}{},
+		"error_message":   "",
+		"create_time":     now,
+		"update_time":     now,
 	}
 
 	taskJSON, err := json.Marshal(task)

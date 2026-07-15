@@ -72,7 +72,7 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout: 20000 });
 }
 
@@ -91,7 +91,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
     addCase("TC-ORG-OVR-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -125,25 +125,25 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: mediaSourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: mediaSourceName }).first();
     await sourceRow.waitFor({ timeout: 15000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
-    const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: "Inception.2010.1080p.mkv" }).first();
+    const fileRow = browserDialog.locator("tbody tr").filter({ hasText: "Inception.2010.1080p.mkv" }).first();
     await fileRow.waitFor({ timeout: 15000 });
-    await fileRow.locator(".el-checkbox").click();
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await fileRow.locator('[role="checkbox"]').click();
+    await browserDialog.locator("button").filter({ hasText: "批量整理" }).click();
 
-    const organizeDialog = page.locator(".el-dialog").filter({ hasText: "批量整理" }).last();
+    const organizeDialog = page.locator('[role="dialog"]').filter({ hasText: "批量整理" }).last();
     await organizeDialog.waitFor({ timeout: 15000 });
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成");
 
-    const previewRow = organizeDialog.locator(".el-table__row").first();
+    const previewRow = organizeDialog.locator("tbody tr").first();
     await previewRow.waitFor({ timeout: 15000 });
-    await previewRow.locator(".edit-name-btn").click();
+    await previewRow.getByRole("button", { name: "编辑新文件名" }).click();
     const editInput = previewRow.locator("input").first();
     await editInput.fill("Manual Override Final.mkv");
     await editInput.press("Enter");
@@ -159,7 +159,7 @@ async function run() {
       await saveShot(page, "02_preview_edited")
     );
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "执行整理" }).click();
     await waitForMessage(page, "整理完成");
     await page.waitForTimeout(1200);
 

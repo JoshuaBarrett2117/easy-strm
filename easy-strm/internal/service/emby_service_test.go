@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"encoding/json"
@@ -342,4 +342,3 @@ func TestEmbyServiceIsEnabledWithConfig(t *testing.T) {
 		})
 	}
 }
-

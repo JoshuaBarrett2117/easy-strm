@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { ElMessage } from 'element-plus'
+import { message } from '../ui/feedback'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -69,7 +69,7 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401) {
       if (!isRedirectingToLogin) {
-        ElMessage.error('登录已过期，请重新登录')
+        message.error('登录已过期，请重新登录')
       }
       clearCredentials()
       redirectToLogin()
@@ -81,9 +81,9 @@ api.interceptors.response.use(
     }
 
     if (error.response) {
-      ElMessage.error(getResponseErrorMessage(error))
+      message.error(getResponseErrorMessage(error))
     } else {
-      ElMessage.error('网络错误，请稍后重试')
+      message.error('网络错误，请稍后重试')
     }
 
     return Promise.reject(error)

@@ -1,0 +1,48 @@
+{
+  "date": "2026-07-15",
+  "executor": "Codex",
+  "locations": {
+    "backend": "easy-strm，Gin 服务固定监听 8082，配置来自 easy-strm/config.yaml",
+    "frontend": "easy-strm-front，Vite dev 固定监听 3001，并代理 /api 到 8082",
+    "e2e": "easy-strm-front/scripts/e2e-*.mjs，Playwright 脚本",
+    "verification_records": [".codex/testing.md", ".codex/verification.md", ".codex/operations-log.md"]
+  },
+  "current_state": {
+    "worktree": "main 分支存在大规模前后端重构与未跟踪拆分文件，用户明确要求提交全部代码变更",
+    "ui_stack": "前端依赖已由 Element Plus 重构为 Naive UI，但大量旧 E2E 仍引用 .el-* DOM 类",
+    "runtime": "Docker Desktop 当前不可用；仓库已有忽略的 easy-strm/config.yaml，可用于连接现有 PostgreSQL/Redis",
+    "published_e2e_commands": [
+      "e2e:organize-preview-refresh",
+      "e2e:organize-preview-cancel",
+      "e2e:resource-platform"
+    ]
+  },
+  "similar_cases": [
+    "e2e-fullflow.mjs：真实后端全链路",
+    "e2e-organize-preview-refresh.mjs：整理预览状态专项",
+    "e2e-resource-platform.mjs：模拟 API 的资源平台主链路"
+  ],
+  "questions": [
+    {"priority": "high", "question": "新 Naive UI DOM 下关键交互的稳定可访问名称和结构是什么？"},
+    {"priority": "high", "question": "现有 config.yaml 的数据库与 Redis 是否仍可连接并支持真实流程？"},
+    {"priority": "high", "question": "哪些未跟踪文件属于代码/文档，哪些是一次性调试产物不应发布？"},
+    {"priority": "medium", "question": "全部历史 E2E 是否都能在当前本地数据与外部服务条件下执行？"}
+  ],
+  "observations": [
+    "旧脚本广泛依赖 Element Plus 私有类，直接机械替换风险高，应优先使用角色、可访问名称和业务文本定位。",
+    "关键主流程涉及外部 TMDB、数据库、Redis 与本地文件写入，应使用临时测试数据并在结束后清理。",
+    ".codex 下存在历史一次性浏览器脚本，应在发布前单独审查，不因‘提交全部代码’而自动视为产品代码。"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallbacks": {
+    "sequential-thinking": "当前会话未提供，改用显式上下文扫描、风险清单与计划工具",
+    "shrimp-task-manager": "当前会话未提供，改用 update_plan",
+    "code-index": "当前会话未提供，改用 rg 与 Git diff",
+    "exa": "本任务无需外部网络检索"
+  }
+}

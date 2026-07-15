@@ -1,7 +1,7 @@
 import { api } from './request'
 
-export const getCloud115List = () => {
-  return api.get('/cloud115')
+export const getCloud115List = (params = {}) => {
+  return api.get('/cloud115', { params })
 }
 
 export const getCloud115ById = (id) => {
@@ -18,6 +18,10 @@ export const updateCloud115 = (id, data) => {
 
 export const deleteCloud115 = (id) => {
   return api.delete(`/cloud115/${id}`)
+}
+
+export const testCloud115Connection = (id) => {
+  return api.get(`/auth/cloud115/${id}`, { skipGlobalErrorMessage: true })
 }
 
 export const get115LoginChannels = () => {
