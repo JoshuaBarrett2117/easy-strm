@@ -53,7 +53,7 @@ const (
 // 任务Redis key前缀
 const taskKeyPrefix = "easy_strm:task:"
 const taskListKey = "easy_strm:task:list"
-const taskCancelKeyPrefix = "easy_strm:task:cancel:"   // 取消标记 key
+const taskCancelKeyPrefix = "easy_strm:task:cancel:"     // 取消标记 key
 const taskProgressKeyPrefix = "easy_strm:task:progress:" // 已处理文件ID集合 key
 
 // CreateTask 创建新任务（默认优先级5）

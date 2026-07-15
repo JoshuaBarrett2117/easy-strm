@@ -1,4 +1,4 @@
-﻿package dao
+package dao
 
 import (
 	"testing"
@@ -22,5 +22,3 @@ func TestGetGlobalRedisClientFallsBackToInitClient(t *testing.T) {
 		t.Fatalf("expected fallback to RedisClient, got %#v", got)
 	}
 }
-
-

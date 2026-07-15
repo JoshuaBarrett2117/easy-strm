@@ -1,5 +1,15 @@
 # Verification
 
+## 2026-07-15/16 重构发布验收结论
+
+- 结论：通过，可以发布。
+- 真实关键链路“登录 → 浏览 → 识别 → 整理 → STRM”已完成；整理与 STRM 均以后台任务终态 `completed` 为准，STRM 文件已实际写入本地临时输出目录。
+- 全部历史 `scripts/e2e-*.mjs` 已移除 Element Plus `.el-*` 选择器并通过语法检查；项目公开的三条 E2E 命令和全流程 40 项回归均通过。
+- 后端单元测试、静态检查、Go 格式检查与前端生产构建通过。
+- 发现并修复：异步整理事件沿用旧同步结果契约，导致提交任务后打开空结果弹窗。
+- 外部副作用已清理：本轮创建的 115 临时目标目录、临时媒体源和 STRM 配置均已删除；时间戳测试报告未纳入长期文档。
+- 已知边界：未逐条执行 23 个历史专项 E2E 的全部外部依赖场景；已对所有脚本完成选择器迁移与语法校验，并实际执行公开基线、全流程和真实 115 STRM 闭环。
+
 ## 结论
 
 - 前端生产构建通过。
@@ -88,3 +98,45 @@
 - 后端接口保持现有 schema，单条 STRM 与刷新库动作已返回可追踪 `task_id`，满足“动作成功后可进入任务中心查看详情”的首版契约。
 - 自动化验证通过：`go test ./...`、`npm run build`、`npm run e2e:resource-platform`、`docker compose config`。
 - 部署侧残余风险：本机 Docker Desktop Linux daemon 未运行，`docker build -t easy-strm:codex-check .` 无法连接 `npipe:////./pipe/dockerDesktopLinuxEngine`，需要启动 Docker daemon 后复跑镜像构建。
+
+## 2026-05-15 大文件深拆上线验证结论
+
+- 后端拆分验证通过：`organize_service.go`、`115client.go`、`db.go`、`auth.go` 已按职责拆分为同包模块，公开函数签名保持兼容，`go test ./...` 与 `go vet ./...` 均通过。
+- 前端拆分验证通过：`Cloud115.vue` 已抽出纯展示工具到 `src/utils/cloud115Display.js`，`npm run build` 通过。
+- 浏览器回归通过：资源整理平台 E2E、整理预览刷新、整理预览取消三条 Playwright 用例均返回 `ok=true`。
+- 部署配置验证：`docker compose config` 通过；`docker build -t easy-strm:codex-check .` 受本机 Docker Desktop Linux daemon 未运行阻塞，未进入代码构建阶段。
+- 临时服务已清理：本轮为 E2E 启动的本地后端 `:8082` 与前端 `:3001` 监听进程已停止。
+- 残余重构项：仍有 800-900 行级别的领域服务与控制器文件，例如 `tmdb_service.go`、`watch_service.go`、`scrape_service.go`、`cloud115_controller.go`、`media_source_service.go`；它们未阻塞上线验证，但可作为下一轮继续细拆对象。
+
+## 2026-05-15 继续深拆复验结论
+
+- 已继续拆分 controller、DAO、service 和根包模型，新增更细粒度 helper/请求归一化/失败分类测试。
+- 通过项：`gofmt -l`、`go test ./...`、`go vet ./...`、`npm run build`、`npm run e2e:resource-platform`、`docker compose config`。
+- 受环境阻塞项：`npm run e2e:organize-preview-refresh`、`npm run e2e:organize-preview-cancel` 需要真实后端 `127.0.0.1:8082` 登录/API；当前后端未运行导致登录跳转超时。`docker build` 需要 Docker Desktop Linux daemon；当前 daemon 未运行。
+- 剩余大文件风险：`auth.go` 仍集中依赖注入与路由注册，`db.go` 仍集中建表/迁移 SQL，`watch_service.go` 仍集中本地监听和 115 轮询主流程。当前验证表明它们不阻塞上线，但建议下一轮优先拆 `auth.go` 路由注册结构体和 `db.go` 迁移执行器。
+
+## 2026-05-27 功能盘点与浏览器验证结论
+
+- 当前产品功能面已按前端路由、API 封装和后端路由确认，主线为“媒体源接入 -> 同步入库 -> 媒体资产台账 -> 待处理修正 -> STRM/刷新库 -> 任务中心追踪”，旁路支撑包括文件工作台、115 云管理、整理规则、系统设置、日志、网络与缓存管理。
+- 自动化验证通过：`go test ./...`、`npm run build`、`npm run e2e:resource-platform`。
+- 浏览器核心链路验证通过：`npm run e2e:resource-platform` 使用 Playwright + 模拟 API 覆盖同步入库、资产台账、单条 STRM 生成并跳任务详情、待处理人工识别并重新入库。
+- Codex in-app Browser 访问 `127.0.0.1:3001` 被企业网络策略拦截，已按策略停止，不做浏览器绕行。
+- 真实后端全链路未执行：Docker daemon、PostgreSQL `5432`、Redis `6379` 均不可用，后端无法在当前环境完成真实启动；真实 115 账号、真实 TMDB/Emby、真实本地媒体源整理执行需要服务依赖恢复后复跑。
+
+## 2026-05-27 真实后端本地启动验证结论
+
+- 已按用户提供的远端 PostgreSQL/Redis 启动本地后端，后端监听 `http://127.0.0.1:8082`。
+- 已启动本地前端，前端监听 `http://127.0.0.1:3001`。
+- 真实浏览器验证通过：临时测试用户登录成功，13 个后台路由均可访问且标题匹配，页面巡检未出现网络错误或 `pageerror`。
+- 真实核心链路通过：创建临时本地媒体源、进入同步入库、触发全量同步、进入资产台账并看到测试文件。
+- 清理完成：临时测试用户已删除，临时媒体源由浏览器脚本删除。
+- 残余观察：后端启动时历史媒体源 `测试本地媒体源` 的目录不可访问；浏览器 console 有 2 条 `403 Forbidden` 资源加载错误，但未影响页面路由和本轮核心链路。
+
+## 2026-05-27 按钮矩阵验证结论
+
+- 已完成主要按钮矩阵验证，脚本 `.codex/button-matrix-e2e-2026-05-27.mjs` 返回 `ok=true`。
+- 覆盖登录、顶部快捷、首页入口、同步入库、资产台账、待处理、任务中心、文件工作台、115 云管理、整理规则、STRM 配置、系统设置、系统日志、网络测试、缓存管理。
+- 本轮没有 failed 项。
+- 临时写入项已清理：媒体源、分类、STRM 配置和测试用户均已删除。
+- 仍需排查：任务中心“详情”按钮点击后自动化未观察到详情抽屉打开；当前结论是“按钮可点击但详情抽屉打开行为未确认”。
+- 仍未做破坏性真实动作：未确认清理真实缓存、删除真实账号、删除真实文件、执行真实既有 STRM 全量生成等高副作用按钮。

@@ -11,7 +11,7 @@ func initWindowsConsole() {
 	stdout := windows.Handle(os.Stdout.Fd())
 	windows.SetConsoleOutputCP(65001)
 	windows.SetConsoleCP(65001)
-	
+
 	var mode uint32
 	windows.GetConsoleMode(stdout, &mode)
 	mode |= windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING

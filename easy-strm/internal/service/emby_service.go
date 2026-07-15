@@ -23,7 +23,7 @@ type SystemConfigReader interface {
 // EmbyService Emby 集成服务
 type EmbyService struct {
 	systemConfigDAO SystemConfigReader
-	httpClient     *http.Client
+	httpClient      *http.Client
 }
 
 // NewEmbyService 创建 Emby 服务实例
@@ -38,27 +38,27 @@ func NewEmbyService(systemConfigDAO SystemConfigReader, httpClient *http.Client)
 
 // EmbySystemInfo Emby 系统信息
 type EmbySystemInfo struct {
-	ID          string `json:"Id"`
-	ServerName  string `json:"ServerName"`
-	Version     string `json:"Version"`
+	ID              string `json:"Id"`
+	ServerName      string `json:"ServerName"`
+	Version         string `json:"Version"`
 	OperatingSystem string `json:"OperatingSystem"`
 }
 
 // EmbyVirtualFolderInfo Emby 虚拟文件夹（媒体库）信息
 type EmbyVirtualFolderInfo struct {
-	Name             string `json:"Name"`
-	ItemID           string `json:"ItemId"`
-	CollectionType   string `json:"CollectionType"`
-	Path             string `json:"Path"`
-	RefreshProgress  float64 `json:"RefreshProgress"`
-	RefreshStatus    string `json:"RefreshStatus"`
+	Name            string  `json:"Name"`
+	ItemID          string  `json:"ItemId"`
+	CollectionType  string  `json:"CollectionType"`
+	Path            string  `json:"Path"`
+	RefreshProgress float64 `json:"RefreshProgress"`
+	RefreshStatus   string  `json:"RefreshStatus"`
 }
 
 // EmbyLibraryRefreshResult Emby 库刷新结果
 type EmbyLibraryRefreshResult struct {
-	Success   bool   `json:"success"`
-	Message   string `json:"message"`
-	LibraryID string `json:"library_id,omitempty"`
+	Success     bool   `json:"success"`
+	Message     string `json:"message"`
+	LibraryID   string `json:"library_id,omitempty"`
 	LibraryName string `json:"library_name,omitempty"`
 }
 
@@ -272,9 +272,9 @@ func (s *EmbyService) RefreshLibraryBySourceID(mediaSourceDAO *dao.MediaSourceDA
 		logger.Errorf("EmbyService[RefreshLibraryBySourceID] 刷新失败: source_id=%d, library_id=%s, error=%v",
 			sourceID, source.EmbyLibraryID, err)
 		return &EmbyLibraryRefreshResult{
-			Success:     false,
-			Message:     fmt.Sprintf("刷新失败: %v", err),
-			LibraryID:   source.EmbyLibraryID,
+			Success:   false,
+			Message:   fmt.Sprintf("刷新失败: %v", err),
+			LibraryID: source.EmbyLibraryID,
 		}
 	}
 

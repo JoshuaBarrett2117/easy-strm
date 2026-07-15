@@ -56,12 +56,12 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout: 20000 });
 }
 
 async function findDialogByTitle(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.locator('[role="dialog"]').filter({ hasText: title }).last();
   await dialog.waitFor({ timeout: 15000 });
   return dialog;
 }
@@ -74,18 +74,18 @@ async function setInputValue(locator, value) {
 }
 
 function labeledField(dialog, label) {
-  return dialog.locator(".el-form-item").filter({ hasText: label });
+  return dialog.locator(".n-form-item").filter({ hasText: label });
 }
 
 async function searchAndSelectTmdb(page, manualDialog, keyword, type) {
-  await manualDialog.locator(".dialog-footer .el-button").filter({ hasText: "从 TMDB 选择" }).click();
+  await manualDialog.locator("button").filter({ hasText: "从 TMDB 选择" }).click();
   const tmdbDialog = await findDialogByTitle(page, "TMDB 手动搜索");
-  await setInputValue(tmdbDialog.locator(".tmdb-search input").first(), keyword);
-  await tmdbDialog.locator(".search-type-select").click();
-  await page.locator(".el-select-dropdown__item").filter({ hasText: type === "tv" ? "剧集" : "电影" }).last().click();
-  await tmdbDialog.locator(".search-btn").click();
+  await setInputValue(tmdbDialog.locator('input[placeholder="输入电影或剧集名称搜索"]').first(), keyword);
+  await tmdbDialog.locator(".n-select").click();
+  await page.locator(".n-base-select-option").filter({ hasText: type === "tv" ? "剧集" : "电影" }).last().click();
+  await tmdbDialog.getByRole("button", { name: "搜索" }).click();
   await page.waitForTimeout(2500);
-  const resultCards = tmdbDialog.locator(".result-item");
+  const resultCards = tmdbDialog.getByTestId("tmdb-result-item");
   const resultCount = await resultCards.count();
   if (resultCount === 0) {
     throw new Error(`TMDB 搜索无结果: keyword=${keyword} type=${type}`);
@@ -95,28 +95,28 @@ async function searchAndSelectTmdb(page, manualDialog, keyword, type) {
 }
 
 async function applyMovieManualIdentify(page, organizeDialog, fileName, keyword) {
-  const row = organizeDialog.locator(".el-table__row").filter({ hasText: fileName }).first();
-  await row.locator(".el-button").filter({ hasText: "手动识别" }).click();
+  const row = organizeDialog.locator("tbody tr").filter({ hasText: fileName }).first();
+  await row.locator("button").filter({ hasText: "手动识别" }).click();
   const manualDialog = await findDialogByTitle(page, "手动识别修正");
   await searchAndSelectTmdb(page, manualDialog, keyword, "movie");
   const title = await labeledField(manualDialog, "标题").locator("input").first().inputValue();
-  const tmdbId = await labeledField(manualDialog, "TMDB ID").locator(".el-input-number input").first().inputValue();
-  await manualDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "应用到预览" }).click();
+  const tmdbId = await labeledField(manualDialog, "TMDB ID").locator(".n-input-number input").first().inputValue();
+  await manualDialog.locator("button").filter({ hasText: "应用到预览" }).click();
   await manualDialog.waitFor({ state: "hidden", timeout: 25000 });
   await waitForMessage(page, "预览完成");
   return { title, tmdbId };
 }
 
 async function applyTvManualIdentify(page, organizeDialog, fileName, keyword, season, episode) {
-  const row = organizeDialog.locator(".el-table__row").filter({ hasText: fileName }).first();
-  await row.locator(".el-button").filter({ hasText: "手动识别" }).click();
+  const row = organizeDialog.locator("tbody tr").filter({ hasText: fileName }).first();
+  await row.locator("button").filter({ hasText: "手动识别" }).click();
   const manualDialog = await findDialogByTitle(page, "手动识别修正");
   await searchAndSelectTmdb(page, manualDialog, keyword, "tv");
-  await setInputValue(labeledField(manualDialog, "季数").locator(".el-input-number input").first(), season);
-  await setInputValue(labeledField(manualDialog, "集数").locator(".el-input-number input").first(), episode);
+  await setInputValue(labeledField(manualDialog, "季数").locator(".n-input-number input").first(), season);
+  await setInputValue(labeledField(manualDialog, "集数").locator(".n-input-number input").first(), episode);
   const title = await labeledField(manualDialog, "标题").locator("input").first().inputValue();
-  const tmdbId = await labeledField(manualDialog, "TMDB ID").locator(".el-input-number input").first().inputValue();
-  await manualDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "应用到预览" }).click();
+  const tmdbId = await labeledField(manualDialog, "TMDB ID").locator(".n-input-number input").first().inputValue();
+  await manualDialog.locator("button").filter({ hasText: "应用到预览" }).click();
   await manualDialog.waitFor({ state: "hidden", timeout: 25000 });
   await waitForMessage(page, "预览完成");
   return { title, tmdbId };
@@ -155,7 +155,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-ORG-MIX-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -226,21 +226,21 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: mediaSourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: mediaSourceName }).first();
     await sourceRow.waitFor({ timeout: 15000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
     for (const fileName of ["Codex.Mixed.Movie.Release.mkv", "Codex.Mixed.Show.Release.mkv"]) {
-      const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: fileName }).first();
+      const fileRow = browserDialog.locator("tbody tr").filter({ hasText: fileName }).first();
       await fileRow.waitFor({ timeout: 15000 });
-      await fileRow.locator(".el-checkbox").click();
+      await fileRow.locator('[role="checkbox"]').click();
     }
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await browserDialog.locator("button").filter({ hasText: "批量整理" }).click();
 
     const organizeDialog = await findDialogByTitle(page, "批量整理");
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成");
 
     const movie = await applyMovieManualIdentify(page, organizeDialog, "Codex.Mixed.Movie.Release.mkv", "Inception");
@@ -264,7 +264,7 @@ async function run() {
       await saveShot(page, "03_preview_mixed")
     );
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "执行整理" }).click();
     await waitForMessage(page, "整理完成");
     await page.waitForTimeout(1500);
 

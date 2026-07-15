@@ -1,4 +1,4 @@
-﻿package controller
+package controller
 
 import (
 	"bytes"
@@ -219,5 +219,3 @@ func TestMediaSourceControllerSyncWatchStateNilSafety(t *testing.T) {
 	controller.syncWatchState(nil)
 	controller.stopWatchState(1)
 }
-
-

@@ -38,9 +38,9 @@ async function main() {
     const page = await context.newPage();
 
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
-    await page.locator('input[type="text"]').first().fill("admin");
-    await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByPlaceholder("用户名").fill("admin");
+    await page.getByPlaceholder("密码").fill("admin");
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
 
     const token = await page.evaluate(() => localStorage.getItem("token"));
@@ -75,47 +75,49 @@ async function main() {
     if (!sourceId) fail(`创建媒体源响应中缺少 ID: ${JSON.stringify(createData)}`);
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const row = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const row = page.getByRole("row").filter({ hasText: sourceName });
     await row.waitFor({ timeout: 15000 });
-    await row.locator("button").first().click();
+    await row.getByRole("button", { name: "浏览" }).click();
 
-    const browserDialog = page.locator(".el-dialog").last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 15000 });
 
-    await browserDialog.locator(".el-table__body-wrapper tbody .el-checkbox").first().click();
-    await browserDialog.locator(".organize-primary-btn").click();
+    const fileRow = browserDialog.getByRole("row").filter({ hasText: "Movie.Manual.2024.1080p.mkv" });
+    await fileRow.getByRole("checkbox").click();
+    await browserDialog.getByRole("button", { name: /批量整理/ }).click();
 
-    const organizeDialog = page.locator(".el-dialog").last();
+    const organizeDialog = page.getByRole("dialog").filter({ hasText: "批量整理工作流" });
     await organizeDialog.waitFor({ timeout: 15000 });
 
-    const previewButton = organizeDialog.locator(".dialog-footer button").nth(1);
+    const previewButton = organizeDialog.getByRole("button", { name: "刷新预览" });
     await previewButton.click();
 
     await page.waitForFunction(() => {
-      const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
-      const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+      const dialog = dialogs.find((item) => item.textContent?.includes("批量整理工作流"));
       if (!dialog) return false;
 
-      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button"));
-      const button = footerButtons[1];
+      const button = Array.from(dialog.querySelectorAll("button"))
+        .find((item) => item.textContent?.includes("刷新预览"));
       if (!button) return false;
 
-      const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
       const hasPreviewState = dialog.textContent?.includes("识别失败")
         || dialog.textContent?.includes("可处理")
         || dialog.textContent?.includes("原文件名");
 
-      return !button.classList.contains("is-loading") && !loadingMask && hasPreviewState;
+      return !button.disabled && hasPreviewState;
     }, { timeout: 20000 });
 
     const previewState = await organizeDialog.evaluate((dialog) => {
-      const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button")).map((button) => ({
+      const footerButtons = Array.from(dialog.querySelectorAll("button"))
+        .filter((button) => ["取消", "刷新预览", "执行整理"].some((text) => button.textContent?.includes(text)))
+        .map((button) => ({
         text: button.textContent || "",
-        className: button.className
+        disabled: button.disabled
       }));
       return {
-        hasLoadingMask: Boolean(dialog.querySelector(".organize-container .el-loading-mask")),
-        hasPreviewTable: Boolean(dialog.querySelector(".el-table")),
+        hasLoadingMask: Boolean(dialog.querySelector('[aria-busy="true"]')),
+        hasPreviewTable: Boolean(dialog.querySelector("table")),
         footerButtons,
         text: dialog.textContent || ""
       };
@@ -125,8 +127,8 @@ async function main() {
       fail("整理弹窗遮罩仍未退出");
     }
 
-    const refreshButtonState = previewState.footerButtons[1];
-    if (!refreshButtonState || refreshButtonState.className.includes("is-loading")) {
+    const refreshButtonState = previewState.footerButtons.find((button) => button.text.includes("刷新预览"));
+    if (!refreshButtonState || refreshButtonState.disabled) {
       fail("刷新预览按钮仍处于 loading 状态");
     }
 

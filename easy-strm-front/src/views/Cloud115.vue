@@ -1,244 +1,183 @@
-﻿<template>
-  <div class="cloud115-container">
-    <el-card shadow="hover" class="main-card">
-      <template #header>
-        <div class="card-header">
-          <div class="header-title">
-            <el-icon class="header-icon"><Cloudy /></el-icon>
-            <span>115云账号管理</span>
-          </div>
-          <div class="header-buttons">
-            <el-button type="success" @click="handleQRCodeLogin">
-              <el-icon><Key /></el-icon>
-              扫码登录
-            </el-button>
-            <el-button type="primary" @click="handleAdd">
-              <el-icon><Plus /></el-icon>
-              新增账号
-            </el-button>
-          </div>
+<template>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">Cloud 115</div>
+          <h2 class="mt-1.5 text-2xl font-extrabold text-slate-800 dark:text-white">115云账号管理</h2>
+          <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            扫码登录、转存链路、状态管理和连通性测试都继续沿用原有后端接口。
+          </p>
         </div>
-      </template>
+        <div class="flex flex-wrap items-center gap-2">
+          <n-button type="success" @click="handleQRCodeLogin">
+            <template #icon>
+              <n-icon :component="QrCodeOutline" />
+            </template>
+            扫码登录
+          </n-button>
+          <n-button type="primary" @click="handleAdd">
+            <template #icon>
+              <n-icon :component="AddOutline" />
+            </template>
+            新增账号
+          </n-button>
+        </div>
+      </div>
+    </div>
 
-      <section class="overview-panel">
-        <div class="overview-copy">
-          <h2>账号池总览</h2>
-          <p>扫码登录、转存链路、状态管理和连通性测试都继续沿用原有后端接口，这里只重构首屏表达与运营视角。</p>
-        </div>
-        <div class="overview-grid">
-          <article v-for="card in cloudOverviewCards" :key="card.label" class="overview-card">
-            <span class="overview-card__label">{{ card.label }}</span>
-            <strong class="overview-card__value">{{ card.value }}</strong>
-            <p class="overview-card__hint">{{ card.hint }}</p>
-          </article>
-        </div>
-      </section>
+    <!-- 账号池总览 -->
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in cloudOverviewCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.hint"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
+    </div>
 
-      <section class="status-rail">
-        <div class="status-rail__item">
-          <span>当前账号结构</span>
-          <strong>{{ accountStructureText }}</strong>
-        </div>
-        <div class="status-rail__item">
-          <span>高优先级账号</span>
-          <strong>{{ priorityLeadersText }}</strong>
-        </div>
-        <div class="status-rail__item">
-          <span>转存配置覆盖</span>
-          <strong>{{ transferCoverageText }}</strong>
-        </div>
-      </section>
-      
-      <el-table :data="cloud115List" border style="width: 100%" stripe class="custom-table" row-key="id" @sort-change="handleSortChange" :default-sort="{ prop: 'id', order: 'ascending' }">
-        <el-table-column prop="id" label="ID" width="60" align="center" sortable="custom" />
-        <el-table-column prop="name" label="名称" min-width="120" sortable="custom" />
-        <el-table-column prop="account_type" label="账号类型" width="100" align="center">
-          <template #default="scope">
-            <el-tag :type="getAccountTypeTag(scope.row.account_type)" size="small">
-              {{ getAccountTypeName(scope.row.account_type) }}
-            </el-tag>
+    <!-- 状态速览 -->
+    <div class="grid grid-cols-1 gap-3 sm:grid-cols-3 lg:gap-4">
+      <div
+        v-for="item in statusRailItems"
+        :key="item.label"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-ink-900"
+      >
+        <p class="text-xs text-slate-400 dark:text-slate-500">{{ item.label }}</p>
+        <p class="mt-1.5 text-sm font-bold text-slate-800 dark:text-white">{{ item.value }}</p>
+      </div>
+    </div>
+
+    <!-- 账号列表 -->
+    <PageCard title="账号列表" subtitle="支持排序、Cookie 查看、连接测试与扫码更新">
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="columns"
+          :data="cloud115List"
+          :row-key="(row) => row.id"
+          :scroll-x="1720"
+          size="small"
+          @update:sorter="handleSorterChange"
+        >
+          <template #empty>
+            <EmptyState title="暂无 115 云账号" description="点击右上角「扫码登录」或「新增账号」开始接入">
+              <n-button type="primary" size="small" @click="handleQRCodeLogin">扫码登录</n-button>
+            </EmptyState>
           </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="90" align="center">
-          <template #default="scope">
-            <el-tag :type="getStatusTag(scope.row.status)" size="small">
-              {{ getStatusName(scope.row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="priority" label="优先级" width="80" align="center" sortable="custom">
-          <template #default="scope">
-            <el-tag :type="getPriorityTag(scope.row.priority)" size="small">
-              {{ scope.row.priority || 5 }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Cookie" min-width="180">
-          <template #default="scope">
-            <div class="sensitive-cell">
-              <span v-if="!scope.row._showCookie" class="masked-text">
-                {{ maskSensitive(scope.row.cookie) }}
-              </span>
-              <span v-else class="full-text">{{ scope.row.cookie || '-' }}</span>
-              <el-button 
-                type="primary" 
-                link 
-                size="small" 
-                @click="toggleShowCookie(scope.row)"
-                class="toggle-btn"
-              >
-                <el-icon><View v-if="!scope.row._showCookie" /><Hide v-else /></el-icon>
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="转存账号" min-width="100" align="center">
-          <template #default="scope">
-            <span v-if="scope.row.transfer_account_id">
-              {{ getTransferAccountName(scope.row.transfer_account_id) }}
-            </span>
-            <span v-else class="text-muted">未配置</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="转存目录" min-width="120">
-          <template #default="scope">
-            <span v-if="scope.row.transfer_account_id">
-              {{ scope.row.transfer_directory || '根目录' }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="秒传方式" width="110" align="center">
-          <template #default="scope">
-            <el-tag v-if="scope.row.transfer_method" :type="getTransferMethodTag(scope.row.transfer_method)" size="small">
-              {{ getTransferMethodName(scope.row.transfer_method) }}
-            </el-tag>
-            <span v-else style="color: #909399">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" sortable="custom" />
-        <el-table-column prop="update_time" label="更新时间" width="160" align="center" sortable="custom" />
-        <el-table-column label="操作" min-width="340" fixed="right" align="center">
-          <template #default="scope">
-            <div class="action-buttons">
-              <el-button type="primary" size="small" @click="handleEdit(scope.row)">
-                <el-icon><Edit /></el-icon>
-                编辑
-              </el-button>
-              <el-button type="success" size="small" @click="handleQRCodeUpdate(scope.row)">
-                <el-icon><Key /></el-icon>
-                扫码更新
-              </el-button>
-              <el-button type="warning" size="small" @click="handleTest(scope.row)" :loading="testingAccountId === scope.row.id">
-                <el-icon><RefreshRight /></el-icon>
-                测试
-              </el-button>
-              <el-button type="danger" size="small" @click="handleDelete(scope.row)">
-                <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-      
-      <div class="pagination-container">
-        <el-pagination
-          v-model:current-page="currentPage"
+        </n-data-table>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <n-pagination
+          v-model:page="currentPage"
           v-model:page-size="pageSize"
+          :item-count="total"
           :page-sizes="[5, 10, 20, 50]"
-          layout="total, sizes, prev, pager, next, jumper"
-          :total="total"
-          @size-change="handleSizeChange"
-          @current-change="handleCurrentChange"
+          show-size-picker
+          @update:page="handleCurrentChange"
+          @update:page-size="handleSizeChange"
         />
       </div>
-    </el-card>
-    
+    </PageCard>
+
     <!-- 新增/编辑对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
-      :title="dialogTitle"
-      width="600px"
-      append-to-body
-    >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入 115 云账号名称" />
-        </el-form-item>
-        <el-form-item label="Cookie" prop="cookie">
-          <el-input v-model="form.cookie" type="textarea" placeholder="请输入 115 云账号 Cookie" :rows="3" />
-        </el-form-item>
-        <el-form-item label="账号类型" prop="account_type">
-          <el-radio-group v-model="form.account_type">
-            <el-radio label="resource">资源号</el-radio>
-            <el-radio label="vip">VIP观影号</el-radio>
-            <el-radio label="both">兼顾</el-radio>
-          </el-radio-group>
-          <div class="form-tip">设置账号在同步任务中的角色类型。</div>
-        </el-form-item>
-        <el-form-item label="状态" prop="status">
-          <el-radio-group v-model="form.status">
-            <el-radio label="active">正常</el-radio>
-            <el-radio label="cooling">冷却中</el-radio>
-            <el-radio label="disabled">禁用</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="优先级" prop="priority">
-          <el-input-number v-model="form.priority" :min="1" :max="10" :step="1" />
-          <div class="form-tip">1-10，数字越大优先级越高，用于同步调度排序。</div>
-        </el-form-item>
-        <el-divider content-position="left">文件转存配置</el-divider>
-        <el-form-item label="转存账号" prop="transfer_account_id">
-          <el-select v-model="form.transfer_account_id" placeholder="请选择转存目标账号" clearable style="width: 100%">
-            <el-option
-              v-for="account in availableTransferAccounts"
-              :key="account.id"
-              :label="account.name"
-              :value="account.id"
+    <n-modal v-model:show="dialogVisible" preset="card" :title="dialogTitle" class="w-[92vw] max-w-2xl">
+      <n-form ref="formRef" :model="form" :rules="rules" label-placement="left" label-width="100">
+        <n-form-item label="名称" path="name">
+          <n-input v-model:value="form.name" placeholder="请输入 115 云账号名称" />
+        </n-form-item>
+        <n-form-item label="Cookie" path="cookie">
+          <n-input v-model:value="form.cookie" type="textarea" placeholder="请输入 115 云账号 Cookie" :rows="3" />
+        </n-form-item>
+        <n-form-item label="账号类型" path="account_type">
+          <div>
+            <n-radio-group v-model:value="form.account_type">
+              <n-radio value="resource">资源号</n-radio>
+              <n-radio value="vip">VIP观影号</n-radio>
+              <n-radio value="both">兼顾</n-radio>
+            </n-radio-group>
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">设置账号在同步任务中的角色类型。</p>
+          </div>
+        </n-form-item>
+        <n-form-item label="状态" path="status">
+          <n-radio-group v-model:value="form.status">
+            <n-radio value="active">正常</n-radio>
+            <n-radio value="cooling">冷却中</n-radio>
+            <n-radio value="disabled">禁用</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item label="优先级" path="priority">
+          <div>
+            <n-input-number v-model:value="form.priority" :min="1" :max="10" :step="1" />
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">1-10，数字越大优先级越高，用于同步调度排序。</p>
+          </div>
+        </n-form-item>
+        <n-divider title-placement="left">文件转存配置</n-divider>
+        <n-form-item label="转存账号" path="transfer_account_id">
+          <div class="w-full">
+            <n-select
+              v-model:value="form.transfer_account_id"
+              placeholder="请选择转存目标账号"
+              clearable
+              :options="transferAccountOptions"
             />
-          </el-select>
-          <div class="form-tip">选择后会将文件转存到该账号下以获取直链。</div>
-        </el-form-item>
-        <el-form-item label="转存目录" prop="transfer_directory" :disabled="transferDisabled">
-          <el-input v-model="form.transfer_directory" placeholder="留空则转存到根目录" :disabled="transferDisabled" />
-          <div class="form-tip">文件转存的目标目录路径，例如：/视频/转存文件。</div>
-        </el-form-item>
-        <el-form-item label="秒传方式" prop="transfer_method" :disabled="transferDisabled">
-          <el-select v-model="form.transfer_method" placeholder="请选择秒传方式" style="width: 100%" :disabled="transferDisabled">
-            <el-option label="alist" value="alist" />
-          </el-select>
-          <div class="form-tip">选择失败时自动回退到直链获取。</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit" :loading="loading">确定</el-button>
-        </span>
-      </template>
-    </el-dialog>
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">选择后会将文件转存到该账号下以获取直链。</p>
+          </div>
+        </n-form-item>
+        <n-form-item label="转存目录" path="transfer_directory">
+          <div class="w-full">
+            <n-input v-model:value="form.transfer_directory" placeholder="留空则转存到根目录" :disabled="transferDisabled" />
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">文件转存的目标目录路径，例如：/视频/转存文件。</p>
+          </div>
+        </n-form-item>
+        <n-form-item label="秒传方式" path="transfer_method">
+          <div class="w-full">
+            <n-select
+              v-model:value="form.transfer_method"
+              placeholder="请选择秒传方式"
+              :disabled="transferDisabled"
+              :options="[{ label: 'alist', value: 'alist' }]"
+            />
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">选择失败时自动回退到直链获取。</p>
+          </div>
+        </n-form-item>
+      </n-form>
+      <div class="mt-2 flex justify-end gap-2">
+        <n-button @click="dialogVisible = false">取消</n-button>
+        <n-button type="primary" :loading="loading" @click="handleSubmit">确定</n-button>
+      </div>
+    </n-modal>
 
     <!-- 扫码登录对话框 -->
-    <el-dialog
-      v-model="qrcodeDialogVisible"
+    <n-modal
+      v-model:show="qrcodeDialogVisible"
+      preset="card"
       :title="qrcodeDialogTitle"
-      width="450px"
-      :close-on-click-modal="false"
-      @close="handleQRCodeDialogClose"
-      append-to-body
+      class="w-[92vw] max-w-md"
+      :mask-closable="false"
     >
-      <div class="qrcode-container">
-        <!-- 渠道选择 -->
-        <div class="channel-selector">
-          <div class="channel-label">扫码渠道</div>
-          <div class="channel-buttons">
+      <div class="flex flex-col items-center">
+        <!-- 登录方式选择 -->
+        <n-tabs :value="loginMode" type="segment" size="small" class="mb-4" @update:value="selectLoginMode">
+          <n-tab name="cookie" tab="Cookie 登录" />
+          <n-tab name="open" tab="开放平台登录" />
+        </n-tabs>
+
+        <!-- 渠道选择（仅 Cookie 登录） -->
+        <div v-if="loginMode === 'cookie'" class="mb-4 w-full">
+          <p class="mb-2 text-center text-xs font-medium text-slate-400 dark:text-slate-500">扫码渠道</p>
+          <div class="flex flex-wrap justify-center gap-2">
             <button
               v-for="channel in loginChannels"
               :key="channel.value"
               type="button"
-              class="channel-btn"
-              :class="{ active: selectedChannel === channel.value }"
+              class="rounded-lg border px-3 py-1.5 text-xs transition-colors"
+              :class="selectedChannel === channel.value
+                ? 'border-cyan-500 bg-cyan-500/10 font-semibold text-cyan-600 dark:text-cyan-400'
+                : 'border-slate-200 text-slate-500 hover:border-cyan-400 hover:text-cyan-600 dark:border-white/10 dark:text-slate-400 dark:hover:text-cyan-400'"
               @click="selectChannel(channel.value)"
             >
               {{ channel.label }}
@@ -246,62 +185,117 @@
           </div>
         </div>
 
-        <div v-if="qrcodeLoading" class="qrcode-loading">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>正在获取二维码...</span>
+        <!-- 加载中 -->
+        <div v-if="qrcodeLoading" class="flex flex-col items-center gap-3 py-10 text-cyan-600 dark:text-cyan-400">
+          <n-spin size="large" />
+          <span class="text-sm">正在获取二维码...</span>
         </div>
-        <div v-else-if="qrcodeError" class="qrcode-error">
-          <el-icon><WarningFilled /></el-icon>
-          <span>{{ qrcodeError }}</span>
-          <el-button type="primary" @click="refreshQRCode">重新获取</el-button>
+
+        <!-- 错误 -->
+        <div v-else-if="qrcodeError" class="flex flex-col items-center gap-4 py-8">
+          <n-icon size="40" class="text-red-500" :component="WarningOutline" />
+          <span class="text-sm text-red-500">{{ qrcodeError }}</span>
+          <n-button type="primary" @click="refreshQRCode">重新获取</n-button>
         </div>
-        <div v-else class="qrcode-content">
-          <div class="qrcode-image">
-            <img :src="qrcodeDataUrl" alt="115登录二维码" />
+
+        <!-- 二维码 -->
+        <div v-else class="flex flex-col items-center gap-4">
+          <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10">
+            <img :src="qrcodeDataUrl" alt="115登录二维码" class="h-[200px] w-[200px]" />
           </div>
-          <div class="qrcode-status">
-            <el-tag :type="loginStatusType" size="large">
-              {{ loginStatusText }}
-            </el-tag>
-          </div>
-          <div class="qrcode-tips">
+          <n-tag :type="loginStatusType" size="large" round>{{ loginStatusText }}</n-tag>
+          <div class="text-center text-sm text-slate-400 dark:text-slate-500">
             <p>{{ channelTip }}</p>
-            <p class="expire-tip" v-if="qrcodeExpireTime > 0">
+            <p v-if="qrcodeExpireTime > 0" class="mt-1 font-bold text-amber-500">
               二维码有效期：{{ formatExpireTime(qrcodeExpireTime) }}
             </p>
           </div>
         </div>
       </div>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="qrcodeDialogVisible = false">关闭</el-button>
-          <el-button type="primary" @click="refreshQRCode" :disabled="qrcodeLoading">
-            刷新二维码
-          </el-button>
-        </span>
-      </template>
-    </el-dialog>
+      <div class="mt-6 flex justify-end gap-2">
+        <n-button @click="qrcodeDialogVisible = false">关闭</n-button>
+        <n-button type="primary" :disabled="qrcodeLoading" @click="refreshQRCode">刷新二维码</n-button>
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { Plus, Edit, Delete, RefreshRight, Key, Loading, WarningFilled, View, Hide, Cloudy } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ref, computed, watch, onMounted, onBeforeUnmount, h } from 'vue'
+import {
+  NButton,
+  NDataTable,
+  NDivider,
+  NForm,
+  NFormItem,
+  NIcon,
+  NInput,
+  NInputNumber,
+  NModal,
+  NPagination,
+  NRadio,
+  NRadioGroup,
+  NSelect,
+  NSpin,
+  NTab,
+  NTabs,
+  NTag,
+  useMessage
+} from 'naive-ui'
+import {
+  AddOutline,
+  AlbumsOutline,
+  CheckmarkCircleOutline,
+  CreateOutline,
+  EyeOffOutline,
+  EyeOutline,
+  KeyOutline,
+  QrCodeOutline,
+  RefreshOutline,
+  SwapHorizontalOutline,
+  TrashOutline,
+  TrendingUpOutline,
+  WarningOutline
+} from '@vicons/ionicons5'
+import PageCard from '../components/common/PageCard.vue'
+import StatCard from '../components/common/StatCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 import { showConfirmDialog } from '../utils/ui/messageBox'
-import { request } from '../utils/api/request'
-import { get115QRCode, check115LoginStatus, confirm115Login, get115LoginChannels } from '../utils/api/cloud115'
+import {
+  channelTips,
+  formatExpireTime,
+  getAccountTypeName,
+  getAccountTypeTag,
+  getPriorityTag,
+  getStatusName,
+  getStatusTag,
+  getTransferMethodName,
+  getTransferMethodTag,
+  isDialogCancelAction,
+  loginStatusMap,
+  maskSensitive,
+  sortChannelsWithWechatFirst
+} from '../utils/cloud115Display'
+import {
+  check115LoginStatus,
+  check115OpenLoginStatus,
+  confirm115Login,
+  confirm115OpenLogin,
+  createCloud115,
+  deleteCloud115,
+  get115LoginChannels,
+  get115OpenQRCode,
+  get115QRCode,
+  getCloud115List,
+  testCloud115Connection,
+  updateCloud115
+} from '../utils/api/cloud115'
 
-/**
- * 敏感信息脱敏处理
- * @param {string} text - 原始文本
- * @returns {string} 脱敏后的文本
- */
-const maskSensitive = (text) => {
-  if (!text) return '-'
-  if (text.length <= 20) return '******'
-  return text.substring(0, 8) + '...' + text.substring(text.length - 8)
-}
+const message = useMessage()
+
+// 旧工具函数返回 Element Plus 的 tag 类型，danger 需映射为 Naive 的 error
+const NAIVE_TAG_TYPE = { primary: 'primary', success: 'success', warning: 'warning', danger: 'error', info: 'info' }
+const toTagType = (tag) => NAIVE_TAG_TYPE[tag] || 'default'
 
 /**
  * 切换 Cookie 显示状态
@@ -309,115 +303,6 @@ const maskSensitive = (text) => {
  */
 const toggleShowCookie = (row) => {
   row._showCookie = !row._showCookie
-}
-
-/**
- * 切换 AccessToken 显示状态
- * @param {Object} row - 行数据
- */
-const toggleShowAccessToken = (row) => {
-  row._showAccessToken = !row._showAccessToken
-}
-
-/**
- * 切换 RefreshToken 显示状态
- * @param {Object} row - 行数据
- */
-const toggleShowRefreshToken = (row) => {
-  row._showRefreshToken = !row._showRefreshToken
-}
-
-// 账号类型映射
-const accountTypeMap = {
-  resource: { name: '资源号', type: 'primary' },
-  vip: { name: 'VIP观影号', type: 'success' },
-  both: { name: '兼顾', type: 'warning' }
-}
-
-// 状态映射
-const statusMap = {
-  active: { name: '正常', type: 'success' },
-  cooling: { name: '冷却中', type: 'warning' },
-  disabled: { name: '禁用', type: 'danger' }
-}
-
-/**
- * 获取账号类型显示名称
- * @param {string} type - 账号类型
- * @returns {string} 显示名称
- */
-const getAccountTypeName = (type) => {
-  return accountTypeMap[type]?.name || '资源号'
-}
-
-/**
- * 获取账号类型标签类型
- * @param {string} type - 账号类型
- * @returns {string} 标签类型
- */
-const getAccountTypeTag = (type) => {
-  return accountTypeMap[type]?.type || 'primary'
-}
-
-/**
- * 获取状态显示名称
- * @param {string} status - 状态
- * @returns {string} 显示名称
- */
-const getStatusName = (status) => {
-  return statusMap[status]?.name || '正常'
-}
-
-/**
- * 获取状态标签类型
- * @param {string} status - 状态
- * @returns {string} 标签类型
- */
-const getStatusTag = (status) => {
-  return statusMap[status]?.type || 'success'
-}
-
-/**
- * 获取优先级标签类型
- * @param {number} priority - 优先级
- * @returns {string} 标签类型
- */
-const getPriorityTag = (priority) => {
-  if (priority >= 8) return 'danger'
-  if (priority >= 6) return 'warning'
-  if (priority >= 4) return 'info'
-  return 'success'
-}
-
-// 秒传方式映射
-const transferMethodMap = {
-  '115driver': { name: '115driver', type: 'primary' },
-  'go115': { name: 'go115', type: 'success' },
-  'alist': { name: 'alist', type: 'warning' }
-}
-
-/**
- * 获取秒传方式显示名称
- * @param {string} method - 秒传方式
- * @returns {string} 显示名称
- */
-const getTransferMethodName = (method) => {
-  if (!method || method === '') {
-    return ''
-  }
-  return transferMethodMap[method]?.name || ''
-}
-
-/**
- * 获取秒传方式标签类型
- * @param {string} method - 秒传方式
- * @returns {string} 标签类型
- */
-const getTransferMethodTag = (method) => {
-  if (!method || method === '') {
-    return 'info'
-  }
-  return transferMethodMap[method]?.type || 'info'
 }
 
 // 表格数据
@@ -457,10 +342,7 @@ const form = ref({
 
 // 表单验证规则
 const rules = {
-  name: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
-  cookie: [{ required: false, message: '请输入 Cookie', trigger: 'blur' }],
-  access_token: [{ required: false, message: '请输入 Access Token', trigger: 'blur' }],
-  refresh_token: [{ required: false, message: '请输入 Refresh Token', trigger: 'blur' }]
+  name: [{ required: true, message: '请输入账号名称', trigger: ['blur', 'input'] }]
 }
 
 /**
@@ -475,10 +357,12 @@ const getTransferAccountName = (accountId) => {
 }
 
 /**
- * 获取可用的转存账号列表（排除当前编辑的账号）
+ * 可用的转存账号选项（排除当前编辑的账号）
  */
-const availableTransferAccounts = computed(() => {
-  return cloud115List.value.filter(item => item.id !== form.value.id)
+const transferAccountOptions = computed(() => {
+  return cloud115List.value
+    .filter(item => item.id !== form.value.id)
+    .map(item => ({ label: item.name, value: item.id }))
 })
 
 // 扫码登录相关状态
@@ -498,34 +382,22 @@ const pollTimer = ref(null)
 const expireTimer = ref(null)
 const updateCloudId = ref(null)
 
+// 登录方式：cookie（扫码取 Cookie）/ open（115 开放平台，取 access_token）
+const loginMode = ref('cookie')
+// 开放平台登录会话标识
+const openLoginState = ref('')
+
 // 渠道选择相关
 const loginChannels = ref([])
 const selectedChannel = ref('wechatmini')
 
-// 渠道提示映射
-const channelTips = {
-  web: '请使用 115 网页版扫描二维码登录',
-  android: '请使用 115 安卓 APP 扫描二维码登录',
-  ios: '请使用 115 iOS APP 扫描二维码登录',
-  tv: '请使用 115 电视版扫描二维码登录',
-  alipaymini: '请使用支付宝小程序扫描二维码登录',
-  wechatmini: '请使用微信小程序扫描二维码登录',
-  qandroid: '请使用 115 安卓 Q 版扫描二维码登录'
-}
-
-// 登录状态文本映射
-const loginStatusMap = {
-  0: { text: '等待扫码', type: 'info' },
-  1: { text: '已扫码，等待确认', type: 'warning' },
-  2: { text: '登录成功', type: 'success' },
-  3: { text: '二维码已过期', type: 'danger' },
-  4: { text: '登录失败', type: 'danger' }
-}
-
 // 计算属性
 const loginStatusText = computed(() => loginStatusMap[loginStatus.value]?.text || '未知状态')
-const loginStatusType = computed(() => loginStatusMap[loginStatus.value]?.type || 'info')
-const channelTip = computed(() => channelTips[selectedChannel.value] || '请扫描二维码登录')
+const loginStatusType = computed(() => toTagType(loginStatusMap[loginStatus.value]?.type || 'info'))
+const channelTip = computed(() => {
+  if (loginMode.value === 'open') return '请使用 115 APP 扫描二维码授权开放平台登录'
+  return channelTips[selectedChannel.value] || '请扫描二维码登录'
+})
 const activeAccounts = computed(() => cloud115List.value.filter(item => item.status === 'active'))
 const coolingAccounts = computed(() => cloud115List.value.filter(item => item.status === 'cooling'))
 const disabledAccounts = computed(() => cloud115List.value.filter(item => item.status === 'disabled'))
@@ -533,31 +405,41 @@ const transferEnabledAccounts = computed(() => cloud115List.value.filter(item =>
 const resourceAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'resource'))
 const vipAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'vip'))
 const hybridAccounts = computed(() => cloud115List.value.filter(item => item.account_type === 'both'))
+
 const cloudOverviewCards = computed(() => {
   const highestPriority = cloud115List.value.reduce((max, item) => Math.max(max, Number(item.priority || 0)), 0)
   return [
     {
       label: '账号总数',
       value: cloud115List.value.length,
-      hint: `活跃 ${activeAccounts.value.length} 个，冷却 ${coolingAccounts.value.length} 个`
+      hint: `活跃 ${activeAccounts.value.length} 个，冷却 ${coolingAccounts.value.length} 个`,
+      icon: AlbumsOutline,
+      tone: 'cyan'
     },
     {
       label: '可用账号',
       value: activeAccounts.value.length,
-      hint: disabledAccounts.value.length ? `${disabledAccounts.value.length} 个账号处于禁用状态` : '当前没有被禁用的账号'
+      hint: disabledAccounts.value.length ? `${disabledAccounts.value.length} 个账号处于禁用状态` : '当前没有被禁用的账号',
+      icon: CheckmarkCircleOutline,
+      tone: 'green'
     },
     {
       label: '已配置转存',
       value: transferEnabledAccounts.value.length,
-      hint: transferEnabledAccounts.value.length ? '可直接参与直链转存链路' : '还没有账号配置转存目标'
+      hint: transferEnabledAccounts.value.length ? '可直接参与直链转存链路' : '还没有账号配置转存目标',
+      icon: SwapHorizontalOutline,
+      tone: 'violet'
     },
     {
       label: '最高优先级',
       value: highestPriority || '-',
-      hint: highestPriority ? '用于同步调度时的优先选择' : '暂无优先级配置'
+      hint: highestPriority ? '用于同步调度时的优先选择' : '暂无优先级配置',
+      icon: TrendingUpOutline,
+      tone: 'amber'
     }
   ]
 })
+
 const accountStructureText = computed(() => {
   return `资源号 ${resourceAccounts.value.length} / VIP ${vipAccounts.value.length} / 兼顾 ${hybridAccounts.value.length}`
 })
@@ -573,50 +455,160 @@ const transferCoverageText = computed(() => {
   if (!cloud115List.value.length) return '暂无账号'
   return `${transferEnabledAccounts.value.length}/${cloud115List.value.length} 已接入转存`
 })
+const statusRailItems = computed(() => [
+  { label: '当前账号结构', value: accountStructureText.value },
+  { label: '高优先级账号', value: priorityLeadersText.value },
+  { label: '转存配置覆盖', value: transferCoverageText.value }
+])
 
-const isDialogCancelAction = (error) => {
-  return error === 'cancel' || error === 'close' || error?.message === 'cancel' || error?.message === 'close'
-}
-
-/**
- * 格式化过期时间倒计时
- * @param {number} seconds - 剩余秒数
- * @returns {string} 格式化后的时间字符串
- */
-const formatExpireTime = (seconds) => {
-  if (seconds <= 0) return '已过期'
-  const minutes = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return `${minutes}分 ${secs}秒`
-}
+// 表格列定义
+const columns = computed(() => [
+  { title: 'ID', key: 'id', width: 64, align: 'center', sorter: true, defaultSortOrder: 'ascend' },
+  { title: '名称', key: 'name', minWidth: 120, sorter: true },
+  {
+    title: '账号类型',
+    key: 'account_type',
+    width: 110,
+    align: 'center',
+    render: (row) => h(
+      NTag,
+      { type: toTagType(getAccountTypeTag(row.account_type)), size: 'small' },
+      { default: () => getAccountTypeName(row.account_type) }
+    )
+  },
+  {
+    title: '状态',
+    key: 'status',
+    width: 90,
+    align: 'center',
+    render: (row) => h(
+      NTag,
+      { type: toTagType(getStatusTag(row.status)), size: 'small' },
+      { default: () => getStatusName(row.status) }
+    )
+  },
+  {
+    title: '优先级',
+    key: 'priority',
+    width: 90,
+    align: 'center',
+    sorter: true,
+    render: (row) => h(
+      NTag,
+      { type: toTagType(getPriorityTag(row.priority)), size: 'small' },
+      { default: () => String(row.priority || 5) }
+    )
+  },
+  {
+    title: 'Cookie',
+    key: 'cookie',
+    minWidth: 200,
+    render: (row) => h('div', { class: 'flex items-center gap-2' }, [
+      h(
+        'span',
+        { class: 'break-all font-mono text-xs text-slate-500 dark:text-slate-400' },
+        row._showCookie ? (row.cookie || '-') : maskSensitive(row.cookie)
+      ),
+      h(
+        NButton,
+        { text: true, type: 'primary', size: 'small', onClick: () => toggleShowCookie(row) },
+        { icon: () => h(NIcon, { component: row._showCookie ? EyeOffOutline : EyeOutline }) }
+      )
+    ])
+  },
+  {
+    title: '转存账号',
+    key: 'transfer_account_id',
+    minWidth: 110,
+    align: 'center',
+    render: (row) => row.transfer_account_id
+      ? getTransferAccountName(row.transfer_account_id)
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '未配置')
+  },
+  {
+    title: '转存目录',
+    key: 'transfer_directory',
+    minWidth: 130,
+    render: (row) => row.transfer_account_id
+      ? (row.transfer_directory || '根目录')
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
+  },
+  {
+    title: '秒传方式',
+    key: 'transfer_method',
+    width: 110,
+    align: 'center',
+    render: (row) => row.transfer_method
+      ? h(
+          NTag,
+          { type: toTagType(getTransferMethodTag(row.transfer_method)), size: 'small' },
+          { default: () => getTransferMethodName(row.transfer_method) }
+        )
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
+  },
+  { title: '创建时间', key: 'create_time', width: 160, align: 'center', sorter: true },
+  { title: '更新时间', key: 'update_time', width: 160, align: 'center', sorter: true },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 320,
+    align: 'center',
+    fixed: 'right',
+    render: (row) => h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' }, [
+      h(
+        NButton,
+        { type: 'primary', size: 'small', onClick: () => handleEdit(row) },
+        { icon: () => h(NIcon, { component: CreateOutline }), default: () => '编辑' }
+      ),
+      h(
+        NButton,
+        { type: 'success', size: 'small', onClick: () => handleQRCodeUpdate(row) },
+        { icon: () => h(NIcon, { component: KeyOutline }), default: () => '扫码更新' }
+      ),
+      h(
+        NButton,
+        {
+          type: 'warning',
+          size: 'small',
+          loading: testingAccountId.value === row.id,
+          onClick: () => handleTest(row)
+        },
+        { icon: () => h(NIcon, { component: RefreshOutline }), default: () => '测试' }
+      ),
+      h(
+        NButton,
+        { type: 'error', size: 'small', onClick: () => handleDelete(row) },
+        { icon: () => h(NIcon, { component: TrashOutline }), default: () => '删除' }
+      )
+    ])
+  }
+])
 
 /**
  * 获取 115 云账号列表
  */
 const fetchCloud115List = async () => {
   try {
-    const params = new URLSearchParams()
-    params.append('sort_field', sortField.value)
-    params.append('sort_order', sortOrder.value)
-    const response = await request(`/cloud115?${params.toString()}`)
+    const response = await getCloud115List({
+      sort_field: sortField.value,
+      sort_order: sortOrder.value
+    })
     const apiData = response.data.data
     cloud115List.value = Array.isArray(apiData) ? apiData : (apiData?.data || [])
     total.value = apiData?.total || cloud115List.value.length
   } catch (error) {
-    ElMessage.error('获取 115 云账号列表失败')
+    message.error('获取 115 云账号列表失败')
   }
 }
 
 /**
- * 处理表格排序变化
- * @param {Object} column - 列信息
- * @param {string} prop - 排序字段
- * @param {string} order - 排序方式
+ * 处理表格排序变化（服务端排序）
+ * @param {Object|null} sorter - Naive UI sorter 状态
  */
-const handleSortChange = ({ prop, order }) => {
-  if (prop && order) {
-    sortField.value = prop
-    sortOrder.value = order === 'ascending' ? 'asc' : 'desc'
+const handleSorterChange = (sorter) => {
+  if (sorter && sorter.order) {
+    sortField.value = sorter.columnKey
+    sortOrder.value = sorter.order === 'ascend' ? 'asc' : 'desc'
   } else {
     sortField.value = 'id'
     sortOrder.value = 'asc'
@@ -649,20 +641,6 @@ const fetchLoginChannels = async () => {
 }
 
 /**
- * 将微信渠道放在第一位
- * @param {Array} channels - 渠道列表
- * @returns {Array} 排序后的渠道列表
- */
-const sortChannelsWithWechatFirst = (channels) => {
-  const wechatIndex = channels.findIndex(c => c.value === 'wechatmini')
-  if (wechatIndex > 0) {
-    const wechat = channels.splice(wechatIndex, 1)[0]
-    channels.unshift(wechat)
-  }
-  return channels
-}
-
-/**
  * 新增账号
  */
 const handleAdd = () => {
@@ -674,32 +652,30 @@ const handleAdd = () => {
 /**
  * 新增或编辑提交
  */
-const handleSubmit = async () => {
+const handleSubmit = () => {
   if (!formRef.value) return
-  
-  await formRef.value.validate((valid) => {
-    if (valid) {
+
+  formRef.value.validate((errors) => {
+    if (!errors) {
       loading.value = true
-      
-      const apiUrl = form.value.id ? `/cloud115/${form.value.id}` : '/cloud115'
-      const method = form.value.id ? 'PUT' : 'POST'
-      
+
       // 准备提交数据，将 null 转换为 0
       const submitData = {
         ...form.value,
         transfer_account_id: form.value.transfer_account_id || 0
       }
-      
-      request(apiUrl, {
-        method,
-        data: submitData
-      }).then(() => {
-        ElMessage.success(form.value.id ? '编辑成功' : '新增成功')
+
+      const submitRequest = form.value.id
+        ? updateCloud115(form.value.id, submitData)
+        : createCloud115(submitData)
+
+      submitRequest.then(() => {
+        message.success(form.value.id ? '编辑成功' : '新增成功')
         dialogVisible.value = false
         fetchCloud115List()
         resetForm()
       }).catch(() => {
-        ElMessage.error(form.value.id ? '编辑失败' : '新增失败')
+        message.error(form.value.id ? '编辑失败' : '新增失败')
       }).finally(() => {
         loading.value = false
       })
@@ -745,17 +721,15 @@ const handleDelete = (row) => {
       type: 'warning'
     }
   ).then(() => {
-    return request(`/cloud115/${row.id}`, {
-      method: 'DELETE'
-    })
+    return deleteCloud115(row.id)
   }).then(() => {
-    ElMessage.success('删除成功')
+    message.success('删除成功')
     fetchCloud115List()
   }).catch((error) => {
     if (isDialogCancelAction(error)) {
       return
     }
-    ElMessage.error('删除失败')
+    message.error('删除失败')
   })
 }
 
@@ -767,36 +741,30 @@ const handleTest = async (row) => {
   if (testingAccountId.value === row.id) return
 
   testingAccountId.value = row.id
-  const loadingMessage = ElMessage({
-    type: 'info',
-    message: `正在测试账号「${row.name}」连接状态...`,
+  const loadingMessage = message.info(`正在测试账号「${row.name}」连接状态...`, {
     duration: 0,
-    showClose: true
+    closable: true
   })
   try {
-    const response = await request(`/auth/cloud115/${row.id}`, {
-      skipGlobalErrorMessage: true
-    })
+    const response = await testCloud115Connection(row.id)
     const payload = response.data || {}
     const data = payload.data || {}
     if (payload.state === true || data?.id || data?.name) {
       const fileCount = Number(data.file_count || 0)
       const accountName = data.name || row.name || `账号 ${row.id}`
-      ElMessage({
-        type: 'success',
+      message.success(`${accountName} 测试成功，连接正常，可访问 ${fileCount} 项内容。`, {
         duration: 4000,
-        showClose: true,
-        message: `${accountName} 测试成功，连接正常，可访问 ${fileCount} 项内容。`
+        closable: true
       })
       return
     }
-    ElMessage.error(`测试失败：${payload.message || payload.error || '未知错误'}`)
+    message.error(`测试失败：${payload.message || payload.error || '未知错误'}`)
   } catch (error) {
     console.error('115云账号测试失败:', error)
     const errorMsg = error.response?.data?.message || error.response?.data?.error || error.message || '未知错误'
-    ElMessage.error(`测试失败：${errorMsg}`)
+    message.error(`测试失败：${errorMsg}`)
   } finally {
-    loadingMessage.close()
+    loadingMessage.destroy()
     testingAccountId.value = null
   }
 }
@@ -820,7 +788,7 @@ const resetForm = () => {
   }
   transferDisabled.value = false
   if (formRef.value) {
-    formRef.value.resetFields()
+    formRef.value.restoreValidation()
   }
 }
 
@@ -835,7 +803,7 @@ const handleSizeChange = (size) => {
 
 /**
  * 当前页变化
- * @param {number} page - 褰撳墠椤电爜
+ * @param {number} page - 当前页码
  */
 const handleCurrentChange = (page) => {
   currentPage.value = page
@@ -849,7 +817,7 @@ const handleQRCodeLogin = () => {
   updateCloudId.value = null
   qrcodeDialogTitle.value = '扫码登录115账号'
   qrcodeDialogVisible.value = true
-  fetchQRCode()
+  fetchCurrentQRCode()
 }
 
 /**
@@ -860,7 +828,7 @@ const handleQRCodeUpdate = (row) => {
   updateCloudId.value = row.id
   qrcodeDialogTitle.value = `扫码更新账号：${row.name}`
   qrcodeDialogVisible.value = true
-  fetchQRCode()
+  fetchCurrentQRCode()
 }
 
 /**
@@ -875,27 +843,49 @@ const selectChannel = (channel) => {
 }
 
 /**
- * 获取登录二维码
+ * 登录方式切换处理
+ * @param {string} mode - cookie | open
+ */
+const selectLoginMode = (mode) => {
+  if (loginMode.value !== mode) {
+    loginMode.value = mode
+    refreshQRCode()
+  }
+}
+
+/**
+ * 按当前登录方式获取二维码
+ */
+const fetchCurrentQRCode = () => {
+  if (loginMode.value === 'open') {
+    fetchOpenQRCode()
+  } else {
+    fetchQRCode()
+  }
+}
+
+/**
+ * 获取登录二维码（Cookie 登录）
  */
 const fetchQRCode = async () => {
   qrcodeLoading.value = true
   qrcodeError.value = ''
   qrcodeDataUrl.value = ''
   loginStatus.value = 0
-  
+
   try {
     const response = await get115QRCode()
     const data = response.data.data
-    
+
     qrcodeSession.value = {
       uid: data.uid,
       time: data.time,
       sign: data.sign
     }
-    
+
     // 生成二维码图片 URL
     qrcodeDataUrl.value = generateQRCodeDataUrl(data.qrcode)
-    
+
     // 设置二维码过期时间，默认 120 秒
     qrcodeExpireTime.value = 120
     startExpireTimer()
@@ -903,6 +893,35 @@ const fetchQRCode = async () => {
   } catch (error) {
     console.error('获取二维码失败:', error)
     qrcodeError.value = '获取二维码失败，请重试'
+  } finally {
+    qrcodeLoading.value = false
+  }
+}
+
+/**
+ * 获取开放平台登录二维码
+ */
+const fetchOpenQRCode = async () => {
+  qrcodeLoading.value = true
+  qrcodeError.value = ''
+  qrcodeDataUrl.value = ''
+  loginStatus.value = 0
+
+  try {
+    const response = await get115OpenQRCode()
+    const data = response.data.data
+
+    openLoginState.value = data.state
+    qrcodeDataUrl.value = generateQRCodeDataUrl(data.qrcode_url)
+
+    // 设置二维码过期时间，默认 120 秒
+    qrcodeExpireTime.value = 120
+    startExpireTimer()
+    startOpenPolling()
+  } catch (error) {
+    console.error('获取开放平台二维码失败:', error)
+    const errorMsg = error.response?.data?.error || error.response?.data?.message || ''
+    qrcodeError.value = errorMsg || '获取开放平台二维码失败，请重试'
   } finally {
     qrcodeLoading.value = false
   }
@@ -924,31 +943,31 @@ const generateQRCodeDataUrl = (content) => {
 const refreshQRCode = () => {
   stopPolling()
   stopExpireTimer()
-  fetchQRCode()
+  fetchCurrentQRCode()
 }
 
 /**
- * 开始轮询检查登录状态
+ * 开始轮询检查登录状态（Cookie 登录）
  */
 const startPolling = () => {
   stopPolling()
-  
+
   pollTimer.value = setInterval(async () => {
     if (loginStatus.value === 2 || loginStatus.value === 3 || loginStatus.value === 4) {
       stopPolling()
       return
     }
-    
+
     try {
       const response = await check115LoginStatus({
         uid: qrcodeSession.value.uid,
         time: qrcodeSession.value.time,
         sign: qrcodeSession.value.sign
       })
-      
+
       const status = response.data.data.status
       loginStatus.value = status
-      
+
       // 状态 2 表示登录成功
       if (status === 2) {
         stopPolling()
@@ -959,7 +978,7 @@ const startPolling = () => {
       else if (status === 3) {
         stopPolling()
         stopExpireTimer()
-      qrcodeError.value = '二维码已过期，请刷新'
+        qrcodeError.value = '二维码已过期，请刷新'
       }
       // 状态 4 表示登录失败
       else if (status === 4) {
@@ -969,6 +988,48 @@ const startPolling = () => {
       }
     } catch (error) {
       console.error('检查登录状态失败:', error)
+    }
+  }, 2000)
+}
+
+/**
+ * 开始轮询检查登录状态（开放平台登录）
+ */
+const startOpenPolling = () => {
+  stopPolling()
+
+  pollTimer.value = setInterval(async () => {
+    if (loginStatus.value === 2 || loginStatus.value === 3 || loginStatus.value === 4) {
+      stopPolling()
+      return
+    }
+
+    try {
+      const response = await check115OpenLoginStatus({ state: openLoginState.value })
+
+      const status = response.data.data.status
+      loginStatus.value = status
+
+      // 状态 2 表示登录成功
+      if (status === 2) {
+        stopPolling()
+        stopExpireTimer()
+        await handleOpenLoginConfirm()
+      }
+      // 状态 3 表示二维码过期
+      else if (status === 3) {
+        stopPolling()
+        stopExpireTimer()
+        qrcodeError.value = '二维码已过期，请刷新'
+      }
+      // 状态 4 表示登录失败
+      else if (status === 4) {
+        stopPolling()
+        stopExpireTimer()
+        qrcodeError.value = '登录失败，请重试'
+      }
+    } catch (error) {
+      console.error('检查开放平台登录状态失败:', error)
     }
   }, 2000)
 }
@@ -988,7 +1049,7 @@ const stopPolling = () => {
  */
 const startExpireTimer = () => {
   stopExpireTimer()
-  
+
   expireTimer.value = setInterval(() => {
     if (qrcodeExpireTime.value > 0) {
       qrcodeExpireTime.value--
@@ -1012,7 +1073,7 @@ const stopExpireTimer = () => {
 }
 
 /**
- * 确认登录并保存凭据
+ * 确认登录并保存凭据（Cookie 登录）
  */
 const handleLoginConfirm = async () => {
   try {
@@ -1024,15 +1085,39 @@ const handleLoginConfirm = async () => {
       name: updateCloudId.value ? undefined : `115账号_${Date.now()}`,
       cloud_id: updateCloudId.value
     }
-    
-    const response = await confirm115Login(confirmData)
-    
-    ElMessage.success(updateCloudId.value ? '账号 Cookie 更新成功' : '扫码登录成功，账号已创建')
+
+    await confirm115Login(confirmData)
+
+    message.success(updateCloudId.value ? '账号 Cookie 更新成功' : '扫码登录成功，账号已创建')
     qrcodeDialogVisible.value = false
     fetchCloud115List()
   } catch (error) {
     console.error('确认登录失败:', error)
-    ElMessage.error('保存登录凭据失败')
+    message.error('保存登录凭据失败')
+    loginStatus.value = 4
+    qrcodeError.value = '保存登录凭据失败，请重试'
+  }
+}
+
+/**
+ * 确认登录并保存 Token（开放平台登录）
+ */
+const handleOpenLoginConfirm = async () => {
+  try {
+    const confirmData = {
+      state: openLoginState.value,
+      name: updateCloudId.value ? undefined : `115账号_${Date.now()}`,
+      cloud_id: updateCloudId.value
+    }
+
+    await confirm115OpenLogin(confirmData)
+
+    message.success(updateCloudId.value ? '账号 Token 更新成功' : '开放平台登录成功，账号已创建')
+    qrcodeDialogVisible.value = false
+    fetchCloud115List()
+  } catch (error) {
+    console.error('确认开放平台登录失败:', error)
+    message.error('保存登录凭据失败')
     loginStatus.value = 4
     qrcodeError.value = '保存登录凭据失败，请重试'
   }
@@ -1050,7 +1135,15 @@ const handleQRCodeDialogClose = () => {
   loginStatus.value = 0
   qrcodeExpireTime.value = 0
   updateCloudId.value = null
+  openLoginState.value = ''
 }
+
+// 对话框关闭时清理轮询与倒计时
+watch(qrcodeDialogVisible, (visible) => {
+  if (!visible) {
+    handleQRCodeDialogClose()
+  }
+})
 
 // 监听转存账号变化，控制秒传方式和转存目录的禁用状态
 watch(() => form.value.transfer_account_id, (newVal) => {
@@ -1070,391 +1163,8 @@ onMounted(() => {
 })
 
 // 组件卸载时清理定时器
-onUnmounted(() => {
+onBeforeUnmount(() => {
   stopPolling()
   stopExpireTimer()
 })
 </script>
-
-<style scoped>
-.cloud115-container {
-  padding: 8px 0 0;
-  min-height: calc(100vh - 100px);
-}
-
-.main-card {
-  border-radius: 24px;
-  overflow: hidden;
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  background: rgba(255, 252, 247, 0.84);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-.main-card :deep(.el-card__header) {
-  background:
-    radial-gradient(circle at top right, rgba(242, 166, 90, 0.28), transparent 32%),
-    linear-gradient(135deg, #1f6f78 0%, #24535f 55%, #17313a 100%);
-  padding: 20px 24px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: white;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.header-icon {
-  font-size: 24px;
-}
-
-.header-buttons {
-  display: flex;
-  gap: 12px;
-}
-
-.custom-table {
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.overview-panel {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
-  gap: 18px;
-  margin-bottom: 22px;
-}
-
-.overview-copy {
-  padding: 20px;
-  border-radius: 22px;
-  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-}
-
-.overview-copy h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #17313a;
-}
-
-.overview-copy p {
-  margin: 12px 0 0;
-  line-height: 1.7;
-  color: #6c6259;
-}
-
-.overview-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.overview-card {
-  padding: 18px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 241, 231, 0.92));
-  border: 1px solid rgba(120, 101, 72, 0.1);
-}
-
-.overview-card__label {
-  display: block;
-  color: #8a7b6d;
-  font-size: 13px;
-}
-
-.overview-card__value {
-  display: block;
-  margin-top: 12px;
-  color: #17313a;
-  font-size: 30px;
-  line-height: 1;
-}
-
-.overview-card__hint {
-  margin: 10px 0 0;
-  color: #73675d;
-  line-height: 1.6;
-}
-
-.status-rail {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-bottom: 22px;
-}
-
-.status-rail__item {
-  padding: 16px 18px;
-  border-radius: 18px;
-  background: rgba(244, 239, 231, 0.88);
-  border: 1px solid rgba(120, 101, 72, 0.08);
-}
-
-.status-rail__item span {
-  display: block;
-  color: #8a7b6d;
-  font-size: 12px;
-}
-
-.status-rail__item strong {
-  display: block;
-  margin-top: 8px;
-  color: #17313a;
-  font-size: 18px;
-  line-height: 1.5;
-}
-
-.custom-table :deep(.el-table__header th) {
-  background-color: #f7f1e7 !important;
-  color: #4d453d;
-  font-weight: 600;
-}
-
-.custom-table :deep(.el-table__row:hover > td) {
-  background-color: #f8f2e8 !important;
-}
-
-.sensitive-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.masked-text {
-  font-family: 'Courier New', monospace;
-  color: #909399;
-  font-size: 13px;
-  word-break: break-all;
-}
-
-.full-text {
-  font-family: 'Courier New', monospace;
-  font-size: 12px;
-  word-break: break-all;
-  max-width: 300px;
-  color: #303133;
-}
-
-.toggle-btn {
-  padding: 2px 6px;
-}
-
-.action-buttons {
-  display: flex;
-  flex-wrap: nowrap;
-  gap: 6px;
-  justify-content: center;
-  white-space: nowrap;
-}
-
-.pagination-container {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding: 18px 0 4px;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.qrcode-container {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 10px 20px 20px;
-}
-
-.channel-selector {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  margin-bottom: 20px;
-  width: 100%;
-}
-
-.channel-label {
-  font-size: 14px;
-  color: #606266;
-  margin-bottom: 12px;
-  font-weight: 500;
-}
-
-.channel-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
-}
-
-.channel-btn {
-  padding: 8px 16px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  background-color: #fff;
-  color: #606266;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  outline: none;
-}
-
-.channel-btn:hover {
-  border-color: #409eff;
-  color: #409eff;
-  background-color: #ecf5ff;
-}
-
-.channel-btn.active {
-  border-color: #1f6f78;
-  background-color: #1f6f78;
-  color: #fff;
-}
-
-.channel-option {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-
-.channel-desc {
-  font-size: 12px;
-  color: #909399;
-}
-
-.qrcode-loading {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  color: #409eff;
-}
-
-.qrcode-loading .el-icon {
-  font-size: 40px;
-}
-
-.qrcode-error {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 15px;
-  color: #f56c6c;
-}
-
-.qrcode-error .el-icon {
-  font-size: 40px;
-}
-
-.qrcode-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 15px;
-}
-
-.qrcode-image {
-  padding: 15px;
-  border: 1px solid #e4e7ed;
-  border-radius: 8px;
-  background-color: #fff;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-}
-
-.qrcode-image img {
-  width: 200px;
-  height: 200px;
-}
-
-.qrcode-status {
-  margin-top: 10px;
-}
-
-.qrcode-tips {
-  text-align: center;
-  color: #909399;
-  font-size: 14px;
-}
-
-.qrcode-tips p {
-  margin: 5px 0;
-}
-
-.expire-tip {
-  color: #e6a23c;
-  font-weight: bold;
-}
-
-.text-muted {
-  color: #909399;
-  font-size: 13px;
-}
-
-.form-tip {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
-  line-height: 1.4;
-}
-
-:global(.dark) .main-card {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-:global(.dark) .overview-copy,
-:global(.dark) .overview-card,
-:global(.dark) .status-rail__item {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .overview-copy h2,
-:global(.dark) .overview-card__value,
-:global(.dark) .status-rail__item strong,
-:global(.dark) .full-text {
-  color: #e8edf4;
-}
-
-:global(.dark) .overview-copy p,
-:global(.dark) .overview-card__hint,
-:global(.dark) .overview-card__label,
-:global(.dark) .status-rail__item span,
-:global(.dark) .masked-text {
-  color: #9faebb;
-}
-
-:global(.dark) .custom-table :deep(.el-table__header th) {
-  background-color: #182231 !important;
-  color: #d6deea;
-}
-
-:global(.dark) .custom-table :deep(.el-table__row:hover > td) {
-  background-color: #14202d !important;
-}
-
-@media (max-width: 960px) {
-  .overview-panel,
-  .overview-grid,
-  .status-rail {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
-
-
-
-
-

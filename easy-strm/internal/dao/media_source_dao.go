@@ -94,7 +94,7 @@ func (d *MediaSourceDAO) GetByType(sourceType string) ([]*domain.MediaSource, er
 
 func (d *MediaSourceDAO) GetEnabled() ([]*domain.MediaSource, error) {
 	rows, err := DB.Query(
-		`SELECT `+mediaSourceColumns+` FROM t_media_source WHERE enabled = true ORDER BY priority ASC, id ASC`,
+		`SELECT ` + mediaSourceColumns + ` FROM t_media_source WHERE enabled = true ORDER BY priority ASC, id ASC`,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("MediaSourceDAO[GetEnabled] 查询失败: %v", err)

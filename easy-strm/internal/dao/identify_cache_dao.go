@@ -23,21 +23,21 @@ func NewIdentifyCacheDAO() *IdentifyCacheDAO {
 
 // IdentifyCache 文件识别缓存模型
 type IdentifyCache struct {
-	ID            int        `json:"id"`
-	FileHash     string     `json:"file_hash"`
-	FileName     string     `json:"file_name"`
-	MediaType    string     `json:"media_type"`
-	TmdbID       int        `json:"tmdb_id"`
-	Title        string     `json:"title"`
-	OriginalTitle string     `json:"original_title"`
-	Year         int        `json:"year"`
-	SeasonNumber int        `json:"season_number"`
+	ID            int       `json:"id"`
+	FileHash      string    `json:"file_hash"`
+	FileName      string    `json:"file_name"`
+	MediaType     string    `json:"media_type"`
+	TmdbID        int       `json:"tmdb_id"`
+	Title         string    `json:"title"`
+	OriginalTitle string    `json:"original_title"`
+	Year          int       `json:"year"`
+	SeasonNumber  int       `json:"season_number"`
 	EpisodeNumber int       `json:"episode_number"`
-	PosterPath   string     `json:"poster_path"`
-	IsManual     bool       `json:"is_manual"`
-	SourceID     int        `json:"source_id"`
-	CreatedAt    time.Time  `json:"created_at"`
-	UpdatedAt    time.Time  `json:"updated_at"`
+	PosterPath    string    `json:"poster_path"`
+	IsManual      bool      `json:"is_manual"`
+	SourceID      int       `json:"source_id"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // FileHash 生成文件名的MD5哈希
@@ -49,6 +49,7 @@ func FileHash(fileName string) string {
 // GetByFileHash 根据文件hash获取缓存
 // 参数:
 //   - fileHash: 文件名hash
+//
 // 返回:
 //   - *IdentifyCache: 缓存数据
 //   - error: 错误信息
@@ -106,6 +107,7 @@ func (d *IdentifyCacheDAO) GetByFileHash(fileHash string) (*IdentifyCache, error
 // GetByFileHashes 批量根据文件hash获取缓存
 // 参数:
 //   - fileHashes: 文件名hash列表
+//
 // 返回:
 //   - map[string]*IdentifyCache: 以file_hash为键的缓存映射
 //   - error: 错误信息
@@ -186,6 +188,7 @@ func (d *IdentifyCacheDAO) GetByFileHashes(fileHashes []string) (map[string]*Ide
 // Create 创建缓存
 // 参数:
 //   - cache: 缓存数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *IdentifyCacheDAO) Create(cache *IdentifyCache) error {
@@ -209,6 +212,7 @@ func (d *IdentifyCacheDAO) Create(cache *IdentifyCache) error {
 // CreateOrUpdate 创建或更新缓存
 // 参数:
 //   - cache: 缓存数据
+//
 // 返回:
 //   - error: 错误信息
 func (d *IdentifyCacheDAO) CreateOrUpdate(cache *IdentifyCache) error {
@@ -245,6 +249,7 @@ func (d *IdentifyCacheDAO) CreateOrUpdate(cache *IdentifyCache) error {
 // DeleteOlderThan 删除超过指定天数的非手动识别记录
 // 参数:
 //   - days: 天数
+//
 // 返回:
 //   - int64: 删除数量
 //   - error: 错误信息
@@ -276,6 +281,7 @@ func (d *IdentifyCacheDAO) GetCount() (int64, error) {
 // GetCountByType 按类型统计缓存数量
 // 参数:
 //   - isManual: 是否手动识别
+//
 // 返回:
 //   - int64: 缓存数量
 //   - error: 错误信息

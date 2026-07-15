@@ -1,4 +1,4 @@
-﻿package dao
+package dao
 
 import (
 	"regexp"
@@ -93,6 +93,3 @@ func TestMediaSourceDAODeleteMissing(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
-
-
-

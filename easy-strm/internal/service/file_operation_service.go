@@ -22,6 +22,7 @@ import (
 type FileOperationService struct {
 	mediaSourceService *MediaSourceService
 	cloud115DAO        *dao.Cloud115DAO
+	cloud115Client     Cloud115Client
 }
 
 // NewFileOperationService 创建文件操作服务实例
@@ -31,10 +32,15 @@ type FileOperationService struct {
 //
 // 返回:
 //   - *FileOperationService: 文件操作服务实例
-func NewFileOperationService(mediaSourceService *MediaSourceService, cloud115DAO *dao.Cloud115DAO) *FileOperationService {
+func NewFileOperationService(mediaSourceService *MediaSourceService, cloud115DAO *dao.Cloud115DAO, cloud115Client ...Cloud115Client) *FileOperationService {
+	var client Cloud115Client
+	if len(cloud115Client) > 0 {
+		client = cloud115Client[0]
+	}
 	return &FileOperationService{
 		mediaSourceService: mediaSourceService,
 		cloud115DAO:        cloud115DAO,
+		cloud115Client:     client,
 	}
 }
 
@@ -97,15 +103,24 @@ func (s *FileOperationService) MoveFile(sourceID int, fileID, targetPath string)
 			Target:  targetFilePath,
 		}, nil
 	} else if source.SourceType == domain.SourceTypeCloud115 {
-		// 115云盘文件移动需要调用API
-		// TODO: implement actual 115 cloud file move via API - currently returns success without performing the operation
-		// 这里暂时返回成功，实际需要调用115 API
-		logger.Infof("FileOperationService[MoveFile] 115文件移动: %s -> %s", fileID, targetPath)
+		cloud115, err := s.getCloud115Account(source)
+		if err != nil {
+			return nil, err
+		}
+		targetDirID, err := s.resolveCloud115TargetDir(targetPath, cloud115.ID, cloud115.Cookie)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.cloud115Client.MoveFile115(fileID, targetDirID, cloud115.ID, cloud115.Cookie); err != nil {
+			return nil, fmt.Errorf("移动115文件失败: %v", err)
+		}
+
+		logger.Infof("FileOperationService[MoveFile] 115文件移动成功: %s -> %s", fileID, targetDirID)
 		return &domain.FileOperationResult{
 			Success: true,
 			Message: "移动成功",
 			Source:  fileID,
-			Target:  targetPath,
+			Target:  targetDirID,
 		}, nil
 	}
 
@@ -178,16 +193,41 @@ func (s *FileOperationService) CopyFile(sourceID, targetID int, fileID, targetPa
 			Source:  fileID,
 			Target:  targetFilePath,
 		}, nil
-	} else if source.SourceType == domain.SourceTypeCloud115 {
-		// 115云盘文件复制需要调用API
-		// TODO: implement actual 115 cloud file copy via API - currently returns success without performing the operation
-		// 这里暂时返回成功，实际需要调用115 API
-		logger.Infof("FileOperationService[CopyFile] 115文件复制: %s -> %s", fileID, targetPath)
+	} else if source.SourceType == domain.SourceTypeCloud115 && target.SourceType == domain.SourceTypeCloud115 {
+		sourceAccount, err := s.getCloud115Account(source)
+		if err != nil {
+			return nil, err
+		}
+		if target.Cloud115ID == nil {
+			return nil, fmt.Errorf("目标媒体源未关联115账号")
+		}
+		if *target.Cloud115ID != sourceAccount.ID {
+			return nil, fmt.Errorf("暂不支持跨115账号复制文件")
+		}
+
+		targetDirPath := targetPath
+		if strings.TrimSpace(targetDirPath) == "" {
+			targetDirPath = target.Path
+		}
+		targetDirID, err := s.resolveCloud115TargetDir(targetDirPath, sourceAccount.ID, sourceAccount.Cookie)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.cloud115Client.CopyFile(fileID, targetDirID, sourceAccount.ID, sourceAccount.Cookie); err != nil {
+			return nil, fmt.Errorf("复制115文件失败: %v", err)
+		}
+		if deleteSource {
+			if err := s.deleteCloud115Path(source, fileID); err != nil {
+				return nil, fmt.Errorf("复制后删除115源文件失败: %v", err)
+			}
+		}
+
+		logger.Infof("FileOperationService[CopyFile] 115文件复制成功: %s -> %s", fileID, targetDirID)
 		return &domain.FileOperationResult{
 			Success: true,
 			Message: "复制成功",
 			Source:  fileID,
-			Target:  targetPath,
+			Target:  targetDirID,
 		}, nil
 	}
 
@@ -241,12 +281,6 @@ func (s *FileOperationService) DeleteFile(sourceID int, fileIDs []string) (*doma
 			}
 			logger.Infof("FileOperationService[DeleteFile] 删除文件成功: %s", fileID)
 			successCount++
-		} else if source.SourceType == domain.SourceTypeCloud115 {
-			// 115云盘文件删除需要调用API
-			// TODO: implement actual 115 cloud file delete via API - currently returns success without performing the operation
-			// 这里暂时返回成功，实际需要调用115 API
-			logger.Infof("FileOperationService[DeleteFile] 115文件删除: %s", fileID)
-			successCount++
 		} else {
 			return nil, fmt.Errorf("不支持的媒体源类型: %s", source.SourceType)
 		}
@@ -274,6 +308,54 @@ func (s *FileOperationService) deleteLocalPath(path string) error {
 		return os.RemoveAll(path)
 	}
 	return os.Remove(path)
+}
+
+func (s *FileOperationService) getCloud115Account(source *domain.MediaSource) (*domain.Cloud115, error) {
+	if source.Cloud115ID == nil {
+		return nil, fmt.Errorf("媒体源未关联115账号")
+	}
+	if s.cloud115DAO == nil {
+		return nil, fmt.Errorf("115账号仓库未初始化")
+	}
+	if s.cloud115Client == nil {
+		return nil, fmt.Errorf("115文件操作客户端未初始化")
+	}
+
+	cloud115, err := s.cloud115DAO.GetByID(*source.Cloud115ID)
+	if err != nil {
+		return nil, fmt.Errorf("获取115账号失败: %v", err)
+	}
+	if cloud115 == nil {
+		return nil, fmt.Errorf("115账号不存在")
+	}
+	return cloud115, nil
+}
+
+func (s *FileOperationService) resolveCloud115TargetDir(targetPath string, cloud115ID int, cookie string) (string, error) {
+	targetPath = strings.TrimSpace(targetPath)
+	if targetPath == "" {
+		return "0", nil
+	}
+	if isCloud115CID(targetPath) {
+		return targetPath, nil
+	}
+	targetDirID, err := s.cloud115Client.MkdirAll115(targetPath, cloud115ID, cookie)
+	if err != nil {
+		return "", fmt.Errorf("创建115目标目录失败: %v", err)
+	}
+	return targetDirID, nil
+}
+
+func isCloud115CID(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // RenameFile 重命名文件

@@ -1,120 +1,114 @@
 <template>
-  <div class="library-page">
-    <section class="page-hero">
-      <div>
-        <div class="page-kicker">Asset Ledger</div>
-        <h2>媒体资产台账</h2>
-        <p>从同步索引追踪源文件、识别状态、STRM、元数据、最近任务和资源健康度。</p>
-      </div>
-      <div class="hero-actions">
-        <el-button @click="goSync" :disabled="!selectedSourceId">同步入库</el-button>
-        <el-button @click="goPending">待处理</el-button>
-        <el-button type="primary" :icon="Refresh" @click="loadItems" :loading="loading">刷新台账</el-button>
-      </div>
-    </section>
-
-    <section class="summary-grid">
-      <article v-for="card in summaryCards" :key="card.label" class="summary-card">
-        <span>{{ card.label }}</span>
-        <strong>{{ card.value }}</strong>
-        <small>{{ card.hint }}</small>
-      </article>
-    </section>
-
-    <section class="filter-bar">
-      <el-select v-model="selectedSourceId" placeholder="选择媒体源" filterable @change="handleSourceChange">
-        <el-option v-for="source in sources" :key="source.id" :label="source.name" :value="source.id" />
-      </el-select>
-      <el-select v-model="status" placeholder="同步状态" clearable @change="loadItems">
-        <el-option label="有效" value="active" />
-        <el-option label="源端缺失" value="missing" />
-        <el-option label="已删除" value="deleted" />
-      </el-select>
-      <el-select v-model="healthFilter" placeholder="健康状态" clearable>
-        <el-option label="正常" value="ok" />
-        <el-option label="待识别" value="identify_failed" />
-        <el-option label="缺少 STRM" value="strm_missing" />
-        <el-option label="源端异常" value="missing" />
-      </el-select>
-    </section>
-
-    <el-alert
-      v-if="lastAction.message"
-      class="action-alert"
-      type="success"
-      show-icon
-      :closable="false"
-      :title="lastAction.message"
-    >
-      <template #default>
-        <div class="alert-actions">
-          <span v-if="lastAction.taskId">最近任务：{{ lastAction.taskId }}</span>
-          <el-button v-if="canOpenTask(lastAction.taskId)" size="small" text @click="goTask(lastAction.taskId)">查看任务</el-button>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-6">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">Asset Ledger</div>
+          <h2 class="mt-1.5 text-2xl font-extrabold text-slate-800 dark:text-white">媒体资产台账</h2>
+          <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+            从同步索引追踪源文件、识别状态、STRM、元数据、最近任务和资源健康度。
+          </p>
         </div>
-      </template>
-    </el-alert>
+        <div class="flex flex-wrap items-center gap-2">
+          <n-button :disabled="!selectedSourceId" @click="goSync">同步入库</n-button>
+          <n-button @click="goPending">待处理</n-button>
+          <n-button type="primary" :loading="loading" @click="loadItems">
+            <template #icon>
+              <n-icon :component="RefreshOutline" />
+            </template>
+            刷新台账
+          </n-button>
+        </div>
+      </div>
+    </div>
 
-    <section class="table-panel">
-      <el-table :data="filteredItems" v-loading="loading" border>
-        <el-table-column prop="source_name" label="资源条目" min-width="220" />
-        <el-table-column label="健康状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="healthTagType(row.health_status)" size="small">{{ healthLabel(row.health_status) }}</el-tag>
+    <!-- 统计卡 -->
+    <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in summaryCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.hint"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
+    </div>
+
+    <!-- 筛选区 -->
+    <PageCard>
+      <div class="flex flex-wrap items-center gap-3">
+        <n-select
+          v-model:value="selectedSourceId"
+          class="w-full sm:w-56"
+          placeholder="选择媒体源"
+          filterable
+          :options="sourceOptions"
+          @update:value="handleSourceChange"
+        />
+        <n-select
+          v-model:value="status"
+          class="w-full sm:w-44"
+          placeholder="同步状态"
+          clearable
+          :options="statusOptions"
+          @update:value="loadItems"
+        />
+        <n-select
+          v-model:value="healthFilter"
+          class="w-full sm:w-44"
+          placeholder="健康状态"
+          clearable
+          :options="healthOptions"
+        />
+      </div>
+    </PageCard>
+
+    <!-- 最近操作提示 -->
+    <n-alert v-if="lastAction.message" type="success" :title="lastAction.message" class="rounded-2xl">
+      <div class="flex flex-wrap items-center gap-3">
+        <span v-if="lastAction.taskId" class="text-xs">最近任务：{{ lastAction.taskId }}</span>
+        <n-button v-if="canOpenTask(lastAction.taskId)" size="small" text type="primary" @click="goTask(lastAction.taskId)">
+          查看任务
+        </n-button>
+      </div>
+    </n-alert>
+
+    <!-- 台账表格 -->
+    <PageCard>
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="columns"
+          :data="filteredItems"
+          :loading="loading"
+          :row-key="(row) => row.id"
+          :scroll-x="1660"
+          size="small"
+        >
+          <template #empty>
+            <EmptyState title="暂无媒体资产" description="请先执行同步入库" />
           </template>
-        </el-table-column>
-        <el-table-column label="识别" width="110">
-          <template #default="{ row }">
-            <el-tag :type="identityTagType(row.identity_status)" size="small">{{ identityLabel(row.identity_status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="同步" width="110">
-          <template #default="{ row }">
-            <el-tag :type="syncTagType(row.sync_status)" size="small">{{ syncLabel(row.sync_status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="STRM" width="90">
-          <template #default="{ row }">
-            <el-tag :type="row.has_strm ? 'success' : 'info'" size="small">{{ row.has_strm ? '有' : '无' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="元数据" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.has_metadata ? 'success' : 'info'" size="small">{{ row.has_metadata ? '有' : '缺失' }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="source_path" label="源路径" min-width="260" show-overflow-tooltip />
-        <el-table-column prop="target_path" label="目标路径" min-width="240" show-overflow-tooltip />
-        <el-table-column label="最近任务" min-width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <button
-              v-if="canOpenTask(row.latest_task_id)"
-              type="button"
-              class="task-link"
-              @click="goTask(row.latest_task_id)"
-            >
-              {{ row.latest_task_id }}
-            </button>
-            <span v-else>{{ row.latest_task_id || '-' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="320" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="runPipeline(row)" :loading="rowLoadingId === row.id">入库</el-button>
-            <el-button size="small" @click="generateStrm(row)" :loading="rowLoadingId === row.id">STRM</el-button>
-            <el-button size="small" type="primary" @click="refreshServer(row)" :loading="rowLoadingId === row.id">刷新库</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!loading && filteredItems.length === 0" description="暂无媒体资产，请先执行同步入库" />
-    </section>
+        </n-data-table>
+      </div>
+    </PageCard>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { NAlert, NButton, NDataTable, NIcon, NSelect, NTag, useMessage } from 'naive-ui'
+import {
+  AlbumsOutline,
+  AlertCircleOutline,
+  CheckmarkCircleOutline,
+  DocumentTextOutline,
+  RefreshOutline
+} from '@vicons/ionicons5'
+import PageCard from '../components/common/PageCard.vue'
+import StatCard from '../components/common/StatCard.vue'
+import EmptyState from '../components/common/EmptyState.vue'
 import {
   generateMediaLibraryItemStrm,
   getMediaLibraryItems,
@@ -125,18 +119,36 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
 
 const loading = ref(false)
 const sources = ref([])
 const selectedSourceId = ref(null)
-const status = ref('')
-const healthFilter = ref('')
+const status = ref(null)
+const healthFilter = ref(null)
 const items = ref([])
 const rowLoadingId = ref(null)
 const lastAction = reactive({
   message: '',
   taskId: ''
 })
+
+const sourceOptions = computed(() =>
+  sources.value.map(source => ({ label: source.name, value: source.id }))
+)
+
+const statusOptions = [
+  { label: '有效', value: 'active' },
+  { label: '源端缺失', value: 'missing' },
+  { label: '已删除', value: 'deleted' }
+]
+
+const healthOptions = [
+  { label: '正常', value: 'ok' },
+  { label: '待识别', value: 'identify_failed' },
+  { label: '缺少 STRM', value: 'strm_missing' },
+  { label: '源端异常', value: 'missing' }
+]
 
 const filteredItems = computed(() => {
   if (!healthFilter.value) return items.value
@@ -149,12 +161,140 @@ const summaryCards = computed(() => {
   const pending = items.value.filter(item => item.health_status === 'identify_failed').length
   const strmMissing = items.value.filter(item => item.health_status === 'strm_missing').length
   return [
-    { label: '资产总数', value: total, hint: '当前媒体源同步索引条目' },
-    { label: '健康资源', value: ok, hint: '识别和关键资产状态正常' },
-    { label: '待处理', value: pending, hint: '识别失败或需要人工修正' },
-    { label: '缺少 STRM', value: strmMissing, hint: '云盘资源需补齐播放入口' }
+    { label: '资产总数', value: total, hint: '当前媒体源同步索引条目', icon: AlbumsOutline, tone: 'cyan' },
+    { label: '健康资源', value: ok, hint: '识别和关键资产状态正常', icon: CheckmarkCircleOutline, tone: 'green' },
+    { label: '待处理', value: pending, hint: '识别失败或需要人工修正', icon: AlertCircleOutline, tone: 'amber' },
+    { label: '缺少 STRM', value: strmMissing, hint: '云盘资源需补齐播放入口', icon: DocumentTextOutline, tone: 'violet' }
   ]
 })
+
+const healthLabel = (value) => ({
+  ok: '正常',
+  identify_failed: '待识别',
+  strm_missing: '缺 STRM',
+  missing: '源端异常'
+})[value] || value || '-'
+
+const healthTagType = (value) => ({
+  ok: 'success',
+  identify_failed: 'warning',
+  strm_missing: 'warning',
+  missing: 'error'
+})[value] || 'info'
+
+const identityLabel = (value) => ({
+  identified: '已识别',
+  failed: '失败',
+  pending: '待识别',
+  unknown: '未知'
+})[value] || value || '未知'
+
+const identityTagType = (value) => value === 'identified' ? 'success' : value === 'failed' ? 'warning' : 'info'
+
+const syncLabel = (value) => ({
+  active: '有效',
+  missing: '源端缺失',
+  deleted: '已删除'
+})[value] || value || '-'
+
+const syncTagType = (value) => value === 'active' ? 'success' : value === 'missing' ? 'warning' : value === 'deleted' ? 'error' : 'info'
+
+const renderTag = (type, label) => h(NTag, { type, size: 'small' }, { default: () => label })
+
+const ellipsisCell = (text) => h('span', { class: 'block truncate', title: text || '' }, text || '-')
+
+const columns = [
+  {
+    title: '资源条目',
+    key: 'source_name',
+    minWidth: 220
+  },
+  {
+    title: '健康状态',
+    key: 'health_status',
+    width: 120,
+    render: (row) => renderTag(healthTagType(row.health_status), healthLabel(row.health_status))
+  },
+  {
+    title: '识别',
+    key: 'identity_status',
+    width: 110,
+    render: (row) => renderTag(identityTagType(row.identity_status), identityLabel(row.identity_status))
+  },
+  {
+    title: '同步',
+    key: 'sync_status',
+    width: 110,
+    render: (row) => renderTag(syncTagType(row.sync_status), syncLabel(row.sync_status))
+  },
+  {
+    title: 'STRM',
+    key: 'has_strm',
+    width: 90,
+    render: (row) => renderTag(row.has_strm ? 'success' : 'info', row.has_strm ? '有' : '无')
+  },
+  {
+    title: '元数据',
+    key: 'has_metadata',
+    width: 100,
+    render: (row) => renderTag(row.has_metadata ? 'success' : 'info', row.has_metadata ? '有' : '缺失')
+  },
+  {
+    title: '源路径',
+    key: 'source_path',
+    minWidth: 260,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: '目标路径',
+    key: 'target_path',
+    minWidth: 240,
+    ellipsis: { tooltip: true }
+  },
+  {
+    title: '最近任务',
+    key: 'latest_task_id',
+    minWidth: 180,
+    render: (row) => {
+      if (canOpenTask(row.latest_task_id)) {
+        return h(
+          'button',
+          {
+            type: 'button',
+            class: 'max-w-full truncate text-left text-cyan-600 hover:underline dark:text-cyan-400',
+            onClick: () => goTask(row.latest_task_id)
+          },
+          row.latest_task_id
+        )
+      }
+      return ellipsisCell(row.latest_task_id)
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 240,
+    fixed: 'right',
+    render: (row) => h('div', { class: 'flex items-center gap-2' }, [
+      h(NButton, {
+        size: 'small',
+        loading: rowLoadingId.value === row.id,
+        onClick: () => runPipeline(row)
+      }, { default: () => '入库' }),
+      h(NButton, {
+        size: 'small',
+        loading: rowLoadingId.value === row.id,
+        onClick: () => generateStrm(row)
+      }, { default: () => 'STRM' }),
+      h(NButton, {
+        size: 'small',
+        type: 'primary',
+        loading: rowLoadingId.value === row.id,
+        onClick: () => refreshServer(row)
+      }, { default: () => '刷新库' })
+    ])
+  }
+]
 
 const readPayload = (response) => response?.data?.data || response?.data || {}
 
@@ -180,7 +320,7 @@ const loadItems = async () => {
   try {
     const response = await getMediaLibraryItems({
       source_id: selectedSourceId.value,
-      status: status.value
+      status: status.value || ''
     })
     const payload = response.data?.data?.data || response.data?.data || []
     items.value = Array.isArray(payload) ? payload : []
@@ -204,7 +344,7 @@ const runRowAction = async (row, action, successMessage) => {
     const taskId = payload.task_id || payload.task?.task_id || payload.last_task_id || payload.latest_task_id || ''
     lastAction.message = taskId ? `${successMessage}，任务 ${taskId}` : successMessage
     lastAction.taskId = taskId
-    ElMessage.success(successMessage)
+    message.success(successMessage)
     await loadItems()
   } finally {
     rowLoadingId.value = null
@@ -233,148 +373,8 @@ const canOpenTask = (taskId) => {
   return Boolean(taskId && !String(taskId).startsWith('manual_'))
 }
 
-const healthLabel = (value) => ({
-  ok: '正常',
-  identify_failed: '待识别',
-  strm_missing: '缺 STRM',
-  missing: '源端异常'
-})[value] || value || '-'
-
-const healthTagType = (value) => ({
-  ok: 'success',
-  identify_failed: 'warning',
-  strm_missing: 'warning',
-  missing: 'danger'
-})[value] || 'info'
-
-const identityLabel = (value) => ({
-  identified: '已识别',
-  failed: '失败',
-  pending: '待识别',
-  unknown: '未知'
-})[value] || value || '未知'
-
-const identityTagType = (value) => value === 'identified' ? 'success' : value === 'failed' ? 'warning' : 'info'
-
-const syncLabel = (value) => ({
-  active: '有效',
-  missing: '源端缺失',
-  deleted: '已删除'
-})[value] || value || '-'
-
-const syncTagType = (value) => value === 'active' ? 'success' : value === 'missing' ? 'warning' : value === 'deleted' ? 'danger' : 'info'
-
 onMounted(async () => {
   await loadSources()
   await loadItems()
 })
 </script>
-
-<style scoped>
-.library-page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.page-hero,
-.summary-card,
-.filter-bar,
-.table-panel {
-  background: rgba(255, 252, 247, 0.86);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  border-radius: 18px;
-  box-shadow: 0 18px 44px rgba(58, 42, 24, 0.08);
-}
-
-.page-hero,
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.hero-actions,
-.alert-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.page-hero {
-  justify-content: space-between;
-  padding: 24px;
-}
-
-.summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.summary-card {
-  display: grid;
-  gap: 8px;
-  padding: 18px;
-}
-
-.summary-card span,
-.summary-card small {
-  color: #6f6457;
-}
-
-.summary-card strong {
-  font-size: 32px;
-}
-
-.filter-bar,
-.table-panel {
-  padding: 18px;
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.page-hero h2 {
-  margin: 8px 0 6px;
-  font-size: 30px;
-}
-
-.action-alert {
-  border-radius: 14px;
-}
-
-.task-link {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: #1f6f78;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-@media (max-width: 900px) {
-  .page-hero,
-  .filter-bar {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 560px) {
-  .summary-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

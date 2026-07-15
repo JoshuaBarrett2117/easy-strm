@@ -1,39 +1,61 @@
 <template>
-  <div class="system-logs">
-    <section class="logs-toolbar">
-      <div>
-        <div class="page-kicker">Logs</div>
-        <h2>系统日志中心</h2>
-      </div>
-
-      <div class="logs-actions">
-        <el-select v-model="selectedLogFile" placeholder="选择日志文件" style="width: 260px" @change="loadLogContent">
-          <el-option v-for="file in logFiles" :key="file.name" :label="file.name" :value="file.name">
-            <span>{{ file.name }}</span>
-            <span style="float: right; color: #909399; font-size: 12px;">{{ formatFileSize(file.size) }}</span>
-          </el-option>
-        </el-select>
-        <el-button :icon="Refresh" @click="refreshLogContent" :loading="logLoading">刷新</el-button>
-        <el-switch v-model="autoRefresh" active-text="自动刷新" />
-        <div class="logs-config">
-          <span>保留天数</span>
-          <el-input-number v-model="logSaveDayLimit" :min="1" :max="365" @change="handleLogConfigChange" />
+  <div class="space-y-4">
+    <!-- 工具栏 -->
+    <PageCard title="系统日志中心" subtitle="Logs">
+      <div class="flex flex-wrap items-center gap-3">
+        <n-select
+          v-model:value="selectedLogFile"
+          :options="logFileOptions"
+          :render-label="renderLogFileLabel"
+          placeholder="选择日志文件"
+          class="w-full sm:w-64"
+          @update:value="loadLogContent"
+        />
+        <n-button :loading="logLoading" @click="refreshLogContent">
+          <template #icon>
+            <n-icon :component="RefreshOutline" />
+          </template>
+          刷新
+        </n-button>
+        <div class="flex items-center gap-2">
+          <n-switch v-model:value="autoRefresh" />
+          <span class="text-xs text-slate-500 dark:text-slate-400">自动刷新</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-slate-500 dark:text-slate-400">保留天数</span>
+          <n-input-number
+            v-model:value="logSaveDayLimit"
+            :min="1"
+            :max="365"
+            class="w-32"
+            @update:value="handleLogConfigChange"
+          />
         </div>
       </div>
-    </section>
+    </PageCard>
 
-    <section class="logs-content" v-loading="logLoading">
-      <pre v-if="logContent">{{ logContent }}</pre>
-      <el-empty v-else description="暂无日志内容" />
-    </section>
+    <!-- 日志内容 -->
+    <PageCard>
+      <n-spin :show="logLoading">
+        <pre
+          v-if="logContent"
+          class="min-h-[60vh] whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-300 overflow-auto"
+        >{{ logContent }}</pre>
+        <EmptyState v-else title="暂无日志内容" />
+      </n-spin>
+    </PageCard>
   </div>
 </template>
 
 <script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
+import { NButton, NIcon, NInputNumber, NSelect, NSpin, NSwitch, useMessage } from 'naive-ui'
+import { RefreshOutline } from '@vicons/ionicons5'
+import PageCard from '../../components/common/PageCard.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
 import { getLogConfig, getLogFileContent, getLogFiles, updateLogConfig } from '../../utils/api/strm'
+
+const message = useMessage()
 
 const logFiles = ref([])
 const selectedLogFile = ref('')
@@ -42,6 +64,22 @@ const logLoading = ref(false)
 const autoRefresh = ref(false)
 const logSaveDayLimit = ref(1)
 let timer = null
+
+const logFileOptions = computed(() => {
+  return logFiles.value.map(file => ({
+    label: file.name,
+    value: file.name,
+    size: file.size
+  }))
+})
+
+// 下拉项：文件名 + 右侧灰色文件大小
+const renderLogFileLabel = (option) => {
+  return h('div', { class: 'flex items-center justify-between gap-3' }, [
+    h('span', null, option.label),
+    h('span', { class: 'text-xs text-slate-400' }, formatFileSize(option.size))
+  ])
+}
 
 const stopAutoRefresh = () => {
   if (timer) {
@@ -74,7 +112,7 @@ const loadLogFiles = async () => {
       await loadLogContent()
     }
   } catch (error) {
-    ElMessage.error('加载日志文件列表失败')
+    message.error('加载日志文件列表失败')
   }
 }
 
@@ -86,7 +124,7 @@ const loadLogContent = async () => {
     logContent.value = response.data.data.content || ''
   } catch (error) {
     logContent.value = ''
-    ElMessage.error('加载日志内容失败')
+    message.error('加载日志内容失败')
   } finally {
     logLoading.value = false
   }
@@ -105,16 +143,16 @@ const loadLogConfig = async () => {
     const response = await getLogConfig()
     logSaveDayLimit.value = response.data.data.value || 1
   } catch (error) {
-    ElMessage.error('加载日志配置失败')
+    message.error('加载日志配置失败')
   }
 }
 
 const handleLogConfigChange = async (value) => {
   try {
     await updateLogConfig(value)
-    ElMessage.success('日志保留天数已更新')
+    message.success('日志保留天数已更新')
   } catch (error) {
-    ElMessage.error('更新日志配置失败')
+    message.error('更新日志配置失败')
   }
 }
 
@@ -129,83 +167,3 @@ onBeforeUnmount(() => {
 
 Promise.all([loadLogFiles(), loadLogConfig()])
 </script>
-
-<style scoped>
-.system-logs {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.logs-toolbar,
-.logs-content {
-  padding: 24px;
-  border-radius: 24px;
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-:global(.dark) .logs-toolbar,
-:global(.dark) .logs-content {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.logs-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.logs-toolbar h2 {
-  margin-top: 10px;
-  font-size: 30px;
-}
-
-.logs-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.logs-config {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #6f6457;
-}
-
-.logs-content {
-  min-height: calc(100vh - 240px);
-  overflow: auto;
-  background: linear-gradient(180deg, #111822 0%, #0b1118 100%);
-}
-
-.logs-content pre {
-  color: #d5e5f4;
-  font-family: Consolas, 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-@media (max-width: 960px) {
-  .logs-toolbar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-}
-</style>

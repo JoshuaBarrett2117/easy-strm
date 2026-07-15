@@ -1,198 +1,153 @@
 <template>
-  <el-dialog
-    v-model="visible"
+  <n-modal
+    v-model:show="visible"
+    preset="card"
     title="批量整理"
-    :width="isMobile ? '100%' : '1000px'"
-    :fullscreen="isMobile"
-    :close-on-click-modal="false"
-    :before-close="handleDialogBeforeClose"
-    destroy-on-close
-    append-to-body
+    class="w-[96vw] max-w-[1000px]"
+    :mask-closable="false"
   >
-    <div class="organize-container" v-loading="loading" :element-loading-text="candidateLoadingText">
-      <section class="organize-overview">
-        <div class="organize-overview__copy">
-          <h3>批量整理工作流</h3>
-          <p>先设定目标目录与整理策略；可先刷新预览确认识别结果，也可直接提交后台整理任务并在任务中心查看进度。</p>
+    <n-spin :show="loading" :description="candidateLoadingText">
+      <div class="min-h-[320px]">
+        <section class="mb-4 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,1.4fr)]">
+          <div class="rounded-2xl border border-cyan-500/10 bg-gradient-to-br from-cyan-500/10 to-amber-400/10 p-4 lg:p-5">
+            <h3 class="text-lg font-bold text-slate-800 dark:text-white">批量整理工作流</h3>
+            <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+              先设定目标目录与整理策略；可先刷新预览确认识别结果，也可直接提交后台整理任务并在任务中心查看进度。
+            </p>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <article class="rounded-2xl bg-slate-100 p-4 dark:bg-white/5">
+              <span class="block text-xs text-slate-400 dark:text-slate-500">候选文件</span>
+              <strong class="mt-2 block text-xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ candidateList.length }}</strong>
+            </article>
+            <article class="rounded-2xl bg-slate-100 p-4 dark:bg-white/5">
+              <span class="block text-xs text-slate-400 dark:text-slate-500">手动修正</span>
+              <strong class="mt-2 block text-xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ manualCount }}</strong>
+            </article>
+            <article class="rounded-2xl bg-slate-100 p-4 dark:bg-white/5">
+              <span class="block text-xs text-slate-400 dark:text-slate-500">预览状态</span>
+              <strong class="mt-2 block text-xl font-extrabold text-slate-800 dark:text-white">{{ hasPreview ? '已生成' : '待刷新' }}</strong>
+            </article>
+          </div>
+        </section>
+
+        <n-form :model="form" label-placement="top" class="mb-2">
+          <div class="grid gap-x-4 sm:grid-cols-2">
+            <n-form-item label="目标目录" class="sm:col-span-2">
+              <n-input v-model:value="form.target_path" placeholder="请输入整理后的目标目录" />
+            </n-form-item>
+
+            <n-form-item label="媒体类型">
+              <n-select v-model:value="form.media_type" :options="mediaTypeOptions" />
+            </n-form-item>
+
+            <n-form-item label="冲突策略">
+              <n-select v-model:value="form.conflict_policy" :options="conflictPolicyOptions" />
+            </n-form-item>
+
+            <n-form-item label="重命名预设">
+              <div class="w-full">
+                <n-select
+                  v-model:value="form.preset_id"
+                  placeholder="选择预设模板（可选）"
+                  clearable
+                  :options="presetOptions"
+                  @update:value="handlePresetChange"
+                />
+                <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">选择预设后会自动填充重命名模板；留空则使用系统默认模板。</p>
+              </div>
+            </n-form-item>
+
+            <n-form-item label="整理方式">
+              <div class="w-full">
+                <n-select v-model:value="form.operation_mode" :options="operationModeOptions" />
+                <p v-if="isCloud115" class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">115 云盘为远程存储，不支持硬链接和软链接。</p>
+              </div>
+            </n-form-item>
+
+            <n-form-item v-if="!isCloud115" label="刮削 NFO">
+              <p class="text-xs leading-relaxed text-slate-400 dark:text-slate-500">整理任务在后台执行，NFO 刮削按后端全局配置自动处理。</p>
+            </n-form-item>
+          </div>
+        </n-form>
+
+        <n-alert
+          v-if="!hasPreview"
+          type="info"
+          :show-icon="true"
+          class="mb-4"
+          :title="`已收集 ${candidateList.length} 个视频文件。你可以先刷新预览确认识别结果，也可以直接执行整理并在任务中心查看进度。`"
+        />
+
+        <n-alert
+          v-if="hasPreview && summary"
+          type="info"
+          :show-icon="true"
+          class="mb-4"
+          :title="`共 ${summary.total} 项，可处理 ${summary.processable || 0} 项，冲突 ${summary.conflicts || 0} 项，识别失败 ${summary.failed || 0} 项`"
+        />
+
+        <n-alert
+          v-if="hasPreview && manualCount > 0"
+          type="warning"
+          :show-icon="true"
+          class="mb-4"
+          :title="`已应用 ${manualCount} 项手动修正的识别结果，执行整理时将优先使用。`"
+        />
+
+        <div v-if="hasPreview && previewList.length > 0" class="overflow-x-auto">
+          <n-data-table
+            :columns="previewColumns"
+            :data="previewList"
+            :max-height="420"
+            :striped="true"
+            :row-key="previewRowKey"
+            :scroll-x="1140"
+          />
         </div>
-        <div class="organize-overview__grid">
-          <article class="overview-chip">
-            <span>候选文件</span>
-            <strong>{{ candidateList.length }}</strong>
-          </article>
-          <article class="overview-chip">
-            <span>手动修正</span>
-            <strong>{{ manualCount }}</strong>
-          </article>
-          <article class="overview-chip">
-            <span>预览状态</span>
-            <strong>{{ hasPreview ? '已生成' : '待刷新' }}</strong>
-          </article>
+
+        <div v-else-if="candidateList.length > 0" class="overflow-x-auto">
+          <n-data-table
+            :columns="candidateColumns"
+            :data="candidateList"
+            :max-height="420"
+            :striped="true"
+            :scroll-x="560"
+          />
         </div>
-      </section>
 
-      <el-form :model="form" label-width="110px" class="organize-form">
-        <el-form-item label="目标目录">
-          <el-input v-model="form.target_path" placeholder="请输入整理后的目标目录" />
-        </el-form-item>
+        <EmptyState v-else title="暂无可显示内容" />
+      </div>
+    </n-spin>
 
-        <el-form-item label="媒体类型">
-          <el-select v-model="form.media_type" style="width: 100%">
-            <el-option label="全部" value="all" />
-            <el-option label="电影" value="movie" />
-            <el-option label="剧集" value="tv" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="冲突策略">
-          <el-select v-model="form.conflict_policy" style="width: 100%">
-            <el-option label="跳过" value="skip" />
-            <el-option label="覆盖" value="overwrite" />
-            <el-option label="追加序号" value="suffix" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="重命名预设">
-          <el-select
-            v-model="form.preset_id"
-            placeholder="选择预设模板（可选）"
-            clearable
-            style="width: 100%"
-            @change="handlePresetChange"
-          >
-            <el-option
-              v-for="preset in presets"
-              :key="preset.id"
-              :label="`${preset.name} (${preset.media_type === 'tv' ? '剧集' : '电影'})`"
-              :value="preset.id"
-            />
-          </el-select>
-          <div class="form-tip">选择预设后会自动填充重命名模板；留空则使用系统默认模板。</div>
-        </el-form-item>
-
-        <el-form-item label="整理方式">
-          <el-select v-model="form.operation_mode" style="width: 100%">
-            <el-option label="移动文件" value="move" />
-            <el-option label="复制文件" value="copy" />
-            <el-option label="硬链接" value="hardlink" :disabled="isCloud115" />
-            <el-option label="软链接" value="symlink" :disabled="isCloud115" />
-          </el-select>
-          <div v-if="isCloud115" class="form-tip">115 云盘为远程存储，不支持硬链接和软链接。</div>
-        </el-form-item>
-
-        <el-form-item v-if="!isCloud115" label="刮削 NFO">
-          <div class="form-tip">整理任务在后台执行，NFO 刮削按后端全局配置自动处理。</div>
-        </el-form-item>
-      </el-form>
-
-      <el-alert
-        v-if="!hasPreview"
-        :title="`已收集 ${candidateList.length} 个视频文件。你可以先刷新预览确认识别结果，也可以直接执行整理并在任务中心查看进度。`"
-        type="info"
-        show-icon
-        :closable="false"
-        style="margin-bottom: 16px"
-      />
-
-      <el-alert
-        v-if="hasPreview && summary"
-        :title="`共 ${summary.total} 项，可处理 ${summary.processable || 0} 项，冲突 ${summary.conflicts || 0} 项，识别失败 ${summary.failed || 0} 项`"
-        type="info"
-        show-icon
-        :closable="false"
-        style="margin-bottom: 16px"
-      />
-
-      <el-alert
-        v-if="hasPreview && manualCount > 0"
-        :title="`已应用 ${manualCount} 项手动修正的识别结果，执行整理时将优先使用。`"
-        type="warning"
-        show-icon
-        :closable="false"
-        style="margin-bottom: 16px"
-      />
-
-      <el-table v-if="hasPreview && previewList.length > 0" :data="previewList" border stripe max-height="420">
-        <el-table-column prop="file_name" label="原文件名" min-width="220" />
-        <el-table-column prop="title" label="识别结果" min-width="180">
-          <template #default="scope">
-            <div class="identify-result-cell">
-              <span>{{ scope.row.title || '-' }}</span>
-              <el-tag v-if="scope.row.manual_override" type="warning" size="small" effect="light">已手动修正</el-tag>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="new_name" label="新文件名" min-width="220">
-          <template #default="scope">
-            <div class="editable-cell">
-              <el-input
-                v-if="editingNewNameKey === getOverrideKey(scope.row)"
-                v-model="scope.row.new_name"
-                size="small"
-                @blur="handleConfirmEditNewName(scope.row)"
-                @keyup.enter="handleConfirmEditNewName(scope.row)"
-              />
-              <template v-else>
-                <span>{{ scope.row.new_name }}</span>
-                <el-button
-                  size="small"
-                  link
-                  type="primary"
-                  @click="handleStartEditNewName(scope.row)"
-                  class="edit-name-btn"
-                >
-                  <el-icon><Edit /></el-icon>
-                </el-button>
-              </template>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="new_path" label="目标路径" min-width="260" show-overflow-tooltip />
-        <el-table-column label="状态" width="140" align="center">
-          <template #default="scope">
-            <el-tag v-if="updatingPreviewRowKey === getOverrideKey(scope.row)" type="info">更新中</el-tag>
-            <el-tag v-else-if="scope.row.identify_error" type="danger">识别失败</el-tag>
-            <el-tag v-else-if="scope.row.manual_override" type="warning">已修正</el-tag>
-            <el-tag v-else-if="scope.row.conflict" type="warning">存在冲突</el-tag>
-            <el-tag v-else type="success">可执行</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" align="center">
-          <template #default="scope">
-            <el-button
-              size="small"
-              :type="scope.row.manual_override ? 'warning' : 'default'"
-              :loading="updatingPreviewRowKey === getOverrideKey(scope.row)"
-              @click="emit('preview-identify', scope.row)"
-            >
-              {{ scope.row.manual_override ? '重新修正' : '手动识别' }}
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <el-table v-else-if="candidateList.length > 0" :data="candidateList" border stripe max-height="420">
-        <el-table-column prop="file_name" label="候选视频文件" min-width="240" />
-        <el-table-column prop="file_path" label="源路径" min-width="320" show-overflow-tooltip />
-      </el-table>
-
-      <el-empty v-else description="暂无可显示内容" />
-    </div>
-
-    <template #footer>
-      <span class="dialog-footer">
-        <el-button @click="handleCloseDialog">取消</el-button>
-        <el-button @click="handlePreview" :loading="previewLoading">刷新预览</el-button>
-        <el-button type="primary" @click="handleExecute" :loading="executing">执行整理</el-button>
-      </span>
+    <template #action>
+      <div class="flex flex-wrap justify-end gap-2">
+        <n-button @click="handleCloseDialog">取消</n-button>
+        <n-button :loading="previewLoading" @click="handlePreview">刷新预览</n-button>
+        <n-button type="primary" :loading="executing" @click="handleExecute">执行整理</n-button>
+      </div>
     </template>
-  </el-dialog>
+  </n-modal>
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Edit } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
+import {
+  NModal,
+  NSpin,
+  NForm,
+  NFormItem,
+  NInput,
+  NSelect,
+  NAlert,
+  NDataTable,
+  NButton,
+  NTag,
+  NIcon,
+  useMessage
+} from 'naive-ui'
+import { CreateOutline } from '@vicons/ionicons5'
+import EmptyState from '../common/EmptyState.vue'
 import {
   executeOrganizeAsync,
   getOrganizePresets,
@@ -230,8 +185,7 @@ const props = defineProps({
 const emit = defineEmits(['execute-success', 'preview-identify', 'open-tmdb-search'])
 
 const visible = defineModel('visible', { type: Boolean, default: false })
-const isMobile = ref(window.innerWidth < 768)
-let resizeTimer = null
+const message = useMessage()
 let candidatePollToken = 0
 let previewPollToken = 0
 
@@ -264,6 +218,30 @@ const form = ref({
 })
 
 const manualCount = computed(() => Object.keys(manualOverrides.value).length)
+
+const mediaTypeOptions = [
+  { label: '全部', value: 'all' },
+  { label: '电影', value: 'movie' },
+  { label: '剧集', value: 'tv' }
+]
+
+const conflictPolicyOptions = [
+  { label: '跳过', value: 'skip' },
+  { label: '覆盖', value: 'overwrite' },
+  { label: '追加序号', value: 'suffix' }
+]
+
+const operationModeOptions = computed(() => [
+  { label: '移动文件', value: 'move' },
+  { label: '复制文件', value: 'copy' },
+  { label: '硬链接', value: 'hardlink', disabled: props.isCloud115 },
+  { label: '软链接', value: 'symlink', disabled: props.isCloud115 }
+])
+
+const presetOptions = computed(() => presets.value.map((preset) => ({
+  label: `${preset.name} (${preset.media_type === 'tv' ? '剧集' : '电影'})`,
+  value: preset.id
+})))
 
 const getPayload = (response) => response?.data?.data || {}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -302,27 +280,7 @@ const handleCloseDialog = () => {
   visible.value = false
 }
 
-const handleDialogBeforeClose = (done) => {
-  resetTransientState()
-  done()
-}
-
-const handleResize = () => {
-  clearTimeout(resizeTimer)
-  resizeTimer = setTimeout(() => {
-    isMobile.value = window.innerWidth < 768
-  }, 150)
-}
-
-onMounted(() => {
-  window.addEventListener('resize', handleResize)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
-  if (resizeTimer) {
-    clearTimeout(resizeTimer)
-  }
+onBeforeUnmount(() => {
   stopCandidatePolling()
   stopPreviewPolling()
 })
@@ -337,6 +295,8 @@ const getOverrideKey = (row) => {
   if (!row) return ''
   return row.cloud_id || row.file_id || row.cloudID || row.fileID || row.id || ''
 }
+
+const previewRowKey = (row) => getOverrideKey(row) || row.file_name
 
 const buildManualItems = () => Object.values(manualOverrides.value)
 const buildRenameItems = () => Object.values(renameOverrides.value)
@@ -476,7 +436,7 @@ const handleLoadCandidates = async () => {
 
     const taskId = getPayload(response)?.task_id
     if (!taskId) {
-      ElMessage.error('启动候选扫描任务失败')
+      message.error('启动候选扫描任务失败')
       return
     }
 
@@ -486,7 +446,7 @@ const handleLoadCandidates = async () => {
 
     while (candidatePollToken === activePollToken && visible.value && currentCandidateTaskId.value === taskId) {
       if (Date.now() - startedAt >= CANDIDATE_POLL_TIMEOUT_MS) {
-        ElMessage.warning('候选扫描超时，请重试')
+        message.warning('候选扫描超时，请重试')
         break
       }
 
@@ -519,19 +479,19 @@ const handleLoadCandidates = async () => {
             .filter(Boolean)
           hasPreview.value = false
           if (candidateList.value.length === 0) {
-            ElMessage.warning('当前选择范围内没有可整理的视频文件')
+            message.warning('当前选择范围内没有可整理的视频文件')
           }
           break
         }
 
         if (normalizedStatus === 'failed') {
-          ElMessage.error(task.error || '候选扫描任务失败')
+          message.error(task.error || '候选扫描任务失败')
           break
         }
       } catch (pollError) {
         console.error('[OrganizeDialog] 获取候选扫描任务状态失败:', pollError)
         if (pollError?.response?.status === 404) {
-          ElMessage.error('候选扫描任务不存在或已过期，请重新加载')
+          message.error('候选扫描任务不存在或已过期，请重新加载')
           break
         }
       }
@@ -540,7 +500,7 @@ const handleLoadCandidates = async () => {
     console.error('[OrganizeDialog] 加载整理候选文件失败:', error)
     candidateLoadingText.value = '候选扫描失败'
     const errorMsg = error.response?.data?.error || error.message || '加载整理候选文件失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   } finally {
     currentCandidateTaskId.value = null
     loading.value = false
@@ -552,7 +512,7 @@ const pollTaskStatus = async (taskId, activePollToken) => {
 
   while (previewPollToken === activePollToken && visible.value && currentTaskId.value === taskId) {
     if (Date.now() - startedAt >= PREVIEW_POLL_TIMEOUT_MS) {
-      ElMessage.warning('预览任务超时，请重新刷新预览')
+      message.warning('预览任务超时，请重新刷新预览')
       break
     }
 
@@ -574,18 +534,18 @@ const pollTaskStatus = async (taskId, activePollToken) => {
         previewList.value = clonePreviewItems(task.result?.previews || [])
         summary.value = task.result?.summary || null
         hasPreview.value = true
-        ElMessage.success('预览完成')
+        message.success('预览完成')
         break
       }
 
       if (normalizedStatus === 'failed') {
-        ElMessage.error(task.error || '预览任务失败')
+        message.error(task.error || '预览任务失败')
         break
       }
     } catch (error) {
       console.error('[OrganizeDialog] 获取预览任务状态失败:', error)
       if (error?.response?.status === 404) {
-        ElMessage.error('预览任务不存在或已过期，请重新刷新预览')
+        message.error('预览任务不存在或已过期，请重新刷新预览')
         break
       }
     }
@@ -599,7 +559,7 @@ const pollTaskStatus = async (taskId, activePollToken) => {
 
 const handlePreview = async () => {
   if (!form.value.target_path.trim()) {
-    ElMessage.warning('请输入目标目录')
+    message.warning('请输入目标目录')
     return
   }
 
@@ -615,7 +575,7 @@ const handlePreview = async () => {
     const response = await startPreviewTaskAsync(buildPayload())
     const taskId = getPayload(response)?.task_id
     if (!taskId) {
-      ElMessage.error('启动预览任务失败')
+      message.error('启动预览任务失败')
       previewLoading.value = false
       return
     }
@@ -626,7 +586,7 @@ const handlePreview = async () => {
   } catch (error) {
     console.error('[OrganizeDialog] 预览整理失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '预览整理失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
     previewLoading.value = false
     currentTaskId.value = null
   }
@@ -634,7 +594,7 @@ const handlePreview = async () => {
 
 const handleExecute = async () => {
   if (!form.value.target_path.trim()) {
-    ElMessage.warning('请输入目标目录')
+    message.warning('请输入目标目录')
     return
   }
 
@@ -643,7 +603,7 @@ const handleExecute = async () => {
     const response = await executeOrganizeAsync(buildPayload())
     const payload = getPayload(response)
     const taskId = payload.task_id
-    ElMessage.success(taskId ? `整理任务已提交，可在任务中心查看进度：${taskId}` : '整理任务已提交，可在任务中心查看进度')
+    message.success(taskId ? `整理任务已提交，可在任务中心查看进度：${taskId}` : '整理任务已提交，可在任务中心查看进度')
     handleCloseDialog()
     emit('execute-success', {
       async: true,
@@ -652,7 +612,7 @@ const handleExecute = async () => {
   } catch (error) {
     console.error('[OrganizeDialog] 执行整理失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '执行整理失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   } finally {
     executing.value = false
   }
@@ -688,7 +648,7 @@ const handleStartEditNewName = (row) => {
 const handleConfirmEditNewName = (row) => {
   editingNewNameKey.value = ''
   if (!row.new_name || !row.new_name.trim()) {
-    ElMessage.warning('新文件名不能为空')
+    message.warning('新文件名不能为空')
     return
   }
   const key = getOverrideKey(row)
@@ -733,7 +693,7 @@ const applyManualOverride = async (overrideForm) => {
     console.error('[OrganizeDialog] 手动识别后同步刷新单行预览失败:', error)
     applyLocalManualOverrideToPreview(key)
   }
-  ElMessage.success('当前行已更新到预览，无需重新刷新整批预览')
+  message.success('当前行已更新到预览，无需重新刷新整批预览')
 }
 
 const clearManualOverride = async (key) => {
@@ -750,7 +710,7 @@ const clearManualOverride = async (key) => {
     console.error('[OrganizeDialog] 清除手动识别后同步刷新单行预览失败:', error)
     applyLocalManualOverrideToPreview(key)
   }
-  ElMessage.success('当前行已恢复自动识别结果，无需重新刷新整批预览')
+  message.success('当前行已恢复自动识别结果，无需重新刷新整批预览')
 }
 
 const retryFailedItems = async (failedItems) => {
@@ -763,7 +723,7 @@ const retryFailedItems = async (failedItems) => {
     const response = await executeOrganizeAsync(payload)
     const resultPayload = getPayload(response)
     const taskId = resultPayload.task_id
-    ElMessage.success(taskId ? `重试任务已提交：${taskId}` : '重试任务已提交，可在任务中心查看进度')
+    message.success(taskId ? `重试任务已提交：${taskId}` : '重试任务已提交，可在任务中心查看进度')
     return {
       async: true,
       taskId
@@ -771,7 +731,7 @@ const retryFailedItems = async (failedItems) => {
   } catch (error) {
     console.error('[OrganizeDialog] 重试失败项失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '重试失败项失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
     return null
   } finally {
     executing.value = false
@@ -804,6 +764,91 @@ const open = async (fileIds, source) => {
   fetchPresets()
 }
 
+// 表格列定义(render 中读取的 ref 会被表格渲染副作用跟踪，自动响应更新)
+const previewColumns = [
+  { title: '原文件名', key: 'file_name', minWidth: 220 },
+  {
+    title: '识别结果',
+    key: 'title',
+    minWidth: 180,
+    render: (row) => h('div', { class: 'flex flex-wrap items-center gap-2' }, [
+      h('span', row.title || '-'),
+      row.manual_override
+        ? h(NTag, { type: 'warning', size: 'small' }, { default: () => '已手动修正' })
+        : null
+    ])
+  },
+  {
+    title: '新文件名',
+    key: 'new_name',
+    minWidth: 220,
+    render: (row) => {
+      const key = getOverrideKey(row)
+      if (editingNewNameKey.value === key) {
+        return h(NInput, {
+          value: row.new_name,
+          size: 'small',
+          onUpdateValue: (value) => { row.new_name = value },
+          onBlur: () => handleConfirmEditNewName(row),
+          onKeyup: (event) => {
+            if (event.key === 'Enter') handleConfirmEditNewName(row)
+          }
+        })
+      }
+      return h('div', { class: 'group flex items-center gap-1' }, [
+        h('span', row.new_name),
+        h(NButton, {
+          size: 'tiny',
+          text: true,
+          type: 'primary',
+          'aria-label': '编辑新文件名',
+          class: 'shrink-0 opacity-0 transition-opacity group-hover:opacity-100',
+          onClick: () => handleStartEditNewName(row)
+        }, { icon: () => h(NIcon, { component: CreateOutline }) })
+      ])
+    }
+  },
+  { title: '目标路径', key: 'new_path', minWidth: 260, ellipsis: { tooltip: true } },
+  {
+    title: '状态',
+    key: 'status',
+    width: 140,
+    align: 'center',
+    render: (row) => {
+      if (updatingPreviewRowKey.value === getOverrideKey(row)) {
+        return h(NTag, { type: 'info', size: 'small' }, { default: () => '更新中' })
+      }
+      if (row.identify_error) {
+        return h(NTag, { type: 'error', size: 'small' }, { default: () => '识别失败' })
+      }
+      if (row.manual_override) {
+        return h(NTag, { type: 'warning', size: 'small' }, { default: () => '已修正' })
+      }
+      if (row.conflict) {
+        return h(NTag, { type: 'warning', size: 'small' }, { default: () => '存在冲突' })
+      }
+      return h(NTag, { type: 'success', size: 'small' }, { default: () => '可执行' })
+    }
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 120,
+    align: 'center',
+    render: (row) => h(NButton, {
+      size: 'small',
+      type: row.manual_override ? 'warning' : 'default',
+      loading: updatingPreviewRowKey.value === getOverrideKey(row),
+      onClick: () => emit('preview-identify', row)
+    }, { default: () => (row.manual_override ? '重新修正' : '手动识别') })
+  }
+]
+
+const candidateColumns = [
+  { title: '候选视频文件', key: 'file_name', minWidth: 240 },
+  { title: '源路径', key: 'file_path', minWidth: 320, ellipsis: { tooltip: true } }
+]
+
 defineExpose({
   open,
   handlePreview,
@@ -818,124 +863,3 @@ defineExpose({
   getOverrideKey
 })
 </script>
-
-<style scoped>
-.form-tip {
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.4;
-  margin-top: 4px;
-}
-
-.organize-container {
-  min-height: 320px;
-}
-
-.organize-overview {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 1.4fr);
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.organize-overview__copy {
-  padding: 18px;
-  border-radius: 18px;
-  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-}
-
-.organize-overview__copy h3 {
-  margin: 0;
-  color: #17313a;
-  font-size: 20px;
-}
-
-.organize-overview__copy p {
-  margin: 10px 0 0;
-  color: #6c6259;
-  line-height: 1.7;
-}
-
-.organize-overview__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.overview-chip {
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(244, 239, 231, 0.88);
-}
-
-.overview-chip span {
-  display: block;
-  font-size: 12px;
-  color: #8a7b6d;
-}
-
-.overview-chip strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 22px;
-  color: #17313a;
-}
-
-.organize-form {
-  margin-bottom: 16px;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-.editable-cell {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.identify-result-cell {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-.edit-name-btn {
-  flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 0.2s;
-}
-
-.editable-cell:hover .edit-name-btn {
-  opacity: 1;
-}
-
-:global(.dark) .organize-overview__copy,
-:global(.dark) .overview-chip {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .organize-overview__copy h3,
-:global(.dark) .overview-chip strong {
-  color: #e8edf4;
-}
-
-:global(.dark) .organize-overview__copy p,
-:global(.dark) .overview-chip span,
-:global(.dark) .form-tip {
-  color: #9faebb;
-}
-
-@media (max-width: 768px) {
-  .organize-overview,
-  .organize-overview__grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

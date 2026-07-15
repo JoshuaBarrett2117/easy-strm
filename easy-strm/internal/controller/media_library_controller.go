@@ -6,19 +6,17 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"easy-strm/internal/dao"
-	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 )
 
 type MediaLibraryController struct {
-	indexDAO *dao.MediaSyncIndexDAO
-	pipeline *service.MediaLibraryPipelineService
+	mediaLibraryService *service.MediaLibraryService
+	pipeline            *service.MediaLibraryPipelineService
 }
 
-func NewMediaLibraryController(indexDAO *dao.MediaSyncIndexDAO, pipeline *service.MediaLibraryPipelineService) *MediaLibraryController {
-	return &MediaLibraryController{indexDAO: indexDAO, pipeline: pipeline}
+func NewMediaLibraryController(mediaLibraryService *service.MediaLibraryService, pipeline *service.MediaLibraryPipelineService) *MediaLibraryController {
+	return &MediaLibraryController{mediaLibraryService: mediaLibraryService, pipeline: pipeline}
 }
 
 func (c *MediaLibraryController) ListItems(ctx *gin.Context) {
@@ -28,22 +26,11 @@ func (c *MediaLibraryController) ListItems(ctx *gin.Context) {
 		return
 	}
 	status := ctx.Query("status")
-	indexes, err := c.indexDAO.ListBySource(sourceID, status)
+	items, err := c.mediaLibraryService.ListItems(sourceID, status)
 	if err != nil {
 		logger.Errorf("MediaLibraryController[ListItems] 查询失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "查询媒体库失败")
 		return
-	}
-	items := make([]domain.MediaLibraryItem, 0, len(indexes))
-	for _, index := range indexes {
-		item := domain.MediaLibraryItem{
-			MediaSyncIndex: *index,
-			HasStrm:        index.StrmPath != "",
-			HasMetadata:    index.MetadataPath != "",
-			HealthStatus:   resolveHealthStatus(index),
-			LatestTaskID:   index.LastTaskID,
-		}
-		items = append(items, item)
 	}
 	SuccessResp(ctx, gin.H{
 		"data":  items,
@@ -57,22 +44,15 @@ func (c *MediaLibraryController) GetItem(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "无效的媒体库条目ID")
 		return
 	}
-	index, err := c.indexDAO.GetByID(id)
+	item, err := c.mediaLibraryService.GetItem(id)
 	if err != nil {
 		logger.Errorf("MediaLibraryController[GetItem] 查询失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "查询媒体库条目失败")
 		return
 	}
-	if index == nil {
+	if item == nil {
 		ErrorResp(ctx, http.StatusNotFound, "媒体库条目不存在")
 		return
-	}
-	item := domain.MediaLibraryItem{
-		MediaSyncIndex: *index,
-		HasStrm:        index.StrmPath != "",
-		HasMetadata:    index.MetadataPath != "",
-		HealthStatus:   resolveHealthStatus(index),
-		LatestTaskID:   index.LastTaskID,
 	}
 	SuccessResp(ctx, item)
 }
@@ -120,17 +100,4 @@ func (c *MediaLibraryController) RefreshServer(ctx *gin.Context) {
 		return
 	}
 	SuccessResp(ctx, result)
-}
-
-func resolveHealthStatus(index *domain.MediaSyncIndex) string {
-	if index.SyncStatus == domain.SyncStatusMissing || index.SyncStatus == domain.SyncStatusDeleted {
-		return "missing"
-	}
-	if index.IdentityStatus == domain.IdentityStatusFailed {
-		return "identify_failed"
-	}
-	if index.StrmPath == "" && index.SourceType == domain.SourceTypeCloud115 {
-		return "strm_missing"
-	}
-	return "ok"
 }

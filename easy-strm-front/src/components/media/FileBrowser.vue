@@ -4,315 +4,221 @@
   兼容本地存储和 115 云盘两种媒体源类型
 -->
 <template>
-  <el-dialog
-    v-model="visible"
+  <n-modal
+    v-model:show="visible"
+    preset="card"
     title="文件浏览"
-    :width="isMobile ? '100%' : '92%'"
-    top="4vh"
-    append-to-body
+    class="w-[96vw] max-w-[1400px]"
   >
-    <section class="workspace-overview">
-      <div class="workspace-overview__copy">
-        <h2>{{ currentDirectoryName || '文件浏览工作区' }}</h2>
-        <p>
-          当前正在浏览 {{ isCloud115 ? '115 云盘媒体源' : '本地媒体源' }}，
-          可在这里完成目录切换、筛选、识别、重命名、整理和删除操作。
-        </p>
-      </div>
-      <div class="workspace-overview__grid">
-        <article v-for="card in browserOverviewCards" :key="card.label" class="overview-card">
-          <span class="overview-card__label">{{ card.label }}</span>
-          <strong class="overview-card__value">{{ card.value }}</strong>
-          <p class="overview-card__hint">{{ card.hint }}</p>
-        </article>
-      </div>
-    </section>
-
-    <div class="breadcrumb-container">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item>
-          <span class="breadcrumb-link" @click="navigateToRoot">
-            <el-icon style="margin-right: 4px;"><HomeFilled /></el-icon>
-            {{ isCloud115 ? (currentSource?.name || '根目录') : '根目录' }}
-          </span>
-        </el-breadcrumb-item>
-        <el-breadcrumb-item
-          v-for="(item, index) in breadcrumbItems"
-          :key="index"
-        >
-          <span class="breadcrumb-link" @click="navigateToPath(item.path)">
-            <el-icon style="margin-right: 4px;"><Folder /></el-icon>
-            {{ item.name }}
-          </span>
-        </el-breadcrumb-item>
-      </el-breadcrumb>
-      <div class="breadcrumb-actions" v-if="canGoBack">
-        <el-button size="small" @click="navigateToRoot">
-          <el-icon><HomeFilled /></el-icon>
-          返回根目录
-        </el-button>
-        <el-button size="small" @click="navigateToParent">
-          <el-icon><Back /></el-icon>
-          返回上一级
-        </el-button>
-      </div>
-    </div>
-
-    <div class="filter-container">
-      <div class="status-rail">
-        <div class="status-rail__item">
-          <span>当前源</span>
-          <strong>{{ currentSourceName }}</strong>
+    <div class="space-y-4">
+      <!-- 工作区概览 -->
+      <section class="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)]">
+        <div class="rounded-2xl border border-cyan-500/10 bg-gradient-to-br from-cyan-500/10 to-amber-400/10 p-4 lg:p-5">
+          <h2 class="text-xl font-bold text-slate-800 dark:text-white">{{ currentDirectoryName || '文件浏览工作区' }}</h2>
+          <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+            当前正在浏览 {{ isCloud115 ? '115 云盘媒体源' : '本地媒体源' }}，
+            可在这里完成目录切换、筛选、识别、重命名、整理和删除操作。
+          </p>
         </div>
-        <div class="status-rail__item">
-          <span>当前显示路径</span>
-          <strong>{{ currentDisplayPath }}</strong>
+        <div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <article
+            v-for="card in browserOverviewCards"
+            :key="card.label"
+            class="rounded-2xl bg-slate-100 p-4 dark:bg-white/5"
+          >
+            <span class="block text-xs text-slate-400 dark:text-slate-500">{{ card.label }}</span>
+            <strong class="mt-2 block break-all text-xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ card.value }}</strong>
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">{{ card.hint }}</p>
+          </article>
         </div>
-        <div class="status-rail__item">
-          <span>已选文件</span>
-          <strong>{{ selectedFiles.length }} 项</strong>
+      </section>
+
+      <!-- 面包屑导航 -->
+      <div class="flex flex-col gap-2 rounded-2xl bg-slate-100 px-4 py-3 md:flex-row md:items-center md:justify-between dark:bg-white/5">
+        <n-breadcrumb separator="/">
+          <n-breadcrumb-item>
+            <span class="inline-flex cursor-pointer items-center gap-1 transition-colors hover:text-cyan-500" @click="navigateToRoot">
+              <n-icon :component="HomeOutline" />
+              {{ isCloud115 ? (currentSource?.name || '根目录') : '根目录' }}
+            </span>
+          </n-breadcrumb-item>
+          <n-breadcrumb-item
+            v-for="(item, index) in breadcrumbItems"
+            :key="index"
+          >
+            <span class="inline-flex cursor-pointer items-center gap-1 transition-colors hover:text-cyan-500" @click="navigateToPath(item.path)">
+              <n-icon :component="FolderOutline" />
+              {{ item.name }}
+            </span>
+          </n-breadcrumb-item>
+        </n-breadcrumb>
+        <div v-if="canGoBack" class="flex shrink-0 flex-wrap gap-2">
+          <n-button size="small" @click="navigateToRoot">
+            <template #icon><n-icon :component="HomeOutline" /></template>
+            返回根目录
+          </n-button>
+          <n-button size="small" @click="navigateToParent">
+            <template #icon><n-icon :component="ArrowBackOutline" /></template>
+            返回上一级
+          </n-button>
         </div>
       </div>
 
-      <div class="filter-search-row">
-        <el-input
-          v-model="searchKeyword"
+      <!-- 状态栏 -->
+      <div class="grid gap-3 md:grid-cols-3">
+        <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/5 dark:bg-ink-900">
+          <span class="block text-xs text-slate-400 dark:text-slate-500">当前源</span>
+          <strong class="mt-1 block break-all text-sm font-semibold text-slate-800 dark:text-white">{{ currentSourceName }}</strong>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/5 dark:bg-ink-900">
+          <span class="block text-xs text-slate-400 dark:text-slate-500">当前显示路径</span>
+          <strong class="mt-1 block break-all text-sm font-semibold text-slate-800 dark:text-white">{{ currentDisplayPath }}</strong>
+        </div>
+        <div class="rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-white/5 dark:bg-ink-900">
+          <span class="block text-xs text-slate-400 dark:text-slate-500">已选文件</span>
+          <strong class="mt-1 block text-sm font-semibold text-slate-800 dark:text-white">{{ selectedFiles.length }} 项</strong>
+        </div>
+      </div>
+
+      <!-- 搜索与筛选 -->
+      <div class="flex flex-wrap items-center gap-3">
+        <n-input
+          v-model:value="searchKeyword"
           placeholder="搜索文件名"
           clearable
-          :style="{ width: isMobile ? '100%' : '300px' }"
+          class="w-full md:w-[300px]"
           @keyup.enter="handleSearch"
         >
           <template #prefix>
-            <el-icon><Search /></el-icon>
+            <n-icon :component="SearchOutline" />
           </template>
-        </el-input>
-        <el-select v-model="filterType" placeholder="文件类型" clearable :style="{ width: isMobile ? '100%' : '150px', marginLeft: isMobile ? '0' : '10px' }">
-          <el-option label="全部" value="" />
-          <el-option label="视频" value="video" />
-          <el-option label="文件夹" value="folder" />
-          <el-option label="已识别" value="identified" />
-          <el-option label="未识别" value="unidentified" />
-        </el-select>
-        <el-button type="primary" @click="handleSearch" :style="{ marginLeft: isMobile ? '0' : '10px' }">
-          <el-icon><Search /></el-icon>
+        </n-input>
+        <n-select
+          v-model:value="filterType"
+          :options="filterTypeOptions"
+          placeholder="文件类型"
+          clearable
+          class="w-full md:w-[150px]"
+        />
+        <n-button type="primary" @click="handleSearch">
+          <template #icon><n-icon :component="SearchOutline" /></template>
           搜索
-        </el-button>
-        <el-button @click="handleRefresh">
-          <el-icon><Refresh /></el-icon>
+        </n-button>
+        <n-button @click="handleRefresh">
+          <template #icon><n-icon :component="RefreshOutline" /></template>
           刷新
-        </el-button>
+        </n-button>
       </div>
 
-      <div class="filter-action-row">
-        <div v-if="!isMobile" class="batch-actions-desktop">
-          <el-button type="success" @click="emit('batch-identify')" :disabled="selectedFiles.length === 0">
-            <el-icon><MagicStick /></el-icon>
-            批量识别
-          </el-button>
-          <el-button type="success" plain @click="emit('batch-directory-identify')" :disabled="selectedFiles.length === 0">
-            <el-icon><FolderOpened /></el-icon>
-            整目录识别
-          </el-button>
-          <el-tooltip :disabled="!isCloud115" content="115 云盘暂不支持单独批量重命名，请使用整理功能" placement="top">
-            <el-button type="warning" @click="emit('batch-rename')" :disabled="selectedFiles.length === 0 || isCloud115">
-              <el-icon><Edit /></el-icon>
+      <!-- 批量操作：桌面端按钮组 -->
+      <div class="hidden flex-wrap items-center gap-2 md:flex">
+        <n-button type="success" :disabled="selectedFiles.length === 0" @click="emit('batch-identify')">
+          <template #icon><n-icon :component="SparklesOutline" /></template>
+          批量识别
+        </n-button>
+        <n-button type="success" ghost :disabled="selectedFiles.length === 0" @click="emit('batch-directory-identify')">
+          <template #icon><n-icon :component="FolderOpenOutline" /></template>
+          整目录识别
+        </n-button>
+        <n-tooltip :disabled="!isCloud115" placement="top">
+          <template #trigger>
+            <n-button type="warning" :disabled="selectedFiles.length === 0 || isCloud115" @click="emit('batch-rename')">
+              <template #icon><n-icon :component="CreateOutline" /></template>
               批量重命名
-            </el-button>
-          </el-tooltip>
-          <el-tooltip :disabled="!isCloud115" content="115 云盘暂不支持刮削" placement="top">
-            <el-button type="info" @click="emit('batch-scrape')" :disabled="selectedFiles.length === 0 || isCloud115" v-if="!isCloud115">
-              <el-icon><Document /></el-icon>
-              批量刮削
-            </el-button>
-          </el-tooltip>
-          <el-button type="info" plain @click="emit('batch-directory-scrape')" :disabled="selectedFiles.length === 0 || isCloud115">
-            <el-icon><FolderOpened /></el-icon>
-            整目录刮削
-          </el-button>
-          <el-button class="organize-primary-btn" type="success" @click="emit('open-organize')" :disabled="selectedFiles.length === 0">
-            <el-icon><Files /></el-icon>
-            批量整理{{ selectedFiles.length ? ` (${selectedFiles.length})` : '' }}
-          </el-button>
-        </div>
+            </n-button>
+          </template>
+          115 云盘暂不支持单独批量重命名，请使用整理功能
+        </n-tooltip>
+        <n-button v-if="!isCloud115" type="info" :disabled="selectedFiles.length === 0" @click="emit('batch-scrape')">
+          <template #icon><n-icon :component="DocumentTextOutline" /></template>
+          批量刮削
+        </n-button>
+        <n-button type="info" ghost :disabled="selectedFiles.length === 0 || isCloud115" @click="emit('batch-directory-scrape')">
+          <template #icon><n-icon :component="FolderOpenOutline" /></template>
+          整目录刮削
+        </n-button>
+        <n-button type="success" class="min-w-[132px] font-bold" :disabled="selectedFiles.length === 0" @click="emit('open-organize')">
+          <template #icon><n-icon :component="FileTrayFullOutline" /></template>
+          批量整理{{ selectedFiles.length ? ` (${selectedFiles.length})` : '' }}
+        </n-button>
+      </div>
 
-        <div v-else class="batch-actions-mobile">
-          <el-dropdown trigger="click">
-            <el-button type="primary" size="small">
-              批量操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="emit('batch-identify')" :disabled="selectedFiles.length === 0">
-                  <el-icon><MagicStick /></el-icon> 批量识别
-                </el-dropdown-item>
-                <el-dropdown-item @click="emit('batch-directory-identify')" :disabled="selectedFiles.length === 0">
-                  <el-icon><FolderOpened /></el-icon> 整目录识别
-                </el-dropdown-item>
-                <el-dropdown-item @click="emit('batch-rename')" :disabled="selectedFiles.length === 0 || isCloud115">
-                  <el-icon><Edit /></el-icon> 批量重命名
-                </el-dropdown-item>
-                <el-dropdown-item v-if="!isCloud115" @click="emit('batch-scrape')" :disabled="selectedFiles.length === 0">
-                  <el-icon><Document /></el-icon> 批量刮削
-                </el-dropdown-item>
-                <el-dropdown-item @click="emit('batch-directory-scrape')" :disabled="selectedFiles.length === 0 || isCloud115">
-                  <el-icon><FolderOpened /></el-icon> 整目录刮削
-                </el-dropdown-item>
-                <el-dropdown-item @click="emit('open-organize')" :disabled="selectedFiles.length === 0">
-                  <el-icon><Files /></el-icon> 批量整理{{ selectedFiles.length ? ` (${selectedFiles.length})` : '' }}
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
+      <!-- 批量操作：移动端下拉菜单 -->
+      <div class="md:hidden">
+        <n-dropdown trigger="click" :options="batchActionOptions" @select="handleBatchAction">
+          <n-button type="primary" size="small" icon-placement="right">
+            <template #icon><n-icon :component="ChevronDownOutline" /></template>
+            批量操作
+          </n-button>
+        </n-dropdown>
+      </div>
+
+      <!-- 文件列表 -->
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="columns"
+          :data="filteredFileList"
+          :loading="loading"
+          :max-height="500"
+          :striped="true"
+          :row-key="rowKey"
+          :row-props="rowProps"
+          :checked-row-keys="checkedRowKeys"
+          :scroll-x="1180"
+          @update:checked-row-keys="handleCheckedRowKeys"
+        />
+      </div>
+
+      <!-- 分页 -->
+      <div class="flex flex-wrap justify-center md:justify-end">
+        <n-pagination
+          :page="currentPage"
+          :page-size="pageSize"
+          :item-count="total"
+          :page-sizes="[20, 50, 100, 200]"
+          show-size-picker
+          show-quick-jumper
+          :prefix="paginationPrefix"
+          @update:page="handleCurrentChange"
+          @update:page-size="handleSizeChange"
+        />
       </div>
     </div>
-    <div class="table-wrapper">
-      <el-table
-        :data="filteredFileList"
-        border
-        style="width: 100%"
-        stripe
-        class="custom-table"
-        @selection-change="handleSelectionChange"
-        @row-dblclick="handleRowDblClick"
-        max-height="500"
-        :row-class-name="getRowClassName"
-      >
-        <el-table-column type="selection" width="55" align="center" />
-        <el-table-column prop="name" label="文件名" min-width="300">
-          <template #default="scope">
-            <div class="file-name" :class="{ 'is-directory': scope.row.is_dir }">
-              <el-icon v-if="scope.row.is_dir" class="file-icon folder"><FolderOpened /></el-icon>
-              <el-icon v-else-if="getFileType(scope.row.name) === 'video'" class="file-icon video"><VideoCamera /></el-icon>
-              <el-icon v-else-if="getFileType(scope.row.name) === 'audio'" class="file-icon audio"><Headset /></el-icon>
-              <el-icon v-else class="file-icon other"><Document /></el-icon>
-              <span>{{ scope.row.name }}</span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="size" label="大小" width="120" align="center">
-          <template #default="scope">
-            <span v-if="!scope.row.is_dir">{{ formatFileSize(scope.row.size) }}</span>
-            <span v-else>-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="modify_time" label="修改时间" width="160" align="center" />
-        <el-table-column prop="tmdb_title" label="TMDB识别" min-width="200">
-          <template #default="scope">
-            <span v-if="scope.row.tmdb_title">{{ scope.row.tmdb_title }}</span>
-            <span v-else class="text-muted">未识别</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="340" fixed="right" align="center">
-          <template #default="scope">
-            <div class="action-buttons-desktop">
-              <el-button type="primary" size="small" @click="emit('identify', scope.row)">
-                <el-icon><MagicStick /></el-icon>
-                识别
-              </el-button>
-          <el-tooltip :disabled="!isCloud115" content="115 云盘暂不支持单独批量重命名，请使用整理功能" placement="top">
-                <el-button type="warning" size="small" @click="emit('rename', scope.row)" :disabled="isCloud115">
-                  <el-icon><Edit /></el-icon>
-                  重命名
-                </el-button>
-              </el-tooltip>
-              <el-button
-                type="success"
-                size="small"
-                @click="emit('single-organize', scope.row)"
-                v-if="scope.row.is_dir || getFileType(scope.row.name) === 'video'"
-              >
-                <el-icon><Files /></el-icon>
-                整理
-              </el-button>
-          <el-tooltip :disabled="!isCloud115" content="115 云盘暂不支持单独批量重命名，请使用整理功能" placement="top">
-                <el-button
-                  type="info"
-                  size="small"
-                  @click="emit('scrape', scope.row)"
-                  :disabled="isCloud115 || scope.row.is_dir || getFileType(scope.row.name) !== 'video'"
-                  v-if="!isCloud115 && !scope.row.is_dir && getFileType(scope.row.name) === 'video'"
-                >
-                  <el-icon><Document /></el-icon>
-                  刮削
-                </el-button>
-              </el-tooltip>
-              <el-button type="danger" size="small" @click="emit('delete-file', scope.row)">
-                <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
-            </div>
-
-            <div class="action-buttons-mobile">
-              <el-dropdown trigger="click">
-                <el-button type="primary" size="small">
-                  操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item @click="emit('identify', scope.row)">
-                      <el-icon><MagicStick /></el-icon> 识别
-                    </el-dropdown-item>
-                    <el-dropdown-item @click="emit('rename', scope.row)" :disabled="isCloud115">
-                      <el-icon><Edit /></el-icon> 重命名
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-if="scope.row.is_dir || getFileType(scope.row.name) === 'video'"
-                      @click="emit('single-organize', scope.row)"
-                    >
-                      <el-icon><Files /></el-icon> 整理
-                    </el-dropdown-item>
-                    <el-dropdown-item
-                      v-if="!isCloud115 && !scope.row.is_dir && getFileType(scope.row.name) === 'video'"
-                      @click="emit('scrape', scope.row)"
-                    >
-                      <el-icon><Document /></el-icon> 刮削
-                    </el-dropdown-item>
-                    <el-dropdown-item @click="emit('delete-file', scope.row)" divided>
-                      <el-icon><Delete /></el-icon> 删除
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
-    </div>
-
-    <div class="pagination-container">
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :page-sizes="[20, 50, 100, 200]"
-        layout="total, sizes, prev, pager, next, jumper"
-        :total="total"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
-    </div>
-  </el-dialog>
+  </n-modal>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h, watch } from 'vue'
 import {
-  FolderOpened,
-  Folder,
-  Document,
-  Search,
-  Refresh,
-  MagicStick,
-  Edit,
-  Delete,
-  VideoCamera,
-  Headset,
-  Files,
-  HomeFilled,
-  Back,
-  ArrowDown
-} from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+  NModal,
+  NBreadcrumb,
+  NBreadcrumbItem,
+  NButton,
+  NIcon,
+  NInput,
+  NSelect,
+  NTooltip,
+  NDropdown,
+  NDataTable,
+  NPagination,
+  useMessage
+} from 'naive-ui'
+import {
+  HomeOutline,
+  FolderOutline,
+  FolderOpenOutline,
+  ArrowBackOutline,
+  SearchOutline,
+  RefreshOutline,
+  SparklesOutline,
+  CreateOutline,
+  DocumentTextOutline,
+  FileTrayFullOutline,
+  TrashOutline,
+  VideocamOutline,
+  HeadsetOutline,
+  ChevronDownOutline
+} from '@vicons/ionicons5'
 import { getMediaFiles } from '../../utils/api/media'
 
 const props = defineProps({
@@ -337,6 +243,7 @@ const emit = defineEmits([
   'batch-directory-scrape',
 ])
 const visible = defineModel('visible', { type: Boolean, default: false })
+const message = useMessage()
 const activeSource = ref(null)
 
 // --- 响应式布局状态 ---
@@ -368,11 +275,21 @@ const directoryStack = ref([])
 // --- 文件列表状态 ---
 const fileList = ref([])
 const selectedFiles = ref([])
+const checkedRowKeys = ref([])
+const loading = ref(false)
 const searchKeyword = ref('')
 const filterType = ref('')
 const currentPage = ref(1)
 const pageSize = ref(50)
 const total = ref(0)
+
+const filterTypeOptions = [
+  { label: '全部', value: '' },
+  { label: '视频', value: 'video' },
+  { label: '文件夹', value: 'folder' },
+  { label: '已识别', value: 'identified' },
+  { label: '未识别', value: 'unidentified' }
+]
 
 // --- 计算属性 ---
 /** 是否为 115 云盘媒体源 */
@@ -479,6 +396,31 @@ const browserOverviewCards = computed(() => [
   }
 ])
 
+/** 移动端批量操作下拉菜单 */
+const batchActionOptions = computed(() => {
+  const noneSelected = selectedFiles.value.length === 0
+  const options = [
+    { label: '批量识别', key: 'batch-identify', disabled: noneSelected, icon: renderIcon(SparklesOutline) },
+    { label: '整目录识别', key: 'batch-directory-identify', disabled: noneSelected, icon: renderIcon(FolderOpenOutline) },
+    { label: '批量重命名', key: 'batch-rename', disabled: noneSelected || isCloud115.value, icon: renderIcon(CreateOutline) }
+  ]
+  if (!isCloud115.value) {
+    options.push({ label: '批量刮削', key: 'batch-scrape', disabled: noneSelected, icon: renderIcon(DocumentTextOutline) })
+  }
+  options.push({ label: '整目录刮削', key: 'batch-directory-scrape', disabled: noneSelected || isCloud115.value, icon: renderIcon(FolderOpenOutline) })
+  options.push({
+    label: `批量整理${selectedFiles.value.length ? ` (${selectedFiles.value.length})` : ''}`,
+    key: 'open-organize',
+    disabled: noneSelected,
+    icon: renderIcon(FileTrayFullOutline)
+  })
+  return options
+})
+
+const handleBatchAction = (key) => {
+  emit(key)
+}
+
 // --- 方法 ---
 /**
  * 归一化文件项字段
@@ -497,6 +439,7 @@ const fetchFileList = async () => {
   const source = activeSource.value || props.currentSource
   if (!source) return
 
+  loading.value = true
   try {
     const serverFilterType = ['video', 'folder'].includes(filterType.value) ? filterType.value : ''
     const params = {
@@ -515,7 +458,9 @@ const fetchFileList = async () => {
   } catch (error) {
     console.error('[FileBrowser] 获取文件列表失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '获取文件列表失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
+  } finally {
+    loading.value = false
   }
 }
 
@@ -605,18 +550,35 @@ const handleRefresh = () => {
   fetchFileList()
 }
 
-const handleSelectionChange = (selection) => {
-  selectedFiles.value = selection
-  emit('selection-change', selection)
+/** 多选行 key（本地文件可能没有 id，回退到 path/name） */
+const rowKey = (row) => row.id || row.path || row.name
+
+const handleCheckedRowKeys = (keys) => {
+  checkedRowKeys.value = keys
+  selectedFiles.value = fileList.value.filter(file => keys.includes(rowKey(file)))
+  emit('selection-change', selectedFiles.value)
 }
 
-const handleSizeChange = () => {
+// 数据变化（重新加载 / 客户端筛选切换）时清空选择，与原 el-table 行为一致
+watch(filteredFileList, () => {
+  if (checkedRowKeys.value.length > 0) {
+    checkedRowKeys.value = []
+    selectedFiles.value = []
+    emit('selection-change', [])
+  }
+})
+
+const handleSizeChange = (size) => {
+  pageSize.value = size
   fetchFileList()
 }
 
-const handleCurrentChange = () => {
+const handleCurrentChange = (page) => {
+  currentPage.value = page
   fetchFileList()
 }
+
+const paginationPrefix = ({ itemCount }) => `共 ${itemCount} 项`
 
 /**
  * 格式化文件大小
@@ -644,9 +606,140 @@ const getFileType = (filename) => {
   return 'other'
 }
 
-const getRowClassName = ({ row }) => {
-  return row.is_dir ? 'directory-row' : 'file-row'
+// --- 表格渲染 ---
+const renderIcon = (icon) => () => h(NIcon, { component: icon })
+
+const renderRowIcon = (row) => {
+  if (row.is_dir) {
+    return h(NIcon, { component: FolderOpenOutline, class: 'shrink-0 text-xl text-amber-500' })
+  }
+  const type = getFileType(row.name)
+  if (type === 'video') {
+    return h(NIcon, { component: VideocamOutline, class: 'shrink-0 text-lg text-cyan-500' })
+  }
+  if (type === 'audio') {
+    return h(NIcon, { component: HeadsetOutline, class: 'shrink-0 text-lg text-emerald-500' })
+  }
+  return h(NIcon, { component: DocumentTextOutline, class: 'shrink-0 text-lg text-slate-400' })
 }
+
+/** 行操作：桌面端按钮组 */
+const renderDesktopRowActions = (row) => {
+  const buttons = [
+    h(NButton, {
+      size: 'small',
+      type: 'primary',
+      onClick: () => emit('identify', row)
+    }, { icon: renderIcon(SparklesOutline), default: () => '识别' }),
+    h(NTooltip, { disabled: !isCloud115.value, placement: 'top' }, {
+      trigger: () => h(NButton, {
+        size: 'small',
+        type: 'warning',
+        disabled: isCloud115.value,
+        onClick: () => emit('rename', row)
+      }, { icon: renderIcon(CreateOutline), default: () => '重命名' }),
+      default: () => '115 云盘暂不支持单独批量重命名，请使用整理功能'
+    })
+  ]
+  if (row.is_dir || getFileType(row.name) === 'video') {
+    buttons.push(h(NButton, {
+      size: 'small',
+      type: 'success',
+      onClick: () => emit('single-organize', row)
+    }, { icon: renderIcon(FileTrayFullOutline), default: () => '整理' }))
+  }
+  if (!isCloud115.value && !row.is_dir && getFileType(row.name) === 'video') {
+    buttons.push(h(NButton, {
+      size: 'small',
+      type: 'info',
+      onClick: () => emit('scrape', row)
+    }, { icon: renderIcon(DocumentTextOutline), default: () => '刮削' }))
+  }
+  buttons.push(h(NButton, {
+    size: 'small',
+    type: 'error',
+    onClick: () => emit('delete-file', row)
+  }, { icon: renderIcon(TrashOutline), default: () => '删除' }))
+  return h('div', { class: 'flex flex-wrap items-center justify-center gap-1' }, buttons)
+}
+
+/** 行操作：移动端下拉菜单 */
+const buildRowActionOptions = (row) => {
+  const options = [
+    { label: '识别', key: 'identify', icon: renderIcon(SparklesOutline) },
+    { label: '重命名', key: 'rename', disabled: isCloud115.value, icon: renderIcon(CreateOutline) }
+  ]
+  if (row.is_dir || getFileType(row.name) === 'video') {
+    options.push({ label: '整理', key: 'single-organize', icon: renderIcon(FileTrayFullOutline) })
+  }
+  if (!isCloud115.value && !row.is_dir && getFileType(row.name) === 'video') {
+    options.push({ label: '刮削', key: 'scrape', icon: renderIcon(DocumentTextOutline) })
+  }
+  options.push({ type: 'divider', key: 'divider-delete' })
+  options.push({ label: '删除', key: 'delete-file', icon: renderIcon(TrashOutline) })
+  return options
+}
+
+const renderMobileRowActions = (row) => h(NDropdown, {
+  trigger: 'click',
+  options: buildRowActionOptions(row),
+  onSelect: (key) => emit(key, row)
+}, {
+  default: () => h(NButton, {
+    size: 'small',
+    type: 'primary',
+    iconPlacement: 'right'
+  }, { icon: renderIcon(ChevronDownOutline), default: () => '操作' })
+})
+
+// render 中读取的 ref（isCloud115 / isMobile）会被表格渲染副作用跟踪，自动响应更新
+const columns = computed(() => [
+  { type: 'selection', width: 48 },
+  {
+    title: '文件名',
+    key: 'name',
+    minWidth: 300,
+    render: (row) => h('div', {
+      class: [
+        'flex items-center gap-2',
+        row.is_dir ? 'cursor-pointer font-medium text-slate-800 dark:text-white' : ''
+      ]
+    }, [
+      renderRowIcon(row),
+      h('span', { class: 'break-all' }, row.name)
+    ])
+  },
+  {
+    title: '大小',
+    key: 'size',
+    width: 110,
+    align: 'center',
+    render: (row) => (row.is_dir ? '-' : formatFileSize(row.size))
+  },
+  { title: '修改时间', key: 'modify_time', width: 170, align: 'center' },
+  {
+    title: 'TMDB识别',
+    key: 'tmdb_title',
+    minWidth: 200,
+    render: (row) => (row.tmdb_title
+      ? h('span', row.tmdb_title)
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '未识别'))
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: isMobile.value ? 120 : 360,
+    align: 'center',
+    fixed: 'right',
+    render: (row) => (isMobile.value ? renderMobileRowActions(row) : renderDesktopRowActions(row))
+  }
+])
+
+/** 行属性：目录行手型光标 + 双击进入 */
+const rowProps = (row) => ({
+  style: row.is_dir ? 'cursor: pointer;' : '',
+  onDblclick: () => handleRowDblClick(row)
+})
 
 // --- 暴露方法供父组件调用 ---
 /**
@@ -699,363 +792,3 @@ defineExpose({
   currentCloud115DisplayPath
 })
 </script>
-
-<style scoped>
-.workspace-overview {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
-  gap: 18px;
-  margin-bottom: 18px;
-}
-
-.workspace-overview__copy {
-  padding: 20px;
-  border-radius: 22px;
-  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-}
-
-.workspace-overview__copy h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #17313a;
-}
-
-.workspace-overview__copy p {
-  margin: 12px 0 0;
-  color: #6c6259;
-  line-height: 1.7;
-}
-
-.workspace-overview__grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.overview-card {
-  padding: 18px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 241, 231, 0.94));
-  border: 1px solid rgba(120, 101, 72, 0.1);
-}
-
-.overview-card__label {
-  display: block;
-  color: #8a7b6d;
-  font-size: 13px;
-}
-
-.overview-card__value {
-  display: block;
-  margin-top: 12px;
-  font-size: 28px;
-  color: #17313a;
-  line-height: 1.1;
-}
-
-.overview-card__hint {
-  margin: 10px 0 0;
-  color: #73675d;
-  line-height: 1.6;
-}
-
-.breadcrumb-container {
-  margin-bottom: 15px;
-  padding: 10px 15px;
-  background-color: #f5f7fa;
-  border-radius: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.breadcrumb-container :deep(.el-breadcrumb__item) {
-  cursor: pointer;
-}
-
-.breadcrumb-container :deep(.el-breadcrumb__item:hover) {
-  color: #409eff;
-}
-
-.breadcrumb-container :deep(.el-breadcrumb__inner) {
-  display: flex;
-  align-items: center;
-}
-
-.breadcrumb-link {
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  transition: color 0.3s;
-}
-
-.breadcrumb-link:hover {
-  color: #409eff;
-}
-
-.breadcrumb-actions {
-  flex-shrink: 0;
-}
-
-.filter-container {
-  display: flex;
-  flex-direction: column;
-  margin-bottom: 15px;
-  gap: 10px;
-}
-
-.status-rail {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.status-rail__item {
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(244, 239, 231, 0.88);
-  border: 1px solid rgba(120, 101, 72, 0.08);
-}
-
-.status-rail__item span {
-  display: block;
-  color: #8a7b6d;
-  font-size: 12px;
-}
-
-.status-rail__item strong {
-  display: block;
-  margin-top: 8px;
-  color: #17313a;
-  font-size: 16px;
-  line-height: 1.5;
-  word-break: break-all;
-}
-
-.filter-search-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.filter-action-row {
-  display: flex;
-  align-items: center;
-}
-
-.batch-actions-desktop {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.batch-actions-mobile {
-  display: none;
-}
-
-.organize-primary-btn {
-  min-width: 132px;
-  border: none;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  background: linear-gradient(135deg, #12b981 0%, #079669 100%);
-  box-shadow: 0 10px 22px rgba(18, 185, 129, 0.26);
-}
-
-.organize-primary-btn:not(.is-disabled):hover {
-  transform: translateY(-1px);
-  box-shadow: 0 14px 28px rgba(18, 185, 129, 0.34);
-}
-
-.organize-primary-btn.is-disabled {
-  opacity: 0.58;
-  box-shadow: 0 6px 16px rgba(18, 185, 129, 0.18);
-}
-
-/* 表格水平滚动容器 */
-.table-wrapper {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.custom-table {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.custom-table :deep(.el-table__header th) {
-  background-color: #f8f9fa !important;
-  color: #495057;
-  font-weight: 600;
-}
-
-.custom-table :deep(.el-table__row:hover > td) {
-  background-color: #e8f4fd !important;
-}
-
-.custom-table :deep(.directory-row) {
-  cursor: pointer;
-}
-
-.custom-table :deep(.directory-row:hover > td) {
-  background-color: #fff3e0 !important;
-}
-
-.custom-table :deep(.file-row) {
-  cursor: default;
-}
-
-/* --- 操作按钮：桌面端 / 移动端切换 --- */
-.action-buttons-mobile {
-  display: none;
-}
-
-.action-buttons-desktop {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.file-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.file-name.is-directory {
-  cursor: pointer;
-}
-
-.file-name.is-directory:hover {
-  color: #409eff;
-}
-
-.file-icon {
-  font-size: 18px;
-  flex-shrink: 0;
-}
-
-.file-icon.folder {
-  color: #f7b32b;
-  font-size: 20px;
-}
-
-.file-icon.video {
-  color: #409eff;
-  font-size: 19px;
-}
-
-.file-icon.audio {
-  color: #67c23a;
-  font-size: 19px;
-}
-
-.file-icon.other {
-  color: #909399;
-  font-size: 17px;
-}
-
-.text-muted {
-  color: #909399;
-  font-size: 13px;
-}
-
-.pagination-container {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 20px;
-  padding: 10px 0;
-}
-
-:global(.dark) .workspace-overview__copy,
-:global(.dark) .overview-card,
-:global(.dark) .status-rail__item,
-:global(.dark) .breadcrumb-container {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .workspace-overview__copy h2,
-:global(.dark) .overview-card__value,
-:global(.dark) .status-rail__item strong,
-:global(.dark) .file-name,
-:global(.dark) .breadcrumb-link {
-  color: #e8edf4;
-}
-
-:global(.dark) .workspace-overview__copy p,
-:global(.dark) .overview-card__hint,
-:global(.dark) .overview-card__label,
-:global(.dark) .status-rail__item span,
-:global(.dark) .text-muted {
-  color: #9faebb;
-}
-
-/* ===== 响应式：移动端（< 768px） ===== */
-@media (max-width: 768px) {
-  .workspace-overview,
-  .workspace-overview__grid,
-  .status-rail {
-    grid-template-columns: 1fr;
-  }
-
-  .breadcrumb-container {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 8px 12px;
-  }
-
-  .breadcrumb-actions {
-    width: 100%;
-    display: flex;
-    gap: 8px;
-  }
-
-  .filter-search-row {
-    width: 100%;
-  }
-
-  .filter-search-row .el-input,
-  .filter-search-row .el-select {
-    flex: 1;
-  }
-
-  /* 移动端：批量操作切换为下拉菜单 */
-  .batch-actions-desktop {
-    display: none;
-  }
-
-  .batch-actions-mobile {
-    display: block;
-  }
-
-  /* 移动端：行操作按钮切换为下拉菜单 */
-  .action-buttons-desktop {
-    display: none;
-  }
-
-  .action-buttons-mobile {
-    display: block;
-  }
-
-  /* 表格最小宽度确保可横向滚动 */
-  .custom-table {
-    min-width: 900px;
-  }
-
-  /* 分页简化 */
-  .pagination-container {
-    justify-content: center;
-  }
-
-  .pagination-container :deep(.el-pagination) {
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-}
-</style>

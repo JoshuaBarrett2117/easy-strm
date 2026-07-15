@@ -1,11 +1,10 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/pkg/logger"
+	"easy-strm/internal/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,13 +12,13 @@ import (
 // SettingsController 系统配置控制器
 // 负责系统设置的 CRUD 操作，路由路径保持与 auth.go 内联版本完全一致
 type SettingsController struct {
-	systemConfigDAO *dao.SystemConfigDAO
+	systemConfigService *service.SystemConfigService
 }
 
 // NewSettingsController 创建系统配置控制器实例
-func NewSettingsController(systemConfigDAO *dao.SystemConfigDAO) *SettingsController {
+func NewSettingsController(systemConfigService *service.SystemConfigService) *SettingsController {
 	return &SettingsController{
-		systemConfigDAO: systemConfigDAO,
+		systemConfigService: systemConfigService,
 	}
 }
 
@@ -29,7 +28,7 @@ func NewSettingsController(systemConfigDAO *dao.SystemConfigDAO) *SettingsContro
 func (sc *SettingsController) GetAll(ctx *gin.Context) {
 	logger.Debug("SettingsController[GetAll] 获取所有系统配置")
 
-	configs, err := sc.systemConfigDAO.GetAll()
+	configs, err := sc.systemConfigService.GetAll()
 	if err != nil {
 		logger.Errorf("SettingsController[GetAll] 查询失败: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -52,7 +51,7 @@ func (sc *SettingsController) GetByKey(ctx *gin.Context) {
 	key := ctx.Param("key")
 	logger.Debugf("SettingsController[GetByKey] 获取配置, key: %s", key)
 
-	config, err := sc.systemConfigDAO.GetByKey(key)
+	config, err := sc.systemConfigService.GetByKey(key)
 	if err != nil || config == nil {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Setting not found: " + key})
 		return
@@ -82,7 +81,7 @@ func (sc *SettingsController) UpdateByKey(ctx *gin.Context) {
 		return
 	}
 
-	if err := sc.systemConfigDAO.Upsert(key, reqData.Value); err != nil {
+	if err := sc.systemConfigService.Upsert(key, reqData.Value); err != nil {
 		logger.Errorf("SettingsController[UpdateByKey] 更新失败 %s: %v", key, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -111,14 +110,7 @@ func (sc *SettingsController) BatchUpdate(ctx *gin.Context) {
 		return
 	}
 
-	updated := make(map[string]string)
-	for key, value := range reqData {
-		if err := sc.systemConfigDAO.Upsert(key, value); err != nil {
-			logger.Errorf("SettingsController[BatchUpdate] 更新失败 %s: %v", key, err)
-			continue
-		}
-		updated[key] = value
-	}
+	updated := sc.systemConfigService.BatchUpsert(reqData)
 
 	logger.Infof("SettingsController[BatchUpdate] 批量更新完成: %d 项", len(updated))
 	ctx.JSON(http.StatusOK, gin.H{
@@ -133,24 +125,11 @@ func (sc *SettingsController) BatchUpdate(ctx *gin.Context) {
 func (sc *SettingsController) GetLogSaveDayLimit(ctx *gin.Context) {
 	logger.Debug("SettingsController[GetLogSaveDayLimit] 获取日志保留天数")
 
-	config, err := sc.systemConfigDAO.GetByKey("log_save_day_limit")
-	if err != nil || config == nil {
-		// 配置不存在时返回默认值
-		ctx.JSON(http.StatusOK, gin.H{
-			"data": map[string]interface{}{
-				"key":   "log_save_day_limit",
-				"value": 1,
-			},
-		})
-		return
-	}
-
-	var days int
-	fmt.Sscanf(config.ConfigVal, "%d", &days)
+	key, days, _ := sc.systemConfigService.GetLogSaveDayLimit()
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": map[string]interface{}{
-			"key":   config.ConfigKey,
+			"key":   key,
 			"value": days,
 		},
 	})
@@ -169,7 +148,7 @@ func (sc *SettingsController) UpdateLogSaveDayLimit(ctx *gin.Context) (int, stri
 		return http.StatusBadRequest, "Invalid request body, value must be between 1 and 365"
 	}
 
-	if err := sc.systemConfigDAO.Upsert("log_save_day_limit", fmt.Sprintf("%d", configData.Value)); err != nil {
+	if err := sc.systemConfigService.UpdateLogSaveDayLimit(configData.Value); err != nil {
 		logger.Errorf("SettingsController[UpdateLogSaveDayLimit] 更新失败: %v", err)
 		return http.StatusInternalServerError, "Failed to update config"
 	}

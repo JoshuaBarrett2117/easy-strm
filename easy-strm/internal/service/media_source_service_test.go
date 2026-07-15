@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"os"
@@ -184,4 +184,3 @@ func TestMediaSourceServiceCreateSymbolicLink(t *testing.T) {
 		t.Fatalf("expected %q to be a symbolic link", dst)
 	}
 }
-

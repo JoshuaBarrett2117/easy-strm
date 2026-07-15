@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"encoding/json"
@@ -112,16 +112,16 @@ func TestGenerateMovieNFORefreshesMinimalCachedPayload(t *testing.T) {
 		switch r.URL.Path {
 		case "/movie/42":
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"id":           42,
-				"title":        "Interstellar",
+				"id":             42,
+				"title":          "Interstellar",
 				"original_title": "Interstellar",
-				"overview":     "A team travels through a wormhole.",
-				"release_date": "2014-11-07",
-				"vote_average": 8.6,
-				"poster_path":  "/poster.jpg",
-				"backdrop_path": "/backdrop.jpg",
-				"runtime":      169,
-				"genres":       []map[string]interface{}{{"id": 1, "name": "Sci-Fi"}},
+				"overview":       "A team travels through a wormhole.",
+				"release_date":   "2014-11-07",
+				"vote_average":   8.6,
+				"poster_path":    "/poster.jpg",
+				"backdrop_path":  "/backdrop.jpg",
+				"runtime":        169,
+				"genres":         []map[string]interface{}{{"id": 1, "name": "Sci-Fi"}},
 				"credits": map[string]interface{}{
 					"cast": []map[string]interface{}{},
 					"crew": []map[string]interface{}{{"name": "Christopher Nolan", "job": "Director"}},
@@ -333,4 +333,3 @@ func TestBuildFallbackRawDataForMovie(t *testing.T) {
 		t.Fatalf("expected release date in fallback payload: %s", text)
 	}
 }
-

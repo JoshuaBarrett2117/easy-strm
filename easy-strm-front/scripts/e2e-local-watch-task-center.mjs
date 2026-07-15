@@ -123,7 +123,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await waitForUrl(page, "/dashboard");
     addCase("TC-LOCAL-WATCH-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -162,7 +162,7 @@ async function run() {
     addCase("TC-LOCAL-WATCH-SETUP-001", "创建本地 watch 自动整理媒体源成功", "PASS", `sourceId=${mediaSourceId}`);
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: mediaSourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: mediaSourceName }).first();
     await sourceRow.waitFor({ timeout: 20000 });
     const sourceRowText = (await sourceRow.textContent()) || "";
     const watchEnabledVisible = sourceRowText.includes(mediaSourceName);
@@ -203,7 +203,7 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/tasks`, { waitUntil: "networkidle" });
-    const taskCard = page.locator(".task-card").filter({ hasText: mediaSourceName }).first();
+    const taskCard = page.getByTestId("task-card").filter({ hasText: mediaSourceName }).first();
     await taskCard.waitFor({ timeout: 20000 });
     const taskCardText = (await taskCard.textContent()) || "";
     const taskCardPass = taskCardText.includes("本地实时监控") && taskCardText.includes("处理文件") && taskCardText.includes("本地自动整理");
@@ -215,8 +215,8 @@ async function run() {
       await saveShot(page, "03_task_center_card")
     );
 
-    await taskCard.locator(".el-button").filter({ hasText: "详情" }).click();
-    const drawer = page.locator(".el-drawer").filter({ hasText: "任务详情" }).last();
+    await taskCard.locator("button").filter({ hasText: "详情" }).click();
+    const drawer = page.locator('[role="dialog"]').filter({ hasText: "任务详情" }).last();
     await drawer.waitFor({ timeout: 20000 });
     const drawerText = (await drawer.textContent()) || "";
     const detailPass = drawerText.includes("来源媒体源") && drawerText.includes(mediaSourceName) && drawerText.includes("触发方式");

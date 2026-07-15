@@ -1,38 +1,35 @@
 <template>
-  <div class="task-center">
-    <section class="page-hero">
-      <div>
-        <div class="page-kicker">Task Center</div>
-        <h2>统一任务队列</h2>
-        <p>保留现有任务取消、恢复、详情与失败文件定位能力，并用正式页面承载。</p>
-      </div>
-      <div class="page-actions">
-        <el-button :icon="Refresh" @click="loadTasks" :loading="taskLoading">刷新</el-button>
-        <el-switch v-model="autoRefresh" active-text="自动刷新" />
-      </div>
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <PageCard title="统一任务队列" subtitle="Task Center">
+      <template #action>
+        <n-button :loading="taskLoading" @click="loadTasks">
+          <template #icon>
+            <n-icon :component="RefreshOutline" />
+          </template>
+          刷新
+        </n-button>
+        <div class="flex items-center gap-2">
+          <n-switch v-model:value="autoRefresh" />
+          <span class="text-xs text-slate-500 dark:text-slate-400">自动刷新</span>
+        </div>
+      </template>
+      <p class="text-sm text-slate-400 dark:text-slate-500">
+        保留现有任务取消、恢复、详情与失败文件定位能力，并用正式页面承载。
+      </p>
+    </PageCard>
+
+    <!-- 统计卡 -->
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard label="总任务" :value="taskList.length" :icon="ListOutline" tone="cyan" />
+      <StatCard label="执行中" :value="taskCounts.running" :icon="PlayCircleOutline" tone="amber" />
+      <StatCard label="失败" :value="taskCounts.failed" :icon="CloseCircleOutline" tone="red" />
+      <StatCard label="已完成" :value="taskCounts.completed" :icon="CheckmarkCircleOutline" tone="green" />
     </section>
 
-    <section class="task-summary-grid">
-      <div class="summary-card">
-        <span>总任务</span>
-        <strong>{{ taskList.length }}</strong>
-      </div>
-      <div class="summary-card">
-        <span>执行中</span>
-        <strong>{{ taskCounts.running }}</strong>
-      </div>
-      <div class="summary-card">
-        <span>失败</span>
-        <strong>{{ taskCounts.failed }}</strong>
-      </div>
-      <div class="summary-card">
-        <span>已完成</span>
-        <strong>{{ taskCounts.completed }}</strong>
-      </div>
-    </section>
-
-    <section class="task-list-panel">
-      <div v-if="taskList.length > 0" class="task-items">
+    <!-- 任务列表 -->
+    <PageCard>
+      <div v-if="taskList.length > 0" class="flex flex-col gap-3">
         <TaskCard
           v-for="task in taskList"
           :key="task.task_id"
@@ -42,116 +39,154 @@
           @detail="handleTaskDetail"
         />
       </div>
-      <el-empty v-else description="暂无任务记录" />
-    </section>
+      <EmptyState v-else title="暂无任务记录" />
+    </PageCard>
 
-    <el-drawer
-      v-model="taskDetailVisible"
-      title="任务详情"
-      size="42%"
-      :destroy-on-close="true"
-      append-to-body
-    >
-      <div class="task-detail-drawer" v-loading="taskDetailLoading">
-        <el-alert
-          v-if="taskDetailError"
-          type="error"
-          :title="taskDetailError"
-          show-icon
-          :closable="false"
-          class="task-detail-error"
-        />
+    <!-- 任务详情抽屉 -->
+    <n-drawer v-model:show="taskDetailVisible" :width="drawerWidth" placement="right">
+      <n-drawer-content title="任务详情" closable body-content-class="!p-4">
+        <n-spin :show="taskDetailLoading">
+          <div class="min-h-40 space-y-4">
+            <n-alert
+              v-if="taskDetailError"
+              type="error"
+              :title="taskDetailError"
+              :closable="false"
+            />
 
-        <template v-if="taskDetailData">
-          <el-descriptions :column="1" border class="task-detail-summary">
-            <el-descriptions-item label="任务ID">{{ taskDetailData.task_id || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="任务名称">{{ taskDetailData.task_name || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="任务类型">{{ taskDetailData.task_type || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="状态">{{ taskDetailData.status || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="创建时间">{{ taskDetailData.create_time || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="更新时间">{{ taskDetailData.update_time || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="进度">{{ taskDetailData.progress ?? 0 }}%</el-descriptions-item>
-            <el-descriptions-item label="文件统计">
-              成功 {{ taskDetailData.success_files || 0 }} / 总数 {{ taskDetailData.total_files || 0 }} / 失败 {{ taskDetailData.failed_files || 0 }}
-            </el-descriptions-item>
-            <el-descriptions-item label="错误信息">{{ taskDetailData.error_message || '-' }}</el-descriptions-item>
-          </el-descriptions>
+            <template v-if="taskDetailData">
+              <n-descriptions :column="1" bordered label-placement="left" size="small">
+                <n-descriptions-item label="任务ID">{{ taskDetailData.task_id || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="任务名称">{{ taskDetailData.task_name || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="任务类型">{{ taskDetailData.task_type || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="状态">{{ taskDetailData.status || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="创建时间">{{ taskDetailData.create_time || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="更新时间">{{ taskDetailData.update_time || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="进度">{{ taskDetailData.progress ?? 0 }}%</n-descriptions-item>
+                <n-descriptions-item label="文件统计">
+                  成功 {{ taskDetailData.success_files || 0 }} / 总数 {{ taskDetailData.total_files || 0 }} / 失败 {{ taskDetailData.failed_files || 0 }}
+                </n-descriptions-item>
+                <n-descriptions-item label="错误信息">{{ taskDetailData.error_message || '-' }}</n-descriptions-item>
+              </n-descriptions>
 
-          <div class="task-detail-section">
-            <div class="task-detail-section-title">执行步骤</div>
-            <el-timeline v-if="taskDetailSteps.length > 0" class="task-detail-steps">
-              <el-timeline-item
-                v-for="step in taskDetailSteps"
-                :key="step.step_key"
-                :type="taskStepTimelineType(step.status)"
-                :timestamp="step.finished_at || step.started_at || step.updated_at || ''"
-              >
-                <div class="task-step-title">{{ step.step_name || step.step_key }}</div>
-                <div class="task-step-meta">
-                  <el-tag size="small" :type="taskStepTagType(step.status)">{{ taskStepStatusLabel(step.status) }}</el-tag>
-                  <span v-if="step.output_summary">{{ step.output_summary }}</span>
-                  <span v-else-if="step.input_summary">{{ step.input_summary }}</span>
-                </div>
-                <div v-if="step.error_message" class="task-step-error">{{ step.error_message }}</div>
-              </el-timeline-item>
-            </el-timeline>
-            <el-empty v-else description="暂无步骤记录" />
-          </div>
-
-          <div class="task-detail-section">
-            <div class="task-detail-section-title">任务元数据</div>
-            <div v-if="taskDetailMetadataRows.length > 0" class="task-detail-meta-grid">
-              <div v-for="item in taskDetailMetadataRows" :key="item.key" class="task-detail-meta-item">
-                <div class="task-detail-meta-label">{{ item.label }}</div>
-                <div class="task-detail-meta-value">{{ item.value }}</div>
+              <!-- 执行步骤 -->
+              <div>
+                <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">执行步骤</div>
+                <n-timeline v-if="taskDetailSteps.length > 0">
+                  <n-timeline-item
+                    v-for="step in taskDetailSteps"
+                    :key="step.step_key"
+                    :type="taskStepTimelineType(step.status)"
+                    :time="step.finished_at || step.started_at || step.updated_at || ''"
+                  >
+                    <div class="mb-2 font-bold text-slate-800 dark:text-white">{{ step.step_name || step.step_key }}</div>
+                    <div class="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                      <n-tag size="small" :type="taskStepTagType(step.status)">{{ taskStepStatusLabel(step.status) }}</n-tag>
+                      <span v-if="step.output_summary">{{ step.output_summary }}</span>
+                      <span v-else-if="step.input_summary">{{ step.input_summary }}</span>
+                    </div>
+                    <div v-if="step.error_message" class="mt-2 text-sm leading-relaxed text-red-500 dark:text-red-400">
+                      {{ step.error_message }}
+                    </div>
+                  </n-timeline-item>
+                </n-timeline>
+                <EmptyState v-else title="暂无步骤记录" />
               </div>
-            </div>
-            <el-empty v-else description="暂无任务元数据" />
-          </div>
 
-          <div v-if="taskDetailFailedItems.length > 0" class="task-detail-section">
-            <div class="task-detail-section-title">失败文件</div>
-            <div v-if="taskDetailFailureGroups.length > 0" class="task-detail-failure-summary">
-              <div v-for="group in taskDetailFailureGroups" :key="group.key" class="task-detail-failure-group">
-                <div class="task-detail-failure-group-header">
-                  <div class="task-detail-failure-group-title">{{ group.label }}</div>
-                  <el-tag :type="group.tagType" size="small">{{ group.items.length }}</el-tag>
+              <!-- 任务元数据 -->
+              <div>
+                <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">任务元数据</div>
+                <div v-if="taskDetailMetadataRows.length > 0" class="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div
+                    v-for="item in taskDetailMetadataRows"
+                    :key="item.key"
+                    class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/5 dark:bg-white/5"
+                  >
+                    <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">{{ item.label }}</div>
+                    <div class="break-words text-sm leading-relaxed text-slate-700 dark:text-slate-200">{{ item.value }}</div>
+                  </div>
                 </div>
-                <div class="task-detail-failure-group-reason">{{ group.reason || '未提供失败原因' }}</div>
+                <EmptyState v-else title="暂无任务元数据" />
               </div>
-            </div>
-            <div class="task-detail-failed-list">
-              <div
-                v-for="item in taskDetailFailedItems"
-                :key="`${item.file_id || item.file_name}-${item.reason}`"
-                class="task-detail-failed-item"
-              >
-                <div class="task-detail-failed-main">
-                  <span class="task-detail-failed-name">{{ item.file_name }}</span>
-                  <span v-if="item.file_id" class="task-detail-failed-id">{{ item.file_id }}</span>
-                  <el-tag v-if="item.category" :type="taskDetailFailureTagType(item.category)" size="small">
-                    {{ taskDetailFailureTagLabel(item.category) }}
-                  </el-tag>
+
+              <!-- 失败文件 -->
+              <div v-if="taskDetailFailedItems.length > 0">
+                <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">失败文件</div>
+                <div v-if="taskDetailFailureGroups.length > 0" class="mb-3 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  <div
+                    v-for="group in taskDetailFailureGroups"
+                    :key="group.key"
+                    class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/5 dark:bg-white/5"
+                  >
+                    <div class="mb-1 flex flex-wrap items-center justify-between gap-2">
+                      <div class="text-sm font-semibold text-slate-700 dark:text-slate-200">{{ group.label }}</div>
+                      <n-tag :type="group.tagType" size="small">{{ group.items.length }}</n-tag>
+                    </div>
+                    <div class="break-words text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                      {{ group.reason || '未提供失败原因' }}
+                    </div>
+                  </div>
                 </div>
-                <div class="task-detail-failed-reason">{{ item.reason || '未提供失败原因' }}</div>
+                <div class="flex flex-col gap-2.5">
+                  <div
+                    v-for="item in taskDetailFailedItems"
+                    :key="`${item.file_id || item.file_name}-${item.reason}`"
+                    class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/5 dark:bg-white/5"
+                  >
+                    <div class="mb-1 flex flex-wrap items-center gap-2">
+                      <span class="break-all text-sm font-bold text-slate-800 dark:text-white">{{ item.file_name }}</span>
+                      <span v-if="item.file_id" class="break-all text-xs text-slate-400 dark:text-slate-500">{{ item.file_id }}</span>
+                      <n-tag v-if="item.category" :type="taskDetailFailureTagType(item.category)" size="small">
+                        {{ taskDetailFailureTagLabel(item.category) }}
+                      </n-tag>
+                    </div>
+                    <div class="break-words text-xs leading-relaxed text-red-500 dark:text-red-400">
+                      {{ item.reason || '未提供失败原因' }}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
+            </template>
           </div>
-        </template>
-      </div>
-    </el-drawer>
+        </n-spin>
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import {
+  NAlert,
+  NButton,
+  NDescriptions,
+  NDescriptionsItem,
+  NDrawer,
+  NDrawerContent,
+  NIcon,
+  NSpin,
+  NSwitch,
+  NTag,
+  NTimeline,
+  NTimelineItem,
+  useMessage
+} from 'naive-ui'
+import {
+  RefreshOutline,
+  ListOutline,
+  PlayCircleOutline,
+  CloseCircleOutline,
+  CheckmarkCircleOutline
+} from '@vicons/ionicons5'
 import TaskCard from '../../components/TaskCard.vue'
+import PageCard from '../../components/common/PageCard.vue'
+import StatCard from '../../components/common/StatCard.vue'
+import EmptyState from '../../components/common/EmptyState.vue'
 import { cancelTask, getTaskDetail, getUnifiedTaskList, resumeTask } from '../../utils/api/task'
 
 const route = useRoute()
+const message = useMessage()
 
 const taskLoading = ref(false)
 const taskList = ref([])
@@ -163,6 +198,14 @@ const taskDetailError = ref('')
 const activeTaskId = ref('')
 let timer = null
 let taskDetailTimer = null
+
+// 抽屉宽度：桌面 42%，移动端占满
+const drawerWidth = computed(() => {
+  if (typeof window !== 'undefined' && window.innerWidth < 768) {
+    return '100%'
+  }
+  return '42%'
+})
 
 const taskCounts = computed(() => {
   return taskList.value.reduce((acc, item) => {
@@ -247,16 +290,16 @@ const taskStepStatusLabel = (status) => {
 const taskStepTagType = (status) => {
   if (status === 'completed') return 'success'
   if (status === 'running') return 'primary'
-  if (status === 'failed') return 'danger'
+  if (status === 'failed') return 'error'
   if (status === 'skipped') return 'info'
   return 'warning'
 }
 
 const taskStepTimelineType = (status) => {
   if (status === 'completed') return 'success'
-  if (status === 'running') return 'primary'
-  if (status === 'failed') return 'danger'
-  return 'info'
+  if (status === 'running') return 'info'
+  if (status === 'failed') return 'error'
+  return 'default'
 }
 
 const taskDetailFailedItems = computed(() => {
@@ -303,14 +346,14 @@ const taskDetailFailureGroups = computed(() => {
   const getGroupMeta = (key) => {
     const meta = {
       identify_failed: { label: '识别失败', tagType: 'warning' },
-      organize_failed: { label: '整理失败', tagType: 'danger' },
-      cloud115_auth_failed: { label: '115 账号失效', tagType: 'danger' },
-      cloud115_failed: { label: '115 操作失败', tagType: 'danger' },
+      organize_failed: { label: '整理失败', tagType: 'error' },
+      cloud115_auth_failed: { label: '115 账号失效', tagType: 'error' },
+      cloud115_failed: { label: '115 操作失败', tagType: 'error' },
       scan_failed: { label: '扫描失败', tagType: 'warning' },
       target_path: { label: '目标路径异常', tagType: 'warning' },
       partial_failed: { label: '部分失败', tagType: 'warning' },
       conflict_skipped: { label: '冲突跳过', tagType: 'warning' },
-      panic: { label: '异常中断', tagType: 'danger' },
+      panic: { label: '异常中断', tagType: 'error' },
       other: { label: '其他失败', tagType: 'info' }
     }
     return meta[key] || meta.other
@@ -353,7 +396,7 @@ const taskDetailFailureTagLabel = (category) => {
 const taskDetailFailureTagType = (category) => {
   const key = String(category || '').trim()
   if (key === 'identify_failed' || key === 'scan_failed' || key === 'target_path') return 'warning'
-  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'danger'
+  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'error'
   if (key === 'partial_failed') return 'warning'
   return 'info'
 }
@@ -404,7 +447,7 @@ const loadTasks = async () => {
     const payload = response.data?.data?.data || response.data?.data || response.data || []
     taskList.value = Array.isArray(payload) ? payload : []
   } catch (error) {
-    ElMessage.error('加载任务列表失败')
+    message.error('加载任务列表失败')
   } finally {
     taskLoading.value = false
   }
@@ -446,20 +489,20 @@ const handleTaskDetail = async (taskId) => {
 const handleCancelTask = async (taskId) => {
   try {
     await cancelTask(taskId)
-    ElMessage.success('任务已取消')
+    message.success('任务已取消')
     await loadTasks()
   } catch (error) {
-    ElMessage.error('取消任务失败')
+    message.error('取消任务失败')
   }
 }
 
 const handleResumeTask = async (taskId) => {
   try {
     await resumeTask(taskId)
-    ElMessage.success('任务已重新执行')
+    message.success('任务已重新执行')
     await loadTasks()
   } catch (error) {
-    ElMessage.error('恢复任务失败')
+    message.error('恢复任务失败')
   }
 }
 
@@ -500,195 +543,3 @@ onMounted(async () => {
   await openRouteTask()
 })
 </script>
-
-<style scoped>
-.task-center {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.page-hero,
-.task-summary-grid,
-.task-list-panel {
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-  border-radius: 24px;
-}
-
-:global(.dark) .page-hero,
-:global(.dark) .task-summary-grid,
-:global(.dark) .task-list-panel {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-.page-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 24px;
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.page-hero h2 {
-  margin: 10px 0 6px;
-  font-size: 32px;
-}
-
-.page-hero p {
-  color: #6f6457;
-}
-
-.page-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.task-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 1px;
-  padding: 1px;
-}
-
-.summary-card {
-  padding: 18px 22px;
-}
-
-.summary-card span {
-  display: block;
-  color: #6f6457;
-  font-size: 13px;
-}
-
-.summary-card strong {
-  display: block;
-  margin-top: 10px;
-  font-size: 34px;
-}
-
-.task-list-panel {
-  padding: 20px;
-}
-
-.task-items {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.task-detail-drawer {
-  padding-right: 8px;
-}
-
-.task-detail-error,
-.task-detail-summary,
-.task-detail-section {
-  margin-bottom: 16px;
-}
-
-.task-detail-section-title {
-  margin-bottom: 12px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.task-detail-meta-grid,
-.task-detail-failure-summary {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 10px;
-}
-
-.task-detail-meta-item,
-.task-detail-failure-group,
-.task-detail-failed-item {
-  padding: 12px 14px;
-  border-radius: 12px;
-  border: 1px solid #ebeef5;
-  background: #f7f8fa;
-}
-
-.task-detail-meta-label {
-  margin-bottom: 4px;
-  color: #909399;
-  font-size: 12px;
-}
-
-.task-detail-meta-value,
-.task-detail-failure-group-reason,
-.task-detail-failed-reason {
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.task-detail-failed-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.task-detail-failed-main,
-.task-detail-failure-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.task-detail-failed-name {
-  font-weight: 700;
-}
-
-.task-detail-failed-id {
-  color: #909399;
-  font-size: 12px;
-}
-
-.task-detail-steps {
-  padding-left: 4px;
-}
-
-.task-step-title {
-  margin-bottom: 8px;
-  font-weight: 700;
-}
-
-.task-step-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  color: #606266;
-}
-
-.task-step-error {
-  margin-top: 8px;
-  color: #c45656;
-  line-height: 1.6;
-}
-
-@media (max-width: 860px) {
-  .page-hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .task-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-</style>

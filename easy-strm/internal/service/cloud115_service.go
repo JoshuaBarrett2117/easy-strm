@@ -10,14 +10,14 @@ import (
 )
 
 type Cloud115Service struct {
-	cloud115DAO          *dao.Cloud115DAO
-	notificationConfigDAO *dao.NotificationConfigDAO
+	cloud115DAO            *dao.Cloud115DAO
+	notificationConfigDAO  *dao.NotificationConfigDAO
 	instantTransferService *InstantTransferService
 }
 
 func NewCloud115Service(cloud115DAO *dao.Cloud115DAO, notificationConfigDAO *dao.NotificationConfigDAO) *Cloud115Service {
 	return &Cloud115Service{
-		cloud115DAO:          cloud115DAO,
+		cloud115DAO:           cloud115DAO,
 		notificationConfigDAO: notificationConfigDAO,
 	}
 }

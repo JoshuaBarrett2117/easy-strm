@@ -1,27 +1,23 @@
 <template>
-  <router-view />
+  <n-config-provider
+    :theme="isDark ? darkTheme : null"
+    :theme-overrides="isDark ? themeOverridesDark : themeOverridesLight"
+    :locale="zhCN"
+    :date-locale="dateZhCN"
+    class="h-full"
+  >
+    <n-dialog-provider>
+      <n-message-provider>
+        <router-view />
+      </n-message-provider>
+    </n-dialog-provider>
+  </n-config-provider>
 </template>
 
 <script setup>
+import { NConfigProvider, NDialogProvider, NMessageProvider, darkTheme, zhCN, dateZhCN } from 'naive-ui'
+import { useTheme } from './composables/useTheme'
+import { themeOverridesDark, themeOverridesLight } from './theme'
 
+const { isDark } = useTheme()
 </script>
-
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html {
-  font-family: "Avenir Next", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif;
-}
-
-body {
-  background-color: #f5f5f5;
-}
-
-#app {
-  height: 100vh;
-}
-</style>

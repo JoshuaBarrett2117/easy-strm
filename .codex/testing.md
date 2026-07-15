@@ -1,5 +1,20 @@
 # Testing Log
 
+## 2026-07-15/16 重构验收与 E2E 选择器迁移
+
+- `go test ./...`（`easy-strm`）：通过。
+- `go vet ./...`（`easy-strm`）：通过。
+- `gofmt -l`（全部 Go 文件）：通过，无未格式化文件。
+- `npm run build`（`easy-strm-front`）：通过，4231 modules transformed。
+- `npm run e2e:resource-platform`：通过，覆盖同步入库、资产台账、STRM 任务深链、待处理修正与重新入库。
+- `npm run e2e:organize-preview-refresh`：通过，真实后端下预览完成后遮罩退出、表格出现、刷新按钮恢复。
+- `npm run e2e:organize-preview-cancel`：通过，真实后端下预览状态轮询启动，关闭后停止，重新打开无残留 loading。
+- `node scripts/e2e-fullflow.mjs`：通过，40/40 PASS。
+- `node scripts/e2e-cloud115-strm-generate.mjs`：核心用例 6 PASS、0 FAIL；覆盖真实登录、115 浏览、TMDB 识别、异步整理任务完成、STRM 自动匹配、STRM 文件落盘。首次清理源 ID 已过期，修正为当前源 `186` 后删除两次测试远端目录。
+- `node --check scripts/e2e-*.mjs`：全部通过。
+- `rg '\.el-' scripts -g 'e2e-*.mjs'`：无匹配。
+- 首次 `go test ./...` 失败原因：未跟踪的一次性 `codex_e2e_user.go` 与正式入口重复 `main()`；删除临时工具后复跑通过。
+
 ## 环境
 
 - 日期：2026-04-18
@@ -87,6 +102,145 @@
 
 - 命令：`npm run build`
 - 结果：通过
+
+## 2026-05-27 功能盘点与浏览器验证
+
+- 任务：整理当前项目功能细节，并基于功能细节进行一轮浏览器测试。
+- 执行者：Codex。
+- 功能盘点依据：`README.md`、`docs/产品与架构.md`、`docs/开发与测试.md`、`easy-strm-front/src/main.js`、`easy-strm-front/src/views/**`、`easy-strm-front/src/utils/api/**`、`easy-strm/auth.go`、`easy-strm/auth_routes_public.go`。
+- 环境检查：
+  - Docker Desktop Linux daemon 未运行，`docker ps` 无法连接 `npipe:////./pipe/dockerDesktopLinuxEngine`。
+  - 本机 `127.0.0.1:5432` PostgreSQL 不通。
+  - 本机 `127.0.0.1:6379` Redis 不通。
+  - 因数据库与 Redis 不可用，无法启动真实后端完成真实账号/真实 API 浏览器全链路。
+- 已执行验证：
+  - 命令：`npm run build`
+  - 工作目录：`easy-strm-front`
+  - 结果：通过，Vite 生产构建完成。
+  - 命令：`npm run e2e:resource-platform`
+  - 工作目录：`easy-strm-front`
+  - 结果：通过，输出 `ok=true`，覆盖 `sync`、`ledger`、`strm task link`、`pending identify and run`。
+  - 命令：`go test ./...`
+  - 工作目录：`easy-strm`
+  - 结果：通过，所有 Go 包测试通过。
+- 浏览器工具状态：
+  - 已按 Browser 插件连接 Codex in-app Browser。
+  - 访问 `http://127.0.0.1:3001` 时被企业网络策略拦截，未继续绕过策略。
+  - 本轮浏览器成功路径以仓库内置 Playwright E2E `npm run e2e:resource-platform` 为准。
+
+## 2026-05-27 真实后端本地启动浏览器验证
+
+- 任务：按用户提供的远端 PostgreSQL/Redis 依赖，本地启动后端与前端并进行浏览器测试。
+- 执行者：Codex。
+- 环境：
+  - 后端：`http://127.0.0.1:8082`
+  - 前端：`http://127.0.0.1:3001`
+  - PostgreSQL：远端 `easy_strm` 库，端口连通。
+  - Redis：远端实例，端口连通。
+- 启动结果：
+  - 后端 `go run .` 启动成功，数据库初始化、Redis 连接、Cron 加载和路由注册完成。
+  - 前端 `npm run dev -- --host 127.0.0.1 --port 3001 --strictPort` 启动成功。
+  - 后端启动日志提示历史媒体源 `测试本地媒体源` 的本地目录不存在，该告警不阻塞服务启动。
+- 登录准备：
+  - 远端库中 `admin/admin` 不是有效登录。
+  - 创建临时测试用户执行浏览器验证，验证完成后已删除该用户。
+- 浏览器脚本：
+  - 文件：`.codex/real-backend-browser-e2e-2026-05-27.mjs`
+  - 结果：通过，`ok=true`。
+  - 覆盖：登录、13 个后台路由渲染、同步入库页临时媒体源展示、触发全量同步、资产台账显示测试文件。
+- 页面巡检：
+  - `/dashboard/home`：通过。
+  - `/dashboard/media-library`：通过。
+  - `/dashboard/sync-tasks`：通过。
+  - `/dashboard/pending-media`：通过。
+  - `/dashboard/tasks`：通过。
+  - `/dashboard/media-manager`：通过。
+  - `/dashboard/strm-config`：通过。
+  - `/dashboard/cloud115`：通过。
+  - `/dashboard/category-strategy`：通过。
+  - `/dashboard/settings`：通过。
+  - `/dashboard/system-logs`：通过。
+  - `/dashboard/network`：通过。
+  - `/dashboard/cache`：通过。
+- 核心链路：
+  - 临时本地媒体源创建成功。
+  - 同步入库页能显示临时媒体源。
+  - 点击全量同步后页面出现同步/任务反馈。
+  - 媒体资产台账能显示测试文件 `Codex.Real.Backend.2026.1080p.mkv`。
+  - 临时媒体源由脚本清理。
+- 截图：
+  - `debug/real-backend-browser-20260527/login-dashboard.png`
+  - `debug/real-backend-browser-20260527/dashboard_home.png`
+  - `debug/real-backend-browser-20260527/dashboard_media-manager.png`
+  - `debug/real-backend-browser-20260527/dashboard_cloud115.png`
+  - `debug/real-backend-browser-20260527/core-flow-library.png`
+- 观察：
+  - 浏览器 console 捕获到 2 条 `403 Forbidden` 资源加载错误，未触发 `pageerror`，且路由巡检均未出现页面级网络错误。
+
+## 2026-05-27 按钮矩阵浏览器验证
+
+- 任务：继续验证主要按钮是否可用。
+- 执行者：Codex。
+- 脚本：`.codex/button-matrix-e2e-2026-05-27.mjs`
+- 环境：
+  - 后端：`http://127.0.0.1:8082`
+  - 前端：`http://127.0.0.1:3001`
+  - 数据库与 Redis：用户提供的远端实例。
+- 结果：通过，`ok=true`，`failed=[]`。
+- 覆盖通过的按钮组：
+  - 登录页按钮。
+  - 顶部快捷入口与主题切换按钮。
+  - 首页 4 个快捷入口。
+  - 同步入库：刷新媒体源、全量同步、增量同步、执行入库、查看资产台账。
+  - 资产台账：同步入库、待处理、行内入库、STRM、刷新库。
+  - 待处理：查看资产台账、修正弹窗保存路径、忽略路径触达。
+  - 任务中心：刷新与详情按钮触达。
+  - 文件工作台：新增媒体源弹窗、媒体源浏览弹窗、文件浏览刷新。
+  - 115 云管理：新增账号弹窗、扫码登录弹窗、账号编辑弹窗、账号测试按钮触达。
+  - 整理规则：刷新、新增取消、选择分类、删除取消。
+  - STRM 配置：新增、编辑、删除取消。
+  - 系统设置：重置、保存 TMDB 配置、测试 Emby 连接。
+  - 系统日志：刷新、自动刷新。
+  - 网络测试：重新探测。
+  - 缓存管理：刷新概览、清理全部缓存取消。
+- Warning：
+  - 任务中心“详情”按钮可点击，但自动化未观察到详情抽屉打开，需要单独排查。
+- 清理：
+  - 临时 STRM 配置已删除。
+  - 临时分类已删除。
+  - 临时媒体源已删除。
+  - 临时测试用户已删除并确认无法登录。
+- 截图：
+  - `debug/button-matrix-20260527/button-matrix-final.png`
+- 观察：
+  - 浏览器 console 捕获到 3 条 `403 Forbidden` 资源加载错误，未触发 `pageerror`。
+
+## 2026-05-15
+
+- 命令：`go test ./...`
+- 工作目录：`easy-strm`
+- 结果：通过，新增 115 事件流辅助函数与 JWT Token 单元测试均通过。
+- 命令：`go vet ./...`
+- 工作目录：`easy-strm`
+- 结果：通过。
+- 命令：`npm run build`
+- 工作目录：`easy-strm-front`
+- 结果：通过，Vite 生产构建完成。
+- 命令：`npm run e2e:resource-platform`
+- 工作目录：`easy-strm-front`
+- 结果：通过，返回 `ok=true`，覆盖同步、台账、STRM 任务深链、待处理识别与入库。
+- 命令：`npm run e2e:organize-preview-refresh`
+- 工作目录：`easy-strm-front`
+- 结果：通过，返回 `ok=true`，整理预览刷新后表格与操作按钮状态正常。
+- 命令：`npm run e2e:organize-preview-cancel`
+- 工作目录：`easy-strm-front`
+- 结果：通过，返回 `ok=true`，预览取消状态轮询正常。
+- 命令：`docker compose config`
+- 工作目录：项目根目录
+- 结果：通过，Compose 配置可解析。
+- 命令：`docker build -t easy-strm:codex-check .`
+- 工作目录：项目根目录
+- 结果：未执行成功，环境阻塞为 Docker Desktop Linux daemon 未运行：`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`。
 
 ## 2026-04-24
 
@@ -192,6 +346,42 @@
 - 命令：`docker build -t easy-strm:codex-check .`
 - 工作目录：项目根目录
 - 结果：未执行成功，环境阻塞为 Docker Desktop Linux daemon 未运行：`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`。
+
+## 2026-05-15 大文件继续深拆验证
+
+- 命令：`go test ./internal/controller`
+- 工作目录：`easy-strm`
+- 结果：通过，覆盖 controller 拆分后的包级编译与新增细粒度测试。
+- 命令：`go test ./internal/dao`
+- 工作目录：`easy-strm`
+- 结果：通过，覆盖 TMDB/更名预设/媒体文件缓存 DAO 拆分。
+- 命令：`go test ./internal/service`
+- 工作目录：`easy-strm`
+- 结果：通过，覆盖媒体源服务、重命名服务、TMDB、watch、scrape 等服务拆分。
+- 命令：`gofmt -l (rg --files -g "*.go")`
+- 工作目录：`easy-strm`
+- 结果：通过，无未格式化 Go 文件。
+- 命令：`go test ./...`
+- 工作目录：`easy-strm`
+- 结果：通过，所有 Go 包测试通过。
+- 命令：`go vet ./...`
+- 工作目录：`easy-strm`
+- 结果：通过。
+- 命令：`npm run build`
+- 工作目录：`easy-strm-front`
+- 结果：通过，Vite 生产构建完成。
+- 命令：`npm run e2e:resource-platform`
+- 工作目录：`easy-strm-front`
+- 结果：首次因重复文本 strict mode 失败，修复脚本定位后复跑通过，输出 `ok=true`。
+- 命令：`npm run e2e:organize-preview-refresh` / `npm run e2e:organize-preview-cancel`
+- 工作目录：`easy-strm-front`
+- 结果：当前环境未运行后端 `127.0.0.1:8082`，登录等待 `/dashboard/**` 超时；该阻塞为本地服务依赖不可用，不是本轮重构引入的编译或构建失败。
+- 命令：`docker compose config`
+- 工作目录：项目根目录
+- 结果：通过。
+- 命令：`docker build -t easy-strm:codex-check .`
+- 工作目录：项目根目录
+- 结果：未执行成功，Docker Desktop Linux daemon 未运行：`failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine`。
 ## 2026-04-19
 
 - 命令：`npm run build`

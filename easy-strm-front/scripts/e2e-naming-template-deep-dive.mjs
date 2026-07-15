@@ -61,32 +61,32 @@ function unwrapData(payload) {
 }
 
 async function waitForSuccessMessage(page, text) {
-  const message = page.locator(".el-message").filter({ hasText: text }).last();
+  const message = page.locator(".n-message").filter({ hasText: text }).last();
   await message.waitFor({ timeout: 15000 });
 }
 
 async function openSourceBrowser(page, sourceName) {
   await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-  const sourceRow = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+  const sourceRow = page.locator("tbody tr").filter({ hasText: sourceName }).first();
   await sourceRow.waitFor({ timeout: 15000 });
-  await sourceRow.locator(".el-button--primary").first().click();
-  const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+  await sourceRow.locator("button").first().click();
+  const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
   await browserDialog.waitFor({ timeout: 15000 });
   return browserDialog;
 }
 
 async function triggerBatchRenameForFile(page, browserDialog, fileName) {
-  const row = browserDialog.locator(".el-table__row").filter({ hasText: fileName }).first();
+  const row = browserDialog.locator("tbody tr").filter({ hasText: fileName }).first();
   await row.waitFor({ timeout: 15000 });
-  await row.locator(".el-checkbox").click();
-  await browserDialog.locator(".el-button").filter({ hasText: "批量重命名" }).click();
-  const renameDialog = page.locator(".el-dialog").filter({ hasText: "重命名预览" }).last();
+  await row.locator('[role="checkbox"]').click();
+  await browserDialog.locator("button").filter({ hasText: "批量重命名" }).click();
+  const renameDialog = page.locator('[role="dialog"]').filter({ hasText: "重命名预览" }).last();
   await renameDialog.waitFor({ timeout: 15000 });
   return renameDialog;
 }
 
 async function executeRenameAndWait(page, renameDialog) {
-  await renameDialog.locator(".dialog-footer .el-button--primary").click();
+  await renameDialog.locator("button").click();
   await waitForSuccessMessage(page, "批量重命名");
   await page.waitForTimeout(1200);
 }
@@ -107,7 +107,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
     addCase("TC-NAMING-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -125,13 +125,13 @@ async function run() {
     originalSettings = unwrapData(await apiJson(settingsResp)) || {};
 
     await page.goto(`${FRONTEND_URL}/dashboard/settings`, { waitUntil: "networkidle" });
-    await page.locator(".header-title, .card-header").filter({ hasText: "系统配置" }).first().waitFor({ timeout: 15000 });
+    await page.getByRole("heading", { name: "系统配置", exact: true }).waitFor({ timeout: 15000 });
 
-    const movieInput = page.locator(".el-form-item").filter({ hasText: "电影命名模板" }).locator("input").first();
-    const tvInput = page.locator(".el-form-item").filter({ hasText: "电视剧命名模板" }).locator("input").first();
+    const movieInput = page.locator(".n-form-item").filter({ hasText: "电影命名模板" }).locator("input").first();
+    const tvInput = page.locator(".n-form-item").filter({ hasText: "电视剧命名模板" }).locator("input").first();
     await movieInput.fill(MOVIE_TEMPLATE);
     await tvInput.fill(TV_TEMPLATE);
-    await page.locator(".form-actions .el-button--primary").filter({ hasText: "保存配置" }).last().click();
+    await page.getByRole("button", { name: "保存配置" }).last().click();
     await waitForSuccessMessage(page, "配置保存成功");
     const settingsShot = await saveShot(page, "02_settings_saved");
 
@@ -195,7 +195,7 @@ async function run() {
       await saveShot(page, "05_tv_done")
     );
 
-    await browserDialog.locator(".el-button").filter({ hasText: "刷新" }).click();
+    await browserDialog.locator("button").filter({ hasText: "刷新" }).click();
     await page.waitForTimeout(800);
     const movieRenameDialog = await triggerBatchRenameForFile(page, browserDialog, "Template.Movie.2024.1080p.mkv");
     const moviePreviewText = await movieRenameDialog.textContent();

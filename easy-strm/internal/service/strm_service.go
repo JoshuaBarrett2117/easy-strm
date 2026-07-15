@@ -233,6 +233,7 @@ func (s *StrmService) CountFilesByConfigID(strmConfigID int) (int, error) {
 // Args:
 //   - cloud115ID: 115 账号 ID
 //   - targetPath: 整理后的目标路径（如 /已整理/电影/xxx）
+//
 // Returns:
 //   - *domain.StrmConfig: 匹配到的 STRM 配置，未找到返回 nil
 //   - error: 查询错误

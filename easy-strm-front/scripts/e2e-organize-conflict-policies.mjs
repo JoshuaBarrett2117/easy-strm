@@ -51,18 +51,18 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout: 20000 });
 }
 
 async function findDialogByTitle(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.locator('[role="dialog"]').filter({ hasText: title }).last();
   await dialog.waitFor({ timeout: 20000 });
   return dialog;
 }
 
 function labeledField(dialog, label) {
-  return dialog.locator(".el-form-item").filter({ hasText: label });
+  return dialog.locator(".n-form-item").filter({ hasText: label });
 }
 
 async function setInputValue(locator, value) {
@@ -73,20 +73,20 @@ async function setInputValue(locator, value) {
 }
 
 async function applyMovieManualIdentify(page, organizeDialog, fileName, title, year) {
-  const row = organizeDialog.locator(".el-table__row").filter({ hasText: fileName }).first();
-  await row.locator(".el-button").filter({ hasText: "手动识别" }).click();
+  const row = organizeDialog.locator("tbody tr").filter({ hasText: fileName }).first();
+  await row.locator("button").filter({ hasText: "手动识别" }).click();
   const manualDialog = await findDialogByTitle(page, "手动识别修正");
-  await manualDialog.locator(".el-select").first().click();
-  await page.locator(".el-select-dropdown__item").filter({ hasText: "电影" }).last().click();
+  await manualDialog.locator(".n-select").first().click();
+  await page.locator(".n-base-select-option").filter({ hasText: "电影" }).last().click();
   await setInputValue(labeledField(manualDialog, "标题").locator("input").first(), title);
-  await setInputValue(labeledField(manualDialog, "年份").locator(".el-input-number input").first(), year);
-  await manualDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "应用到预览" }).click();
+  await setInputValue(labeledField(manualDialog, "年份").locator(".n-input-number input").first(), year);
+  await manualDialog.locator("button").filter({ hasText: "应用到预览" }).click();
   await manualDialog.waitFor({ state: "hidden", timeout: 25000 });
   await waitForMessage(page, "预览完成");
 }
 
 async function closeDialog(dialog) {
-  await dialog.locator(".dialog-footer .el-button").filter({ hasText: "关闭" }).click();
+  await dialog.locator("button").filter({ hasText: "关闭" }).click();
   await dialog.waitFor({ state: "hidden", timeout: 15000 });
 }
 
@@ -132,26 +132,26 @@ async function runPolicy({ page, api, policy, label, sourceDir, targetDir, sourc
 
   try {
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: `conflict_${policy}_${stamp}` }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: `conflict_${policy}_${stamp}` }).first();
     await sourceRow.waitFor({ timeout: 20000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.locator("button").first().click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 20000 });
-    const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const fileRow = browserDialog.locator("tbody tr").filter({ hasText: sourceName }).first();
     await fileRow.waitFor({ timeout: 20000 });
-    await fileRow.locator(".el-checkbox").click();
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await fileRow.locator('[role="checkbox"]').click();
+    await browserDialog.locator("button").filter({ hasText: "批量整理" }).click();
 
     const organizeDialog = await findDialogByTitle(page, "批量整理");
-    await organizeDialog.locator(".el-form-item").filter({ hasText: "冲突策略" }).locator(".el-select").click();
-    await page.locator(".el-select-dropdown__item").filter({ hasText: label }).last().click();
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.locator(".n-form-item").filter({ hasText: "冲突策略" }).locator(".n-select").click();
+    await page.locator(".n-base-select-option").filter({ hasText: label }).last().click();
+    await organizeDialog.locator("button").filter({ hasText: "刷新预览" }).click();
     await waitForMessage(page, "预览完成");
     await applyMovieManualIdentify(page, organizeDialog, sourceName, "Conflict Policy Movie", 2024);
     await saveShot(page, `${policy}_preview`);
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
+    await organizeDialog.locator("button").filter({ hasText: "执行整理" }).click();
     await waitForMessage(page, "整理完成");
     const resultDialog = await findDialogByTitle(page, "整理结果");
     const dialogText = ((await resultDialog.textContent()) || "").replace(/\s+/g, " ");
@@ -185,7 +185,7 @@ async function runPolicy({ page, api, policy, label, sourceDir, targetDir, sourc
     );
 
     await closeDialog(resultDialog);
-    const fileBrowserClose = browserDialog.locator(".el-dialog__headerbtn").last();
+    const fileBrowserClose = browserDialog.locator('[aria-label="close"]').last();
     await fileBrowserClose.click().catch(() => {});
   } finally {
     await api.delete(`/media/sources/${sourceId}`).catch(() => {});
@@ -206,7 +206,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-ORG-CONFLICT-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 

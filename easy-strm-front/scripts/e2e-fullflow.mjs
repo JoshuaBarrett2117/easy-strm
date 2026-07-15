@@ -120,7 +120,7 @@ async function run() {
 
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
     addCase("TC-AUTH-002", "登录成功进入 dashboard", "PASS", "", await saveArtifact(page, "02_after_login"));
 
@@ -254,62 +254,59 @@ async function run() {
     addCase("TC-UI-001", "媒体管理页面加载（包含表格）", "PASS", "", await saveArtifact(page, "04_media_manager_loaded"));
 
     try {
-      const sourceRow = page.locator(".el-table__row").filter({ hasText: createSourcePayload.name }).first();
+      const sourceRow = page.locator("tbody tr").filter({ hasText: createSourcePayload.name }).first();
       await sourceRow.waitFor({ timeout: 15000 });
-      await sourceRow.locator("button").first().click();
+      await sourceRow.getByRole("button", { name: "浏览" }).click();
 
-      const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+      const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
       await browserDialog.waitFor({ timeout: 15000 });
-      const videoRow = browserDialog.locator(".el-table__row").filter({ hasText: ".mkv" }).first();
+      const videoRow = browserDialog.getByRole("row").filter({ hasText: ".mkv" }).first();
       await videoRow.waitFor({ timeout: 15000 });
-      await videoRow.locator(".el-checkbox").first().click();
-      await browserDialog.locator(".organize-primary-btn").click();
+      await videoRow.getByRole("checkbox").click();
+      await browserDialog.getByRole("button", { name: /批量整理/ }).click();
 
-      const organizeDialog = page.locator(".el-dialog").filter({ has: page.locator(".organize-container") }).last();
+      const organizeDialog = page.getByRole("dialog").filter({ hasText: "批量整理工作流" });
       await organizeDialog.waitFor({ timeout: 15000 });
-      const previewButton = organizeDialog.locator(".dialog-footer button").nth(1);
+      const previewButton = organizeDialog.getByRole("button", { name: "刷新预览" });
       await previewButton.click();
 
       await page.waitForFunction(() => {
-        const dialogs = Array.from(document.querySelectorAll(".el-dialog"));
-        const dialog = dialogs.find((item) => item.querySelector(".organize-container"));
+        const dialogs = Array.from(document.querySelectorAll('[role="dialog"]'));
+        const dialog = dialogs.find((item) => item.textContent?.includes("批量整理工作流"));
         if (!dialog) return false;
 
-        const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button"));
-        const button = footerButtons[1];
+        const button = Array.from(dialog.querySelectorAll("button"))
+          .find((item) => item.textContent?.includes("刷新预览"));
         if (!button) return false;
 
-        const loadingMask = dialog.querySelector(".organize-container .el-loading-mask");
         const hasPreviewState = dialog.textContent?.includes("识别失败")
           || dialog.textContent?.includes("可处理")
           || dialog.textContent?.includes("原文件名")
           || dialog.textContent?.includes("手动识别");
 
-        return !button.classList.contains("is-loading") && !loadingMask && hasPreviewState;
+        return !button.disabled && hasPreviewState;
       }, { timeout: 20000 });
 
       const previewState = await organizeDialog.evaluate((dialog) => {
-        const footerButtons = Array.from(dialog.querySelectorAll(".dialog-footer button")).map((button) => ({
-          text: button.textContent || "",
-          className: button.className
-        }));
+        const refreshButton = Array.from(dialog.querySelectorAll("button"))
+          .find((button) => button.textContent?.includes("刷新预览"));
         return {
-          hasLoadingMask: Boolean(dialog.querySelector(".organize-container .el-loading-mask")),
-          hasPreviewTable: Boolean(dialog.querySelector(".el-table")),
+          hasLoadingMask: Boolean(dialog.querySelector('[aria-busy="true"]')),
+          hasPreviewTable: Boolean(dialog.querySelector("table")),
           hasManualAction: (dialog.textContent || "").includes("手动识别"),
-          refreshButtonClass: footerButtons[1]?.className || ""
+          refreshButtonDisabled: Boolean(refreshButton?.disabled)
         };
       });
 
       const pass = !previewState.hasLoadingMask
         && (previewState.hasPreviewTable || previewState.hasManualAction)
-        && !previewState.refreshButtonClass.includes("is-loading");
+        && !previewState.refreshButtonDisabled;
 
       addCase(
         "TC-ORG-UI-001",
         "整理弹窗刷新预览后退出加载态",
         pass ? "PASS" : "FAIL",
-        `mask=${previewState.hasLoadingMask} table=${previewState.hasPreviewTable} btn=${previewState.refreshButtonClass || "N/A"}`,
+        `mask=${previewState.hasLoadingMask} table=${previewState.hasPreviewTable} refresh_disabled=${previewState.refreshButtonDisabled}`,
         await saveArtifact(page, "04b_organize_preview_refresh")
       );
     } catch (err) {

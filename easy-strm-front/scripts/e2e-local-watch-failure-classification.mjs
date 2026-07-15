@@ -89,7 +89,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-LOCAL-WATCH-FAIL-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -142,7 +142,7 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/tasks`, { waitUntil: "networkidle" });
-    const taskCard = page.locator(".task-card").filter({ hasText: mediaSourceName }).first();
+    const taskCard = page.getByTestId("task-card").filter({ hasText: mediaSourceName }).first();
     await taskCard.waitFor({ timeout: 20000 });
     const taskCardText = (await taskCard.textContent()) || "";
     const cardPass = taskCardText.includes("识别失败") || taskCardText.includes("失败文件");
@@ -154,8 +154,8 @@ async function run() {
       await saveShot(page, "02_task_card")
     );
 
-    await taskCard.locator(".el-button").filter({ hasText: "详情" }).click();
-    const drawer = page.locator(".el-drawer").filter({ hasText: "任务详情" }).last();
+    await taskCard.locator("button").filter({ hasText: "详情" }).click();
+    const drawer = page.locator('[role="dialog"]').filter({ hasText: "任务详情" }).last();
     await drawer.waitFor({ timeout: 20000 });
     const drawerText = (await drawer.textContent()) || "";
     const detailPass = drawerText.includes("识别失败") && drawerText.includes(injectedFileName);

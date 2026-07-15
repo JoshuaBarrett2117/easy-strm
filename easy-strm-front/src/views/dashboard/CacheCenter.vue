@@ -1,76 +1,67 @@
 <template>
-  <div class="cache-center">
-    <section class="cache-hero">
-      <div>
-        <div class="page-kicker">Cache Center</div>
-        <h2>缓存管理</h2>
-        <p>集中查看识别、刮削和 Redis 热点缓存，并支持按类型手动清理。</p>
-      </div>
-      <div class="cache-hero-actions">
-        <el-button :icon="Refresh" @click="loadOverview" :loading="loading">刷新概览</el-button>
-        <el-button type="danger" plain @click="handleClear('all', '全部缓存')" :loading="clearingScope === 'all'">
+  <div class="space-y-4">
+    <!-- 页头 -->
+    <PageCard title="缓存管理" subtitle="Cache Center">
+      <template #action>
+        <n-button :loading="loading" @click="loadOverview">
+          <template #icon>
+            <n-icon :component="RefreshOutline" />
+          </template>
+          刷新概览
+        </n-button>
+        <n-button type="error" secondary :loading="clearingScope === 'all'" @click="handleClear('all', '全部缓存')">
           一键清理
-        </el-button>
-      </div>
+        </n-button>
+      </template>
+      <p class="text-sm text-slate-400 dark:text-slate-500">
+        集中查看识别、刮削和 Redis 热点缓存，并支持按类型手动清理。
+      </p>
+    </PageCard>
+
+    <!-- 统计卡 -->
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        label="Redis 状态"
+        :value="overview.redis_connected ? '已连接' : '未连接'"
+        :icon="PulseOutline"
+        :tone="overview.redis_connected ? 'green' : 'red'"
+      />
+      <StatCard label="Redis Key 总数" :value="formatCount(overview.redis_total_keys)" :icon="KeyOutline" tone="cyan" />
+      <StatCard label="Redis 内存" :value="overview.redis_memory || '-'" :icon="HardwareChipOutline" tone="violet" />
+      <StatCard label="已纳管缓存" :value="overview.groups.length" :icon="LayersOutline" tone="amber" />
     </section>
 
-    <section class="cache-summary-grid">
-      <div class="summary-card">
-        <span>Redis 状态</span>
-        <strong>{{ overview.redis_connected ? '已连接' : '未连接' }}</strong>
+    <!-- 缓存分组 -->
+    <PageCard>
+      <div class="overflow-x-auto">
+        <n-data-table
+          :columns="cacheColumns"
+          :data="overview.groups"
+          :loading="loading"
+          :row-key="(row) => row.key"
+          :scroll-x="800"
+        />
       </div>
-      <div class="summary-card">
-        <span>Redis Key 总数</span>
-        <strong>{{ formatCount(overview.redis_total_keys) }}</strong>
-      </div>
-      <div class="summary-card">
-        <span>Redis 内存</span>
-        <strong>{{ overview.redis_memory || '-' }}</strong>
-      </div>
-      <div class="summary-card">
-        <span>已纳管缓存</span>
-        <strong>{{ overview.groups.length }}</strong>
-      </div>
-    </section>
-
-    <section class="cache-panel">
-      <el-table :data="overview.groups" v-loading="loading" stripe border>
-        <el-table-column prop="name" label="缓存名称" min-width="160" />
-        <el-table-column prop="description" label="说明" min-width="260" />
-        <el-table-column label="存储位置" width="120">
-          <template #default="{ row }">
-            <el-tag :type="storageTagType(row.storage)">{{ storageLabel(row.storage) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="条目数" width="120">
-          <template #default="{ row }">
-            <strong>{{ formatCount(row.count) }}</strong>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150">
-          <template #default="{ row }">
-            <el-button
-              type="danger"
-              link
-              :disabled="row.count <= 0"
-              :loading="clearingScope === row.key"
-              @click="handleClear(row.key, row.name)"
-            >
-              清理
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </section>
+    </PageCard>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { h, reactive, ref } from 'vue'
+import { NButton, NDataTable, NIcon, NTag, useMessage } from 'naive-ui'
+import {
+  RefreshOutline,
+  PulseOutline,
+  KeyOutline,
+  HardwareChipOutline,
+  LayersOutline
+} from '@vicons/ionicons5'
+import PageCard from '../../components/common/PageCard.vue'
+import StatCard from '../../components/common/StatCard.vue'
 import { getCacheOverview, clearCacheGroup } from '../../utils/api/cache'
 import { showConfirmDialog } from '../../utils/ui/messageBox'
+
+const message = useMessage()
 
 const loading = ref(false)
 const clearingScope = ref('')
@@ -80,6 +71,44 @@ const overview = reactive({
   redis_memory: '',
   groups: []
 })
+
+const cacheColumns = [
+  { title: '缓存名称', key: 'name', minWidth: 160 },
+  { title: '说明', key: 'description', minWidth: 260 },
+  {
+    title: '存储位置',
+    key: 'storage',
+    width: 120,
+    render: (row) => h(
+      NTag,
+      { type: storageTagType(row.storage), size: 'small' },
+      { default: () => storageLabel(row.storage) }
+    )
+  },
+  {
+    title: '条目数',
+    key: 'count',
+    width: 120,
+    render: (row) => h('strong', { class: 'tabular-nums' }, formatCount(row.count))
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 150,
+    render: (row) => h(
+      NButton,
+      {
+        type: 'error',
+        text: true,
+        size: 'small',
+        disabled: row.count <= 0,
+        loading: clearingScope.value === row.key,
+        onClick: () => handleClear(row.key, row.name)
+      },
+      { default: () => '清理' }
+    )
+  }
+]
 
 const formatCount = (value) => {
   const parsed = Number(value || 0)
@@ -96,7 +125,7 @@ const storageLabel = (storage) => {
 
 const storageTagType = (storage) => {
   return {
-    redis: 'danger',
+    redis: 'error',
     postgres: 'success',
     mixed: 'warning'
   }[storage] || 'info'
@@ -112,7 +141,7 @@ const loadOverview = async () => {
     overview.redis_memory = payload.redis_memory || ''
     overview.groups = Array.isArray(payload.groups) ? payload.groups : []
   } catch (error) {
-    ElMessage.error('加载缓存概览失败')
+    message.error('加载缓存概览失败')
   } finally {
     loading.value = false
   }
@@ -133,10 +162,10 @@ const handleClear = async (scope, label) => {
   try {
     const response = await clearCacheGroup(scope)
     const deletedCount = response?.data?.data?.deleted_count ?? 0
-    ElMessage.success(`缓存清理完成，共删除 ${formatCount(deletedCount)} 项`)
+    message.success(`缓存清理完成，共删除 ${formatCount(deletedCount)} 项`)
     await loadOverview()
   } catch (error) {
-    ElMessage.error(error?.response?.data?.error || '清理缓存失败')
+    message.error(error?.response?.data?.error || '清理缓存失败')
   } finally {
     clearingScope.value = ''
   }
@@ -144,121 +173,3 @@ const handleClear = async (scope, label) => {
 
 loadOverview()
 </script>
-
-<style scoped>
-.cache-center {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.cache-hero,
-.cache-panel,
-.summary-card {
-  border-radius: 24px;
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-:global(.dark) .cache-hero,
-:global(.dark) .cache-panel,
-:global(.dark) .summary-card {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-.cache-hero,
-.cache-panel {
-  padding: 24px;
-}
-
-.cache-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.cache-hero-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.page-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-.cache-hero h2 {
-  margin: 10px 0 6px;
-  font-size: 30px;
-}
-
-.cache-hero p {
-  color: #6f6457;
-}
-
-.cache-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.summary-card {
-  padding: 20px 22px;
-}
-
-.summary-card span {
-  display: block;
-  color: #6f6457;
-  font-size: 13px;
-}
-
-.summary-card strong {
-  display: block;
-  margin-top: 8px;
-  font-size: 28px;
-  color: #1f2933;
-}
-
-:global(.dark) .summary-card span,
-:global(.dark) .cache-hero p {
-  color: #8fa1b5;
-}
-
-:global(.dark) .summary-card strong {
-  color: #ebf2fa;
-}
-
-@media (max-width: 980px) {
-  .cache-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 860px) {
-  .cache-hero {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .cache-hero-actions {
-    width: 100%;
-  }
-
-  .cache-hero-actions :deep(.el-button) {
-    flex: 1;
-  }
-}
-
-@media (max-width: 640px) {
-  .cache-summary-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>

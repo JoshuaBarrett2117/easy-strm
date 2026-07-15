@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-redis/redis/v8"
 	"easy-strm/internal/pkg/logger"
+	"github.com/go-redis/redis/v8"
 )
 
 const (
@@ -19,11 +19,11 @@ const (
 )
 
 type TransferLimiter struct {
-	redisClient    *redis.Client
-	accountLimits  map[int]*AccountLimiter
-	accountMu      sync.RWMutex
-	globalLimiter  *TokenBucket
-	maxTransfers   int
+	redisClient     *redis.Client
+	accountLimits   map[int]*AccountLimiter
+	accountMu       sync.RWMutex
+	globalLimiter   *TokenBucket
+	maxTransfers    int
 	rateLimitWindow time.Duration
 }
 
@@ -98,9 +98,9 @@ func (tb *TokenBucket) Wait(duration time.Duration) error {
 
 func NewTransferLimiter(redisClient *redis.Client) *TransferLimiter {
 	limiter := &TransferLimiter{
-		redisClient:    redisClient,
-		accountLimits:  make(map[int]*AccountLimiter),
-		maxTransfers:   defaultMaxTransfers,
+		redisClient:     redisClient,
+		accountLimits:   make(map[int]*AccountLimiter),
+		maxTransfers:    defaultMaxTransfers,
 		rateLimitWindow: defaultRateLimitWindow,
 	}
 

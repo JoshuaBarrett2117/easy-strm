@@ -51,25 +51,25 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text }).last();
   await locator.waitFor({ timeout: 20000 });
 }
 
 async function openDialog(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.locator('[role="dialog"]').filter({ hasText: title }).last();
   await dialog.waitFor({ timeout: 15000 });
   return dialog;
 }
 
 function getFormItem(container, label) {
-  return container.locator(".el-form-item").filter({
-    has: container.locator(".el-form-item__label", { hasText: label })
+  return container.locator(".n-form-item").filter({
+    has: container.locator(".n-form-item__label", { hasText: label })
   }).first();
 }
 
 async function clickSelectAt(page, container, index, optionText) {
-  await container.locator(".el-select").nth(index).click();
-  await page.locator(".el-select-dropdown__item").filter({ hasText: optionText }).last().click();
+  await container.locator(".n-select").nth(index).click();
+  await page.locator(".n-base-select-option").filter({ hasText: optionText }).last().click();
 }
 
 async function setInputByPlaceholder(container, placeholder, value) {
@@ -79,14 +79,14 @@ async function setInputByPlaceholder(container, placeholder, value) {
 }
 
 async function setInputNumberAt(container, index, value) {
-  const input = container.locator(".el-input-number input").nth(index);
+  const input = container.locator(".n-input-number input").nth(index);
   await input.waitFor({ timeout: 10000 });
   await input.fill(String(value));
   await input.press("Tab");
 }
 
 async function setSwitchAt(container, index, targetOn) {
-  const control = container.locator(".el-switch").nth(index);
+  const control = container.locator('[role="switch"]').nth(index);
   await control.waitFor({ timeout: 10000 });
   const checked = await control.evaluate((node) => node.classList.contains("is-checked"));
   if (checked !== targetOn) {
@@ -96,9 +96,9 @@ async function setSwitchAt(container, index, targetOn) {
 
 async function openMediaSourceDialog(page) {
   await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-  const card = page.locator(".source-card").first();
-  await card.waitFor({ timeout: 15000 });
-  await card.locator(".card-header .el-button--primary").click();
+  const addButton = page.getByRole("button", { name: "新增媒体源" }).first();
+  await addButton.waitFor({ timeout: 15000 });
+  await addButton.click();
   return openDialog(page, "新增媒体源");
 }
 
@@ -117,7 +117,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-MS-CONFIG-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -147,7 +147,7 @@ async function run() {
     await clickSelectAt(page, dialog, 2, "硬链接");
     await setSwitchAt(dialog, 0, true);
     await setSwitchAt(dialog, 1, true);
-    await dialog.locator(".dialog-footer .el-button--primary").click();
+    await dialog.locator("button").click();
     await waitForMessage(page, "新增成功");
     addCase("TC-MS-CONFIG-LOCAL-001", "本地媒体源表单提交成功", "PASS", localName, await saveShot(page, "02_local_created"));
 
@@ -184,7 +184,7 @@ async function run() {
       const cloudWatchPath = `/codex/watch/${stamp}`;
       const cloudTarget = `/codex/organized/${stamp}`;
       await setInputByPlaceholder(dialog, "媒体源名称", cloudName);
-      await dialog.locator('.el-radio-group .el-radio').filter({ hasText: "115云盘" }).click();
+      await dialog.locator('.n-radio-group .n-radio').filter({ hasText: "115云盘" }).click();
       await setInputByPlaceholder(dialog, "请输入路径", cloudPath);
       await clickSelectAt(page, dialog, 0, cloudAccounts[0].name);
       await setInputByPlaceholder(dialog, "请输入要轮询的 115 目录 CID", cloudWatchPath);
@@ -195,7 +195,7 @@ async function run() {
       await setSwitchAt(dialog, 0, true);
       await setSwitchAt(dialog, 1, true);
       await setInputNumberAt(dialog, 0, 600);
-      await dialog.locator(".dialog-footer .el-button--primary").click();
+      await dialog.locator("button").click();
       await waitForMessage(page, "新增成功");
       addCase("TC-MS-CONFIG-CLOUD-001", "115 云盘媒体源表单提交成功", "PASS", cloudName, await saveShot(page, "04_cloud_created"));
 

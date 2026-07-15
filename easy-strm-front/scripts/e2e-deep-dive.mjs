@@ -56,13 +56,13 @@ function normalizeData(payload) {
 }
 
 async function confirmPrimaryAction(page) {
-  const primary = page.locator(".el-message-box__btns .el-button--primary").last();
+  const primary = page.locator(".n-dialog__action button").last();
   await primary.waitFor({ timeout: 10000 });
   await primary.click();
 }
 
 async function clickVisibleDropdownItem(page, text) {
-  const item = page.locator(".el-dropdown-menu__item:visible").filter({ hasText: text }).last();
+  const item = page.locator(".n-dropdown-option:visible").filter({ hasText: text }).last();
   await item.waitFor({ timeout: 10000 });
   await item.click();
 }
@@ -84,7 +84,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL("**/dashboard/**", { timeout: 15000 });
 
     const token = await page.evaluate(() => localStorage.getItem("token"));
@@ -114,18 +114,18 @@ async function run() {
     addCase("TC-DEEP-STRM-001", "创建测试 115 账号成功", "PASS", `id=${cloudAccountId}`);
 
     await page.goto(`${FRONTEND_URL}/dashboard/strm-config`, { waitUntil: "networkidle" });
-    await page.locator(".header-title").filter({ hasText: "STRM 文件配置中心" }).waitFor({ timeout: 15000 });
-    await page.locator(".card-header .el-button--primary").click();
+    await page.getByRole("heading", { name: "STRM 文件配置中心", exact: true }).waitFor({ timeout: 15000 });
+    await page.getByRole("button", { name: "新增配置" }).click();
 
-    const dialog = page.locator(".el-dialog").filter({ hasText: "新增配置" }).last();
+    const dialog = page.locator('[role="dialog"]').filter({ hasText: "新增配置" }).last();
     await dialog.waitFor({ timeout: 10000 });
-    await dialog.locator(".el-select").first().click();
-    await page.locator(".el-select-dropdown__item").filter({ hasText: cloudName }).click();
+    await dialog.locator(".n-select").first().click();
+    await page.locator(".n-base-select-option").filter({ hasText: cloudName }).click();
     await dialog.locator('input[placeholder="请输入网盘目录路径"]').fill(`/deep/${stamp}`);
     await dialog.locator('input[placeholder="请输入本地目录路径"]').fill(`C:/deep/${stamp}`);
     await dialog.locator('input[placeholder*="Cron"]').fill("0 2 * * *");
     await dialog.locator('input[placeholder*="请输入文件后缀名"]').fill(".mkv,.mp4");
-    await dialog.locator(".dialog-footer .el-button--primary").click();
+    await dialog.locator("button").click();
     await page.waitForTimeout(1200);
 
     const configListResp = await api.get("/strm/config");
@@ -137,14 +137,14 @@ async function run() {
     strmConfigId = createdConfig.id;
     addCase("TC-DEEP-STRM-002", "STRM 配置新增成功", "PASS", `id=${strmConfigId}`, await saveShot(page, "02_strm_created"));
 
-    const row = page.locator(".el-table__row").filter({ hasText: `/deep/${stamp}` }).first();
+    const row = page.locator("tbody tr").filter({ hasText: `/deep/${stamp}` }).first();
     await row.waitFor({ timeout: 10000 });
-    await row.locator(".el-button--primary").first().click();
-    const editDialog = page.locator(".el-dialog").filter({ hasText: "编辑配置" }).last();
+    await row.locator("button").first().click();
+    const editDialog = page.locator('[role="dialog"]').filter({ hasText: "编辑配置" }).last();
     await editDialog.waitFor({ timeout: 10000 });
     await editDialog.locator('input[placeholder*="请输入文件后缀名"]').fill(".strm");
     await editDialog.locator('input[placeholder*="Cron"]').fill("15 3 * * *");
-    await editDialog.locator(".dialog-footer .el-button--primary").click();
+    await editDialog.locator("button").click();
     await page.waitForTimeout(1200);
 
     const configDetailResp = await api.get(`/strm/config/${strmConfigId}`);
@@ -152,7 +152,7 @@ async function run() {
     const updatePass = configDetail.extension === ".strm" && configDetail.cron === "15 3 * * *";
     addCase("TC-DEEP-STRM-003", "STRM 配置编辑成功", updatePass ? "PASS" : "FAIL", `ext=${configDetail.extension} cron=${configDetail.cron}`, await saveShot(page, "03_strm_updated"));
 
-    const cronDropdown = row.locator(".el-button--info").first();
+    const cronDropdown = row.getByRole("button", { name: "定时任务" });
     await cronDropdown.click();
     await clickVisibleDropdownItem(page, "禁用定时任务");
     await page.waitForTimeout(1200);
@@ -183,11 +183,11 @@ async function run() {
 
     await cronDropdown.click();
     await clickVisibleDropdownItem(page, "查看详情");
-    await page.locator(".el-message-box").waitFor({ timeout: 10000 });
+    await page.getByRole("dialog").filter({ hasText: "定时任务详情" }).waitFor({ timeout: 10000 });
     addCase("TC-DEEP-STRM-006", "定时任务详情弹窗可打开", "PASS", "", await saveShot(page, "06_cron_detail"));
-    await page.locator(".el-message-box__btns .el-button--primary").click();
+    await page.locator(".n-dialog__action button").click();
 
-    await row.locator(".el-button--danger").first().click();
+    await row.getByRole("button", { name: "删除" }).click();
     await confirmPrimaryAction(page);
     await page.waitForTimeout(1200);
     const configListAfterDeleteResp = await api.get("/strm/config");
@@ -220,19 +220,19 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: mediaSourceName }).first();
+    const sourceRow = page.locator("tbody tr").filter({ hasText: mediaSourceName }).first();
     await sourceRow.waitFor({ timeout: 10000 });
-    await sourceRow.locator(".el-button--primary").first().click();
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    await sourceRow.locator("button").first().click();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 10000 });
-    await browserDialog.locator(".el-table__row").filter({ hasText: "Rename.Target.2024.1080p.mkv" }).first().locator(".el-checkbox").click();
-    await browserDialog.locator(".el-table__row").filter({ hasText: "Rename.Target.2024.1080p.copy.mkv" }).first().locator(".el-checkbox").click();
-    await browserDialog.locator(".el-button").filter({ hasText: "批量重命名" }).click();
+    await browserDialog.locator("tbody tr").filter({ hasText: "Rename.Target.2024.1080p.mkv" }).first().locator('[role="checkbox"]').click();
+    await browserDialog.locator("tbody tr").filter({ hasText: "Rename.Target.2024.1080p.copy.mkv" }).first().locator('[role="checkbox"]').click();
+    await browserDialog.locator("button").filter({ hasText: "批量重命名" }).click();
 
-    const renameDialog = page.locator(".el-dialog").filter({ hasText: "重命名预览" }).last();
+    const renameDialog = page.locator('[role="dialog"]').filter({ hasText: "重命名预览" }).last();
     await renameDialog.waitFor({ timeout: 10000 });
     addCase("TC-DEEP-REN-001", "批量重命名预览弹窗可打开", "PASS", "", await saveShot(page, "08_rename_preview"));
-    await renameDialog.locator(".dialog-footer .el-button--primary").click();
+    await renameDialog.locator("button").click();
     await page.waitForTimeout(1500);
 
     const filesResp = await api.get(`/media/files?source_id=${mediaSourceId}&path=/&page=1&page_size=100`);

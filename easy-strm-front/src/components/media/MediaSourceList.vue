@@ -1,60 +1,58 @@
-﻿<!--
+<!--
   MediaSourceList - 媒体源管理卡片
   包含媒体源列表表格和新增/编辑媒体源对话框
   支持本地存储和 115 云盘两种类型
 -->
 <template>
-  <el-card shadow="hover" class="source-card">
-    <template #header>
-      <div class="card-header">
-        <div class="header-title">
-          <el-icon class="header-icon"><FolderOpened /></el-icon>
-          <span>媒体源管理</span>
-        </div>
-        <el-button type="primary" @click="handleAdd">
-          <el-icon><Plus /></el-icon>
-          新增媒体源
-        </el-button>
-      </div>
+  <PageCard title="媒体源管理" subtitle="本地目录和 115 云盘媒体源统一在这里管理">
+    <template #action>
+      <n-button type="primary" @click="handleAdd">
+        <template #icon>
+          <n-icon :component="AddOutline" />
+        </template>
+        新增媒体源
+      </n-button>
     </template>
 
-    <section class="source-overview">
-      <div class="source-overview__copy">
-        <h2>媒体源编排区</h2>
-        <p>本地目录和 115 云盘媒体源统一在这里管理。新增、编辑、浏览和自动整理配置仍然沿用现有后端接口。</p>
+    <section class="mb-4 grid gap-4 lg:grid-cols-[minmax(260px,1fr)_minmax(0,2fr)]">
+      <div class="rounded-2xl border border-cyan-500/10 bg-gradient-to-br from-cyan-500/10 to-amber-400/10 p-4 lg:p-5">
+        <h2 class="text-lg font-bold text-slate-800 dark:text-white">媒体源编排区</h2>
+        <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
+          本地目录和 115 云盘媒体源统一在这里管理。新增、编辑、浏览和自动整理配置仍然沿用现有后端接口。
+        </p>
       </div>
-      <div class="source-overview__grid">
-        <article v-for="card in sourceOverviewCards" :key="card.label" class="overview-card">
-          <span class="overview-card__label">{{ card.label }}</span>
-          <strong class="overview-card__value">{{ card.value }}</strong>
-          <p class="overview-card__hint">{{ card.hint }}</p>
-        </article>
+      <div class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+        <StatCard
+          v-for="card in sourceOverviewCards"
+          :key="card.label"
+          :label="card.label"
+          :value="card.value"
+          :hint="card.hint"
+        />
       </div>
     </section>
 
-    <section v-if="mediaSources.length" class="source-highlight">
-      <div class="source-highlight__header">
-        <div>
-          <h3>最近媒体源</h3>
-          <span>优先从这里进入浏览和整理</span>
-        </div>
+    <section v-if="mediaSources.length" class="mb-4">
+      <div>
+        <h3 class="text-base font-bold text-slate-800 dark:text-white">最近媒体源</h3>
+        <span class="mt-1 block text-xs text-slate-400 dark:text-slate-500">优先从这里进入浏览和整理</span>
       </div>
-      <div class="source-highlight__grid">
+      <div class="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <button
           v-for="source in highlightedSources"
           :key="source.id"
           type="button"
-          class="source-spotlight"
+          class="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md dark:border-white/5 dark:bg-ink-800"
           @click="emit('browse', source)"
         >
-          <div class="source-spotlight__top">
-            <strong>{{ source.name }}</strong>
-            <el-tag :type="source.source_type === 'local' ? 'success' : 'primary'" size="small" round>
+          <div class="flex items-start justify-between gap-3">
+            <strong class="text-sm font-bold text-slate-800 dark:text-white">{{ source.name }}</strong>
+            <n-tag :type="source.source_type === 'local' ? 'success' : 'primary'" size="small" round>
               {{ source.source_type === 'local' ? '本地存储' : '115 云盘' }}
-            </el-tag>
+            </n-tag>
           </div>
-          <div class="source-spotlight__path">{{ source.path || '/' }}</div>
-          <div class="source-spotlight__meta">
+          <div class="mt-3 break-all font-mono text-xs text-slate-500 dark:text-slate-400">{{ source.path || '/' }}</div>
+          <div class="mt-3 flex flex-wrap justify-between gap-2 text-xs text-slate-400 dark:text-slate-500">
             <span>{{ getOrganizeDefaultsSummary(source) }}</span>
             <span>{{ getWatchStatusLabel(source) }}</span>
           </div>
@@ -62,273 +60,225 @@
       </div>
     </section>
 
-    <div class="table-wrapper">
-      <el-table :data="mediaSources" border style="width: 100%" stripe class="custom-table">
-        <el-table-column prop="id" label="ID" width="60" align="center" />
-        <el-table-column prop="name" label="名称" min-width="120" />
-        <el-table-column prop="source_type" label="类型" width="120" align="center">
-          <template #default="scope">
-            <el-tag :type="scope.row.source_type === 'local' ? 'success' : 'primary'" size="small">
-              {{ scope.row.source_type === 'local' ? '本地存储' : '115云盘' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="path" label="路径" min-width="200" show-overflow-tooltip />
-        <el-table-column prop="watch_path" label="监控目录" min-width="200" show-overflow-tooltip>
-          <template #default="scope">
-            <span v-if="scope.row.source_type === 'cloud115'">
-              {{ scope.row.watch_path || scope.row.path || '未配置' }}
-            </span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="organize_target_path" label="整理目标目录" min-width="150" show-overflow-tooltip>
-          <template #default="scope">
-            <span v-if="scope.row.organize_target_path">{{ scope.row.organize_target_path }}</span>
-            <span v-else class="text-muted">未配置</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="整理默认" min-width="180" show-overflow-tooltip>
-          <template #default="scope">
-            <span class="organize-default-summary">{{ getOrganizeDefaultsSummary(scope.row) }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="监控状态" min-width="220" align="center">
-          <template #default="scope">
-            <div class="watch-status-cell">
-              <el-tag :type="getWatchStatusType(scope.row)" size="small">
-                {{ getWatchStatusLabel(scope.row) }}
-              </el-tag>
-              <span class="watch-status-tip">
-                {{ getWatchStatusDescription(scope.row) }}
-              </span>
-            </div>
-          </template>
-        </el-table-column>
-        <el-table-column prop="cloud115_name" label="关联账号" width="120" align="center">
-          <template #default="scope">
-            <span v-if="scope.row.cloud115_id">{{ scope.row.cloud115_name || '-' }}</span>
-            <span v-else class="text-muted">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="create_time" label="创建时间" width="160" align="center" />
-        <el-table-column label="操作" width="240" fixed="right" align="center">
-          <template #default="scope">
-            <!-- 桌面端：平铺按钮 -->
-            <div class="action-buttons-desktop">
-              <el-button type="primary" size="small" @click="emit('browse', scope.row)">
-                <el-icon><Folder /></el-icon>
-                浏览
-              </el-button>
-              <el-button type="warning" size="small" @click="handleEdit(scope.row)">
-                <el-icon><Edit /></el-icon>
-                编辑
-              </el-button>
-              <el-button type="danger" size="small" @click="handleDelete(scope.row)">
-                <el-icon><Delete /></el-icon>
-                删除
-              </el-button>
-            </div>
-            <!-- 移动端：下拉菜单 -->
-            <div class="action-buttons-mobile">
-              <el-dropdown trigger="click">
-                <el-button type="primary" size="small">
-                  操作 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item @click="emit('browse', scope.row)">
-                      <el-icon><Folder /></el-icon> 浏览
-                    </el-dropdown-item>
-                    <el-dropdown-item @click="handleEdit(scope.row)">
-                      <el-icon><Edit /></el-icon> 编辑
-                    </el-dropdown-item>
-                    <el-dropdown-item @click="handleDelete(scope.row)">
-                      <el-icon><Delete /></el-icon> 删除
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
+    <div class="overflow-x-auto">
+      <n-data-table
+        :columns="columns"
+        :data="mediaSources"
+        :striped="true"
+        :row-key="(row) => row.id"
+        :scroll-x="1640"
+      />
     </div>
 
     <!-- 新增/编辑媒体源对话框 -->
-    <el-dialog
-      v-model="dialogVisible"
+    <n-modal
+      v-model:show="dialogVisible"
+      preset="card"
       :title="dialogTitle"
-      width="640px"
-      append-to-body
+      class="w-[92vw] max-w-2xl"
+      :mask-closable="false"
     >
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="名称" prop="name">
-          <el-input v-model="form.name" placeholder="请输入媒体源名称" />
-        </el-form-item>
-        <el-form-item label="类型" prop="source_type">
-          <el-radio-group v-model="form.source_type" @change="handleSourceTypeChange">
-            <el-radio label="local">本地存储</el-radio>
-            <el-radio label="cloud115">115云盘</el-radio>
-          </el-radio-group>
-        </el-form-item>
-        <el-form-item label="路径" prop="path">
-          <el-input v-model="form.path" placeholder="请输入路径" />
-        </el-form-item>
-        <el-form-item v-if="form.source_type === 'cloud115'" label="关联账号" prop="cloud115_id">
-          <el-select v-model="form.cloud115_id" placeholder="请选择115账号" style="width: 100%">
-            <el-option
-              v-for="account in cloud115List"
-              :key="account.id"
-              :label="account.name"
-              :value="account.id"
+      <n-form ref="formRef" :model="form" :rules="rules" label-placement="top">
+        <div class="grid gap-x-4 sm:grid-cols-2">
+          <n-form-item label="名称" path="name">
+            <n-input v-model:value="form.name" placeholder="请输入媒体源名称" />
+          </n-form-item>
+          <n-form-item label="类型" path="source_type">
+            <n-radio-group v-model:value="form.source_type" @update:value="handleSourceTypeChange">
+              <n-radio value="local">本地存储</n-radio>
+              <n-radio value="cloud115">115云盘</n-radio>
+            </n-radio-group>
+          </n-form-item>
+          <n-form-item label="路径" path="path" class="sm:col-span-2">
+            <n-input v-model:value="form.path" placeholder="请输入路径" />
+          </n-form-item>
+          <n-form-item v-if="form.source_type === 'cloud115'" label="关联账号" path="cloud115_id">
+            <n-select
+              v-model:value="form.cloud115_id"
+              placeholder="请选择115账号"
+              :options="cloud115Options"
             />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="form.source_type === 'cloud115'" label="监控目录" prop="watch_path">
-          <el-input
-            v-model="form.watch_path"
-            placeholder="请输入要轮询的 115 目录 CID"
-          />
-          <div class="form-tip">这里填写自动监控的目标目录，和上面的“路径”可以不同。</div>
-        </el-form-item>
-        <el-form-item v-if="form.source_type !== 'cloud115'" label="整理目标目录" prop="organize_target_path">
-          <el-input
-            v-model="form.organize_target_path"
-            placeholder="如 /已整理，留空则使用媒体源路径作为默认目标"
-          />
-          <div class="form-tip">整理时文件将以此路径为根目录进行分类分发。</div>
-        </el-form-item>
-        <el-divider content-position="left">整理默认配置</el-divider>
-        <el-form-item label="媒体类型" prop="media_type">
-          <el-select v-model="form.media_type" style="width: 100%">
-            <el-option label="全部" value="all" />
-            <el-option label="电影" value="movie" />
-            <el-option label="剧集" value="tv" />
-          </el-select>
-          <div class="form-tip">自动整理时默认采用的媒体类型筛选条件。</div>
-        </el-form-item>
-        <el-form-item label="冲突策略" prop="conflict_policy">
-          <el-select v-model="form.conflict_policy" style="width: 100%">
-            <el-option label="跳过" value="skip" />
-            <el-option label="覆盖" value="overwrite" />
-            <el-option label="追加序号" value="suffix" />
-          </el-select>
-          <div class="form-tip">目标已存在同名文件时的默认处理方式。</div>
-        </el-form-item>
-        <el-form-item label="整理方式" prop="operation_mode">
-          <el-select v-model="form.operation_mode" style="width: 100%">
-            <el-option label="移动文件" value="move" />
-            <el-option label="复制文件" value="copy" />
-            <el-option label="硬链接" value="hardlink" :disabled="form.source_type === 'cloud115'" />
-            <el-option label="软链接" value="symlink" :disabled="form.source_type === 'cloud115'" />
-          </el-select>
-          <div class="form-tip">
-            {{ form.source_type === 'cloud115' ? '115 云盘不支持硬链接和软链接，保存时会自动回退为安全模式。' : '本地源可选硬链接或软链接以节省磁盘空间。' }}
-          </div>
-        </el-form-item>
-        <template v-if="form.source_type === 'cloud115'">
-          <div class="feature-panel">
-            <div class="feature-panel__header">
-              <div>
-                <div class="feature-panel__title">115自动监控整理</div>
-                <div class="feature-panel__subtitle">监听 115 媒体源中的新增文件，并自动进入整理流程。</div>
-              </div>
-              <el-tag :type="cloud115FeatureStatus.type" effect="light">
-                {{ cloud115FeatureStatus.label }}
-              </el-tag>
+          </n-form-item>
+          <n-form-item v-if="form.source_type === 'cloud115'" label="监控目录" path="watch_path">
+            <div class="w-full">
+              <n-input v-model:value="form.watch_path" placeholder="请输入要轮询的 115 目录 CID" />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">这里填写自动监控的目标目录，和上面的“路径”可以不同。</p>
             </div>
-            <el-alert
+          </n-form-item>
+          <n-form-item v-if="form.source_type !== 'cloud115'" label="整理目标目录" path="organize_target_path" class="sm:col-span-2">
+            <div class="w-full">
+              <n-input
+                v-model:value="form.organize_target_path"
+                placeholder="如 /已整理，留空则使用媒体源路径作为默认目标"
+              />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">整理时文件将以此路径为根目录进行分类分发。</p>
+            </div>
+          </n-form-item>
+        </div>
+
+        <n-divider title-placement="left">整理默认配置</n-divider>
+
+        <div class="grid gap-x-4 sm:grid-cols-2">
+          <n-form-item label="媒体类型" path="media_type">
+            <div class="w-full">
+              <n-select v-model:value="form.media_type" :options="mediaTypeOptions" />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">自动整理时默认采用的媒体类型筛选条件。</p>
+            </div>
+          </n-form-item>
+          <n-form-item label="冲突策略" path="conflict_policy">
+            <div class="w-full">
+              <n-select v-model:value="form.conflict_policy" :options="conflictPolicyOptions" />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">目标已存在同名文件时的默认处理方式。</p>
+            </div>
+          </n-form-item>
+          <n-form-item label="整理方式" path="operation_mode" class="sm:col-span-2">
+            <div class="w-full">
+              <n-select v-model:value="form.operation_mode" :options="operationModeOptions" />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                {{ form.source_type === 'cloud115' ? '115 云盘不支持硬链接和软链接，保存时会自动回退为安全模式。' : '本地源可选硬链接或软链接以节省磁盘空间。' }}
+              </p>
+            </div>
+          </n-form-item>
+        </div>
+
+        <template v-if="form.source_type === 'cloud115'">
+          <div class="mb-4 rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-4">
+            <div class="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div class="text-sm font-bold text-slate-800 dark:text-white">115自动监控整理</div>
+                <div class="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">监听 115 媒体源中的新增文件，并自动进入整理流程。</div>
+              </div>
+              <n-tag :type="cloud115FeatureStatus.type" size="small">
+                {{ cloud115FeatureStatus.label }}
+              </n-tag>
+            </div>
+            <n-alert
               type="info"
               :closable="false"
-              show-icon
+              :show-icon="true"
               title="开启后会按轮询间隔扫描 115 目录，只处理新增文件，不影响已有文件。"
-              class="feature-alert"
+              class="mb-4"
             />
-            <el-form-item label="整理目标目录" prop="organize_target_path" class="feature-form-item">
-              <el-input
-                v-model="form.organize_target_path"
-                placeholder="如 /电影库，留空则默认整理回当前媒体源路径"
-              />
-              <div class="form-tip">建议为 115 自动监控整理单独设置归档目录，便于后续浏览和复查。</div>
-            </el-form-item>
-            <el-form-item label="目录监控" class="feature-form-item">
-              <el-switch
-                v-model="form.watch_enabled"
-                active-text="开启"
-                inactive-text="关闭"
-                @change="handleWatchEnabledChange"
-              />
-              <div class="form-tip">开启后会按设定间隔轮询 115 云盘目录，发现新增文件后继续执行自动整理。</div>
-            </el-form-item>
-            <el-form-item label="自动整理" class="feature-form-item">
-              <el-switch
-                v-model="form.auto_organize"
-                active-text="开启"
-                inactive-text="关闭"
-                :disabled="!form.watch_enabled"
-              />
-              <div class="form-tip">
-                {{ form.watch_enabled ? '发现新增文件后自动创建整理任务，结果可在任务列表中查看。' : '请先开启目录监控，自动整理才会生效。' }}
+            <n-form-item label="整理目标目录" path="organize_target_path">
+              <div class="w-full">
+                <n-input
+                  v-model:value="form.organize_target_path"
+                  placeholder="如 /电影库，留空则默认整理回当前媒体源路径"
+                />
+                <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">建议为 115 自动监控整理单独设置归档目录，便于后续浏览和复查。</p>
               </div>
-            </el-form-item>
-            <el-form-item v-if="form.watch_enabled" label="轮询间隔" class="feature-form-item">
-              <el-input-number
-                v-model="form.watch_interval"
-                :min="60"
-                :max="86400"
-                :step="60"
-                style="width: 200px"
-              />
-              <span style="margin-left: 8px; color: #909399; font-size: 13px">秒</span>
-              <div class="form-tip">建议 10 到 30 分钟之间，兼顾及时性和 115 轮询开销。</div>
-            </el-form-item>
+            </n-form-item>
+            <n-form-item label="目录监控">
+              <div class="w-full">
+                <n-switch v-model:value="form.watch_enabled" @update:value="handleWatchEnabledChange">
+                  <template #checked>开启</template>
+                  <template #unchecked>关闭</template>
+                </n-switch>
+                <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">开启后会按设定间隔轮询 115 云盘目录，发现新增文件后继续执行自动整理。</p>
+              </div>
+            </n-form-item>
+            <n-form-item label="自动整理">
+              <div class="w-full">
+                <n-switch v-model:value="form.auto_organize" :disabled="!form.watch_enabled">
+                  <template #checked>开启</template>
+                  <template #unchecked>关闭</template>
+                </n-switch>
+                <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">
+                  {{ form.watch_enabled ? '发现新增文件后自动创建整理任务，结果可在任务列表中查看。' : '请先开启目录监控，自动整理才会生效。' }}
+                </p>
+              </div>
+            </n-form-item>
+            <n-form-item v-if="form.watch_enabled" label="轮询间隔">
+              <div class="w-full">
+                <div class="flex items-center gap-2">
+                  <n-input-number
+                    v-model:value="form.watch_interval"
+                    :min="60"
+                    :max="86400"
+                    :step="60"
+                    class="w-[200px]"
+                  />
+                  <span class="text-[13px] text-slate-400 dark:text-slate-500">秒</span>
+                </div>
+                <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">建议 10 到 30 分钟之间，兼顾及时性和 115 轮询开销。</p>
+              </div>
+            </n-form-item>
           </div>
         </template>
         <template v-else>
-          <el-form-item label="自动整理">
-            <el-switch v-model="form.auto_organize" active-text="开启" inactive-text="关闭" />
-            <div class="form-tip">开启后，监控到新文件时会自动触发整理流程。</div>
-          </el-form-item>
-          <el-form-item label="目录监控">
-            <el-switch v-model="form.watch_enabled" active-text="开启" inactive-text="关闭" />
-            <div class="form-tip">本地目录使用 fsnotify 实时监控，115 云盘使用轮询监控。</div>
-          </el-form-item>
+          <n-form-item label="自动整理">
+            <div class="w-full">
+              <n-switch v-model:value="form.auto_organize">
+                <template #checked>开启</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">开启后，监控到新文件时会自动触发整理流程。</p>
+            </div>
+          </n-form-item>
+          <n-form-item label="目录监控">
+            <div class="w-full">
+              <n-switch v-model:value="form.watch_enabled">
+                <template #checked>开启</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">本地目录使用 fsnotify 实时监控，115 云盘使用轮询监控。</p>
+            </div>
+          </n-form-item>
         </template>
-        <el-form-item v-if="embyLibraries.length > 0" label="Emby媒体库">
-          <el-select v-model="form.emby_library_id" placeholder="可选：绑定Emby媒体库" clearable style="width: 100%">
-            <el-option label="不绑定" value="" />
-            <el-option
-              v-for="lib in embyLibraries"
-              :key="lib.ItemId"
-              :label="lib.Name"
-              :value="lib.ItemId"
+
+        <n-form-item v-if="embyLibraries.length > 0" label="Emby媒体库">
+          <div class="w-full">
+            <n-select
+              v-model:value="form.emby_library_id"
+              placeholder="可选：绑定Emby媒体库"
+              clearable
+              :options="embyLibraryOptions"
             />
-          </el-select>
-          <div class="form-tip">绑定后，该媒体源整理完成时会自动刷新对应的Emby媒体库。</div>
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="dialogVisible = false">取消</el-button>
-          <el-button type="primary" @click="handleSubmit" :loading="submitLoading">确定</el-button>
-        </span>
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">绑定后，该媒体源整理完成时会自动刷新对应的Emby媒体库。</p>
+          </div>
+        </n-form-item>
+      </n-form>
+
+      <template #action>
+        <div class="flex flex-wrap justify-end gap-2">
+          <n-button @click="dialogVisible = false">取消</n-button>
+          <n-button type="primary" :loading="submitLoading" @click="handleSubmit">确定</n-button>
+        </div>
       </template>
-    </el-dialog>
-  </el-card>
+    </n-modal>
+  </PageCard>
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref } from 'vue'
 import {
-  FolderOpened,
-  Plus,
-  Edit,
-  Delete,
-  Folder,
-  ArrowDown
-} from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+  NButton,
+  NDataTable,
+  NModal,
+  NForm,
+  NFormItem,
+  NInput,
+  NInputNumber,
+  NSelect,
+  NSwitch,
+  NRadioGroup,
+  NRadio,
+  NTag,
+  NAlert,
+  NDivider,
+  NIcon,
+  NDropdown,
+  useMessage
+} from 'naive-ui'
+import {
+  AddOutline,
+  FolderOpenOutline,
+  CreateOutline,
+  TrashOutline,
+  ChevronDownOutline
+} from '@vicons/ionicons5'
+import PageCard from '../common/PageCard.vue'
+import StatCard from '../common/StatCard.vue'
 import { showConfirmDialog } from '../../utils/ui/messageBox'
 import {
   getMediaSources,
@@ -340,6 +290,8 @@ import { getCloud115List } from '../../utils/api/cloud115'
 import { getEmbyLibraries } from '../../utils/api/emby'
 
 const emit = defineEmits(['browse'])
+
+const message = useMessage()
 
 // --- 响应式布局状态 ---
 const isMobile = ref(window.innerWidth < 768)
@@ -385,6 +337,38 @@ const rules = {
   source_type: [{ required: true, message: '请选择类型', trigger: 'change' }],
   path: [{ required: true, message: '请输入路径', trigger: 'blur' }]
 }
+
+const mediaTypeOptions = [
+  { label: '全部', value: 'all' },
+  { label: '电影', value: 'movie' },
+  { label: '剧集', value: 'tv' }
+]
+
+const conflictPolicyOptions = [
+  { label: '跳过', value: 'skip' },
+  { label: '覆盖', value: 'overwrite' },
+  { label: '追加序号', value: 'suffix' }
+]
+
+const operationModeOptions = computed(() => [
+  { label: '移动文件', value: 'move' },
+  { label: '复制文件', value: 'copy' },
+  { label: '硬链接', value: 'hardlink', disabled: form.value.source_type === 'cloud115' },
+  { label: '软链接', value: 'symlink', disabled: form.value.source_type === 'cloud115' }
+])
+
+const cloud115Options = computed(() => cloud115List.value.map((account) => ({
+  label: account.name,
+  value: account.id
+})))
+
+const embyLibraryOptions = computed(() => [
+  { label: '不绑定', value: '' },
+  ...embyLibraries.value.map((lib) => ({
+    label: lib.Name,
+    value: lib.ItemId
+  }))
+])
 
 const getWatchStatusType = (source) => {
   if (!source?.watch_enabled) return 'info'
@@ -504,6 +488,165 @@ const sourceOverviewCards = computed(() => [
 ])
 const highlightedSources = computed(() => mediaSources.value.slice(0, 3))
 
+// --- 表格列定义(render 中读取的 ref 会被表格渲染副作用跟踪，自动响应更新) ---
+const mutedText = 'text-[13px] text-slate-400 dark:text-slate-500'
+
+const rowActionOptions = [
+  {
+    label: '浏览',
+    key: 'browse',
+    icon: () => h(NIcon, { component: FolderOpenOutline })
+  },
+  {
+    label: '编辑',
+    key: 'edit',
+    icon: () => h(NIcon, { component: CreateOutline })
+  },
+  {
+    label: '删除',
+    key: 'delete',
+    icon: () => h(NIcon, { component: TrashOutline })
+  }
+]
+
+const handleRowAction = (key, row) => {
+  if (key === 'browse') {
+    emit('browse', row)
+  } else if (key === 'edit') {
+    handleEdit(row)
+  } else if (key === 'delete') {
+    handleDelete(row)
+  }
+}
+
+const columns = [
+  { title: 'ID', key: 'id', width: 60, align: 'center' },
+  { title: '名称', key: 'name', minWidth: 120 },
+  {
+    title: '类型',
+    key: 'source_type',
+    width: 110,
+    align: 'center',
+    render: (row) => h(
+      NTag,
+      { type: row.source_type === 'local' ? 'success' : 'primary', size: 'small' },
+      { default: () => (row.source_type === 'local' ? '本地存储' : '115云盘') }
+    )
+  },
+  { title: '路径', key: 'path', minWidth: 200, ellipsis: { tooltip: true } },
+  {
+    title: '监控目录',
+    key: 'watch_path',
+    minWidth: 200,
+    ellipsis: { tooltip: true },
+    render: (row) => (
+      row.source_type === 'cloud115'
+        ? h('span', row.watch_path || row.path || '未配置')
+        : h('span', { class: mutedText }, '-')
+    )
+  },
+  {
+    title: '整理目标目录',
+    key: 'organize_target_path',
+    minWidth: 150,
+    ellipsis: { tooltip: true },
+    render: (row) => (
+      row.organize_target_path
+        ? h('span', row.organize_target_path)
+        : h('span', { class: mutedText }, '未配置')
+    )
+  },
+  {
+    title: '整理默认',
+    key: 'organize_defaults',
+    minWidth: 180,
+    ellipsis: { tooltip: true },
+    render: (row) => getOrganizeDefaultsSummary(row)
+  },
+  {
+    title: '监控状态',
+    key: 'watch_status',
+    minWidth: 220,
+    align: 'center',
+    render: (row) => h('div', { class: 'flex flex-col items-center gap-1' }, [
+      h(
+        NTag,
+        { type: getWatchStatusType(row), size: 'small' },
+        { default: () => getWatchStatusLabel(row) }
+      ),
+      h('span', { class: 'text-xs leading-snug text-slate-400 dark:text-slate-500' }, getWatchStatusDescription(row))
+    ])
+  },
+  {
+    title: '关联账号',
+    key: 'cloud115_name',
+    width: 120,
+    align: 'center',
+    render: (row) => (
+      row.cloud115_id
+        ? h('span', row.cloud115_name || '-')
+        : h('span', { class: mutedText }, '-')
+    )
+  },
+  { title: '创建时间', key: 'create_time', width: 160, align: 'center' },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 240,
+    align: 'center',
+    fixed: 'right',
+    render: (row) => {
+      // 移动端：下拉菜单;桌面端：平铺按钮
+      if (isMobile.value) {
+        return h(
+          NDropdown,
+          {
+            trigger: 'click',
+            options: rowActionOptions,
+            onSelect: (key) => handleRowAction(key, row)
+          },
+          {
+            default: () => h(
+              NButton,
+              { type: 'primary', size: 'small' },
+              {
+                default: () => '操作',
+                icon: () => h(NIcon, { component: ChevronDownOutline })
+              }
+            )
+          }
+        )
+      }
+      return h('div', { class: 'flex flex-nowrap justify-center gap-1' }, [
+        h(
+          NButton,
+          { type: 'primary', size: 'small', onClick: () => emit('browse', row) },
+          {
+            default: () => '浏览',
+            icon: () => h(NIcon, { component: FolderOpenOutline })
+          }
+        ),
+        h(
+          NButton,
+          { type: 'warning', size: 'small', onClick: () => handleEdit(row) },
+          {
+            default: () => '编辑',
+            icon: () => h(NIcon, { component: CreateOutline })
+          }
+        ),
+        h(
+          NButton,
+          { type: 'error', size: 'small', onClick: () => handleDelete(row) },
+          {
+            default: () => '删除',
+            icon: () => h(NIcon, { component: TrashOutline })
+          }
+        )
+      ])
+    }
+  }
+]
+
 // --- 方法 ---
 
 const fetchMediaSources = async () => {
@@ -515,7 +658,7 @@ const fetchMediaSources = async () => {
   } catch (error) {
     console.error('[MediaSourceList] 获取媒体源列表失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '获取媒体源列表失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   }
 }
 
@@ -527,7 +670,7 @@ const fetchCloud115List = async () => {
   } catch (error) {
     console.error('[MediaSourceList] 获取115账号列表失败:', error)
     const errorMsg = error.response?.data?.error || error.message || '获取115账号列表失败'
-    ElMessage.error(errorMsg)
+    message.error(errorMsg)
   }
 }
 
@@ -586,26 +729,26 @@ const handleDelete = (row) => {
   ).then(async () => {
     try {
       await deleteMediaSource(row.id)
-      ElMessage.success('删除成功')
+      message.success('删除成功')
       fetchMediaSources()
     } catch (error) {
       console.error('[MediaSourceList] 删除媒体源失败:', error)
       const errorMsg = error.response?.data?.error || error.message || '删除失败'
-      ElMessage.error(errorMsg)
+      message.error(errorMsg)
     }
   }).catch(() => {})
 }
 
-const handleSubmit = async () => {
+const handleSubmit = () => {
   if (!formRef.value) return
 
-  await formRef.value.validate(async (valid) => {
-    if (valid) {
+  formRef.value.validate(async (errors) => {
+    if (!errors) {
       if (!form.value.watch_enabled) {
         form.value.auto_organize = false
       }
       if (form.value.source_type === 'cloud115' && form.value.watch_enabled && !String(form.value.watch_path || '').trim()) {
-        ElMessage.error('请先填写监控目录')
+        message.error('请先填写监控目录')
         submitLoading.value = false
         return
       }
@@ -613,10 +756,10 @@ const handleSubmit = async () => {
       try {
         if (form.value.id) {
           await updateMediaSource(form.value.id, form.value)
-          ElMessage.success('编辑成功')
+          message.success('编辑成功')
         } else {
           await createMediaSource(form.value)
-          ElMessage.success('新增成功')
+          message.success('新增成功')
         }
         dialogVisible.value = false
         fetchMediaSources()
@@ -624,12 +767,12 @@ const handleSubmit = async () => {
       } catch (error) {
         console.error('[MediaSourceList] 提交媒体源失败:', error)
         const errorMsg = error.response?.data?.error || error.message || (form.value.id ? '编辑失败' : '新增失败')
-        ElMessage.error(errorMsg)
+        message.error(errorMsg)
       } finally {
         submitLoading.value = false
       }
     }
-  })
+  }).catch(() => {})
 }
 
 const resetForm = () => {
@@ -650,7 +793,7 @@ const resetForm = () => {
     emby_library_id: ''
   }
   if (formRef.value) {
-    formRef.value.resetFields()
+    formRef.value.restoreValidation()
   }
 }
 
@@ -695,345 +838,3 @@ defineExpose({
   handleAdd
 })
 </script>
-
-<style scoped>
-.form-tip {
-  font-size: 12px;
-  color: #909399;
-  line-height: 1.4;
-  margin-top: 4px;
-}
-
-.source-card {
-  margin-bottom: 20px;
-  border-radius: 24px;
-  overflow: hidden;
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  background: rgba(255, 252, 247, 0.86);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-}
-
-.source-card :deep(.el-card__header) {
-  background:
-    radial-gradient(circle at top right, rgba(242, 166, 90, 0.24), transparent 30%),
-    linear-gradient(135deg, #17313a 0%, #24535f 55%, #1f6f78 100%);
-  padding: 20px 24px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: white;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.header-icon {
-  font-size: 22px;
-}
-
-.source-overview {
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr);
-  gap: 18px;
-  margin-bottom: 22px;
-}
-
-.source-overview__copy {
-  padding: 20px;
-  border-radius: 22px;
-  background: linear-gradient(160deg, rgba(31, 111, 120, 0.12), rgba(242, 166, 90, 0.12));
-  border: 1px solid rgba(31, 111, 120, 0.12);
-}
-
-.source-overview__copy h2 {
-  margin: 0;
-  font-size: 24px;
-  color: #17313a;
-}
-
-.source-overview__copy p {
-  margin: 12px 0 0;
-  color: #6c6259;
-  line-height: 1.7;
-}
-
-.source-overview__grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.overview-card {
-  padding: 18px;
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 241, 231, 0.94));
-  border: 1px solid rgba(120, 101, 72, 0.1);
-}
-
-.overview-card__label {
-  display: block;
-  color: #8a7b6d;
-  font-size: 13px;
-}
-
-.overview-card__value {
-  display: block;
-  margin-top: 12px;
-  font-size: 28px;
-  color: #17313a;
-  line-height: 1.1;
-}
-
-.overview-card__hint {
-  margin: 10px 0 0;
-  color: #73675d;
-  line-height: 1.6;
-}
-
-.source-highlight {
-  margin-bottom: 22px;
-}
-
-.source-highlight__header h3 {
-  margin: 0;
-  font-size: 18px;
-  color: #17313a;
-}
-
-.source-highlight__header span {
-  display: block;
-  margin-top: 6px;
-  color: #7b6e63;
-}
-
-.source-highlight__grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  margin-top: 14px;
-}
-
-.source-spotlight {
-  border: 1px solid rgba(31, 111, 120, 0.12);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(244, 239, 231, 0.92));
-  border-radius: 20px;
-  padding: 18px;
-  text-align: left;
-  cursor: pointer;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
-}
-
-.source-spotlight:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(30, 55, 62, 0.1);
-}
-
-.source-spotlight__top {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.source-spotlight__top strong {
-  color: #17313a;
-  font-size: 16px;
-}
-
-.source-spotlight__path {
-  margin-top: 12px;
-  font-family: 'Courier New', monospace;
-  color: #6b6258;
-  word-break: break-all;
-  font-size: 13px;
-}
-
-.source-spotlight__meta {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 14px;
-  color: #87786b;
-  font-size: 12px;
-}
-
-/* 表格水平滚动容器 */
-.table-wrapper {
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-}
-
-.custom-table {
-  border-radius: 18px;
-  overflow: hidden;
-}
-
-.custom-table :deep(.el-table__header th) {
-  background-color: #f8f9fa !important;
-  color: #495057;
-  font-weight: 600;
-}
-
-.custom-table :deep(.el-table__row:hover > td) {
-  background-color: #e8f4fd !important;
-}
-
-.text-muted {
-  color: #909399;
-  font-size: 13px;
-}
-
-.watch-status-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  align-items: center;
-}
-
-.watch-status-tip {
-  color: #909399;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.feature-panel {
-  margin-bottom: 18px;
-  padding: 16px;
-  border: 1px solid #d9ecff;
-  border-radius: 12px;
-  background: linear-gradient(180deg, #f7fbff 0%, #fdfefe 100%);
-}
-
-.feature-panel__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.feature-panel__title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #303133;
-}
-
-.feature-panel__subtitle {
-  margin-top: 4px;
-  color: #606266;
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.feature-alert {
-  margin-bottom: 16px;
-}
-
-.feature-form-item:last-child {
-  margin-bottom: 0;
-}
-
-.dialog-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
-/* --- 操作按钮：桌面端/移动端切换 --- */
-.action-buttons-mobile {
-  display: none;
-}
-
-.action-buttons-desktop {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  flex-wrap: nowrap;
-}
-
-:global(.dark) .source-card {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.24);
-}
-
-:global(.dark) .source-overview__copy,
-:global(.dark) .overview-card,
-:global(.dark) .source-spotlight {
-  background: rgba(16, 26, 37, 0.88);
-  border-color: rgba(139, 163, 185, 0.12);
-}
-
-:global(.dark) .source-overview__copy h2,
-:global(.dark) .overview-card__value,
-:global(.dark) .source-highlight__header h3,
-:global(.dark) .source-spotlight__top strong {
-  color: #e8edf4;
-}
-
-:global(.dark) .source-overview__copy p,
-:global(.dark) .overview-card__hint,
-:global(.dark) .overview-card__label,
-:global(.dark) .source-highlight__header span,
-:global(.dark) .source-spotlight__path,
-:global(.dark) .source-spotlight__meta,
-:global(.dark) .feature-panel__subtitle,
-:global(.dark) .form-tip {
-  color: #9faebb;
-}
-
-/* ===== 响应式：移动端(< 768px) ===== */
-@media (max-width: 768px) {
-  .source-overview,
-  .source-overview__grid,
-  .source-highlight__grid {
-    grid-template-columns: 1fr;
-  }
-
-  .source-card :deep(.el-card__header) {
-    padding: 12px 16px;
-  }
-
-  .header-title {
-    font-size: 15px;
-    gap: 6px;
-  }
-
-  .card-header {
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-
-  /* 移动端：操作按钮切换为下拉菜单 */
-  .action-buttons-desktop {
-    display: none;
-  }
-
-  .action-buttons-mobile {
-    display: block;
-  }
-
-  /* 表格最小宽度确保可横向滚动 */
-  .custom-table {
-    min-width: 800px;
-  }
-
-  /* 表单标签宽度适配 */
-  :deep(.el-form-item__label) {
-    width: 100px !important;
-  }
-
-  .feature-panel__header {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-}
-</style>
-

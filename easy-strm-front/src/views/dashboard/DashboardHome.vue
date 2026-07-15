@@ -1,236 +1,292 @@
 <template>
-  <div class="dashboard-home">
-    <section class="hero-panel">
-      <div class="hero-copy">
-        <div class="hero-kicker">Resource Hub</div>
-        <h2>以媒体资产台账为中心，串起同步、入库、STRM 与任务追踪。</h2>
-        <p>
-          首版主链路固定为媒体源同步索引、媒体库台账、入库流水线、任务中心和待处理修正。
-        </p>
-      </div>
+  <div class="space-y-4">
+    <!-- Hero -->
+    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-7">
+      <div class="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        <div>
+          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">Resource Hub</div>
+          <h2 class="mt-3 text-2xl font-extrabold leading-snug text-slate-800 dark:text-white lg:text-3xl">
+            以媒体资产台账为中心，串起同步、入库、STRM 与任务追踪。
+          </h2>
+          <p class="mt-3 text-sm leading-relaxed text-slate-400 dark:text-slate-500">
+            首版主链路固定为媒体源同步索引、媒体库台账、入库流水线、任务中心和待处理修正。
+          </p>
+        </div>
 
-      <div class="hero-actions">
-        <router-link to="/dashboard/media-library" class="hero-action hero-action-primary">打开资产台账</router-link>
-        <router-link to="/dashboard/sync-tasks" class="hero-action">同步入库</router-link>
-        <router-link to="/dashboard/pending-media" class="hero-action">处理失败项</router-link>
-        <router-link to="/dashboard/tasks" class="hero-action">查看任务中心</router-link>
+        <div class="flex flex-col justify-center gap-3">
+          <router-link
+            to="/dashboard/media-library"
+            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-400 px-4 font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+          >
+            打开资产台账
+          </router-link>
+          <router-link
+            to="/dashboard/sync-tasks"
+            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+          >
+            同步入库
+          </router-link>
+          <router-link
+            to="/dashboard/pending-media"
+            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+          >
+            处理失败项
+          </router-link>
+          <router-link
+            to="/dashboard/tasks"
+            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
+          >
+            查看任务中心
+          </router-link>
+        </div>
       </div>
     </section>
 
-    <section class="workflow-strip">
-      <article v-for="step in workflowSteps" :key="step.title" class="workflow-step">
-        <span>{{ step.index }}</span>
-        <strong>{{ step.title }}</strong>
-        <small>{{ step.desc }}</small>
+    <!-- 工作流 -->
+    <section class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+      <article
+        v-for="step in workflowSteps"
+        :key="step.title"
+        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-5"
+      >
+        <div class="text-xs font-extrabold text-cyan-600 dark:text-cyan-400">{{ step.index }}</div>
+        <div class="mt-2 text-lg font-bold text-slate-800 dark:text-white">{{ step.title }}</div>
+        <div class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">{{ step.desc }}</div>
       </article>
     </section>
 
-    <section class="metric-grid">
-      <article v-for="card in metricCards" :key="card.label" class="metric-card">
-        <div class="metric-label">{{ card.label }}</div>
-        <div class="metric-value">{{ card.value }}</div>
-        <div class="metric-foot">{{ card.foot }}</div>
-      </article>
+    <!-- 统计卡 -->
+    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+      <StatCard
+        v-for="card in metricCards"
+        :key="card.label"
+        :label="card.label"
+        :value="card.value"
+        :hint="card.foot"
+        :icon="card.icon"
+        :tone="card.tone"
+      />
     </section>
 
-    <section class="main-grid">
-      <article class="surface-card surface-span-2">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Task Flow</div>
-            <h3>资源整理任务</h3>
+    <!-- 主区域 -->
+    <section class="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <!-- 资源整理任务 -->
+      <PageCard title="资源整理任务" subtitle="Task Flow" class="lg:col-span-2">
+        <template #action>
+          <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            查看全部
+          </router-link>
+        </template>
+
+        <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <div class="rounded-xl bg-cyan-500/10 p-4">
+            <div class="text-xs text-slate-500 dark:text-slate-400">运行中</div>
+            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.running || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当前仍在执行的任务</div>
           </div>
-          <router-link to="/dashboard/tasks" class="surface-link">查看全部</router-link>
+          <div class="rounded-xl bg-emerald-500/10 p-4">
+            <div class="text-xs text-slate-500 dark:text-slate-400">今日完成</div>
+            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.completed_today || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当天成功落地的任务</div>
+          </div>
+          <div class="rounded-xl bg-red-500/10 p-4">
+            <div class="text-xs text-slate-500 dark:text-slate-400">今日失败</div>
+            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.failed_today || 0 }}</div>
+            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">需要进入任务中心排查</div>
+          </div>
         </div>
 
-        <div class="task-panels">
-          <div class="task-panel">
-            <div class="task-panel-label">运行中</div>
-            <div class="task-panel-value">{{ stats.tasks.running || 0 }}</div>
-            <div class="task-panel-foot">当前仍在执行的任务</div>
-          </div>
-          <div class="task-panel">
-            <div class="task-panel-label">今日完成</div>
-            <div class="task-panel-value">{{ stats.tasks.completed_today || 0 }}</div>
-            <div class="task-panel-foot">当天成功落地的任务</div>
-          </div>
-          <div class="task-panel task-panel-alert">
-            <div class="task-panel-label">今日失败</div>
-            <div class="task-panel-value">{{ stats.tasks.failed_today || 0 }}</div>
-            <div class="task-panel-foot">需要进入任务中心排查</div>
-          </div>
-        </div>
-
-        <div class="recent-task-list">
-          <div v-if="recentTasks.length === 0" class="empty-state">暂无任务记录</div>
+        <div class="flex flex-col gap-2">
+          <p v-if="recentTasks.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无任务记录</p>
           <button
             v-for="task in recentTasks"
             :key="task.task_id"
             type="button"
-            class="recent-task-item"
+            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10"
             @click="router.push('/dashboard/tasks')"
           >
-            <span class="recent-task-name">{{ task.task_name || task.task_type || '任务' }}</span>
-            <span class="recent-task-status" :data-status="task.status">{{ formatTaskStatus(task.status) }}</span>
+            <span class="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
+              {{ task.task_name || task.task_type || '任务' }}
+            </span>
+            <span
+              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+              :class="taskStatusPillClass(task.status)"
+            >
+              {{ formatTaskStatus(task.status) }}
+            </span>
           </button>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="surface-card">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Source</div>
-            <h3>同步入口</h3>
+      <!-- 同步入口 -->
+      <PageCard title="同步入口" subtitle="Source">
+        <template #action>
+          <router-link to="/dashboard/sync-tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            进入同步
+          </router-link>
+        </template>
+
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">总媒体源</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.total || 0 }}</strong>
           </div>
-          <router-link to="/dashboard/sync-tasks" class="surface-link">进入同步</router-link>
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">本地</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.local || 0 }}</strong>
+          </div>
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">115</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.cloud115 || 0 }}</strong>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-slate-400 dark:text-slate-500">启用中</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.enabled || 0 }}</strong>
+          </div>
         </div>
+      </PageCard>
 
-        <div class="stat-stack">
-          <div class="stat-row">
-            <span>总媒体源</span>
-            <strong>{{ stats.media_sources.total || 0 }}</strong>
-          </div>
-          <div class="stat-row">
-            <span>本地</span>
-            <strong>{{ stats.media_sources.local || 0 }}</strong>
-          </div>
-          <div class="stat-row">
-            <span>115</span>
-            <strong>{{ stats.media_sources.cloud115 || 0 }}</strong>
-          </div>
-          <div class="stat-row">
-            <span>启用中</span>
-            <strong>{{ stats.media_sources.enabled || 0 }}</strong>
-          </div>
-        </div>
-      </article>
+      <!-- 账号配额 -->
+      <PageCard title="账号配额" subtitle="Quota">
+        <template #action>
+          <router-link to="/dashboard/cloud115" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            查看账号
+          </router-link>
+        </template>
 
-      <article class="surface-card">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Quota</div>
-            <h3>账号配额</h3>
-          </div>
-          <router-link to="/dashboard/cloud115" class="surface-link">查看账号</router-link>
-        </div>
-
-        <div v-if="storageAccounts.length === 0" class="empty-state">暂无账号配额数据</div>
-        <div v-else class="storage-list">
-          <div v-for="account in storageAccounts" :key="account.name" class="storage-item">
-            <div class="storage-head">
-              <span>{{ account.name }}</span>
-              <strong>{{ formatBytes(account.used) }}</strong>
+        <p v-if="storageAccounts.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无账号配额数据</p>
+        <div v-else class="flex flex-col gap-4">
+          <div v-for="account in storageAccounts" :key="account.name">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <span class="truncate text-sm text-slate-500 dark:text-slate-400">{{ account.name }}</span>
+              <strong class="shrink-0 text-sm tabular-nums text-slate-800 dark:text-white">{{ formatBytes(account.used) }}</strong>
             </div>
-            <div class="storage-bar">
-              <span class="storage-fill" :style="{ width: `${account.percentage || 12}%` }"></span>
+            <div class="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+              <span
+                class="block h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300"
+                :style="{ width: `${account.percentage || 12}%` }"
+              ></span>
             </div>
           </div>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="surface-card">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Runtime</div>
-            <h3>资源监控</h3>
-          </div>
-          <span class="surface-link">{{ formatDateTime(monitor.sampled_at) }}</span>
-        </div>
+      <!-- 资源监控 -->
+      <PageCard title="资源监控" subtitle="Runtime">
+        <template #action>
+          <span class="text-xs text-slate-400 dark:text-slate-500">{{ formatDateTime(monitor.sampled_at) }}</span>
+        </template>
 
-        <div class="stat-stack">
-          <div class="stat-row">
-            <span>运行内存</span>
-            <strong>{{ formatBytes(monitor.memory_bytes) }}</strong>
+        <div class="flex flex-col gap-3">
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">运行内存</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.memory_bytes) }}</strong>
           </div>
-          <div class="stat-row">
-            <span>堆分配</span>
-            <strong>{{ formatBytes(monitor.heap_alloc_bytes) }}</strong>
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">堆分配</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.heap_alloc_bytes) }}</strong>
           </div>
-          <div class="stat-row">
-            <span>Goroutines</span>
-            <strong>{{ monitor.goroutines || 0 }}</strong>
+          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+            <span class="text-sm text-slate-400 dark:text-slate-500">Goroutines</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.goroutines || 0 }}</strong>
           </div>
-          <div class="stat-row">
-            <span>CPU 核心</span>
-            <strong>{{ monitor.cpu_cores || 0 }}</strong>
+          <div class="flex items-center justify-between">
+            <span class="text-sm text-slate-400 dark:text-slate-500">CPU 核心</span>
+            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.cpu_cores || 0 }}</strong>
           </div>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="surface-card surface-span-2">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Trend</div>
-            <h3>近 7 天整理趋势</h3>
+      <!-- 近 7 天整理趋势 -->
+      <PageCard title="近 7 天整理趋势" subtitle="Trend" class="lg:col-span-2">
+        <template #action>
+          <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
+            <span class="flex items-center gap-1.5">
+              <i class="inline-block h-2 w-2 rounded-full bg-cyan-500"></i>STRM
+            </span>
+            <span class="flex items-center gap-1.5">
+              <i class="inline-block h-2 w-2 rounded-full bg-amber-400"></i>入库/整理
+            </span>
           </div>
-          <div class="trend-legend">
-            <span><i class="legend-dot legend-dot-primary"></i>STRM</span>
-            <span><i class="legend-dot legend-dot-secondary"></i>入库/整理</span>
-          </div>
-        </div>
+        </template>
 
-        <div class="trend-chart">
-          <div class="trend-grid">
-            <div v-for="row in 4" :key="row" class="trend-grid-line"></div>
+        <div class="relative h-64 pt-3">
+          <div class="absolute inset-x-0 top-0 bottom-7 grid grid-rows-4">
+            <div v-for="row in 4" :key="row" class="border-t border-dashed border-slate-200 dark:border-white/10"></div>
           </div>
-          <div class="trend-series">
-            <div v-for="point in trendPoints" :key="point.date" class="trend-column">
-              <div class="trend-bars">
-                <span class="trend-bar trend-bar-primary" :style="{ height: `${point.strmHeight}%` }"></span>
-                <span class="trend-bar trend-bar-secondary" :style="{ height: `${point.organizeHeight}%` }"></span>
+          <div class="relative z-10 grid h-full grid-cols-7 items-end gap-2 sm:gap-3">
+            <div v-for="point in trendPoints" :key="point.date" class="flex h-full flex-col items-center gap-2">
+              <div class="flex w-full flex-1 items-end justify-center gap-1.5 sm:gap-2">
+                <span
+                  class="w-3 rounded-t-full bg-gradient-to-b from-cyan-500 to-cyan-600 sm:w-4"
+                  :style="{ height: `${point.strmHeight}%` }"
+                ></span>
+                <span
+                  class="w-3 rounded-t-full bg-gradient-to-b from-amber-400 to-amber-500 sm:w-4"
+                  :style="{ height: `${point.organizeHeight}%` }"
+                ></span>
               </div>
-              <div class="trend-label">{{ point.label }}</div>
+              <div class="text-xs text-slate-400 dark:text-slate-500">{{ point.label }}</div>
             </div>
           </div>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="surface-card">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Probe</div>
-            <h3>网络探针</h3>
-          </div>
-          <router-link to="/dashboard/network" class="surface-link">详细探测</router-link>
-        </div>
+      <!-- 网络探针 -->
+      <PageCard title="网络探针" subtitle="Probe">
+        <template #action>
+          <router-link to="/dashboard/network" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            详细探测
+          </router-link>
+        </template>
 
-        <div v-if="probeLoading" class="empty-state">探针检测中...</div>
-        <div v-else class="probe-list">
-          <div v-for="probe in probes" :key="probe.url" class="probe-item">
-            <div>
-              <div class="probe-name">{{ probe.name }}</div>
-              <div class="probe-url">{{ probe.url }}</div>
+        <p v-if="probeLoading" class="text-sm text-slate-400 dark:text-slate-500">探针检测中...</p>
+        <div v-else class="flex flex-col gap-2.5">
+          <div
+            v-for="probe in probes"
+            :key="probe.url"
+            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
+          >
+            <div class="min-w-0">
+              <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ probe.name }}</div>
+              <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ probe.url }}</div>
             </div>
-            <span class="probe-status" :data-status="probe.ok === true ? 'success' : probe.ok === false ? 'danger' : 'pending'">
+            <span
+              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+              :class="probeStatusPillClass(probe.ok)"
+            >
               {{ probe.ok === true ? '正常' : probe.ok === false ? '失败' : '待测' }}
             </span>
           </div>
         </div>
-      </article>
+      </PageCard>
 
-      <article class="surface-card surface-span-2">
-        <div class="surface-header">
-          <div>
-            <div class="surface-kicker">Recent Ingest</div>
-            <h3>最近入库</h3>
-          </div>
-          <router-link to="/dashboard/media-library" class="surface-link">查看台账</router-link>
-        </div>
+      <!-- 最近入库 -->
+      <PageCard title="最近入库" subtitle="Recent Ingest" class="lg:col-span-2">
+        <template #action>
+          <router-link to="/dashboard/media-library" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            查看台账
+          </router-link>
+        </template>
 
-        <div v-if="recentIngest.length === 0" class="empty-state">暂无最近入库记录</div>
-        <div v-else class="ingest-list">
-          <div v-for="item in recentIngest" :key="item.task_id" class="ingest-item">
-            <div>
-              <div class="ingest-name">{{ item.task_name || '任务' }}</div>
-              <div class="ingest-meta">{{ item.source_name || item.task_type || '系统任务' }}</div>
+        <p v-if="recentIngest.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无最近入库记录</p>
+        <div v-else class="flex flex-col gap-2.5">
+          <div
+            v-for="item in recentIngest"
+            :key="item.task_id"
+            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
+          >
+            <div class="min-w-0">
+              <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ item.task_name || '任务' }}</div>
+              <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ item.source_name || item.task_type || '系统任务' }}</div>
             </div>
-            <div class="ingest-brief">
-              <span>{{ item.result_brief }}</span>
-              <small>{{ item.update_time || '-' }}</small>
+            <div class="flex shrink-0 flex-col items-end gap-0.5 text-right">
+              <span class="text-xs text-slate-600 dark:text-slate-300">{{ item.result_brief }}</span>
+              <small class="text-xs text-slate-400 dark:text-slate-500">{{ item.update_time || '-' }}</small>
             </div>
           </div>
         </div>
-      </article>
+      </PageCard>
     </section>
   </div>
 </template>
@@ -238,6 +294,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import {
+  DocumentTextOutline,
+  CloudOutline,
+  PlayCircleOutline,
+  ServerOutline
+} from '@vicons/ionicons5'
+import PageCard from '../../components/common/PageCard.vue'
+import StatCard from '../../components/common/StatCard.vue'
 import { getDashboardOverview, getDashboardResourceMonitor, getDashboardTrend } from '../../utils/api/dashboard'
 import { getNetworkProbeSites, testNetworkConnectivity } from '../../utils/api/setting'
 
@@ -319,22 +383,30 @@ const metricCards = computed(() => {
     {
       label: 'STRM 资产',
       value: stats.value.strm_files.total || 0,
-      foot: stats.value.strm_files.last_generation_time ? `最近生成 ${formatDateTime(stats.value.strm_files.last_generation_time)}` : '暂无最近生成记录'
+      foot: stats.value.strm_files.last_generation_time ? `最近生成 ${formatDateTime(stats.value.strm_files.last_generation_time)}` : '暂无最近生成记录',
+      icon: DocumentTextOutline,
+      tone: 'cyan'
     },
     {
       label: '云盘账号',
       value: stats.value.accounts.total || 0,
-      foot: `可用 ${stats.value.accounts.active || 0} / 冷却 ${stats.value.accounts.cooling || 0}`
+      foot: `可用 ${stats.value.accounts.active || 0} / 冷却 ${stats.value.accounts.cooling || 0}`,
+      icon: CloudOutline,
+      tone: 'violet'
     },
     {
       label: '运行中任务',
       value: stats.value.tasks.running || 0,
-      foot: `今日完成 ${stats.value.tasks.completed_today || 0} 项`
+      foot: `今日完成 ${stats.value.tasks.completed_today || 0} 项`,
+      icon: PlayCircleOutline,
+      tone: 'amber'
     },
     {
       label: '启用媒体源',
       value: stats.value.media_sources.enabled || 0,
-      foot: `总数 ${stats.value.media_sources.total || 0}`
+      foot: `总数 ${stats.value.media_sources.total || 0}`,
+      icon: ServerOutline,
+      tone: 'green'
     }
   ]
 })
@@ -441,519 +513,25 @@ const formatTaskStatus = (status) => {
   return map[status] || '未知'
 }
 
+const taskStatusPillClass = (status) => {
+  const map = {
+    completed: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+    running: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',
+    failed: 'bg-red-500/10 text-red-600 dark:text-red-400',
+    pending: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+    cancelled: 'bg-slate-500/10 text-slate-500 dark:text-slate-400',
+    scheduled: 'bg-violet-500/10 text-violet-600 dark:text-violet-400'
+  }
+  return map[status] || 'bg-slate-500/10 text-slate-500 dark:text-slate-400'
+}
+
+const probeStatusPillClass = (ok) => {
+  if (ok === true) return 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+  if (ok === false) return 'bg-red-500/10 text-red-600 dark:text-red-400'
+  return 'bg-slate-500/10 text-slate-500 dark:text-slate-400'
+}
+
 onMounted(async () => {
   await Promise.all([loadOverview(), loadMonitor(), loadTrends(), loadProbes()])
 })
 </script>
-
-<style scoped>
-.dashboard-home {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.hero-panel,
-.workflow-step,
-.surface-card,
-.metric-card {
-  background: rgba(255, 252, 247, 0.84);
-  border: 1px solid rgba(120, 101, 72, 0.12);
-  box-shadow: 0 24px 60px rgba(58, 42, 24, 0.08);
-  backdrop-filter: blur(14px);
-}
-
-:global(.dark) .hero-panel,
-:global(.dark) .workflow-step,
-:global(.dark) .surface-card,
-:global(.dark) .metric-card {
-  background: rgba(14, 21, 32, 0.86);
-  border-color: rgba(139, 163, 185, 0.12);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
-}
-
-.hero-panel {
-  display: grid;
-  grid-template-columns: 1.5fr 1fr;
-  gap: 24px;
-  padding: 28px;
-  border-radius: 28px;
-}
-
-.hero-kicker,
-.surface-kicker {
-  color: #1f6f78;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-}
-
-:global(.dark) .hero-kicker,
-:global(.dark) .surface-kicker {
-  color: #77c3d4;
-}
-
-.hero-copy h2 {
-  margin: 12px 0;
-  font-size: 34px;
-  line-height: 1.15;
-}
-
-.hero-copy p {
-  color: #695d51;
-  line-height: 1.8;
-}
-
-:global(.dark) .hero-copy p,
-:global(.dark) .surface-link,
-:global(.dark) .metric-foot,
-:global(.dark) .stat-row span,
-:global(.dark) .probe-url,
-:global(.dark) .trend-label,
-:global(.dark) .empty-state,
-:global(.dark) .recent-task-name {
-  color: #8fa1b5;
-}
-
-.hero-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  justify-content: center;
-}
-
-.hero-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 54px;
-  padding: 0 18px;
-  border-radius: 18px;
-  background: rgba(31, 111, 120, 0.08);
-  color: #1f2933;
-  text-decoration: none;
-  font-weight: 700;
-}
-
-.hero-action-primary {
-  background: linear-gradient(135deg, #1f6f78, #f2a65a);
-  color: #fff;
-}
-
-.workflow-strip {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.workflow-step {
-  display: grid;
-  gap: 8px;
-  min-height: 128px;
-  padding: 20px;
-  border-radius: 18px;
-}
-
-.workflow-step span {
-  color: #1f6f78;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.workflow-step strong {
-  font-size: 20px;
-}
-
-.workflow-step small {
-  color: #776c60;
-  line-height: 1.6;
-}
-
-:global(.dark) .workflow-step span {
-  color: #77c3d4;
-}
-
-:global(.dark) .workflow-step small {
-  color: #8fa1b5;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.metric-card {
-  padding: 22px;
-  border-radius: 24px;
-}
-
-.metric-label {
-  color: #695d51;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.metric-value {
-  margin: 10px 0 6px;
-  font-size: 40px;
-  font-weight: 800;
-  line-height: 1;
-}
-
-.metric-foot {
-  font-size: 12px;
-  color: #776c60;
-  line-height: 1.6;
-}
-
-.main-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-}
-
-.surface-card {
-  padding: 22px;
-  border-radius: 24px;
-}
-
-.surface-span-2 {
-  grid-column: span 2;
-}
-
-.surface-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
-}
-
-.surface-header h3 {
-  margin-top: 8px;
-  font-size: 24px;
-}
-
-.surface-link {
-  color: #5b5147;
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.task-panels {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 18px;
-}
-
-.task-panel {
-  padding: 18px;
-  border-radius: 18px;
-  background: rgba(31, 111, 120, 0.08);
-}
-
-.task-panel-alert {
-  background: rgba(224, 95, 76, 0.08);
-}
-
-.task-panel-label,
-.task-panel-foot {
-  font-size: 13px;
-  color: #6f6457;
-}
-
-.task-panel-value {
-  margin: 10px 0 8px;
-  font-size: 32px;
-  font-weight: 800;
-}
-
-.recent-task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.recent-task-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  border: 0;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.58);
-  cursor: pointer;
-  text-align: left;
-}
-
-:global(.dark) .recent-task-item {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.recent-task-name {
-  color: #1f2933;
-  font-weight: 600;
-}
-
-:global(.dark) .recent-task-name {
-  color: #ebf2fa;
-}
-
-.recent-task-status,
-.probe-status {
-  padding: 6px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.recent-task-status[data-status='completed'],
-.probe-status[data-status='success'] {
-  background: rgba(79, 168, 100, 0.14);
-  color: #2f7d32;
-}
-
-.recent-task-status[data-status='running'] {
-  background: rgba(242, 166, 90, 0.18);
-  color: #9a5a17;
-}
-
-.recent-task-status[data-status='failed'],
-.probe-status[data-status='danger'] {
-  background: rgba(220, 94, 74, 0.14);
-  color: #9f3729;
-}
-
-.recent-task-status[data-status='pending'],
-.probe-status[data-status='pending'] {
-  background: rgba(76, 110, 245, 0.12);
-  color: #3154a6;
-}
-
-.stat-stack,
-.storage-list,
-.probe-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.stat-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-bottom: 10px;
-  border-bottom: 1px dashed rgba(120, 101, 72, 0.16);
-}
-
-.stat-row strong,
-.storage-head strong {
-  font-size: 20px;
-}
-
-.storage-item {
-  padding: 14px 0;
-}
-
-.storage-head {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
-}
-
-.storage-bar {
-  height: 10px;
-  border-radius: 999px;
-  background: rgba(31, 111, 120, 0.08);
-  overflow: hidden;
-}
-
-.storage-fill {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #1f6f78, #f2a65a);
-}
-
-.trend-chart {
-  position: relative;
-  height: 280px;
-  padding-top: 14px;
-}
-
-.trend-grid {
-  position: absolute;
-  inset: 0 0 28px;
-  display: grid;
-  grid-template-rows: repeat(4, 1fr);
-}
-
-.trend-grid-line {
-  border-top: 1px dashed rgba(120, 101, 72, 0.12);
-}
-
-.trend-series {
-  position: relative;
-  z-index: 1;
-  height: 100%;
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  align-items: end;
-  gap: 12px;
-}
-
-.trend-column {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-  height: 100%;
-}
-
-.trend-bars {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 8px;
-}
-
-.trend-bar {
-  width: 18px;
-  min-height: 8%;
-  border-radius: 999px 999px 6px 6px;
-}
-
-.trend-bar-primary {
-  background: linear-gradient(180deg, #1f6f78, #3d96a1);
-}
-
-.trend-bar-secondary {
-  background: linear-gradient(180deg, #f2a65a, #d58534);
-}
-
-.trend-label {
-  font-size: 12px;
-  color: #6f6457;
-}
-
-.trend-legend {
-  display: flex;
-  gap: 14px;
-  color: #6f6457;
-  font-size: 12px;
-}
-
-.legend-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
-  border-radius: 999px;
-}
-
-.legend-dot-primary {
-  background: #1f6f78;
-}
-
-.legend-dot-secondary {
-  background: #f2a65a;
-}
-
-.probe-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.52);
-}
-
-:global(.dark) .probe-item {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.probe-name {
-  font-weight: 700;
-}
-
-.probe-url {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #776c60;
-}
-
-.empty-state {
-  color: #776c60;
-  font-size: 14px;
-}
-
-.ingest-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.ingest-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.52);
-}
-
-:global(.dark) .ingest-item {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.ingest-name {
-  font-weight: 700;
-}
-
-.ingest-meta,
-.ingest-brief small {
-  color: #776c60;
-  font-size: 12px;
-}
-
-.ingest-meta {
-  margin-top: 4px;
-}
-
-.ingest-brief {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  text-align: right;
-}
-
-@media (max-width: 1180px) {
-  .metric-grid,
-  .main-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 860px) {
-  .hero-panel,
-  .workflow-strip,
-  .metric-grid,
-  .main-grid,
-  .task-panels {
-    grid-template-columns: 1fr;
-  }
-
-  .surface-span-2 {
-    grid-column: span 1;
-  }
-}
-</style>

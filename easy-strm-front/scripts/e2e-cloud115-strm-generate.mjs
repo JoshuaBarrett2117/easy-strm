@@ -19,7 +19,7 @@ const sourceName = `cloud_strm_e2e_${stamp}`;
 const targetPath = `/影视资源/CodexStrmE2E_${stamp}`;
 const targetFolderName = `CodexStrmE2E_${stamp}`;
 const movieSourceCID = "2977269469445485999";
-const sourceLibraryID = 20;
+const sourceLibraryID = 186;
 const organizedRootCID = "3410496669326971511";
 
 const cases = [];
@@ -57,12 +57,14 @@ function unwrapData(payload) {
 }
 
 async function waitForMessage(page, text, timeout = 60000) {
-  const locator = page.locator(".el-message").filter({ hasText: text }).last();
+  const locator = page.locator(".n-message").filter({ hasText: text });
   await locator.waitFor({ timeout });
 }
 
 async function findDialogByTitle(page, title) {
-  const dialog = page.locator(".el-dialog").filter({ hasText: title }).last();
+  const dialog = page.getByRole("dialog").filter({
+    has: page.getByRole("heading", { name: title, exact: true })
+  });
   await dialog.waitFor({ timeout: 20000 });
   return dialog;
 }
@@ -76,6 +78,19 @@ async function pollTask(api, taskId, maxAttempts = 30) {
       return detail;
     }
     await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+  return null;
+}
+
+async function pollUnifiedTask(api, taskId, maxAttempts = 60) {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const resp = await api.get(`/tasks/${taskId}`);
+    const detail = unwrapData(await apiJson(resp)) || {};
+    const status = detail.status || "";
+    if (status && status !== "pending" && status !== "running") {
+      return detail;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   return null;
 }
@@ -117,7 +132,7 @@ async function run() {
     await page.goto(`${FRONTEND_URL}/login`, { waitUntil: "networkidle" });
     await page.locator('input[placeholder*="用户名"], input[type="text"]').first().fill("admin");
     await page.locator('input[type="password"]').first().fill("admin");
-    await page.locator(".login-btn").click();
+    await page.getByRole("button", { name: "登录" }).click();
     await page.waitForURL(/\/dashboard(\/|$)/, { timeout: 30000, waitUntil: "commit" });
     addCase("TC-CLOUD-STRM-AUTH-001", "登录成功", "PASS", "", await saveShot(page, "01_login"));
 
@@ -171,19 +186,19 @@ async function run() {
     }
 
     await page.goto(`${FRONTEND_URL}/dashboard/media-manager`, { waitUntil: "networkidle" });
-    const sourceRow = page.locator(".el-table__row").filter({ hasText: sourceName }).first();
+    const sourceRow = page.getByRole("row").filter({ hasText: sourceName });
     await sourceRow.waitFor({ timeout: 20000 });
-    await sourceRow.locator(".el-button--primary").first().click();
+    await sourceRow.getByRole("button", { name: "浏览" }).click();
 
-    const browserDialog = page.locator(".el-dialog").filter({ has: page.locator(".table-wrapper") }).last();
+    const browserDialog = page.getByRole("dialog").filter({ hasText: "文件浏览" });
     await browserDialog.waitFor({ timeout: 20000 });
-    const fileRow = browserDialog.locator(".el-table__row").filter({ hasText: ".mp4" }).first();
+    const fileRow = browserDialog.getByRole("row").filter({ hasText: ".mp4" }).first();
     await fileRow.waitFor({ timeout: 20000 });
-    await fileRow.locator(".el-checkbox").click();
-    await browserDialog.locator(".el-button").filter({ hasText: "批量整理" }).click();
+    await fileRow.getByRole("checkbox").click();
+    await browserDialog.getByRole("button", { name: /批量整理/ }).click();
 
     const organizeDialog = await findDialogByTitle(page, "批量整理");
-    await organizeDialog.locator(".dialog-footer .el-button").filter({ hasText: "刷新预览" }).click();
+    await organizeDialog.getByRole("button", { name: "刷新预览" }).click();
     await waitForMessage(page, "预览完成", 90000);
     const previewText = (await organizeDialog.textContent()) || "";
     const previewPass = previewText.includes("可处理 1 项") && previewText.includes("识别失败 0 项");
@@ -195,26 +210,31 @@ async function run() {
       await saveShot(page, "02_preview_success")
     );
 
-    await organizeDialog.locator(".dialog-footer .el-button--primary").filter({ hasText: "执行整理" }).click();
-    await waitForMessage(page, "整理完成", 180000);
-    const resultDialog = await findDialogByTitle(page, "整理结果");
-    const resultText = (await resultDialog.textContent()) || "";
-    const hasGenerateButton = await resultDialog.locator(".el-button").filter({ hasText: "生成 STRM" }).count();
-    addCase(
-      "TC-CLOUD-STRM-002",
-      "115 云源整理成功后结果弹窗展示生成 STRM 按钮",
-      resultText.includes("成功") && hasGenerateButton > 0 ? "PASS" : "FAIL",
-      resultText.replace(/\s+/g, " ").slice(0, 220),
-      await saveShot(page, "03_result_dialog")
-    );
-
-    const responsePromise = page.waitForResponse(
-      (resp) => resp.url().includes("/strm/config/generate/from-organize") && resp.request().method() === "POST",
+    const executeResponsePromise = page.waitForResponse(
+      (resp) => resp.url().includes("/media/organize/execute/async") && resp.request().method() === "POST",
       { timeout: 60000 }
     );
-    await resultDialog.locator(".el-button").filter({ hasText: "生成 STRM" }).click();
-    const generateResp = await responsePromise;
-    const generatePayload = await generateResp.json();
+    await organizeDialog.getByRole("button", { name: "执行整理" }).click();
+    const executeResp = await executeResponsePromise;
+    const executePayload = unwrapData(await executeResp.json()) || {};
+    const organizeTaskId = executePayload.task_id || "";
+    const organizeTask = organizeTaskId ? await pollUnifiedTask(api, organizeTaskId) : null;
+    addCase(
+      "TC-CLOUD-STRM-002",
+      "115 云源整理任务提交后在任务中心完成",
+      executeResp.ok() && organizeTask?.status === "completed" ? "PASS" : "FAIL",
+      `task=${organizeTaskId || "-"} status=${organizeTask?.status || "unknown"}`,
+      await saveShot(page, "03_organize_task_submitted")
+    );
+
+    const generateResp = await api.post("/strm/config/generate/from-organize", {
+      data: {
+        source_id: tempSourceId,
+        target_paths: [targetPath],
+        strm_config_id: 0
+      }
+    });
+    const generatePayload = await apiJson(generateResp);
     const generatedConfigId = generatePayload?.strm_config_id || generatePayload?.data?.strm_config_id || 0;
     const taskId = generatePayload?.task_id || generatePayload?.data?.task_id || "";
     addCase(
@@ -237,7 +257,7 @@ async function run() {
     );
 
     await page.goto(`${FRONTEND_URL}/dashboard/tasks`, { waitUntil: "networkidle" });
-    const taskCard = page.locator(".task-items").filter({ hasText: taskId || targetPath }).first();
+    const taskCard = page.getByText(taskId || targetPath).first();
     await taskCard.waitFor({ timeout: 20000 }).catch(() => {});
     const taskShot = await saveShot(page, "05_task_center");
     addCase(
@@ -310,6 +330,7 @@ async function run() {
     process.exitCode = 1;
   } finally {
     if (api) {
+      await cleanupRemoteArtifacts(api).catch(() => false);
       if (tempConfigId) await api.delete(`/strm/config/${tempConfigId}`).catch(() => {});
       if (tempSourceId) await api.delete(`/media/sources/${tempSourceId}`).catch(() => {});
       await api.dispose().catch(() => {});

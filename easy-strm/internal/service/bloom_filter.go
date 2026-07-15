@@ -7,25 +7,25 @@ import (
 	"math"
 	"sync"
 
-	"github.com/go-redis/redis/v8"
 	"easy-strm/internal/pkg/logger"
+	"github.com/go-redis/redis/v8"
 )
 
 const (
-	bloomFilterKey       = "easy_strm:bloom:sha1"
-	bloomFilterRedisKey  = "easy_strm:bloom:keys"
+	bloomFilterKey           = "easy_strm:bloom:sha1"
+	bloomFilterRedisKey      = "easy_strm:bloom:keys"
 	defaultFalsePositiveRate = 0.01
-	defaultBitSize       = 10000000
+	defaultBitSize           = 10000000
 )
 
 type BloomFilter struct {
-	client       *redis.Client
-	ctx          context.Context
-	bitSize      uint64
-	hashCount    uint8
-	mu           sync.RWMutex
-	localFilter  *SafeBitSet
-	useLocal     bool
+	client      *redis.Client
+	ctx         context.Context
+	bitSize     uint64
+	hashCount   uint8
+	mu          sync.RWMutex
+	localFilter *SafeBitSet
+	useLocal    bool
 }
 
 type SafeBitSet struct {
@@ -67,12 +67,12 @@ func NewBloomFilter(client *redis.Client, bitSize uint64) *BloomFilter {
 	hashCount := optimalHashCount(bitSize, defaultFalsePositiveRate)
 
 	bf := &BloomFilter{
-		client:    client,
-		ctx:       context.Background(),
-		bitSize:   bitSize,
-		hashCount: hashCount,
+		client:      client,
+		ctx:         context.Background(),
+		bitSize:     bitSize,
+		hashCount:   hashCount,
 		localFilter: NewSafeBitSet(bitSize),
-		useLocal:  client == nil,
+		useLocal:    client == nil,
 	}
 
 	if client != nil {
@@ -150,7 +150,7 @@ func (bf *BloomFilter) MayContain(sha1Hash string) bool {
 
 func (bf *BloomFilter) getPositions(sha1Hash string) []uint64 {
 	positions := make([]uint64, bf.hashCount)
-	var h1, h2 uint64 = bf.hash(sha1Hash), bf.hash(sha1Hash+"salt")
+	var h1, h2 uint64 = bf.hash(sha1Hash), bf.hash(sha1Hash + "salt")
 	for i := uint8(0); i < bf.hashCount; i++ {
 		positions[i] = (h1 + uint64(i)*h2) % bf.bitSize
 	}
