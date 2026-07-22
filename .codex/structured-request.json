@@ -1,20 +1,19 @@
 {
-  "date": "2026-07-15",
+  "task": "修复亮色主题侧栏并启动真实后端执行全模块测试",
+  "date": "2026-07-17",
   "executor": "Codex",
-  "goal": "验证重构后的关键主流程，更新旧 E2E 脚本以适配新 DOM，并发布全部代码变更到 GitHub",
   "scope": [
-    "启动 Go 后端与 Vite 前端",
-    "浏览器验证登录、文件浏览、TMDB 识别、媒体整理、STRM 生成",
-    "更新 easy-strm-front/scripts/e2e-*.mjs 的旧 Element Plus 选择器",
-    "执行后端测试、前端构建、E2E 与关键主流程回归",
-    "提交全部确认后的工作区变更并创建 GitHub 草稿 PR"
+    "easy-strm-front/src/views/Dashboard.vue",
+    "easy-strm/db.go",
+    "docs/开发与测试.md",
+    ".codex/testing.md",
+    ".codex/verification.md"
   ],
   "acceptance": [
-    "后端监听 8082，前端监听 3001",
-    "关键主流程在真实本地前后端上可执行并有可核查结果",
-    "项目 package.json 暴露的 E2E 命令全部通过",
-    "go test ./... 与 npm run build 通过",
-    "无密钥、Cookie、Token 或生成型大文件被误提交",
-    "远程分支与草稿 PR 创建成功"
+    "亮色主题下侧栏、菜单与状态卡同步变为浅色",
+    "Docker PostgreSQL、Redis 与主应用启动成功",
+    "按测试文档覆盖主要后端模块和核心数据闭环",
+    "发现的可复现缺陷完成修复与复测",
+    "生成并更新最新测试文档，明确未覆盖项"
   ]
 }

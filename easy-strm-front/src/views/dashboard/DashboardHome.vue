@@ -1,56 +1,65 @@
 <template>
-  <div class="space-y-4">
+  <div class="space-y-5 lg:space-y-6">
     <!-- Hero -->
-    <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-7">
-      <div class="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
-        <div>
-          <div class="text-xs font-bold uppercase tracking-[0.16em] text-cyan-600 dark:text-cyan-400">Resource Hub</div>
-          <h2 class="mt-3 text-2xl font-extrabold leading-snug text-slate-800 dark:text-white lg:text-3xl">
-            以媒体资产台账为中心，串起同步、入库、STRM 与任务追踪。
+    <section class="surface-card relative overflow-hidden rounded-[1.75rem] p-5 lg:p-8">
+      <div class="pointer-events-none absolute -right-24 -top-40 h-96 w-96 rounded-full bg-indigo-500/15 blur-3xl"></div>
+      <div class="pointer-events-none absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl"></div>
+      <div class="relative grid gap-8 xl:grid-cols-[1.25fr_0.75fr] xl:items-center">
+        <div class="max-w-3xl">
+          <div class="inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-indigo-600 dark:text-indigo-300">
+            <span class="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
+            Resource operations hub
+          </div>
+          <h2 class="mt-5 max-w-3xl text-3xl font-black leading-[1.18] tracking-[-0.035em] text-slate-900 dark:text-white lg:text-[2.65rem]">
+            从媒体源到资产台账，
+            <span class="bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent dark:from-indigo-300 dark:to-cyan-300">让每一步都有迹可循。</span>
           </h2>
-          <p class="mt-3 text-sm leading-relaxed text-slate-400 dark:text-slate-500">
-            首版主链路固定为媒体源同步索引、媒体库台账、入库流水线、任务中心和待处理修正。
+          <p class="mt-4 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
+            统一查看媒体源、同步索引、入库状态与 STRM 生成结果，把分散的整理动作收敛为一条清晰工作流。
           </p>
+          <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
+            <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-emerald-400"></i>{{ stats.media_sources.enabled || 0 }} 个媒体源启用</span>
+            <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-indigo-400"></i>{{ stats.tasks.running || 0 }} 个任务运行中</span>
+            <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-cyan-400"></i>{{ stats.strm_files.total || 0 }} 条 STRM 资产</span>
+          </div>
         </div>
 
-        <div class="flex flex-col justify-center gap-3">
+        <div class="grid grid-cols-2 gap-3">
           <router-link
-            to="/dashboard/media-library"
-            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-400 px-4 font-bold text-white shadow-sm transition-opacity hover:opacity-90"
+            v-for="action in quickActions"
+            :key="action.to"
+            :to="action.to"
+            class="group flex min-h-28 flex-col justify-between rounded-2xl border border-slate-200/70 bg-white/65 p-4 transition-all duration-200 hover:-translate-y-1 hover:border-indigo-300/60 hover:shadow-lg hover:shadow-indigo-950/5 dark:border-white/[0.07] dark:bg-white/[0.035] dark:hover:border-indigo-400/20 dark:hover:bg-white/[0.06]"
           >
-            打开资产台账
-          </router-link>
-          <router-link
-            to="/dashboard/sync-tasks"
-            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
-          >
-            同步入库
-          </router-link>
-          <router-link
-            to="/dashboard/pending-media"
-            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
-          >
-            处理失败项
-          </router-link>
-          <router-link
-            to="/dashboard/tasks"
-            class="inline-flex min-h-12 items-center justify-center rounded-xl bg-slate-100 px-4 font-bold text-slate-700 transition-colors hover:bg-slate-200 dark:bg-white/5 dark:text-slate-200 dark:hover:bg-white/10"
-          >
-            查看任务中心
+            <span class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/15 to-cyan-500/10 text-indigo-600 ring-1 ring-inset ring-indigo-400/10 transition-transform group-hover:scale-105 dark:text-indigo-300">
+              <n-icon size="19" :component="action.icon" />
+            </span>
+            <span class="flex items-end justify-between gap-2">
+              <span>
+                <strong class="block text-sm text-slate-800 dark:text-slate-100">{{ action.title }}</strong>
+                <small class="mt-0.5 block text-[11px] text-slate-400 dark:text-slate-500">{{ action.description }}</small>
+              </span>
+              <span class="text-lg text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-indigo-400 dark:text-slate-700">→</span>
+            </span>
           </router-link>
         </div>
       </div>
     </section>
 
     <!-- 工作流 -->
-    <section class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
+    <section class="relative grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:gap-4">
       <article
         v-for="step in workflowSteps"
         :key="step.title"
-        class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:p-5"
+        class="surface-card group rounded-[1.2rem] p-4 transition-transform duration-200 hover:-translate-y-0.5 lg:p-5"
       >
-        <div class="text-xs font-extrabold text-cyan-600 dark:text-cyan-400">{{ step.index }}</div>
-        <div class="mt-2 text-lg font-bold text-slate-800 dark:text-white">{{ step.title }}</div>
+        <div class="flex items-center justify-between">
+          <span class="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400 dark:text-slate-600">Step {{ step.index }}</span>
+          <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-500 dark:text-indigo-300">
+            <n-icon size="17" :component="step.icon" />
+          </span>
+        </div>
+        <div class="mt-4 text-[15px] font-extrabold text-slate-800 dark:text-white">{{ step.title }}</div>
         <div class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">{{ step.desc }}</div>
       </article>
     </section>
@@ -298,8 +307,14 @@ import {
   DocumentTextOutline,
   CloudOutline,
   PlayCircleOutline,
-  ServerOutline
+  ServerOutline,
+  FolderOpenOutline,
+  SyncOutline,
+  FilmOutline,
+  AlertCircleOutline,
+  ListOutline
 } from '@vicons/ionicons5'
+import { NIcon } from 'naive-ui'
 import PageCard from '../../components/common/PageCard.vue'
 import StatCard from '../../components/common/StatCard.vue'
 import { getDashboardOverview, getDashboardResourceMonitor, getDashboardTrend } from '../../utils/api/dashboard'
@@ -327,10 +342,17 @@ const strmTrend = ref({ points: [] })
 const archiveTrend = ref({ points: [] })
 
 const workflowSteps = [
-  { index: '01', title: '媒体源', desc: '本地与 115 统一接入' },
-  { index: '02', title: '同步索引', desc: '全量或增量扫描资源' },
-  { index: '03', title: '资产台账', desc: '追踪识别、STRM 与元数据' },
-  { index: '04', title: '任务闭环', desc: '失败进入待处理修正' }
+  { index: '01', title: '媒体源', desc: '本地与 115 统一接入', icon: FolderOpenOutline },
+  { index: '02', title: '同步索引', desc: '全量或增量扫描资源', icon: SyncOutline },
+  { index: '03', title: '资产台账', desc: '追踪识别、STRM 与元数据', icon: FilmOutline },
+  { index: '04', title: '任务闭环', desc: '失败进入待处理修正', icon: AlertCircleOutline }
+]
+
+const quickActions = [
+  { to: '/dashboard/media-library', title: '资产台账', description: '查看媒体资产', icon: FilmOutline },
+  { to: '/dashboard/sync-tasks', title: '同步入库', description: '发起资源同步', icon: SyncOutline },
+  { to: '/dashboard/pending-media', title: '待处理', description: '修正失败资源', icon: AlertCircleOutline },
+  { to: '/dashboard/tasks', title: '任务中心', description: '追踪执行状态', icon: ListOutline }
 ]
 
 const stats = computed(() => ({

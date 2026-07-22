@@ -1,22 +1,23 @@
 <template>
-  <div class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md dark:border-white/5 dark:bg-ink-900 lg:p-5">
+  <article class="surface-card group rounded-[1.25rem] p-4 transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:border-indigo-300/40 hover:shadow-[var(--shadow-card-hover)] lg:p-5">
+    <span class="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></span>
     <div class="flex items-start justify-between">
       <div class="min-w-0">
-        <p class="text-xs font-medium text-slate-400 dark:text-slate-500">{{ label }}</p>
-        <p class="mt-1 truncate text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">
+        <p class="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-400 dark:text-slate-500">{{ label }}</p>
+        <p class="mt-2 truncate text-3xl font-black tracking-tight tabular-nums text-slate-800 dark:text-white">
           {{ value }}
         </p>
-        <p v-if="hint" class="mt-1 truncate text-xs text-slate-400 dark:text-slate-500">{{ hint }}</p>
+        <p v-if="hint" class="mt-1.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ hint }}</p>
       </div>
       <div
         v-if="icon"
-        class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+        class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl ring-1 ring-inset ring-current/10 transition-transform duration-200 group-hover:scale-105"
         :class="toneClass"
       >
         <n-icon size="20" :component="icon" />
       </div>
     </div>
-  </div>
+  </article>
 </template>
 
 <script setup>

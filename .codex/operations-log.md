@@ -187,3 +187,42 @@
 - 最终结果 `ok=true`，通过 15 个按钮组：登录、顶部快捷、首页入口、同步入库、资产台账、待处理、任务中心、文件工作台、115、整理规则、STRM、系统设置、日志、网络、缓存。
 - 清理：临时测试用户删除后再次登录确认失败；临时媒体源、分类和 STRM 配置均由脚本删除。
 - 残余 warning：任务中心“详情”按钮可点击，但本轮未观察到详情抽屉打开，需要单独排查。
+# 2026-07-16 UI 重构与美化
+
+- 执行者：Codex
+- `git status --short --branch`：确认工作区干净，`main` 跟踪 `origin/main`。
+- `git pull --ff-only origin main`：从 `c789030` 快进到 `3664027`。
+- 工具降级：当前会话未提供 sequential-thinking、code-index、shrimp-task-manager，使用本地 `rg`、文件读取与 `update_plan` 替代。
+- 上下文扫描：检查 Vue/Vite/Naive UI/Tailwind 配置、全局主题、应用壳层、登录页、仪表盘及公共组件。
+- 方案决策：不新增依赖，不改 API 与路由；通过全局设计令牌、Naive UI 覆盖、应用壳层和公共组件统一全站视觉。
+- 实现：重构全局设计令牌、Naive UI themeOverrides、Dashboard 侧栏/顶栏/内容容器、登录页、Dashboard 首页与三个公共组件。
+- 浏览器验收：桌面与 390px 窄屏登录页通过；发现全局 reset 覆盖 Tailwind 间距后已修复并复验。
+- 验证：`npm run build`、`go test ./...`、`git diff --check` 均通过。
+- 清理：关闭本轮临时 Vite `:4173` 服务并结束浏览器验收标签页。
+
+# 2026-07-17 本地服务启动
+
+- 执行者：Codex
+- 前端：`npm run dev -- --host 127.0.0.1 --port 3001 --strictPort` 启动成功，HTTP 200。
+- 后端：先后使用 `config.yaml` 与 `.env.test` 的 PostgreSQL 配置启动，均被 `192.168.31.12:15432` 返回密码认证失败。
+- Docker 降级检查：仓库包含 PostgreSQL/Redis Compose 服务，但本机 Docker Desktop Linux daemon 未运行，无法启动本地依赖。
+- 当前状态：前端保持运行；后端需要有效 PostgreSQL 凭据或可用的 Docker daemon。
+
+# 2026-07-17 亮色主题与全模块回归
+
+- 使用截图和 `Dashboard.vue` 定位侧栏固定深色 class，改为浅色默认 + `dark:` 深色覆盖。
+- 启动 Docker Desktop，并通过 Compose 启动 PostgreSQL、Redis 和 `easy-strm` 主应用。
+- 真实 API 测试覆盖鉴权、Dashboard、媒体源、同步、资产台账、文件操作、待处理、任务、分类、设置、日志、网络、缓存、Cron、通知等模块。
+- 创建的临时媒体源、分类、待处理数据和容器测试文件均已清理。
+- 发现 `t_notification_config` 未在全新数据库初始化，补齐 `InitDB` 建表逻辑，重建容器后复测通过。
+- Chrome 访问 localhost 被企业网络策略阻止，遵循策略未切换其他浏览器自动化绕过；在测试报告中记录为未覆盖项。
+- 验证通过：`npm run build`、`go test ./...`、`go vet ./...`、23 个 E2E 脚本 `node --check`、Docker 镜像构建、`git diff --check`。
+
+# 2026-07-22 本地服务启动
+
+- 启动 Docker Desktop，并恢复 PostgreSQL、Redis、easy-strm 主应用容器。
+- 启动 Vite 前端开发服务 `127.0.0.1:3001`。
+- HTTP 验证：前端与后端首页均返回 200；未携带 Token 访问鉴权 API 返回预期 401。
+- 按用户要求将后端切换至 NAS PostgreSQL `192.168.31.12:15432/easy_strm_prod`，运行时凭据未写入仓库文件。
+- 使用独立容器 `easy-strm-nas-test` 连接 NAS 数据库，并复用本地 Redis；后端 `:8082` 与前端 `:3001` 均返回 200。
+- 启动日志确认数据库与 Redis 连接成功，管理员登录只读冒烟通过。

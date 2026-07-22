@@ -1,42 +1,65 @@
 <template>
-  <div class="flex h-screen overflow-hidden bg-slate-100 dark:bg-ink-950">
+  <div class="app-canvas flex h-screen overflow-hidden">
     <!-- 侧边栏 -->
     <aside
-      class="fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 dark:border-white/5 dark:bg-ink-900 lg:static lg:translate-x-0"
+      class="fixed inset-y-0 left-0 z-40 flex w-[17rem] flex-col overflow-hidden border-r border-slate-200/80 bg-white text-slate-800 shadow-2xl shadow-slate-950/10 transition-transform duration-200 dark:border-white/[0.07] dark:bg-[#0b0f1a] dark:text-white dark:shadow-slate-950/20 lg:static lg:translate-x-0 lg:shadow-none"
       :class="mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'"
     >
       <!-- 品牌 -->
-      <div class="flex items-center gap-3 px-5 py-5">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-cyan-700 text-sm font-extrabold tracking-wider text-white shadow-lg shadow-cyan-500/20">
-          ES
+      <div class="relative flex items-center gap-3 px-5 pb-5 pt-6">
+        <div class="absolute -left-16 -top-24 h-48 w-48 rounded-full bg-indigo-400/15 blur-3xl dark:bg-indigo-500/20"></div>
+        <div class="relative flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-400 via-indigo-500 to-cyan-500 text-sm font-black tracking-wider text-white shadow-lg shadow-indigo-950/40 ring-1 ring-white/20">
+          <span>ES</span>
+          <span class="absolute -bottom-3 -right-3 h-8 w-8 rounded-full bg-white/20 blur-md"></span>
         </div>
-        <div>
-          <div class="text-base font-bold text-slate-800 dark:text-white">Easy Stream</div>
-          <div class="text-[11px] uppercase tracking-widest text-slate-400 dark:text-slate-500">Media Platform</div>
+        <div class="relative min-w-0">
+          <div class="truncate text-[15px] font-extrabold tracking-tight text-slate-900 dark:text-white">Easy Stream</div>
+          <div class="mt-0.5 text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">Media Workspace</div>
         </div>
       </div>
 
       <!-- 菜单 -->
-      <nav class="flex-1 overflow-y-auto px-3 pb-4">
-        <div v-for="section in menuSections" :key="section.title" class="mb-2">
-          <div class="px-3 py-2 text-[11px] font-bold uppercase tracking-widest text-slate-400 dark:text-slate-600">
+      <nav class="relative flex-1 overflow-y-auto px-3 pb-4">
+        <div v-for="section in menuSections" :key="section.title" class="mb-4">
+          <div class="px-3 pb-2 pt-1 text-[10px] font-extrabold uppercase tracking-[0.18em] text-slate-400 dark:text-slate-600">
             {{ section.title }}
           </div>
           <button
             v-for="item in section.items"
             :key="item.path"
             type="button"
-            class="group mb-0.5 flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors"
+            class="group relative mb-1 flex w-full items-center gap-3 overflow-hidden rounded-xl px-3 py-2.5 text-left text-[13px] transition-all duration-150"
             :class="route.path === item.path
-              ? 'bg-cyan-600/10 font-semibold text-cyan-700 dark:bg-cyan-400/10 dark:text-cyan-300'
-              : 'text-slate-600 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-200'"
+              ? 'bg-indigo-50 font-bold text-indigo-700 shadow-sm ring-1 ring-indigo-100 dark:bg-white/[0.09] dark:text-white dark:shadow-inner dark:shadow-white/[0.03] dark:ring-white/[0.06]'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/[0.045] dark:hover:text-slate-200'"
             @click="navigate(item.path)"
           >
-            <n-icon size="18" :component="item.icon" />
+            <span v-if="route.path === item.path" class="absolute inset-y-2 left-0 w-0.5 rounded-full bg-gradient-to-b from-indigo-400 to-cyan-300"></span>
+            <span
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors"
+              :class="route.path === item.path
+                ? 'bg-gradient-to-br from-indigo-100 to-cyan-50 text-indigo-600 dark:from-indigo-500/30 dark:to-cyan-500/20 dark:text-indigo-200'
+                : 'bg-slate-100 text-slate-400 group-hover:text-slate-600 dark:bg-white/[0.035] dark:text-slate-500 dark:group-hover:text-slate-300'"
+            >
+              <n-icon size="17" :component="item.icon" />
+            </span>
             <span>{{ item.label }}</span>
           </button>
         </div>
       </nav>
+
+      <div class="relative m-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-3.5 dark:border-white/[0.07] dark:bg-white/[0.035]">
+        <div class="flex items-center gap-2.5">
+          <span class="relative flex h-2.5 w-2.5">
+            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-30"></span>
+            <span class="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+          </span>
+          <div>
+            <div class="text-xs font-bold text-slate-700 dark:text-slate-200">工作区已连接</div>
+            <div class="mt-0.5 text-[10px] text-slate-400 dark:text-slate-600">服务运行状态正常</div>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- 移动端遮罩 -->
@@ -49,18 +72,23 @@
     <!-- 主区域 -->
     <div class="flex min-w-0 flex-1 flex-col">
       <!-- 顶栏 -->
-      <header class="flex items-center justify-between gap-4 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur dark:border-white/5 dark:bg-ink-900/80 lg:px-6">
+      <header class="relative z-20 flex min-h-[4.5rem] items-center justify-between gap-4 border-b border-slate-200/60 bg-white/65 px-4 backdrop-blur-xl dark:border-white/[0.06] dark:bg-[#0b0f1a]/60 lg:px-7">
         <div class="flex min-w-0 items-center gap-3">
           <button
             type="button"
-            class="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5 lg:hidden"
+            class="icon-button lg:hidden"
             @click="mobileMenuOpen = !mobileMenuOpen"
           >
             <n-icon size="20" :component="MenuOutline" />
           </button>
-          <div class="min-w-0">
-            <h1 class="truncate text-lg font-bold text-slate-800 dark:text-white">{{ currentTitle }}</h1>
-            <p class="hidden truncate text-xs text-slate-400 dark:text-slate-500 md:block">{{ currentDescription }}</p>
+          <div class="min-w-0 py-2">
+            <div class="mb-0.5 hidden items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-600 sm:flex">
+              <span>Easy Stream</span>
+              <span class="text-slate-300 dark:text-slate-700">/</span>
+              <span>{{ currentSection }}</span>
+            </div>
+            <h1 class="truncate text-lg font-extrabold tracking-tight text-slate-800 dark:text-white">{{ currentTitle }}</h1>
+            <p class="hidden max-w-3xl truncate text-xs text-slate-400 dark:text-slate-500 md:block">{{ currentDescription }}</p>
           </div>
         </div>
 
@@ -69,7 +97,7 @@
             <template #trigger>
               <button
                 type="button"
-                class="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-white/5"
+                class="icon-button"
                 @click="toggleTheme"
               >
                 <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
@@ -81,7 +109,7 @@
             <template #trigger>
               <button
                 type="button"
-                class="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-red-50 hover:text-red-500 dark:text-slate-400 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+                class="icon-button hover:!border-red-200 hover:!bg-red-50 hover:!text-red-500 dark:hover:!border-red-500/20 dark:hover:!bg-red-500/10 dark:hover:!text-red-400"
                 @click="handleLogout"
               >
                 <n-icon size="18" :component="LogOutOutline" />
@@ -93,12 +121,14 @@
       </header>
 
       <!-- 内容 -->
-      <main class="flex-1 overflow-y-auto p-4 lg:p-6">
-        <router-view v-slot="{ Component }">
-          <transition name="page-fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
+      <main class="flex-1 overflow-y-auto px-3 py-4 sm:px-4 lg:px-7 lg:py-6">
+        <div class="page-content">
+          <router-view v-slot="{ Component }">
+            <transition name="page-fade" mode="out-in">
+              <component :is="Component" />
+            </transition>
+          </router-view>
+        </div>
       </main>
     </div>
   </div>
@@ -170,6 +200,9 @@ const menuSections = [
 
 const currentTitle = computed(() => route.meta?.title || '控制台')
 const currentDescription = computed(() => route.meta?.description || '')
+const currentSection = computed(() => {
+  return menuSections.find(section => section.items.some(item => item.path === route.path))?.title || '工作台'
+})
 
 watch(() => route.path, () => {
   mobileMenuOpen.value = false

@@ -1,3 +1,29 @@
+# 2026-07-17 亮色主题与全模块测试
+
+- 前端构建：通过，4231 modules transformed。
+- 后端测试：`go test ./...`、`go vet ./...` 通过。
+- Docker：PostgreSQL、Redis 健康，主应用运行于 `:8082`。
+- E2E 静态检查：23 个 `e2e-*.mjs` 全部通过 `node --check`。
+- API 基线：登录后 20+ 个模块查询接口返回正常 JSON。
+- 核心闭环：媒体源创建 -> 全量同步 -> 索引 -> 资产台账 -> 任务 -> 删除清理，通过。
+- 文件操作：浏览、搜索、重命名、复制、移动、删除，通过。
+- 待处理：创建、识别、重新入库、清理，通过。
+- 配置操作：分类 CRUD、日志配置更新恢复、网络探针、缓存定向清理，通过。
+- 缺陷复现：全新数据库 `/notify/config` 返回 500，缺少 `t_notification_config`。
+- 缺陷复测：补齐初始化建表后接口恢复成功。
+- 浏览器：Chrome localhost 访问被企业策略阻止，未执行真实点击测试，未尝试绕过。
+- 详细矩阵：[docs/开发与测试.md](../docs/开发与测试.md)
+
+# 2026-07-16 UI 重构验证
+
+- `git pull --ff-only origin main`：通过，快进到 `3664027`。
+- `npm run build`（`easy-strm-front`）：通过，4231 modules transformed。
+- `go test ./...`（`easy-strm`）：通过，所有 Go 包通过。
+- `git diff --check`：通过，无空白错误。
+- Codex in-app Browser：登录页桌面 1280×720 通过；窄屏 390×844 通过，`scrollWidth=390`，无横向溢出。
+- 工作台真实页面：因浏览器没有登录态，访问 `/dashboard/home` 按既有路由守卫重定向 `/login`，未绕过认证注入状态；工作台通过构建与静态模板检查。
+- 发现并修复：全局 reset 覆盖 Tailwind 间距工具类，已移除 `*` 的 margin/padding reset，仅保留 box-sizing 并将 body margin 置零。
+
 # Testing Log
 
 ## 2026-07-15/16 重构验收与 E2E 选择器迁移

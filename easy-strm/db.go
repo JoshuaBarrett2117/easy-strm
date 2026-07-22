@@ -190,6 +190,24 @@ func InitDB(config *Config) error {
 		return err
 	}
 
+	// 创建通知配置表，确保全新数据库无需手工执行历史迁移脚本即可使用通知模块。
+	createNotificationConfigTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_notification_config (
+		id SERIAL PRIMARY KEY,
+		channel VARCHAR(20) NOT NULL UNIQUE,
+		config JSONB NOT NULL DEFAULT '{}',
+		enabled BOOLEAN DEFAULT FALSE,
+		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+	);
+	`
+
+	_, err = db.Exec(createNotificationConfigTableSQL)
+	if err != nil {
+		Error("Failed to create notification_config table: %v", err)
+		return err
+	}
+
 	// 创建STRM配置表（如果不存在）
 	createStrmConfigTableSQL := `
 	CREATE TABLE IF NOT EXISTS t_strm_config (
