@@ -11,11 +11,11 @@
             Resource operations hub
           </div>
           <h2 class="mt-5 max-w-3xl text-3xl font-black leading-[1.18] tracking-[-0.035em] text-slate-900 dark:text-white lg:text-[2.65rem]">
-            从媒体源到资产台账，
-            <span class="bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent dark:from-indigo-300 dark:to-cyan-300">让每一步都有迹可循。</span>
+            从媒体源到 STRM，
+            <span class="bg-gradient-to-r from-indigo-500 to-cyan-500 bg-clip-text text-transparent dark:from-indigo-300 dark:to-cyan-300">让整理流程简单清晰。</span>
           </h2>
           <p class="mt-4 max-w-2xl text-sm leading-7 text-slate-500 dark:text-slate-400">
-            统一查看媒体源、同步索引、入库状态与 STRM 生成结果，把分散的整理动作收敛为一条清晰工作流。
+            统一完成文件浏览、TMDB 识别、重命名整理与 STRM 生成，保留真正高频的媒体处理能力。
           </p>
           <div class="mt-6 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
             <span class="flex items-center gap-2"><i class="h-2 w-2 rounded-full bg-emerald-400"></i>{{ stats.media_sources.enabled || 0 }} 个媒体源启用</span>
@@ -127,11 +127,11 @@
         </div>
       </PageCard>
 
-      <!-- 同步入口 -->
-      <PageCard title="同步入口" subtitle="Source">
+      <!-- 媒体源入口 -->
+      <PageCard title="媒体源" subtitle="Source">
         <template #action>
-          <router-link to="/dashboard/sync-tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            进入同步
+          <router-link to="/dashboard/media-manager" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            打开工作台
           </router-link>
         </template>
 
@@ -214,7 +214,7 @@
               <i class="inline-block h-2 w-2 rounded-full bg-cyan-500"></i>STRM
             </span>
             <span class="flex items-center gap-1.5">
-              <i class="inline-block h-2 w-2 rounded-full bg-amber-400"></i>入库/整理
+              <i class="inline-block h-2 w-2 rounded-full bg-amber-400"></i>整理/刮削
             </span>
           </div>
         </template>
@@ -270,18 +270,18 @@
         </div>
       </PageCard>
 
-      <!-- 最近入库 -->
-      <PageCard title="最近入库" subtitle="Recent Ingest" class="lg:col-span-2">
+      <!-- 最近处理 -->
+      <PageCard title="最近处理" subtitle="Recent Activity" class="lg:col-span-2">
         <template #action>
-          <router-link to="/dashboard/media-library" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            查看台账
+          <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+            查看任务
           </router-link>
         </template>
 
-        <p v-if="recentIngest.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无最近入库记录</p>
+        <p v-if="recentActivity.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无最近处理记录</p>
         <div v-else class="flex flex-col gap-2.5">
           <div
-            v-for="item in recentIngest"
+            v-for="item in recentActivity"
             :key="item.task_id"
             class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
           >
@@ -309,9 +309,8 @@ import {
   PlayCircleOutline,
   ServerOutline,
   FolderOpenOutline,
-  SyncOutline,
-  FilmOutline,
-  AlertCircleOutline,
+  SearchOutline,
+  CreateOutline,
   ListOutline
 } from '@vicons/ionicons5'
 import { NIcon } from 'naive-ui'
@@ -333,7 +332,7 @@ const overview = ref({
   strm_task: {},
   archive_task: {},
   recent_tasks: [],
-  recent_ingest: []
+  recent_activity: []
 })
 const monitorState = ref({})
 const probes = ref([])
@@ -343,15 +342,15 @@ const archiveTrend = ref({ points: [] })
 
 const workflowSteps = [
   { index: '01', title: '媒体源', desc: '本地与 115 统一接入', icon: FolderOpenOutline },
-  { index: '02', title: '同步索引', desc: '全量或增量扫描资源', icon: SyncOutline },
-  { index: '03', title: '资产台账', desc: '追踪识别、STRM 与元数据', icon: FilmOutline },
-  { index: '04', title: '任务闭环', desc: '失败进入待处理修正', icon: AlertCircleOutline }
+  { index: '02', title: '识别', desc: '通过 TMDB 匹配媒体信息', icon: SearchOutline },
+  { index: '03', title: '整理', desc: '预览并执行命名与归档', icon: CreateOutline },
+  { index: '04', title: '任务追踪', desc: '查看进度、结果与失败原因', icon: ListOutline }
 ]
 
 const quickActions = [
-  { to: '/dashboard/media-library', title: '资产台账', description: '查看媒体资产', icon: FilmOutline },
-  { to: '/dashboard/sync-tasks', title: '同步入库', description: '发起资源同步', icon: SyncOutline },
-  { to: '/dashboard/pending-media', title: '待处理', description: '修正失败资源', icon: AlertCircleOutline },
+  { to: '/dashboard/media-manager', title: '文件工作台', description: '浏览与整理媒体', icon: FolderOpenOutline },
+  { to: '/dashboard/strm-config', title: 'STRM 配置', description: '管理生成规则', icon: DocumentTextOutline },
+  { to: '/dashboard/cloud115', title: '115 云管理', description: '维护云盘账号', icon: CloudOutline },
   { to: '/dashboard/tasks', title: '任务中心', description: '追踪执行状态', icon: ListOutline }
 ]
 
@@ -434,7 +433,7 @@ const metricCards = computed(() => {
 })
 
 const recentTasks = computed(() => (overview.value.recent_tasks || []).slice(0, 5))
-const recentIngest = computed(() => (overview.value.recent_ingest || []).slice(0, 5))
+const recentActivity = computed(() => (overview.value.recent_activity || []).slice(0, 5))
 const storageAccounts = computed(() => stats.value.storage.accounts.slice(0, 4))
 
 const trendPoints = computed(() => {

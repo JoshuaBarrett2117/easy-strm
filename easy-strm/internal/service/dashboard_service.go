@@ -22,11 +22,11 @@ type DashboardStats struct {
 
 // DashboardOverview Dashboard 首页总览结果
 type DashboardOverview struct {
-	Stats        DashboardStats     `json:"stats"`
-	StrmTask     TaskOverview       `json:"strm_task"`
-	ArchiveTask  TaskOverview       `json:"archive_task"`
-	RecentTasks  []map[string]any   `json:"recent_tasks"`
-	RecentIngest []RecentIngestItem `json:"recent_ingest"`
+	Stats          DashboardStats       `json:"stats"`
+	StrmTask       TaskOverview         `json:"strm_task"`
+	ArchiveTask    TaskOverview         `json:"archive_task"`
+	RecentTasks    []map[string]any     `json:"recent_tasks"`
+	RecentActivity []RecentActivityItem `json:"recent_activity"`
 }
 
 // TaskOverview 首页任务摘要
@@ -37,8 +37,8 @@ type TaskOverview struct {
 	Total     int  `json:"total"`
 }
 
-// RecentIngestItem 最近入库项
-type RecentIngestItem struct {
+// RecentActivityItem 最近媒体处理记录。
+type RecentActivityItem struct {
 	TaskID      string `json:"task_id"`
 	TaskName    string `json:"task_name"`
 	TaskType    string `json:"task_type"`
@@ -180,11 +180,11 @@ func (s *DashboardService) GetDashboardOverview() (*DashboardOverview, error) {
 	}
 
 	overview := &DashboardOverview{
-		Stats:        *stats,
-		StrmTask:     s.buildTaskOverview(tasks, []string{"strm_generate"}),
-		ArchiveTask:  s.buildTaskOverview(tasks, []string{"organize", "watch_auto_organize", "scrape"}),
-		RecentTasks:  s.limitTasks(tasks, 8),
-		RecentIngest: s.buildRecentIngest(tasks, 8),
+		Stats:          *stats,
+		StrmTask:       s.buildTaskOverview(tasks, []string{"strm_generate"}),
+		ArchiveTask:    s.buildTaskOverview(tasks, []string{"organize", "watch_auto_organize", "scrape"}),
+		RecentTasks:    s.limitTasks(tasks, 8),
+		RecentActivity: s.buildRecentActivity(tasks, 8),
 	}
 
 	return overview, nil
@@ -470,12 +470,12 @@ func (s *DashboardService) limitTasks(tasks []map[string]interface{}, limit int)
 	return result
 }
 
-func (s *DashboardService) buildRecentIngest(tasks []map[string]interface{}, limit int) []RecentIngestItem {
+func (s *DashboardService) buildRecentActivity(tasks []map[string]interface{}, limit int) []RecentActivityItem {
 	if limit <= 0 {
-		return []RecentIngestItem{}
+		return []RecentActivityItem{}
 	}
 
-	result := make([]RecentIngestItem, 0, limit)
+	result := make([]RecentActivityItem, 0, limit)
 	for _, task := range tasks {
 		taskType, _ := task["task_type"].(string)
 		status, _ := task["status"].(string)
@@ -497,7 +497,7 @@ func (s *DashboardService) buildRecentIngest(tasks []map[string]interface{}, lim
 		taskName, _ := task["task_name"].(string)
 		updateTime, _ := task["update_time"].(string)
 
-		result = append(result, RecentIngestItem{
+		result = append(result, RecentActivityItem{
 			TaskID:      taskID,
 			TaskName:    taskName,
 			TaskType:    taskType,

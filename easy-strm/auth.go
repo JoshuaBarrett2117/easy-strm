@@ -32,11 +32,6 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmConfigDAO := dao.NewStrmConfigDAO()
 	strmFileDAO := dao.NewStrmFileDAO()
 	cronTaskDAO := dao.NewCronTaskDAO()
-	mediaSyncIndexDAO := dao.NewMediaSyncIndexDAO()
-	pendingMediaDAO := dao.NewPendingMediaDAO()
-	if err := dao.EnsureMediaLibraryTables(); err != nil {
-		Error("Failed to ensure media library tables: %v", err)
-	}
 
 	// 初始化 Service
 	mediaSourceService := service.NewMediaSourceService(mediaSourceDAO, cloud115DAO)
@@ -54,19 +49,12 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmService := service.NewStrmService(strmConfigDAO, strmFileDAO, cronTaskDAO)
 	cronService := service.NewCronService(cronTaskDAO)
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
-	taskService.SetTaskStepDAO(dao.NewTaskStepDAO())
 	dashboardService := service.NewDashboardService(cloud115DAO, mediaSourceDAO, strmFileDAO, dao.NewTaskRedisDAOWithGlobal())
 	authService := service.NewAuthService(dao.NewUserDAO(), config.JWTSecret)
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
 	embyService := service.NewEmbyService(systemConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
 	cacheAdminService := service.NewCacheAdminService(dao.DB, dao.GetGlobalRedisClient())
-	mediaSyncService := service.NewMediaSyncService(mediaSourceDAO, cloud115DAO, mediaSyncIndexDAO, taskService, client)
-	mediaSyncService.SetSystemConfigDAO(systemConfigDAO)
-	mediaLibraryPipelineService := service.NewMediaLibraryPipelineService(mediaSourceDAO, mediaSyncIndexDAO, pendingMediaDAO, strmConfigDAO, strmFileDAO, systemConfigDAO, tmdbService, taskService, embyService)
-	mediaSyncService.SetPipeline(mediaLibraryPipelineService)
 	mediaCategoryService := service.NewMediaCategoryService(mediaCategoryDAO)
-	pendingMediaService := service.NewPendingMediaService(pendingMediaDAO, mediaLibraryPipelineService)
-	mediaLibraryService := service.NewMediaLibraryService(mediaSyncIndexDAO)
 	systemConfigService := service.NewSystemConfigService(systemConfigDAO)
 
 	// --- 初始化 Controller ---
@@ -87,9 +75,6 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	embyController := controller.NewEmbyController(embyService)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
-	mediaSyncController := controller.NewMediaSyncController(mediaSyncService, mediaLibraryPipelineService)
-	pendingMediaController := controller.NewPendingMediaController(pendingMediaService)
-	mediaLibraryController := controller.NewMediaLibraryController(mediaLibraryService, mediaLibraryPipelineService)
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
@@ -619,24 +604,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/sources", mediaSourceController.Create)
 		auth.PUT("/media/sources/:id", mediaSourceController.Update)
 		auth.DELETE("/media/sources/:id", mediaSourceController.Delete)
-		auth.POST("/media/sources/:id/sync/full", mediaSyncController.RunFullSync)
-		auth.POST("/media/sources/:id/sync/incremental", mediaSyncController.RunIncrementalSync)
-		auth.GET("/media/sources/:id/sync/index", mediaSyncController.GetIndex)
-		auth.POST("/media/sources/:id/pipeline", mediaSyncController.RunPipeline)
 		auth.GET("/media/files", mediaSourceController.GetFiles)
 		auth.GET("/media/files/search", mediaSourceController.SearchFiles)
-
-		// ========== 媒体库与待处理 ==========
-		auth.GET("/media/library/items", mediaLibraryController.ListItems)
-		auth.GET("/media/library/items/:id", mediaLibraryController.GetItem)
-		auth.POST("/media/library/items/:id/pipeline", mediaLibraryController.RunPipeline)
-		auth.POST("/media/library/items/:id/strm", mediaLibraryController.GenerateStrm)
-		auth.POST("/media/library/items/:id/refresh-server", mediaLibraryController.RefreshServer)
-		auth.GET("/media/pending", pendingMediaController.List)
-		auth.POST("/media/pending", pendingMediaController.Create)
-		auth.POST("/media/pending/:id/identify", pendingMediaController.Identify)
-		auth.POST("/media/pending/:id/run", pendingMediaController.Run)
-		auth.POST("/media/pending/:id/ignore", pendingMediaController.Ignore)
 
 		// ========== 文件操作 ==========
 		auth.POST("/media/files/move", fileOperationController.MoveFile)

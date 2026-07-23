@@ -99,9 +99,7 @@ async function run() {
 
     await page.goto(`${FRONTEND_URL}/dashboard/settings`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "系统配置", exact: true }).waitFor({ timeout: 15000 });
-    const alistValue = `http://127.0.0.1:${Math.floor(4000 + Math.random() * 500)}`;
     const proxyDomainsValue = "github,tmdb";
-    await page.locator('input[placeholder*="192.168.1.100:5244"]').fill(alistValue);
     await page.locator('.n-input-number input').first().fill("9");
     await page.locator('textarea[placeholder*="tg,github"]').fill(proxyDomainsValue);
     await page.getByRole("button", { name: "保存配置" }).first().click();
@@ -109,14 +107,13 @@ async function run() {
 
     const savedSettingsResp = await api.get("/settings");
     const savedSettingsData = normalizeData(await apiJson(savedSettingsResp)) || {};
-    const settingsPass = savedSettingsData.alist_url === alistValue
-      && String(savedSettingsData.log_save_day_limit) === "9"
+    const settingsPass = String(savedSettingsData.log_save_day_limit) === "9"
       && savedSettingsData.proxy_domains === proxyDomainsValue;
     addCase(
       "TC-EXT-SET-001",
       "系统设置保存并回读成功",
       settingsPass ? "PASS" : "FAIL",
-      `alist=${savedSettingsData.alist_url || ""} days=${savedSettingsData.log_save_day_limit || ""} domains=${savedSettingsData.proxy_domains || ""}`,
+      `days=${savedSettingsData.log_save_day_limit || ""} domains=${savedSettingsData.proxy_domains || ""}`,
       await saveShot(page, "02_settings_saved")
     );
 

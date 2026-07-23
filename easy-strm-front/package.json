@@ -8,8 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "e2e:organize-preview-refresh": "node scripts/e2e-organize-preview-refresh.mjs",
-    "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs",
-    "e2e:resource-platform": "node scripts/e2e-resource-platform.mjs"
+    "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",

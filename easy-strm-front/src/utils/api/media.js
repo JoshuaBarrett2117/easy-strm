@@ -30,38 +30,6 @@ export const getMediaFiles = (params) => api.get('/media/files', { params })
 export const searchMediaFiles = (params) => api.get('/media/files/search', { params })
 
 /**
- * 媒体库同步 API
- */
-
-export const runFullMediaSync = (sourceId) => api.post(`/media/sources/${sourceId}/sync/full`)
-
-export const runIncrementalMediaSync = (sourceId) => api.post(`/media/sources/${sourceId}/sync/incremental`)
-
-export const getMediaSyncIndex = (sourceId, params) => api.get(`/media/sources/${sourceId}/sync/index`, { params })
-
-export const runMediaLibraryPipeline = (sourceId) => api.post(`/media/sources/${sourceId}/pipeline`)
-
-export const getMediaLibraryItems = (params) => api.get('/media/library/items', { params })
-
-export const getMediaLibraryItem = (id) => api.get(`/media/library/items/${id}`)
-
-export const runMediaLibraryItemPipeline = (id) => api.post(`/media/library/items/${id}/pipeline`)
-
-export const generateMediaLibraryItemStrm = (id) => api.post(`/media/library/items/${id}/strm`)
-
-export const refreshMediaLibraryItemServer = (id) => api.post(`/media/library/items/${id}/refresh-server`)
-
-export const getPendingMediaItems = (params) => api.get('/media/pending', { params })
-
-export const createPendingMediaItem = (data) => api.post('/media/pending', data)
-
-export const identifyPendingMediaItem = (id, data) => api.post(`/media/pending/${id}/identify`, data)
-
-export const runPendingMediaItem = (id) => api.post(`/media/pending/${id}/run`)
-
-export const ignorePendingMediaItem = (id) => api.post(`/media/pending/${id}/ignore`)
-
-/**
  * 文件操作 API（Phase 1 第二部分）
  */
 

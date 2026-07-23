@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -13,7 +12,6 @@ import (
 
 type TaskService struct {
 	taskRedisDAO *dao.TaskRedisDAO
-	taskStepDAO  *dao.TaskStepDAO
 	// cancelFuncs 存储运行中任务的取消函数，用于从外部中断长时间运行的任务
 	cancelFuncs sync.Map // map[string]context.CancelFunc
 }
@@ -21,12 +19,7 @@ type TaskService struct {
 func NewTaskService(taskRedisDAO *dao.TaskRedisDAO) *TaskService {
 	return &TaskService{
 		taskRedisDAO: taskRedisDAO,
-		taskStepDAO:  dao.NewTaskStepDAO(),
 	}
-}
-
-func (s *TaskService) SetTaskStepDAO(taskStepDAO *dao.TaskStepDAO) {
-	s.taskStepDAO = taskStepDAO
 }
 
 // Create 创建新任务（默认优先级5）
@@ -55,7 +48,6 @@ func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
 	if err != nil || task == nil {
 		return task, err
 	}
-	s.attachSteps(task)
 	return task, nil
 }
 
@@ -117,80 +109,7 @@ func (s *TaskService) GetUnified() ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, task := range tasks {
-		s.attachSteps(task)
-	}
 	return tasks, nil
-}
-
-func (s *TaskService) CreateStep(taskID, stepKey, stepName string, sortOrder int, inputSummary string) (*domain.TaskStep, error) {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return nil, nil
-	}
-	step := &domain.TaskStep{
-		TaskID:       taskID,
-		StepKey:      stepKey,
-		StepName:     stepName,
-		Status:       domain.TaskStatusPending,
-		SortOrder:    sortOrder,
-		InputSummary: inputSummary,
-	}
-	return s.taskStepDAO.Create(step)
-}
-
-func (s *TaskService) StartStep(taskID, stepKey string) error {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return nil
-	}
-	now := time.Now()
-	return s.taskStepDAO.UpdateStatus(taskID, stepKey, domain.TaskStatusRunning, "", "", &now, nil)
-}
-
-func (s *TaskService) CompleteStep(taskID, stepKey, outputSummary string) error {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return nil
-	}
-	now := time.Now()
-	return s.taskStepDAO.UpdateStatus(taskID, stepKey, domain.TaskStatusCompleted, outputSummary, "", nil, &now)
-}
-
-func (s *TaskService) FailStep(taskID, stepKey, errMsg string) error {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return nil
-	}
-	now := time.Now()
-	return s.taskStepDAO.UpdateStatus(taskID, stepKey, domain.TaskStatusFailed, "", errMsg, nil, &now)
-}
-
-func (s *TaskService) SkipStep(taskID, stepKey, outputSummary string) error {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return nil
-	}
-	now := time.Now()
-	return s.taskStepDAO.UpdateStatus(taskID, stepKey, domain.TaskStatusSkipped, outputSummary, "", nil, &now)
-}
-
-func (s *TaskService) ListSteps(taskID string) ([]*domain.TaskStep, error) {
-	if s.taskStepDAO == nil || dao.DB == nil {
-		return []*domain.TaskStep{}, nil
-	}
-	return s.taskStepDAO.ListByTask(taskID)
-}
-
-func (s *TaskService) attachSteps(task map[string]interface{}) {
-	if s.taskStepDAO == nil || dao.DB == nil || task == nil {
-		return
-	}
-	taskID, _ := task["task_id"].(string)
-	if taskID == "" {
-		return
-	}
-	steps, err := s.taskStepDAO.ListByTask(taskID)
-	if err != nil {
-		logger.Warnf("TaskService[attachSteps] 加载任务步骤失败: task_id=%s, error=%v", taskID, err)
-		return
-	}
-	task["steps"] = steps
 }
 
 // Cancel 取消任务（设置Redis取消标记 + 调用context cancel + 更新状态）

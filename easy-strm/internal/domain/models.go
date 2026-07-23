@@ -130,8 +130,6 @@ const (
 	TaskTypeOrganize        TaskType = "organize"
 	TaskTypeScrape          TaskType = "scrape"
 	TaskTypeEmbyRefresh     TaskType = "emby_refresh"
-	TaskTypeLibrarySync     TaskType = "library_sync"
-	TaskTypeLibraryPipeline TaskType = "library_pipeline"
 )
 
 // TaskTypeNames 任务类型中文名称映射
@@ -145,8 +143,6 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeOrganize:        "媒体整理",
 	TaskTypeScrape:          "NFO刮削",
 	TaskTypeEmbyRefresh:     "Emby库刷新",
-	TaskTypeLibrarySync:     "媒体库同步",
-	TaskTypeLibraryPipeline: "媒体入库流水线",
 }
 
 // TaskStatus 任务运行状态

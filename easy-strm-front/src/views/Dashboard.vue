@@ -140,9 +140,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { NIcon, NTooltip } from 'naive-ui'
 import {
   HomeOutline,
-  FilmOutline,
-  SyncOutline,
-  AlertCircleOutline,
   ListOutline,
   FolderOpenOutline,
   DocumentTextOutline,
@@ -172,9 +169,6 @@ const menuSections = [
     title: '资源整理',
     items: [
       { path: '/dashboard/home', label: '仪表盘', icon: HomeOutline },
-      { path: '/dashboard/media-library', label: '资产台账', icon: FilmOutline },
-      { path: '/dashboard/sync-tasks', label: '同步入库', icon: SyncOutline },
-      { path: '/dashboard/pending-media', label: '待处理', icon: AlertCircleOutline },
       { path: '/dashboard/tasks', label: '任务中心', icon: ListOutline }
     ]
   },

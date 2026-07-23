@@ -15,29 +15,3 @@ type Cloud115Client interface {
 	MoveFile115(fileID, targetDirID string, cloud115ID int, cookie string) error
 	MkdirAll115(path string, cloud115ID int, cookie string) (string, error)
 }
-
-// Cloud115LifeEventClient 表示支持 115 生活事件流的客户端能力。
-// 事件流用于增量同步的快速判断，目录扫描仍作为首次同步、异常和周期对账兜底。
-type Cloud115LifeEventClient interface {
-	GetLifeEvents(offset int, limit int, behaviorType string, date string, cloud115ID int, cookie string) (*Cloud115LifeEventResp, error)
-}
-
-type Cloud115LifeEventResp struct {
-	Count    int                    `json:"count"`
-	NextPage bool                   `json:"next_page"`
-	Events   []Cloud115LifeEvent    `json:"events"`
-	Raw      map[string]interface{} `json:"raw,omitempty"`
-}
-
-type Cloud115LifeEvent struct {
-	ID          int64                  `json:"id"`
-	UpdateTime  int64                  `json:"update_time"`
-	Type        int                    `json:"type"`
-	EventName   string                 `json:"event_name"`
-	FileID      string                 `json:"file_id"`
-	PickCode    string                 `json:"pick_code"`
-	ParentID    string                 `json:"parent_id"`
-	FileName    string                 `json:"file_name"`
-	IsDirectory bool                   `json:"is_directory"`
-	Raw         map[string]interface{} `json:"raw,omitempty"`
-}

@@ -17,7 +17,7 @@
 ```text
 easy-strm/
 ├── easy-strm/         # Go 后端，Gin + PostgreSQL + Redis
-├── easy-strm-front/   # Vue 3 前端，Vite + Element Plus
+├── easy-strm-front/   # Vue 3 前端，Vite + Naive UI
 ├── deploy/            # Docker 部署文件
 ├── docker/            # 镜像与运行环境配置
 ├── docs/              # 长期维护文档
@@ -147,7 +147,7 @@ dao -> domain
 
 ### 7.3 样式与 UI
 
-- 复用 Element Plus 组件和项目既有样式变量，不新增平行 UI 框架。
+- 复用 Naive UI 组件和项目既有样式变量，不新增平行 UI 框架。
 - 新增页面应保持当前媒体工作台的视觉语言：清晰分区、明确主操作、可读的状态卡片。
 - 样式命名使用语义化 class，避免只表达颜色或位置的命名。
 - 移动端和窄屏场景至少保证主要流程可操作，不出现关键按钮不可见。
@@ -185,7 +185,6 @@ npm run build
 Set-Location .\easy-strm-front
 npm run e2e:organize-preview-refresh
 npm run e2e:organize-preview-cancel
-npm run e2e:resource-platform
 ```
 
 ### 9.2 测试编写要求

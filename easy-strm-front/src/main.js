@@ -10,9 +10,6 @@ const StrmConfig = () => import('./views/StrmConfig.vue')
 const Settings = () => import('./views/Settings.vue')
 const MediaManager = () => import('./views/MediaManager.vue')
 const CategoryStrategy = () => import('./views/CategoryStrategy.vue')
-const MediaLibrary = () => import('./views/MediaLibrary.vue')
-const PendingMedia = () => import('./views/PendingMedia.vue')
-const SyncTasks = () => import('./views/SyncTasks.vue')
 const DashboardHome = () => import('./views/dashboard/DashboardHome.vue')
 const TaskCenter = () => import('./views/dashboard/TaskCenter.vue')
 const SystemLogs = () => import('./views/dashboard/SystemLogs.vue')
@@ -32,7 +29,7 @@ const routes = [
         component: DashboardHome,
         meta: {
           title: '仪表盘',
-          description: '资源整理平台首页，聚合媒体源、同步入库、资产台账与任务态势。'
+          description: '媒体整理工作台首页，聚合媒体源、STRM、任务与运行状态。'
         }
       },
       {
@@ -76,35 +73,11 @@ const routes = [
         }
       },
       {
-        path: 'media-library',
-        component: MediaLibrary,
-        meta: {
-          title: '媒体资产台账',
-          description: '从同步索引追踪源文件、入库状态、STRM、元数据与最近任务。'
-        }
-      },
-      {
-        path: 'pending-media',
-        component: PendingMedia,
-        meta: {
-          title: '待处理',
-          description: '承接识别失败资源，完成人工修正、重新入库与忽略。'
-        }
-      },
-      {
-        path: 'sync-tasks',
-        component: SyncTasks,
-        meta: {
-          title: '同步入库',
-          description: '媒体源全量/增量同步、索引查看与入库流水线触发。'
-        }
-      },
-      {
         path: 'strm-config',
         component: StrmConfig,
         meta: {
           title: 'STRM 配置',
-          description: '维护入库流水线使用的 STRM 输出规则、定时任务与生成配置。'
+          description: '维护 STRM 输出规则、定时任务与生成配置。'
         }
       },
       {

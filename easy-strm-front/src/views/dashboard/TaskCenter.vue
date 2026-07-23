@@ -69,30 +69,6 @@
                 <n-descriptions-item label="错误信息">{{ taskDetailData.error_message || '-' }}</n-descriptions-item>
               </n-descriptions>
 
-              <!-- 执行步骤 -->
-              <div>
-                <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">执行步骤</div>
-                <n-timeline v-if="taskDetailSteps.length > 0">
-                  <n-timeline-item
-                    v-for="step in taskDetailSteps"
-                    :key="step.step_key"
-                    :type="taskStepTimelineType(step.status)"
-                    :time="step.finished_at || step.started_at || step.updated_at || ''"
-                  >
-                    <div class="mb-2 font-bold text-slate-800 dark:text-white">{{ step.step_name || step.step_key }}</div>
-                    <div class="flex flex-wrap items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                      <n-tag size="small" :type="taskStepTagType(step.status)">{{ taskStepStatusLabel(step.status) }}</n-tag>
-                      <span v-if="step.output_summary">{{ step.output_summary }}</span>
-                      <span v-else-if="step.input_summary">{{ step.input_summary }}</span>
-                    </div>
-                    <div v-if="step.error_message" class="mt-2 text-sm leading-relaxed text-red-500 dark:text-red-400">
-                      {{ step.error_message }}
-                    </div>
-                  </n-timeline-item>
-                </n-timeline>
-                <EmptyState v-else title="暂无步骤记录" />
-              </div>
-
               <!-- 任务元数据 -->
               <div>
                 <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">任务元数据</div>
@@ -168,8 +144,6 @@ import {
   NSpin,
   NSwitch,
   NTag,
-  NTimeline,
-  NTimelineItem,
   useMessage
 } from 'naive-ui'
 import {
@@ -269,38 +243,6 @@ const taskDetailMetadataRows = computed(() => {
       }
     })
 })
-
-const taskDetailSteps = computed(() => {
-  const steps = taskDetailData.value?.steps
-  return Array.isArray(steps) ? steps : []
-})
-
-const taskStepStatusLabel = (status) => {
-  const map = {
-    pending: '等待中',
-    running: '执行中',
-    completed: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
-    skipped: '已跳过'
-  }
-  return map[status] || status || '-'
-}
-
-const taskStepTagType = (status) => {
-  if (status === 'completed') return 'success'
-  if (status === 'running') return 'primary'
-  if (status === 'failed') return 'error'
-  if (status === 'skipped') return 'info'
-  return 'warning'
-}
-
-const taskStepTimelineType = (status) => {
-  if (status === 'completed') return 'success'
-  if (status === 'running') return 'info'
-  if (status === 'failed') return 'error'
-  return 'default'
-}
 
 const taskDetailFailedItems = computed(() => {
   const items = taskDetailData.value?.metadata?.failed_items

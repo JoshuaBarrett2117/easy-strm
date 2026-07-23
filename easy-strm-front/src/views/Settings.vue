@@ -1,47 +1,11 @@
 <template>
   <div class="space-y-4">
-    <PageCard title="系统配置" subtitle="管理 Alist、TMDB、Emby、代理与整理刮削等全局设置">
+    <PageCard title="系统配置" subtitle="管理 TMDB、Emby、代理与整理刮削等全局设置">
       <n-tabs v-model:value="activeTab" type="line" animated>
-        <!-- 基础设置:Alist / 日志 / 代理 -->
+        <!-- 基础设置：日志 / 代理 -->
         <n-tab-pane name="basic" tab="基础设置">
           <n-form :model="form" label-placement="top" class="max-w-2xl">
-            <h3 class="mb-3 text-sm font-bold text-slate-800 dark:text-white">Alist 配置</h3>
-
-            <n-form-item label="Alist 服务地址">
-              <div class="w-full">
-                <n-input
-                  v-model:value="form.alist_url"
-                  placeholder="例如:http://192.168.1.100:5244"
-                  clearable
-                />
-                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                  用于 Alist 秒传场景,格式示例:`http://your-alist-server:port`。
-                </p>
-              </div>
-            </n-form-item>
-
-            <n-form-item label="Alist 访问令牌">
-              <div class="w-full">
-                <n-input
-                  v-model:value="form.alist_token"
-                  type="password"
-                  show-password-on="click"
-                  placeholder="请输入 Alist 访问令牌"
-                  clearable
-                />
-                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">可在 Alist 设置页面获取 Token。</p>
-              </div>
-            </n-form-item>
-
-            <n-alert v-if="alistHelpVisible" type="info" title="Alist 秒传配置说明" class="mb-4">
-              <ul class="list-disc space-y-1 pl-5 text-xs">
-                <li>确认 Alist 服务可被当前部署环境访问。</li>
-                <li>确认 Alist 已开启直链相关能力。</li>
-                <li>115 账号中选择 `alist` 秒传方式时会用到这里的配置。</li>
-              </ul>
-            </n-alert>
-
-            <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">日志配置</h3>
+            <h3 class="mb-3 text-sm font-bold text-slate-800 dark:text-white">日志配置</h3>
 
             <n-form-item label="日志保留天数">
               <div class="w-full">
@@ -351,7 +315,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted } from 'vue'
 import {
   NTabs,
   NTabPane,
@@ -381,8 +345,6 @@ const tmdbLoading = ref(false)
 const initialForm = ref({})
 
 const form = ref({
-  alist_url: '',
-  alist_token: '',
   log_save_day_limit: 1,
   proxy_url: '',
   proxy_domains: '',
@@ -435,17 +397,11 @@ const embyTesting = ref(false)
 const embyConnectionStatus = ref(null)
 const embyServerInfo = ref(null)
 
-const alistHelpVisible = computed(() => {
-  return form.value.alist_url || form.value.alist_token
-})
-
 const fetchSettings = async () => {
   try {
     const response = await getSettings({ skipGlobalErrorMessage: true })
     const data = response.data.data || {}
     form.value = {
-      alist_url: data.alist_url || '',
-      alist_token: data.alist_token || '',
       log_save_day_limit: parseInt(data.log_save_day_limit, 10) || 1,
       proxy_url: data.proxy_url || '',
       proxy_domains: data.proxy_domains || '',
@@ -481,8 +437,6 @@ const fetchSettings = async () => {
     console.error('获取系统配置失败:', error)
     if (error.response?.status === 404) {
       form.value = {
-        alist_url: '',
-        alist_token: '',
         log_save_day_limit: 1,
         proxy_url: '',
         proxy_domains: '',
@@ -519,8 +473,6 @@ const handleSubmit = async () => {
   loading.value = true
   try {
     const settings = {
-      alist_url: form.value.alist_url,
-      alist_token: form.value.alist_token,
       log_save_day_limit: String(form.value.log_save_day_limit),
       proxy_url: form.value.proxy_url,
       proxy_domains: form.value.proxy_domains,
