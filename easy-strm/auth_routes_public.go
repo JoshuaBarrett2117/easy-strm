@@ -121,4 +121,7 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 	r.POST("/login", authController.Login)
 	r.POST("/auth/login", authController.Login)
 	r.GET("/direct-link", directLinkController.GetDirectLink)
+	// Emby 会通过 HEAD 预解析 STRM 中的远程地址；返回最终 CDN Location 后，
+	// Emby 可直接把 115 直链交给播放器，避免客户端访问仅在内网可达的中转地址。
+	r.HEAD("/direct-link", directLinkController.GetDirectLink)
 }
