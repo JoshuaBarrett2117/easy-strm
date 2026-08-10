@@ -1,0 +1,71 @@
+sequenceDiagram
+    autonumber
+    participant FE as 前端 ResourceTransfer.vue
+    participant Ctrl as ResourceController
+    participant STS as ShareTransferService
+    participant DAO as TaskRedisDAO
+    participant C115 as Cloud115Client
+    participant Org as OrganizeService
+    participant Scr as PostTransferScraper
+
+    Note over FE,STS: 阶段一：提交转存（auto=false 时到此为止，行为同原版）
+
+    FE->>Ctrl: POST /v1/resource/115-share/transfer
+        {share_code, target_directory, files, auto_organize, auto_scrape, organize_source_id?}
+    Ctrl->>STS: SubmitTransfer(req)
+    STS->>DAO: Create(share_transfer) + 写元数据(auto_organize/auto_scrape/...)
+    STS->>STS: go executeTransfer(req)
+
+    Note over STS,C115: 阶段二：转存执行（既有逻辑，逐个 ReceiveShare）
+
+    loop 每个文件
+        STS->>C115: ReceiveShare(share_code, fid, targetDirCID, account)
+        C115-->>STS: ok / err(重试1次)
+    end
+    STS->>DAO: UpdateStatus(终态 completed|partial_failed|failed)
+
+    alt auto_organize == false（默认）
+        Note over STS: 不触发任何后续，与原版完全一致
+    else auto_organize == true 且 未取消
+        STS->>STS: go runPostTransferOrganize(taskId, req, account)
+
+        Note over STS,Org: 阶段三：自动整理
+
+        STS->>STS: buildAdhocOrganizeSource(req, account, folder)
+            Note right of STS: organize_source_id>0 则 GetByID 复用；否则构造临时 MediaSource(Path=TargetDirectory, MediaType=推断)
+        STS->>DAO: Create(share_transfer_organize) + 元数据(parent_task_id, stage=organize)
+        STS->>DAO: 回填转存任务 metadata.organize_task_id
+        STS->>C115: GetFileList(targetDirCID) 取视频文件 pickcode
+        C115-->>STS: fileIDs(仅本次落盘文件)
+        STS->>Org: OrganizeDirectoryForSource(ctx, source, targetDir, targetPath, mediaType, "move", fileIDs, onProgress, shouldStop)
+        Org-->>STS: []OrganizeResult
+        STS->>DAO: UpdateProgress/UpdateStatus(organize 任务)
+        STS->>DAO: 回填转存任务 metadata.organize_summary
+
+        alt auto_scrape == true 且 非全失败
+            STS->>STS: go runPostTransferScrape(taskId, req, source, successFiles)
+
+            Note over STS,Scr: 阶段四：自动刮削（按源类型分流）
+
+            STS->>DAO: Create(share_transfer_scrape) + 元数据(parent_task_id, stage=scrape)
+            STS->>DAO: 回填转存任务 metadata.scrape_task_id
+            STS->>STS: selectScraper(source)
+            alt 本地源
+                STS->>Scr: LocalScraper.Scrape(source.ID, filePaths)
+                Scr-->>STS: 真实 NFO/海报 (ScrapeService)
+            else 115 云盘（本期降级）
+                STS->>Scr: Cloud115Scraper.Scrape(source, filePaths)
+                Scr-->>STS: skipped + "115 暂不支持 NFO 写入" (nil error)
+            end
+            STS->>DAO: UpdateStatus(scrape 任务 completed) + 元数据(scrape_status/skipped)
+        end
+    end
+
+    Note over STS,DAO: 失败/部分失败处理
+    rect rgb(250,240,240)
+        Note over STS: 转存 failed → 不触发整理/刮削
+        Note over STS: 转存 partial_failed → 仍整理(仅落盘文件)
+        Note over STS: 整理 failed → 转存维持原终态；auto_scrape 跳过
+        Note over STS: 刮削 unsupported(115) → 任务 completed+skipped，不阻断
+        Note over STS: 取消传播 → shouldStop 读 IsCancelled(parentTaskId)
+    end

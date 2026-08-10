@@ -14,14 +14,22 @@ import (
 type TaskType string
 
 const (
-	TaskTypeStrmGenerate    TaskType = "strm_generate"    // STRM文件生成（全量）
-	TaskTypeIncrementalSync TaskType = "incremental_sync" // STRM文件增量同步
+	TaskTypeStrmGenerate          TaskType = "strm_generate"           // STRM文件生成（全量）
+	TaskTypeIncrementalSync       TaskType = "incremental_sync"        // STRM文件增量同步
+	TaskTypeShareTransfer         TaskType = "share_transfer"          // 分享转存
+	TaskTypeShareParse            TaskType = "share_parse"             // 分享解析
+	TaskTypeShareTransferOrganize TaskType = "share_transfer_organize" // 转存后自动整理
+	TaskTypeShareTransferScrape   TaskType = "share_transfer_scrape"   // 转存后自动刮削
 )
 
 // TaskTypeNames 任务类型中文名称
 var TaskTypeNames = map[TaskType]string{
-	TaskTypeStrmGenerate:    "STRM文件生成",
-	TaskTypeIncrementalSync: "增量同步",
+	TaskTypeStrmGenerate:          "STRM文件生成",
+	TaskTypeIncrementalSync:       "增量同步",
+	TaskTypeShareTransfer:         "分享转存",
+	TaskTypeShareParse:            "分享解析",
+	TaskTypeShareTransferOrganize: "转存后整理",
+	TaskTypeShareTransferScrape:   "转存后刮削",
 }
 
 // TaskStatus 任务状态

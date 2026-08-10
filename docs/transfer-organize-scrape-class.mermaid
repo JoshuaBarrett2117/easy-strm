@@ -1,0 +1,115 @@
+classDiagram
+    %% ===== 请求与领域模型 =====
+    class TransferRequest {
+        +string ShareCode
+        +string Password
+        +int TargetCloud115Id
+        +string TargetDirectory
+        +[]ShareTransferFileItem Files
+        +string ConflictStrategy
+        +bool AutoOrganize
+        +bool AutoScrape
+        +int OrganizeSourceID
+        +string OrganizeTargetPath
+    }
+
+    class MediaSource {
+        +int ID
+        +string SourceType
+        +string Path
+        +*int Cloud115ID
+        +string OrganizeTargetPath
+        +string MediaType
+        +string ConflictPolicy
+        +string OperationMode
+    }
+
+    class OrganizeResult {
+        +string FileID
+        +string FileName
+        +bool Success
+        +bool Skipped
+        +string NewPath
+    }
+
+    class ScrapeResult {
+        +string FilePath
+        +string NfoPath
+        +bool Success
+        +string Message
+    }
+
+    %% ===== 服务层 =====
+    class ShareTransferService {
+        -Cloud115Client client
+        -TaskRedisDAO taskDAO
+        -ShareTransferLogDAO logDAO
+        -Cloud115DAO cloud115DAO
+        -OrganizeService organizeService
+        -PostTransferScraper localScraper
+        -PostTransferScraper cloud115Scraper
+        +SubmitTransfer(req TransferRequest) TransferResponse
+        +executeTransfer(...)
+        -runPostTransferOrganize(taskId, req, account)
+        -runPostTransferScrape(taskId, req, source, filePaths)
+        -buildAdhocOrganizeSource(req, account, folder) MediaSource
+        -inferMediaTypeFromName(name) string
+        -listTransferredFileIDs(dirCID, account) []string
+        -selectScraper(source) PostTransferScraper
+    }
+
+    class OrganizeService {
+        +OrganizeDirectory(sourceID int, ...) []OrganizeResult
+        +OrganizeDirectoryForSource(ctx, source *MediaSource, ...) []OrganizeResult
+        -organizeDirectoryInternal(...)
+        -PreviewOrganize(...)
+        -ListOrganizeCandidates(...)
+    }
+
+    class PostTransferScraper {
+        <<interface>>
+        +Scrape(ctx, source *MediaSource, filePaths []string) []ScrapeResult
+    }
+
+    class LocalScraper {
+        -ScrapeService svc
+        +Scrape(ctx, source, filePaths) []ScrapeResult
+    }
+
+    class Cloud115Scraper {
+        -ScrapeService svc
+        -Cloud115Client client
+        +Scrape(ctx, source, filePaths) []ScrapeResult
+    }
+
+    class ScrapeService {
+        +ScrapeFiles(sourceID int, filePaths) []ScrapeResult
+        +GenerateMovieNFO(...) (string, []string, error)
+        +GenerateEpisodeNFO(...) (string, []string, error)
+    }
+
+    class TaskRedisDAO {
+        +Create(taskID, taskType, taskName) error
+        +UpdateMetadata(taskID, meta) error
+        +UpdateProgress(taskID, total, proc, ok, fail) error
+        +UpdateStatus(taskID, status) error
+        +SetError(taskID, msg) error
+        +IsCancelled(taskID) bool
+    }
+
+    %% ===== 关系 =====
+    ShareTransferService ..> TransferRequest : 消费
+    ShareTransferService --> OrganizeService : 触发整理
+    ShareTransferService --> PostTransferScraper : 触发刮削
+    ShareTransferService --> TaskRedisDAO : 登记/进度/元数据
+    ShareTransferService ..> MediaSource : 构造临时源
+
+    OrganizeService ..> MediaSource : 需要(source/直传)
+    OrganizeService ..> OrganizeResult : 产出
+
+    PostTransferScraper <|.. LocalScraper
+    PostTransferScraper <|.. Cloud115Scraper
+    LocalScraper --> ScrapeService : 委托
+    Cloud115Scraper --> ScrapeService : 生成NFO内容(后续上传)
+    PostTransferScraper ..> ScrapeResult : 产出
+    PostTransferScraper ..> MediaSource : 需要

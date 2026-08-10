@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"os"
 	pathpkg "path"
@@ -168,6 +169,13 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
+	return s.previewOrganizeForSource(source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+}
+
+// previewOrganizeForSource 预览整理（直接消费已构造的 *MediaSource，不调用 GetByID）。
+// 供 PreviewOrganize 与 OrganizeDirectoryForSource 复用，避免无 DB 媒体源时重复查询。
+func (s *OrganizeService) previewOrganizeForSource(source *domain.MediaSource, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
+	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_type=%s, source_path=%s, target_path=%s", source.SourceType, sourcePath, targetPath)
 
 	// 获取文件列表 (传入想要整理的 ID 以进行扫描剪枝)
 	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs, true)
@@ -239,39 +247,69 @@ func (s *OrganizeService) buildPreviewErrorResult(file domain.MediaFile, err err
 }
 
 func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride) ([]OrganizeResult, error) {
-	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, nil, nil)
+	source, err := s.mediaSourceService.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("获取媒体源失败: %v", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("媒体源不存在")
+	}
+	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, nil, nil)
 }
 
 func (s *OrganizeService) OrganizeDirectoryWithProgress(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress)) ([]OrganizeResult, error) {
-	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, nil)
+	source, err := s.mediaSourceService.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("获取媒体源失败: %v", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("媒体源不存在")
+	}
+	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, nil)
 }
 
 func (s *OrganizeService) OrganizeDirectoryWithCallbacks(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
-	return s.organizeDirectoryInternal(sourceID, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
+	source, err := s.mediaSourceService.GetByID(sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("获取媒体源失败: %v", err)
+	}
+	if source == nil {
+		return nil, fmt.Errorf("媒体源不存在")
+	}
+	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
 }
 
-func (s *OrganizeService) organizeDirectoryInternal(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
+// OrganizeDirectoryForSource 接受已构造的 *MediaSource（支持临时源 / ad-hoc 转存场景），
+// 行为与 OrganizeDirectory 一致，但不再调用 GetByID（避免无 DB 媒体源时误报错）。
+// 适用于「转存后自动整理」中临时拼装的 115 媒体源，以及复用既有媒体源两种路径。
+func (s *OrganizeService) OrganizeDirectoryForSource(
+	ctx context.Context,
+	source *domain.MediaSource,
+	sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string,
+	fileIDs []string, useCategory bool,
+	manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride,
+	progress func(OrganizeExecutionProgress), shouldStop func() bool,
+) ([]OrganizeResult, error) {
+	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
+}
+
+// organizeDirectoryInternal 整理执行核心。直接消费 *domain.MediaSource，供 OrganizeDirectory（按 ID 查源）
+// 与 OrganizeDirectoryForSource（直接传源）共用，避免重复查询媒体源。
+func (s *OrganizeService) organizeDirectoryInternal(source *domain.MediaSource, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
 	operationMode = normalizeOrganizeOperationMode(operationMode)
 	if operationMode == "" {
 		return nil, fmt.Errorf("unsupported organize mode")
 	}
 
 	logger.Infof("OrganizeService[OrganizeDirectory] start: source_id=%d, source_path=%s, target_path=%s, operation_mode=%s",
-		sourceID, sourcePath, targetPath, operationMode)
+		source.ID, sourcePath, targetPath, operationMode)
 
-	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	previews, err := s.previewOrganizeForSource(source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(renameItems) > 0 {
-		source, err := s.mediaSourceService.GetByID(sourceID)
-		if err != nil {
-			return nil, fmt.Errorf("获取媒体源失败: %v", err)
-		}
-		if source == nil {
-			return nil, fmt.Errorf("媒体源不存在")
-		}
 		s.applyOrganizeRenameOverrides(previews, source, renameItems)
 	}
 
@@ -315,7 +353,7 @@ func (s *OrganizeService) organizeDirectoryInternal(sourceID int, sourcePath, ta
 			continue
 		}
 
-		result, err := s.organizeFile(sourceID, preview, conflictPolicy, operationMode)
+		result, err := s.organizeFileForSource(source, preview, conflictPolicy, operationMode)
 		if err != nil {
 			logger.Warnf("OrganizeService[OrganizeDirectory] organize failed: %s, error: %v", preview.FileName, err)
 			failedResult := OrganizeResult{
@@ -332,7 +370,11 @@ func (s *OrganizeService) organizeDirectoryInternal(sourceID int, sourcePath, ta
 			continue
 		}
 
-		s.maybeScrapeOrganizedResult(sourceID, *result)
+		// 仅对持久化媒体源（ID>0）触发内置刮削；临时/ad-hoc 源（如转存整理临时源）跳过，
+		// 避免对 115 路径误触发以及无谓的 DB 查询，真实刮削由 ShareTransferService 编排负责。
+		if source.ID > 0 {
+			s.maybeScrapeOrganizedResult(source.ID, *result)
+		}
 		results = append(results, *result)
 		processed++
 		if result.Skipped {

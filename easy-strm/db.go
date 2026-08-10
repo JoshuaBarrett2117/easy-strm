@@ -926,6 +926,39 @@ END $$;
 		Warn("Failed to create idx_identify_cache_created_at: %v", err)
 	}
 
+	// ============================================
+	// V15: 115云下载（离线下载）任务记录表
+	// ============================================
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS t_offline_download_task (
+		    id            BIGSERIAL PRIMARY KEY,
+		    task_id       VARCHAR(64)  NOT NULL DEFAULT '',
+		    cloud115_id   INTEGER      NOT NULL,
+		    url           TEXT         NOT NULL,
+		    info_hash     VARCHAR(64)  NOT NULL DEFAULT '',
+		    name          TEXT         NOT NULL DEFAULT '',
+		    size          BIGINT       NOT NULL DEFAULT 0,
+		    status        VARCHAR(32)  NOT NULL DEFAULT 'pending',
+		    percent       DOUBLE PRECISION NOT NULL DEFAULT 0,
+		    error_message TEXT         NOT NULL DEFAULT '',
+		    save_dir_id   VARCHAR(64)  NOT NULL DEFAULT '',
+		    create_time   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		    update_time   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+		);
+	`)
+	if err != nil {
+		Error("Failed to create t_offline_download_task: %v", err)
+		return err
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_offline_download_task_task_id ON t_offline_download_task(task_id)`)
+	if err != nil {
+		Warn("Failed to create idx_offline_download_task_task_id: %v", err)
+	}
+	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_offline_download_task_account_status ON t_offline_download_task(cloud115_id, status)`)
+	if err != nil {
+		Warn("Failed to create idx_offline_download_task_account_status: %v", err)
+	}
+
 	Info("Database initialized successfully")
 	return nil
 }

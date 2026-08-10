@@ -1,0 +1,132 @@
+sequenceDiagram
+    participant U as User
+    participant FE as Frontend (Vue 3)
+    participant RC as ResourceController
+    participant SS as ShareTransferService
+    participant R as Redis
+    participant C as Client (115driver)
+    participant API as 115 WebAPI
+    participant PG as PostgreSQL
+
+    Note over U,PG: === Phase 1: 分享链接解析 (同步) ===
+
+    U->>FE: 粘贴分享链接 + 点击解析
+    FE->>FE: 正则提取 shareCode, password
+    FE->>RC: POST /api/v1/resource/115-share/parse
+    RC->>SS: ParseShareLink(url, password)
+
+    SS->>SS: 校验 URL 格式（正则 /s/(\w+)）
+    alt URL 不合法
+        SS-->>RC: INVALID_URL
+        RC-->>FE: {code: INVALID_URL}
+        FE->>FE: ShareLinkInput → error 状态
+    end
+
+    SS->>C: 调用 115 webapi 分享接口
+    Note over C,API: POST webapi.115.com/share/snap
+
+    alt 分享失效
+        API-->>C: errNo=990001
+        SS-->>RC: SHARE_EXPIRED
+        RC-->>FE: {code: SHARE_EXPIRED}
+        FE->>FE: ShareLinkInput → error 状态
+    else 需要密码
+        API-->>C: errNo=990002
+        SS-->>RC: PASSWORD_REQUIRED
+        RC-->>FE: {code: PASSWORD_REQUIRED}
+        FE->>FE: ShareLinkInput → 展开密码输入框
+    else 成功
+        API-->>C: {data: {list: [...], count: 195}}
+        C-->>SS: 文件列表
+        SS->>SS: 转换为 ShareFileInfo[]
+        SS->>R: 缓存解析结果 (TTL 5min)
+        SS-->>RC: ParseShareResponse
+        RC-->>FE: {code: 0, data: {shareCode, folderName, files, totalFiles, totalSize}}
+        FE->>FE: ShareLinkInput → parsed<br/>FileSelector + TargetFolderPicker 渲染
+    end
+
+    Note over U,PG: === Phase 2: 转存提交 + 异步执行 ===
+
+    U->>FE: 选择文件 + 目标目录 + 点击转存
+    FE->>RC: POST /api/v1/resource/115-share/transfer
+    RC->>SS: SubmitTransfer(req)
+
+    SS->>SS: 校验必填字段
+    SS->>C: GetCIDByPath(targetDirectory)
+    alt 目录不存在
+        SS->>C: MkdirAll115(targetDirectory)
+    end
+
+    SS->>R: CreateTask("share-transfer-{uuid}", share_transfer, taskName)
+    SS->>R: UpdateMetadata(taskId, metadata)
+    SS->>PG: BatchInsert(transferLogs) → pending
+
+    SS-->>RC: {taskId, totalFiles, estimatedSize}
+    RC-->>FE: {code: 0, data: {taskId, ...}}
+    FE->>FE: TransferProgress → queued 状态
+
+    Note over SS: --- 异步 goroutine 开始 ---
+    SS->>SS: executeTransfer(taskId, req)
+    SS->>R: UpdateTaskStatus(taskId, "running")
+
+    loop 遍历 files[]
+        SS->>R: IsTaskCancelled(taskId)
+        alt 已取消
+            SS->>R: UpdateTaskStatus(taskId, "cancelled")
+        end
+
+        SS->>C: GetFileInfo(pickCode) → SHA1
+        SS->>C: RapidTransferFile(pickCode, sourceID, sourceCookie, targetCID, targetID, targetCookie)
+
+        alt 秒传成功
+            SS->>PG: UPDATE log SET status='success'
+            SS->>R: AddProcessedFileID + UpdateProgress
+        else 秒传失败 → 自动重试 1 次
+            alt 重试成功
+                SS->>PG: UPDATE log SET status='success'
+            else 重试失败
+                SS->>PG: UPDATE log SET status='failed'
+            end
+        end
+    end
+
+    alt 全部成功
+        SS->>R: UpdateTaskStatus(taskId, "completed")
+    else 部分失败
+        SS->>R: UpdateTaskStatus(taskId, "partial_failed")
+    else 全部失败
+        SS->>R: UpdateTaskStatus(taskId, "failed")
+    end
+
+    Note over U,PG: === Phase 3: 前端轮询进度 ===
+
+    loop 每 2 秒（直到终态）
+        FE->>RC: GET /api/v1/resource/115-share/transfer/{taskId}
+        RC->>SS: GetProgress(taskId)
+        SS->>R: GetTask(taskId) → TaskStatus
+        SS-->>RC: TransferProgressResponse
+        RC-->>FE: {status, progress, totalFiles, processedFiles, ...}
+        FE->>FE: TransferProgress 更新状态
+    end
+
+    Note over U,PG: === Phase 4: 取消/重试（可选） ===
+
+    opt 用户取消
+        U->>FE: 点击取消转存
+        FE->>RC: POST /api/v1/resource/115-share/transfer/{taskId}/cancel
+        RC->>SS: CancelTransfer(taskId)
+        SS->>R: SetTaskCancelFlag(taskId)
+        SS->>R: UpdateTaskStatus(taskId, "cancelled")
+        SS-->>RC: {taskId, status: "cancelled", completedFiles, cancelledFiles}
+        RC-->>FE: 显示取消结果
+    end
+
+    opt 用户重试失败项
+        U->>FE: 点击重试全部失败项
+        FE->>RC: POST /api/v1/resource/115-share/transfer/{taskId}/retry
+        RC->>SS: RetryTransfer(taskId)
+        SS->>R: GetTask(taskId) → failedItems
+        SS->>R: ClearCancelFlag + Reset status → "pending"
+        SS-->>RC: {taskId, retriedFiles, message}
+        RC-->>FE: 重新进入轮询
+    end

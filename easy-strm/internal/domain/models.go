@@ -130,6 +130,7 @@ const (
 	TaskTypeOrganize        TaskType = "organize"
 	TaskTypeScrape          TaskType = "scrape"
 	TaskTypeEmbyRefresh     TaskType = "emby_refresh"
+	TaskTypeOfflineDownload TaskType = "offline_download"
 )
 
 // TaskTypeNames 任务类型中文名称映射
@@ -143,6 +144,7 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeOrganize:        "媒体整理",
 	TaskTypeScrape:          "NFO刮削",
 	TaskTypeEmbyRefresh:     "Emby库刷新",
+	TaskTypeOfflineDownload: "115云下载",
 }
 
 // TaskStatus 任务运行状态
@@ -214,4 +216,122 @@ type FileItem struct {
 	FileType     string    `json:"file_type"` // video | audio | image | other
 	SourceID     int       `json:"source_id"`
 	SourceName   string    `json:"source_name"`
+}
+
+// ========== 115分享链接转存相关领域模型 ==========
+
+// ShareFileInfo 分享文件信息（支持嵌套目录结构）
+type ShareFileInfo struct {
+	Name     string          `json:"name"`      // 文件名
+	Size     int64           `json:"size"`      // 文件大小（字节）
+	Type     string          `json:"type"`      // 文件类型：video/audio/image/folder/other
+	Path     string          `json:"path"`      // 文件在分享中的路径
+	PickCode string          `json:"pick_code"` // 文件pickcode（分享场景通常为空）
+	Fid      string          `json:"fid"`       // 分享文件ID（115 file_id，转存时使用）
+	Sha1     string          `json:"sha1"`      // 文件SHA1
+	IsDir    bool            `json:"is_dir"`    // 是否为目录
+	Children []ShareFileInfo `json:"children"`  // 子文件/子目录列表
+}
+
+// ParseShareRequest 解析分享链接请求
+type ParseShareRequest struct {
+	URL      string `json:"url"`      // 115分享链接
+	Password string `json:"password"` // 分享密码（可选）
+}
+
+// ParseShareResponse 解析分享链接响应
+type ParseShareResponse struct {
+	ShareCode  string          `json:"share_code"`  // 分享码
+	FolderName string          `json:"folder_name"` // 分享文件夹名称
+	Files      []ShareFileInfo `json:"files"`       // 文件列表
+	TotalFiles int             `json:"total_files"` // 文件总数
+	TotalSize  int64           `json:"total_size"`  // 总大小（字节）
+}
+
+// ShareTransferFileItem 转存文件项（用于提交转存请求）
+type ShareTransferFileItem struct {
+	PickCode string `json:"pick_code"` // 文件pickcode（分享场景通常为空）
+	Fid      string `json:"fid"`       // 分享文件ID（115 file_id，转存时使用）
+	Name     string `json:"name"`      // 文件名
+	Size     int64  `json:"size"`      // 文件大小（字节）
+}
+
+// TransferRequest 转存任务请求
+type TransferRequest struct {
+	ShareCode        string                  `json:"share_code"`        // 分享码
+	Password         string                  `json:"password"`          // 分享密码
+	TargetCloud115Id int                     `json:"target_cloud115_id"` // 目标115账号ID
+	TargetDirectory  string                  `json:"target_directory"`   // 目标目录路径
+	Files            []ShareTransferFileItem `json:"files"`              // 待转存文件列表
+	ConflictStrategy string                  `json:"conflict_strategy"` // 冲突策略：skip/overwrite/rename
+	AutoOrganize     bool                    `json:"auto_organize"`     // 是否转存完成后自动整理
+	AutoScrape       bool                    `json:"auto_scrape"`       // 是否整理完成后自动刮削（115 云盘目标本期优雅降级为 skipped）
+	OrganizeSourceID int                     `json:"organize_source_id"` // 复用已有媒体源的规则（0=使用临时/方案B源）
+	OrganizeTargetPath string                `json:"organize_target_path"` // 整理目标路径（可选，缺省=TargetDirectory）
+}
+
+// TransferResponse 转存任务提交响应
+type TransferResponse struct {
+	TaskId        string `json:"task_id"`        // 任务ID
+	TotalFiles    int    `json:"total_files"`    // 总文件数
+	EstimatedSize int64  `json:"estimated_size"` // 预估总大小（字节）
+}
+
+// TransferProgressResponse 转存任务进度响应
+type TransferProgressResponse struct {
+	TaskId             string       `json:"task_id"`             // 任务ID
+	Status             string       `json:"status"`              // 任务状态
+	Progress           int          `json:"progress"`            // 进度百分比
+	TotalFiles         int          `json:"total_files"`         // 总文件数
+	ProcessedFiles     int          `json:"processed_files"`     // 已处理文件数
+	SuccessFiles       int          `json:"success_files"`       // 成功文件数
+	FailedFiles        int          `json:"failed_files"`        // 失败文件数
+	SkippedFiles       int          `json:"skipped_files"`       // 跳过文件数
+	FailedItems        []FailedItem `json:"failed_items"`        // 失败文件明细
+	CurrentFile        string       `json:"current_file"`        // 当前处理文件名
+	EstimatedRemaining string       `json:"estimated_remaining"` // 预计剩余时间
+	CreateTime         string       `json:"create_time"`         // 创建时间
+	UpdateTime         string       `json:"update_time"`         // 更新时间
+}
+
+// FailedItem 失败文件项
+type FailedItem struct {
+	Name      string `json:"name"`      // 文件名
+	Error     string `json:"error"`     // 错误信息
+	Retryable bool   `json:"retryable"` // 是否可重试
+}
+
+// CancelResponse 取消转存响应
+type CancelResponse struct {
+	TaskId         string `json:"task_id"`         // 任务ID
+	Status         string `json:"status"`          // 最终状态
+	CompletedFiles int    `json:"completed_files"` // 已完成文件数
+	CancelledFiles int    `json:"cancelled_files"` // 被取消的文件数
+	Message        string `json:"message"`         // 提示信息
+}
+
+// RetryResponse 重试转存响应
+type RetryResponse struct {
+	TaskId      string `json:"task_id"`      // 任务ID
+	RetriedFiles int   `json:"retried_files"` // 重试文件数
+	Message     string `json:"message"`      // 提示信息
+}
+
+// ShareTransferLog 分享转存日志（对应 t_share_transfer_log 表）
+type ShareTransferLog struct {
+	ID               int    `json:"id"`                 // 主键ID
+	TaskId           string `json:"task_id"`            // 任务ID
+	ShareCode        string `json:"share_code"`         // 分享码
+	ShareFolderName  string `json:"share_folder_name"`  // 分享文件夹名称
+	FileName         string `json:"file_name"`          // 文件名
+	FilePickCode     string `json:"file_pick_code"`     // 文件pickcode
+	FileSize         int64  `json:"file_size"`          // 文件大小
+	FileSha1         string `json:"file_sha1"`          // 文件SHA1
+	Cloud115Id       int    `json:"cloud115_id"`        // 目标115账号ID
+	TargetDirectory  string `json:"target_directory"`   // 目标目录路径
+	Status           string `json:"status"`             // 状态
+	ErrorMessage     string `json:"error_message"`      // 错误信息
+	IsSecondTransfer bool   `json:"is_second_transfer"` // 是否二传
+	CreateTime       string `json:"create_time"`        // 创建时间
+	UpdateTime       string `json:"update_time"`        // 更新时间
 }

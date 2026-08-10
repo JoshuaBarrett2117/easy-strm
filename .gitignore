@@ -46,9 +46,15 @@ Thumbs.db
 config.yaml
 login.json
 
+# Test DB connection (sensitive)
+.db_test_connection
+
 # Temporary files
 *.tmp
 *.temp
+.codex/manual-verify-processes.json
+.workbuddy/
+nul
 *.swp
 *.swo
 

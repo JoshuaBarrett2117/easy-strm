@@ -19,10 +19,8 @@ func (s *MediaSourceService) GetFiles(sourceID int, path string, page, pageSize 
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
-	if !source.Enabled {
-		return nil, fmt.Errorf("媒体源已禁用")
-	}
 
+	// 浏览为只读查看操作，允许对禁用状态的媒体源进行浏览（禁用仅用于拦截自动整理/监控/写入等自动化流程）。
 	switch source.SourceType {
 	case domain.SourceTypeLocal:
 		return s.getLocalFiles(source, path, page, pageSize, sortField, sortOrder, filter, search)

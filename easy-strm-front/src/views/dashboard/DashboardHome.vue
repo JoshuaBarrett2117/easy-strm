@@ -2,8 +2,8 @@
   <div class="space-y-5 lg:space-y-6">
     <!-- Hero -->
     <section class="surface-card relative overflow-hidden rounded-[1.75rem] p-5 lg:p-8">
-      <div class="pointer-events-none absolute -right-24 -top-40 h-96 w-96 rounded-full bg-indigo-500/15 blur-3xl"></div>
-      <div class="pointer-events-none absolute -bottom-40 left-1/3 h-80 w-80 rounded-full bg-cyan-500/10 blur-3xl"></div>
+      <div class="pointer-events-none absolute -right-16 -top-24 h-64 w-64 rounded-full bg-indigo-500/15 blur-3xl"></div>
+      <div class="pointer-events-none absolute -bottom-28 left-1/4 h-56 w-56 rounded-full bg-cyan-500/10 blur-3xl"></div>
       <div class="relative grid gap-8 xl:grid-cols-[1.25fr_0.75fr] xl:items-center">
         <div class="max-w-3xl">
           <div class="inline-flex items-center gap-2 rounded-full border border-indigo-400/20 bg-indigo-500/10 px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.14em] text-indigo-600 dark:text-indigo-300">
@@ -77,225 +77,232 @@
       />
     </section>
 
-    <!-- 主区域 -->
+    <!-- 主区域：主列（2/3）+ 侧栏（1/3），避免混合 col-span 在右列产生空白格 -->
     <section class="grid grid-cols-1 gap-4 lg:grid-cols-3">
-      <!-- 资源整理任务 -->
-      <PageCard title="资源整理任务" subtitle="Task Flow" class="lg:col-span-2">
-        <template #action>
-          <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            查看全部
-          </router-link>
-        </template>
+      <!-- 主列 -->
+      <div class="flex flex-col gap-4 lg:col-span-2">
+        <!-- 资源整理任务 -->
+        <PageCard title="资源整理任务" subtitle="Task Flow">
+          <template #action>
+            <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+              查看全部
+            </router-link>
+          </template>
 
-        <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div class="rounded-xl bg-cyan-500/10 p-4">
-            <div class="text-xs text-slate-500 dark:text-slate-400">运行中</div>
-            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.running || 0 }}</div>
-            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当前仍在执行的任务</div>
+          <div class="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div class="rounded-xl bg-cyan-500/10 p-4">
+              <div class="text-xs text-slate-500 dark:text-slate-400">运行中</div>
+              <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.running || 0 }}</div>
+              <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当前仍在执行的任务</div>
+            </div>
+            <div class="rounded-xl bg-emerald-500/10 p-4">
+              <div class="text-xs text-slate-500 dark:text-slate-400">今日完成</div>
+              <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.completed_today || 0 }}</div>
+              <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当天成功落地的任务</div>
+            </div>
+            <div class="rounded-xl bg-red-500/10 p-4">
+              <div class="text-xs text-slate-500 dark:text-slate-400">今日失败</div>
+              <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.failed_today || 0 }}</div>
+              <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">需要进入任务中心排查</div>
+            </div>
           </div>
-          <div class="rounded-xl bg-emerald-500/10 p-4">
-            <div class="text-xs text-slate-500 dark:text-slate-400">今日完成</div>
-            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.completed_today || 0 }}</div>
-            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">当天成功落地的任务</div>
-          </div>
-          <div class="rounded-xl bg-red-500/10 p-4">
-            <div class="text-xs text-slate-500 dark:text-slate-400">今日失败</div>
-            <div class="mt-2 text-2xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ stats.tasks.failed_today || 0 }}</div>
-            <div class="mt-1 text-xs text-slate-400 dark:text-slate-500">需要进入任务中心排查</div>
-          </div>
-        </div>
 
-        <div class="flex flex-col gap-2">
-          <p v-if="recentTasks.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无任务记录</p>
-          <button
-            v-for="task in recentTasks"
-            :key="task.task_id"
-            type="button"
-            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10"
-            @click="router.push('/dashboard/tasks')"
-          >
-            <span class="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
-              {{ task.task_name || task.task_type || '任务' }}
-            </span>
-            <span
-              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
-              :class="taskStatusPillClass(task.status)"
+          <div class="flex flex-col gap-2">
+            <p v-if="recentTasks.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无任务记录</p>
+            <button
+              v-for="task in recentTasks"
+              :key="task.task_id"
+              type="button"
+              class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 text-left transition-colors hover:bg-slate-100 dark:bg-white/5 dark:hover:bg-white/10"
+              @click="router.push('/dashboard/tasks')"
             >
-              {{ formatTaskStatus(task.status) }}
-            </span>
-          </button>
-        </div>
-      </PageCard>
-
-      <!-- 媒体源入口 -->
-      <PageCard title="媒体源" subtitle="Source">
-        <template #action>
-          <router-link to="/dashboard/media-manager" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            打开工作台
-          </router-link>
-        </template>
-
-        <div class="flex flex-col gap-3">
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">总媒体源</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.total || 0 }}</strong>
-          </div>
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">本地</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.local || 0 }}</strong>
-          </div>
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">115</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.cloud115 || 0 }}</strong>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-slate-400 dark:text-slate-500">启用中</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.enabled || 0 }}</strong>
-          </div>
-        </div>
-      </PageCard>
-
-      <!-- 账号配额 -->
-      <PageCard title="账号配额" subtitle="Quota">
-        <template #action>
-          <router-link to="/dashboard/cloud115" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            查看账号
-          </router-link>
-        </template>
-
-        <p v-if="storageAccounts.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无账号配额数据</p>
-        <div v-else class="flex flex-col gap-4">
-          <div v-for="account in storageAccounts" :key="account.name">
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <span class="truncate text-sm text-slate-500 dark:text-slate-400">{{ account.name }}</span>
-              <strong class="shrink-0 text-sm tabular-nums text-slate-800 dark:text-white">{{ formatBytes(account.used) }}</strong>
-            </div>
-            <div class="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
+              <span class="truncate text-sm font-semibold text-slate-700 dark:text-slate-200">
+                {{ task.task_name || task.task_type || '任务' }}
+              </span>
               <span
-                class="block h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300"
-                :style="{ width: `${account.percentage || 12}%` }"
-              ></span>
+                class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+                :class="taskStatusPillClass(task.status)"
+              >
+                {{ formatTaskStatus(task.status) }}
+              </span>
+            </button>
+          </div>
+        </PageCard>
+
+        <!-- 近 7 天整理趋势 -->
+        <PageCard title="近 7 天整理趋势" subtitle="Trend">
+          <template #action>
+            <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
+              <span class="flex items-center gap-1.5">
+                <i class="inline-block h-2 w-2 rounded-full bg-cyan-500"></i>STRM
+              </span>
+              <span class="flex items-center gap-1.5">
+                <i class="inline-block h-2 w-2 rounded-full bg-amber-400"></i>整理/刮削
+              </span>
+            </div>
+          </template>
+
+          <div v-if="trendPoints.length" class="relative h-64 pt-3">
+            <div class="absolute inset-x-0 top-0 bottom-7 grid grid-rows-4">
+              <div v-for="row in 4" :key="row" class="border-t border-dashed border-slate-200 dark:border-white/10"></div>
+            </div>
+            <div class="relative z-10 grid h-full grid-cols-7 items-end gap-2 sm:gap-3">
+              <div v-for="point in trendPoints" :key="point.date" class="flex h-full flex-col items-center gap-2">
+                <div class="flex w-full flex-1 items-end justify-center gap-1.5 sm:gap-2">
+                  <span
+                    class="w-3 rounded-t-full bg-gradient-to-b from-cyan-500 to-cyan-600 sm:w-4"
+                    :style="{ height: `${point.strmHeight}%` }"
+                  ></span>
+                  <span
+                    class="w-3 rounded-t-full bg-gradient-to-b from-amber-400 to-amber-500 sm:w-4"
+                    :style="{ height: `${point.organizeHeight}%` }"
+                  ></span>
+                </div>
+                <div class="text-xs text-slate-400 dark:text-slate-500">{{ point.label }}</div>
+              </div>
             </div>
           </div>
-        </div>
-      </PageCard>
+          <p v-else class="py-16 text-center text-sm text-slate-400 dark:text-slate-500">暂无近 7 天整理趋势数据</p>
+        </PageCard>
 
-      <!-- 资源监控 -->
-      <PageCard title="资源监控" subtitle="Runtime">
-        <template #action>
-          <span class="text-xs text-slate-400 dark:text-slate-500">{{ formatDateTime(monitor.sampled_at) }}</span>
-        </template>
+        <!-- 最近处理 -->
+        <PageCard title="最近处理" subtitle="Recent Activity">
+          <template #action>
+            <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+              查看任务
+            </router-link>
+          </template>
 
-        <div class="flex flex-col gap-3">
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">运行内存</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.memory_bytes) }}</strong>
+          <p v-if="recentActivity.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无最近处理记录</p>
+          <div v-else class="flex flex-col gap-2.5">
+            <div
+              v-for="item in recentActivity"
+              :key="item.task_id"
+              class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
+            >
+              <div class="min-w-0">
+                <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ item.task_name || '任务' }}</div>
+                <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ item.source_name || item.task_type || '系统任务' }}</div>
+              </div>
+              <div class="flex shrink-0 flex-col items-end gap-0.5 text-right">
+                <span class="text-xs text-slate-600 dark:text-slate-300">{{ item.result_brief }}</span>
+                <small class="text-xs text-slate-400 dark:text-slate-500">{{ item.update_time || '-' }}</small>
+              </div>
+            </div>
           </div>
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">堆分配</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.heap_alloc_bytes) }}</strong>
-          </div>
-          <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
-            <span class="text-sm text-slate-400 dark:text-slate-500">Goroutines</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.goroutines || 0 }}</strong>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-sm text-slate-400 dark:text-slate-500">CPU 核心</span>
-            <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.cpu_cores || 0 }}</strong>
-          </div>
-        </div>
-      </PageCard>
+        </PageCard>
+      </div>
 
-      <!-- 近 7 天整理趋势 -->
-      <PageCard title="近 7 天整理趋势" subtitle="Trend" class="lg:col-span-2">
-        <template #action>
-          <div class="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
-            <span class="flex items-center gap-1.5">
-              <i class="inline-block h-2 w-2 rounded-full bg-cyan-500"></i>STRM
-            </span>
-            <span class="flex items-center gap-1.5">
-              <i class="inline-block h-2 w-2 rounded-full bg-amber-400"></i>整理/刮削
-            </span>
-          </div>
-        </template>
+      <!-- 侧栏 -->
+      <div class="flex flex-col gap-4">
+        <!-- 媒体源入口 -->
+        <PageCard title="媒体源" subtitle="Source">
+          <template #action>
+            <router-link to="/dashboard/media-manager" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+              打开工作台
+            </router-link>
+          </template>
 
-        <div class="relative h-64 pt-3">
-          <div class="absolute inset-x-0 top-0 bottom-7 grid grid-rows-4">
-            <div v-for="row in 4" :key="row" class="border-t border-dashed border-slate-200 dark:border-white/10"></div>
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">总媒体源</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.total || 0 }}</strong>
+            </div>
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">本地</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.local || 0 }}</strong>
+            </div>
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">115</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.cloud115 || 0 }}</strong>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-slate-400 dark:text-slate-500">启用中</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ stats.media_sources.enabled || 0 }}</strong>
+            </div>
           </div>
-          <div class="relative z-10 grid h-full grid-cols-7 items-end gap-2 sm:gap-3">
-            <div v-for="point in trendPoints" :key="point.date" class="flex h-full flex-col items-center gap-2">
-              <div class="flex w-full flex-1 items-end justify-center gap-1.5 sm:gap-2">
+        </PageCard>
+
+        <!-- 账号配额 -->
+        <PageCard title="账号配额" subtitle="Quota">
+          <template #action>
+            <router-link to="/dashboard/cloud115" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+              查看账号
+            </router-link>
+          </template>
+
+          <p v-if="storageAccounts.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无账号配额数据</p>
+          <div v-else class="flex flex-col gap-4">
+            <div v-for="account in storageAccounts" :key="account.name">
+              <div class="mb-2 flex items-center justify-between gap-3">
+                <span class="truncate text-sm text-slate-500 dark:text-slate-400">{{ account.name }}</span>
+                <strong class="shrink-0 text-sm tabular-nums text-slate-800 dark:text-white">{{ formatBytes(account.used) }}</strong>
+              </div>
+              <div class="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
                 <span
-                  class="w-3 rounded-t-full bg-gradient-to-b from-cyan-500 to-cyan-600 sm:w-4"
-                  :style="{ height: `${point.strmHeight}%` }"
-                ></span>
-                <span
-                  class="w-3 rounded-t-full bg-gradient-to-b from-amber-400 to-amber-500 sm:w-4"
-                  :style="{ height: `${point.organizeHeight}%` }"
+                  class="block h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300"
+                  :style="{ width: `${account.percentage || 12}%` }"
                 ></span>
               </div>
-              <div class="text-xs text-slate-400 dark:text-slate-500">{{ point.label }}</div>
             </div>
           </div>
-        </div>
-      </PageCard>
+        </PageCard>
 
-      <!-- 网络探针 -->
-      <PageCard title="网络探针" subtitle="Probe">
-        <template #action>
-          <router-link to="/dashboard/network" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            详细探测
-          </router-link>
-        </template>
+        <!-- 资源监控 -->
+        <PageCard title="资源监控" subtitle="Runtime">
+          <template #action>
+            <span class="text-xs text-slate-400 dark:text-slate-500">{{ formatDateTime(monitor.sampled_at) }}</span>
+          </template>
 
-        <p v-if="probeLoading" class="text-sm text-slate-400 dark:text-slate-500">探针检测中...</p>
-        <div v-else class="flex flex-col gap-2.5">
-          <div
-            v-for="probe in probes"
-            :key="probe.url"
-            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
-          >
-            <div class="min-w-0">
-              <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ probe.name }}</div>
-              <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ probe.url }}</div>
+          <div class="flex flex-col gap-3">
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">运行内存</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.memory_bytes) }}</strong>
             </div>
-            <span
-              class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
-              :class="probeStatusPillClass(probe.ok)"
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">堆分配</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ formatBytes(monitor.heap_alloc_bytes) }}</strong>
+            </div>
+            <div class="flex items-center justify-between border-b border-dashed border-slate-200 pb-2.5 dark:border-white/10">
+              <span class="text-sm text-slate-400 dark:text-slate-500">Goroutines</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.goroutines || 0 }}</strong>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-sm text-slate-400 dark:text-slate-500">CPU 核心</span>
+              <strong class="text-lg tabular-nums text-slate-800 dark:text-white">{{ monitor.cpu_cores || 0 }}</strong>
+            </div>
+          </div>
+        </PageCard>
+
+        <!-- 网络探针 -->
+        <PageCard title="网络探针" subtitle="Probe">
+          <template #action>
+            <router-link to="/dashboard/network" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
+              详细探测
+            </router-link>
+          </template>
+
+          <p v-if="probeLoading" class="text-sm text-slate-400 dark:text-slate-500">探针检测中...</p>
+          <div v-else class="flex flex-col gap-2.5">
+            <div
+              v-for="probe in probes"
+              :key="probe.url"
+              class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
             >
-              {{ probe.ok === true ? '正常' : probe.ok === false ? '失败' : '待测' }}
-            </span>
-          </div>
-        </div>
-      </PageCard>
-
-      <!-- 最近处理 -->
-      <PageCard title="最近处理" subtitle="Recent Activity" class="lg:col-span-2">
-        <template #action>
-          <router-link to="/dashboard/tasks" class="text-xs font-bold text-cyan-600 hover:text-cyan-500 dark:text-cyan-400">
-            查看任务
-          </router-link>
-        </template>
-
-        <p v-if="recentActivity.length === 0" class="text-sm text-slate-400 dark:text-slate-500">暂无最近处理记录</p>
-        <div v-else class="flex flex-col gap-2.5">
-          <div
-            v-for="item in recentActivity"
-            :key="item.task_id"
-            class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5"
-          >
-            <div class="min-w-0">
-              <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ item.task_name || '任务' }}</div>
-              <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ item.source_name || item.task_type || '系统任务' }}</div>
-            </div>
-            <div class="flex shrink-0 flex-col items-end gap-0.5 text-right">
-              <span class="text-xs text-slate-600 dark:text-slate-300">{{ item.result_brief }}</span>
-              <small class="text-xs text-slate-400 dark:text-slate-500">{{ item.update_time || '-' }}</small>
+              <div class="min-w-0">
+                <div class="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{{ probe.name }}</div>
+                <div class="mt-0.5 truncate text-xs text-slate-400 dark:text-slate-500">{{ probe.url }}</div>
+              </div>
+              <span
+                class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold"
+                :class="probeStatusPillClass(probe.ok)"
+              >
+                {{ probe.ok === true ? '正常' : probe.ok === false ? '失败' : '待测' }}
+              </span>
             </div>
           </div>
-        </div>
-      </PageCard>
+        </PageCard>
+      </div>
     </section>
   </div>
 </template>

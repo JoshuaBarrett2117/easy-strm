@@ -63,6 +63,22 @@ func (f *fakeFileOperationCloud115Client) MkdirAll115(path string, cloud115ID in
 	return f.mkdirCID, nil
 }
 
+func (f *fakeFileOperationCloud115Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (string, error) {
+	return "", nil
+}
+
+func (f *fakeFileOperationCloud115Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*driver.File, error) {
+	return nil, nil
+}
+
+func (f *fakeFileOperationCloud115Client) GetShareSnap(shareCode, receiveCode, dirID string, queries ...driver.Query) (*driver.ShareSnapResp, error) {
+	return nil, nil
+}
+
+func (f *fakeFileOperationCloud115Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error {
+	return nil
+}
+
 func expectFileOperationMediaSourceByID(mock sqlmock.Sqlmock, id int, sourceType, path string, cloud115ID *int) {
 	now := time.Now()
 	var cloud115Value interface{}

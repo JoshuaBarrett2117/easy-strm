@@ -15,6 +15,7 @@ const TaskCenter = () => import('./views/dashboard/TaskCenter.vue')
 const SystemLogs = () => import('./views/dashboard/SystemLogs.vue')
 const NetworkCenter = () => import('./views/dashboard/NetworkCenter.vue')
 const CacheCenter = () => import('./views/dashboard/CacheCenter.vue')
+const ResourceAggregation = () => import('./views/ResourceAggregation.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -102,6 +103,14 @@ const routes = [
         meta: {
           title: '系统设置',
           description: 'TMDB、Emby、日志、代理与命名模板配置。'
+        }
+      },
+      {
+        path: 'resources/transfer',
+        component: ResourceAggregation,
+        meta: {
+          title: '资源聚合',
+          description: '115分享链接一键解析与批量转存、115云下载（ed2k/磁力等离线下载）。'
         }
       }
     ]

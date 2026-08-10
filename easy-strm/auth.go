@@ -57,6 +57,27 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	mediaCategoryService := service.NewMediaCategoryService(mediaCategoryDAO)
 	systemConfigService := service.NewSystemConfigService(systemConfigDAO)
 
+	// --- 分享转存服务初始化 ---
+	shareTransferTaskDAO := dao.NewTaskRedisDAOWithGlobal()
+	shareTransferLogDAO := dao.NewShareTransferLogDAO(dao.DB)
+	// 注入自动整理（OrganizeService 满足 PostTransferOrganizer）、刮削适配器（本地真实 / 115 降级）与媒体源服务
+	shareTransferService := service.NewShareTransferService(
+		client,
+		shareTransferTaskDAO,
+		shareTransferLogDAO,
+		cloud115DAO,
+		organizeService,
+		service.NewLocalScraper(scrapeService),
+		service.NewCloud115Scraper(scrapeService, client),
+		mediaSourceService,
+	)
+	resourceController := controller.NewResourceController(shareTransferService)
+
+	// --- 115云下载（离线下载）服务初始化 ---
+	offlineDownloadDAO := dao.NewOfflineDownloadTaskDAO(dao.DB)
+	offlineDownloadService := service.NewOfflineDownloadService(client, dao.NewTaskRedisDAOWithGlobal(), offlineDownloadDAO, cloud115DAO)
+	offlineDownloadController := controller.NewOfflineDownloadController(offlineDownloadService)
+
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)
 	fileOperationController := controller.NewFileOperationController(fileOperationService, mediaSourceService)
@@ -814,6 +835,19 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/logs/:filename", logController.GetFileContent)
 		auth.GET("/logs/config", logController.GetConfig)
 		auth.PUT("/logs/config", logController.UpdateConfig)
+
+		// ========== 115分享转存 ==========
+		auth.POST("/v1/resource/115-share/parse", resourceController.Parse)
+		auth.GET("/v1/resource/115-share/files", resourceController.GetFiles)
+		auth.POST("/v1/resource/115-share/transfer", resourceController.SubmitTransfer)
+		auth.GET("/v1/resource/115-share/transfer/:taskId", resourceController.GetProgress)
+		auth.POST("/v1/resource/115-share/transfer/:taskId/cancel", resourceController.CancelTransfer)
+		auth.POST("/v1/resource/115-share/transfer/:taskId/retry", resourceController.RetryTransfer)
+
+		// ========== 115云下载（离线下载） ==========
+		auth.POST("/v1/resource/115-offline/submit", offlineDownloadController.Submit)
+		auth.GET("/v1/resource/115-offline/tasks", offlineDownloadController.List)
+		auth.DELETE("/v1/resource/115-offline/tasks/:id", offlineDownloadController.Delete)
 	}
 
 	// 启动文件监控服务（异步，不阻塞主流程）

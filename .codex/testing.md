@@ -129,6 +129,45 @@
 - 命令：`npm run build`
 - 结果：通过
 
+## 2026-08-10 GitHub main 发布前测试
+
+- 后端：在 `easy-strm` 执行 `go test ./...`，全部通过。
+- 后端静态检查：在 `easy-strm` 执行 `go vet ./...`，全部通过。
+- 前端：在 `easy-strm-front` 执行 `npm run build`，Vite 生产构建通过，共转换 4248 个模块。
+- 前端单元测试：执行 `node --test src/components/resource/targetFolderTree.test.mjs`，3/3 通过。
+- Git 质量检查：`git diff --check` 通过；真实分享凭据定向扫描无匹配。
+
+## 2026-08-09 仪表盘首屏空白回归验证
+
+- 执行者：Codex。
+- 命令：`npm run build`；结果：通过，Vite 完成 4247 个模块转换。
+- 命令：`git diff --check`；结果：通过，无空白错误，仅存在工作区既有的 LF/CRLF 提示。
+- 桌面浏览器（1280×720）：Hero 高度 328px，两个光晕子元素计算样式均为 `position: absolute`，后续工作流与 Hero 间距为 24px。
+- 窄屏浏览器（390×844）：页面 `scrollWidth` 为 390px，无横向溢出；Hero 高度 569px，后续工作流间距为 20px。
+
+## 2026-08-09 资源聚合目录选择器回归验证
+
+- 执行者：Codex。
+- 回归测试首次运行：失败，缺少待实现的 `targetFolderTree.js`，证明测试在实现前处于红灯状态。
+- 命令：`node --test src/components/resource/targetFolderTree.test.mjs`；结果：3/3 通过，覆盖 Axios 响应提取、115 原始目录字段归一化和嵌套路径拼接。
+- 命令：`npm run build`；结果：通过，Vite 完成 4248 个模块转换。
+- 命令：`git diff --check`；结果：通过，无空白错误，仅有工作区既有 LF/CRLF 提示。
+- 真实浏览器：根目录列表展示通过；子目录懒加载通过；路径选择回填 `/云下载/LOL-ERICHAND` 通过；验证后恢复 `/`。
+
+## 2026-08-09 前后端手动验证
+
+- 执行者：Codex。
+- `Test-NetConnection 192.168.31.12 -Port 15432`：通过，PostgreSQL 端口可达。
+- `Test-NetConnection 192.168.31.12 -Port 16379`：通过，Redis 端口可达。
+- 后端 `go run .`：通过，数据库与 Redis 初始化成功，监听 `:8082`。
+- 前端 `npm run dev -- --host 127.0.0.1`：通过，监听 `127.0.0.1:3001`。
+- `curl.exe --noproxy "*" http://127.0.0.1:3001/`：HTTP 200。
+- `curl.exe --noproxy "*" http://127.0.0.1:8082/`：HTTP 404，符合根路径未注册的现状，同时证明 Gin 可响应。
+- 浏览器登录：默认管理员登录成功，跳转 `/dashboard/home`。
+- 页面巡检：仪表盘、任务中心、资源聚合、115 云下载、文件工作台、STRM 配置、115 云管理、整理规则、系统设置、系统日志、网络测试、缓存管理均成功渲染对应页面标题。
+- 交互巡检：失败任务详情弹窗可打开；资源聚合两个页签可切换；媒体源文件浏览弹窗可打开。
+- 未执行：真实转存、云下载、删除、整理、刮削、保存配置等有业务副作用的动作；本轮没有代码变更，因此未重复执行单元测试与生产构建。
+
 ## 2026-05-27 功能盘点与浏览器验证
 
 - 任务：整理当前项目功能细节，并基于功能细节进行一轮浏览器测试。

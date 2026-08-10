@@ -226,3 +226,44 @@
 - 按用户要求将后端切换至 NAS PostgreSQL `192.168.31.12:15432/easy_strm_prod`，运行时凭据未写入仓库文件。
 - 使用独立容器 `easy-strm-nas-test` 连接 NAS 数据库，并复用本地 Redis；后端 `:8082` 与前端 `:3001` 均返回 200。
 - 启动日志确认数据库与 Redis 连接成功，管理员登录只读冒烟通过。
+
+# 2026-08-09 前后端启动与手动验证
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，改用本地 `rg`、`update_plan`、PowerShell 与应用内浏览器完成上下文检查和验证。
+- 仓库检查：工作区存在用户未提交改动，本轮未修改业务代码，也未覆盖或清理现有改动。
+- 环境检查：Go 1.25.6、Node.js 24.13.0、npm 11.6.2 可用；前端 `node_modules` 已就绪；配置中的 PostgreSQL `15432` 与 Redis `16379` 端口可达。Docker Desktop daemon 未运行，但本地进程启动不依赖 Docker。
+- 后端启动：在 `easy-strm` 执行 `go run .`，成功连接 PostgreSQL/Redis 并监听 `:8082`；日志写入 `.codex/backend-manual-verify.*.log`。
+- 前端启动：在 `easy-strm-front` 执行 `npm run dev -- --host 127.0.0.1`，Vite 成功监听 `127.0.0.1:3001`；日志写入 `.codex/frontend-manual-verify.*.log`。
+- HTTP 探测：绕过本机系统代理后，前端 `/` 返回 200；后端根路径返回预期 404，Gin 路由服务正常监听。
+- 浏览器验证：使用本地默认管理员登录，检查仪表盘、任务中心、资源聚合及两个页签、文件工作台、STRM 配置、115 云管理、整理规则、系统设置、系统日志、网络测试、缓存管理。
+- 观察项：失效 Token 首次进入根路由会让仪表盘 mounted hook 报“登录已过期”后再跳登录页；历史本地媒体源为 Linux 路径，在 Windows 浏览时返回“路径不存在”；一条历史失败任务只显示“导出目录树失败:”而没有具体原因。
+- 收尾：前后端继续保持运行，便于用户继续手动验证。
+
+# 2026-08-09 仪表盘首屏空白修复
+
+- 执行者：Codex。
+- 根据用户截图定位到 `.surface-card > * { position: relative }` 覆盖 Tailwind `absolute` 工具类，导致 Hero 的两个光晕装饰进入普通文档流并累计占据 480px 高度。
+- 修改 `easy-strm-front/src/style.css`：将卡片高光并入 `background-image`，删除伪元素覆盖层和强制修改所有直接子元素定位的规则。
+- 影响范围：修复仪表盘 Hero 空白，同时恢复 `StatCard` 等卡片中绝对定位装饰的正常语义。
+- 验证：前端生产构建通过；桌面 1280px 下 Hero 高 328px、与工作流间距 24px；390px 下无横向溢出，Hero 与工作流间距 20px。
+
+# 2026-08-09 资源聚合目录选择器修复
+
+- 执行者：Codex。
+- 真实接口复现：`GET /115/files?cloud115_id=2&cid=0&show_dir=1&offset=0&limit=500` 返回 200 和 16 条记录，其中 11 条为根目录。
+- 根因一：组件先读取 `response.data.data` 得到数组，随后又把数组当对象读取 `.files/.data`，最终得到空数组。
+- 根因二：115 原始目录字段为 `cid/n/ico`，组件只识别 `is_directory/name/path`，即使提取到数据也会全部过滤。
+- 实现：新增 115 响应提取和目录字段归一化工具；目录树加入根目录节点、错误提示、账号切换重载和基于 `cid` 的子目录懒加载。
+- 浏览器复验：根目录可展示 11 个目录；展开“云下载”后显示下一级目录；选择后完整路径正确回填，验证结束后恢复根路径 `/`。
+- 安全边界：仅执行 GET 目录查询和本地表单选择，未提交云下载、转存、删除或云盘写操作。
+
+# 2026-08-10 GitHub main 发布
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用本地 Git、`rg`、PowerShell 和既有测试命令完成审计与发布。
+- 发布范围：提交工作区内资源聚合、115 分享转存、云下载、自动整理/刮削、Dashboard、数据库迁移、测试、正式文档和交付材料等全部项目代码变更。
+- 发布清理：将 `.workbuddy/`、`.codex/manual-verify-processes.json` 和异常 `nul` 文件加入 `.gitignore`，不提交本地运行产物。
+- 凭据清理：真实 115 分享码与密码已从测试、POC 和文档中移除；live 测试改为读取 `EASY_STRM_LIVE_SHARE_CODE`、`EASY_STRM_LIVE_SHARE_PASSWORD`，未配置时跳过。
+- 同步检查：执行 `git fetch origin main` 后，本地 `main` 与 `origin/main` 均无领先或落后。
+- 发布前验证：`go test ./...`、`go vet ./...`、`npm run build`、目录选择器 3 条 Node 单元测试和 `git diff --check` 全部通过。

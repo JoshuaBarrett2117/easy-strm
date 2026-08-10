@@ -1,0 +1,154 @@
+classDiagram
+    class ShareFileInfo {
+        +string Name
+        +int64 Size
+        +string Type
+        +string Path
+        +string PickCode
+        +string Sha1
+        +bool IsDir
+        +[]ShareFileInfo Children
+    }
+
+    class ParseShareRequest {
+        +string Url
+        +string Password
+    }
+
+    class ParseShareResponse {
+        +string ShareCode
+        +string FolderName
+        +[]ShareFileInfo Files
+        +int TotalFiles
+        +int64 TotalSize
+    }
+
+    class TransferRequest {
+        +string ShareCode
+        +string Password
+        +int TargetCloud115Id
+        +string TargetDirectory
+        +[]FileItem Files
+        +string ConflictStrategy
+        +bool AutoOrganize
+    }
+
+    class FileItem {
+        +string PickCode
+        +string Name
+        +int64 Size
+    }
+
+    class TransferResponse {
+        +string TaskId
+        +int TotalFiles
+        +int64 EstimatedSize
+    }
+
+    class TransferProgressResponse {
+        +string TaskId
+        +string Status
+        +int Progress
+        +int TotalFiles
+        +int ProcessedFiles
+        +int SuccessFiles
+        +int FailedFiles
+        +int SkippedFiles
+        +[]FailedItem FailedItems
+        +string CurrentFile
+        +string EstimatedRemaining
+        +string CreateTime
+        +string UpdateTime
+    }
+
+    class FailedItem {
+        +string Name
+        +string Error
+        +bool Retryable
+    }
+
+    class ShareTransferLog {
+        +int ID
+        +string TaskId
+        +string ShareCode
+        +string ShareFolderName
+        +string FileName
+        +string FilePickCode
+        +int64 FileSize
+        +string FileSha1
+        +int Cloud115Id
+        +string TargetDirectory
+        +string Status
+        +string ErrorMessage
+        +bool IsSecondTransfer
+        +time Time CreateTime
+        +time Time UpdateTime
+    }
+
+    class ShareTransferService {
+        -Client client
+        -TaskRedisDAO taskDAO
+        -ShareTransferLogDAO logDAO
+        -Cloud115DAO cloud115DAO
+        +ParseShareLink(url, password string) ParseShareResponse
+        +GetShareFiles(shareCode, password, page, pageSize, type, keyword string) ParseShareResponse
+        +SubmitTransfer(req TransferRequest) TransferResponse
+        +GetProgress(taskId string) TransferProgressResponse
+        +CancelTransfer(taskId string) CancelResponse
+        +RetryTransfer(taskId string) RetryResponse
+        -executeTransfer(taskId string, req TransferRequest)
+        -transferSingleFile(pickCode, targetCID, sourceCookie, targetCookie, cloud115ID)
+    }
+
+    class ResourceController {
+        -ShareTransferService service
+        +Parse(ctx *gin.Context)
+        +GetFiles(ctx *gin.Context)
+        +SubmitTransfer(ctx *gin.Context)
+        +GetProgress(ctx *gin.Context)
+        +CancelTransfer(ctx *gin.Context)
+        +RetryTransfer(ctx *gin.Context)
+    }
+
+    class ShareTransferLogDAO {
+        -DB *sql.DB
+        +BatchInsert(logs []ShareTransferLog) error
+        +GetByTaskId(taskId string) []ShareTransferLog
+        +UpdateStatus(taskId, pickCode, status, errMsg string) error
+    }
+
+    class TaskRedisDAO {
+        +Create(taskID, taskType, taskName string) error
+        +Get(taskID string) map
+        +UpdateStatus(taskID, status string) error
+        +UpdateProgress(taskID string, total, processed, success, failed int) error
+        +UpdateMetadata(taskID string, metadata map) error
+        +SetCancelFlag(taskID string) error
+        +IsCancelled(taskID string) bool
+        +AddProcessedFileID(taskID, fileID string) error
+        +GetProcessedFileIDs(taskID string) []string
+        +Cancel(taskID string) error
+        +Resume(taskID string) error
+    }
+
+    class Cloud115DAO {
+        +GetByID(id int) Cloud115
+    }
+
+    class Client {
+        +GetFileInfo(pickCode string, cloud115ID int, cookie string) FileInfo
+        +RapidTransferFile(sourcePickCode, sourceID, sourceCookie, targetDirID, targetID, targetCookie, fileName) string
+        +GetCIDByPath(path, cloud115ID, cookie string) string
+        +MkdirAll115(path, cloud115ID, cookie string) string
+    }
+
+    ResourceController --> ShareTransferService
+    ShareTransferService --> ShareTransferLogDAO
+    ShareTransferService --> TaskRedisDAO
+    ShareTransferService --> Cloud115DAO
+    ShareTransferService --> Client
+    ShareTransferLogDAO --> ShareTransferLog
+    TransferRequest --> FileItem
+    TransferProgressResponse --> FailedItem
+    ParseShareResponse --> ShareFileInfo
+    TransferResponse --> FileItem

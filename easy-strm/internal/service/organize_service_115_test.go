@@ -90,6 +90,22 @@ func (f *fakeOrganizeCloud115Client) MkdirAll115(path string, cloud115ID int, co
 	return "target-cid", nil
 }
 
+func (f *fakeOrganizeCloud115Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (string, error) {
+	return "", nil
+}
+
+func (f *fakeOrganizeCloud115Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*driver.File, error) {
+	return nil, nil
+}
+
+func (f *fakeOrganizeCloud115Client) GetShareSnap(shareCode, receiveCode, dirID string, queries ...driver.Query) (*driver.ShareSnapResp, error) {
+	return nil, nil
+}
+
+func (f *fakeOrganizeCloud115Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error {
+	return nil
+}
+
 func expectCloud115Account(t *testing.T, mock sqlmock.Sqlmock) {
 	t.Helper()
 

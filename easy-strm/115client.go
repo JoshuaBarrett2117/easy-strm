@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -198,4 +201,53 @@ func (c *Client) GetUser(cookie string) (*driver.UserInfo, error) {
 
 	Info("Got user info for user: %s", userInfo.UserName)
 	return userInfo, nil
+}
+
+// ReceiveShare 将分享文件转存到目标账号指定目录
+// 调用 115 官方接口 POST https://webapi.115.com/share/receive
+// 基于分享文件的 file_id（fid）而非 pickcode，避免跨账号秒传的 status=7 内容校验问题
+func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error {
+	masked := shareCode
+	if len(masked) > 4 {
+		masked = masked[:4] + "***"
+	}
+	Debug("[ReceiveShare] start | shareCode=%s | files=%s | saveFolderID=%s", masked, fileIDs, saveFolderID)
+
+	d, err := getOrCreateDriver(targetCloud115ID, targetCookie)
+	if err != nil {
+		return err
+	}
+
+	form := url.Values{}
+	form.Set("share_code", shareCode)
+	form.Set("receive_code", receiveCode)
+	form.Set("file_id", fileIDs)
+	form.Set("save_folder_id", saveFolderID)
+
+	resp, err := d.NewRequest().
+		SetHeaderVerbatim("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("Referer", "https://115cdn.com/").
+		SetBody(form.Encode()).
+		SetDoNotParseResponse(true).
+		Post("https://webapi.115.com/share/receive")
+	if err != nil {
+		return fmt.Errorf("share receive request failed: %v", err)
+	}
+	data := resp.RawBody()
+	bodyBytes, _ := io.ReadAll(data)
+	data.Close()
+
+	var result struct {
+		State  bool   `json:"state"`
+		Errno  int    `json:"errno"`
+		Errmsg string `json:"errmsg"`
+	}
+	if err := json.Unmarshal(bodyBytes, &result); err != nil {
+		return fmt.Errorf("parse share receive response failed: %v (raw: %s)", err, string(bodyBytes))
+	}
+	if !result.State {
+		return fmt.Errorf("share receive failed: %s (errno=%d)", result.Errmsg, result.Errno)
+	}
+	Info("[ReceiveShare] success | shareCode=%s | files=%s", masked, fileIDs)
+	return nil
 }

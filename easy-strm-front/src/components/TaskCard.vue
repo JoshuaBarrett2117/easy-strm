@@ -183,7 +183,8 @@ import {
   VideocamOutline,
   FilmOutline,
   SearchOutline,
-  LinkOutline
+  LinkOutline,
+  CloudDownloadOutline
 } from '@vicons/ionicons5'
 
 const props = defineProps({
@@ -209,7 +210,8 @@ const taskTypeNames = {
   scrape: 'NFO 刮削',
   emby_refresh: 'Emby 库刷新',
   log_clean: '日志清理',
-  sync_files: '文件同步'
+  sync_files: '文件同步',
+  offline_download: '115 云下载'
 }
 
 const taskTypeIcons = {
@@ -224,7 +226,8 @@ const taskTypeIcons = {
   scrape: SearchOutline,
   emby_refresh: LinkOutline,
   log_clean: RefreshOutline,
-  sync_files: TimerOutline
+  sync_files: TimerOutline,
+  offline_download: CloudDownloadOutline
 }
 
 const taskTypeTagTypes = {
@@ -239,7 +242,8 @@ const taskTypeTagTypes = {
   scrape: 'warning',
   emby_refresh: 'error',
   log_clean: 'warning',
-  sync_files: 'info'
+  sync_files: 'info',
+  offline_download: 'info'
 }
 
 // 任务类型左侧强调色
@@ -255,7 +259,8 @@ const taskAccentClasses = {
   scrape: 'border-l-orange-500',
   emby_refresh: 'border-l-teal-500',
   log_clean: 'border-l-amber-500',
-  sync_files: 'border-l-slate-400'
+  sync_files: 'border-l-slate-400',
+  offline_download: 'border-l-blue-500'
 }
 
 const taskAccentClass = computed(() => {

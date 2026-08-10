@@ -16,20 +16,17 @@ import (
 
 // TmdbController TMDB 控制器
 type TmdbController struct {
-	tmdbService *service.TmdbService
-	cacheDAO    *dao.TmdbCacheDAO
+	tmdbService     *service.TmdbService
+	cacheDAO        *dao.TmdbCacheDAO
+	systemConfigDAO *dao.SystemConfigDAO
 }
 
 // NewTmdbController 创建 TMDB 控制器实例
-// 参数:
-//   - tmdbService: TMDB 服务
-//
-// 返回:
-//   - *TmdbController: TMDB 控制器实例
 func NewTmdbController(tmdbService *service.TmdbService) *TmdbController {
 	return &TmdbController{
-		tmdbService: tmdbService,
-		cacheDAO:    dao.NewTmdbCacheDAO(),
+		tmdbService:     tmdbService,
+		cacheDAO:        dao.NewTmdbCacheDAO(),
+		systemConfigDAO: dao.NewSystemConfigDAO(),
 	}
 }
 
@@ -387,12 +384,26 @@ func (c *TmdbController) UpdateAPIKey(ctx *gin.Context) {
 		return
 	}
 
+	// 持久化到数据库
+	if err := c.systemConfigDAO.Upsert("tmdb_api_key", req.APIKey); err != nil {
+		logger.Errorf("TmdbController[UpdateAPIKey] 保存 tmdb_api_key 到数据库失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "保存配置失败")
+		return
+	}
+	if req.Language != "" {
+		if err := c.systemConfigDAO.Upsert("tmdb_language", req.Language); err != nil {
+			logger.Warnf("TmdbController[UpdateAPIKey] 保存 tmdb_language 到数据库失败: %v", err)
+			// 语言保存失败不阻断主流程
+		}
+	}
+
+	// 同步更新内存中的服务实例（立即生效，无需重启）
 	c.tmdbService.SetAPIKey(req.APIKey)
 	if req.Language != "" {
 		c.tmdbService.SetLanguage(req.Language)
 	}
 
-	logger.Infof("TmdbController[UpdateAPIKey] API Key 已更新")
+	logger.Infof("TmdbController[UpdateAPIKey] API Key 已更新并持久化")
 	SuccessResp(ctx, gin.H{
 		"message": "API Key 更新成功",
 	})
@@ -401,9 +412,28 @@ func (c *TmdbController) UpdateAPIKey(ctx *gin.Context) {
 // GetConfig 获取 TMDB 配置
 // GET /api/media/tmdb/config
 func (c *TmdbController) GetConfig(ctx *gin.Context) {
-	apiKey := c.tmdbService.GetAPIKey()
-	language := c.tmdbService.GetLanguage()
-	hasKey := c.tmdbService.HasUsableAPIKey()
+	// 优先从数据库读取持久化配置
+	dbKey, dbErr := c.systemConfigDAO.GetByKey("tmdb_api_key")
+	dbLang, langErr := c.systemConfigDAO.GetByKey("tmdb_language")
+
+	var apiKey, language string
+	hasDBKey := false
+
+	if dbErr == nil && dbKey != nil && dbKey.ConfigVal != "" {
+		apiKey = dbKey.ConfigVal
+		hasDBKey = true
+	} else {
+		// 回退到内存中的值（来自 config.yaml 或之前的 SetAPIKey 调用）
+		apiKey = c.tmdbService.GetAPIKey()
+	}
+
+	if langErr == nil && dbLang != nil && dbLang.ConfigVal != "" {
+		language = dbLang.ConfigVal
+	} else {
+		language = c.tmdbService.GetLanguage()
+	}
+
+	hasKey := hasDBKey || c.tmdbService.HasUsableAPIKey()
 
 	// 对 API Key 进行脱敏处理（只显示前后各4位）
 	maskedKey := ""
