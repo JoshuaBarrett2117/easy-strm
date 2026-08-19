@@ -35,11 +35,13 @@ type OfflineDownloadUrlResult struct {
 
 // OfflineDownloadSubmitResponse 云下载提交响应
 type OfflineDownloadSubmitResponse struct {
-	TaskId   string                     `json:"task_id"`  // 任务中心跟踪任务ID
-	Total    int                        `json:"total"`    // 提交链接总数
-	Accepted int                        `json:"accepted"` // 115接受的链接数
-	Rejected int                        `json:"rejected"` // 被拒绝或格式非法的链接数
-	Results  []OfflineDownloadUrlResult `json:"results"`  // 逐链接结果明细
+	TaskId      string                     `json:"task_id"`      // 任务中心跟踪任务ID
+	Total       int                        `json:"total"`        // 提交链接总数
+	Accepted    int                        `json:"accepted"`     // 115已接受的链接数；后台排队时为0
+	Rejected    int                        `json:"rejected"`     // 已确认被拒绝或格式非法的链接数
+	Queued      bool                       `json:"queued"`       // 是否已进入后台发送队列
+	QueuedCount int                        `json:"queued_count"` // 等待后台发送到115的有效链接数
+	Results     []OfflineDownloadUrlResult `json:"results"`      // 同步提交时的逐链接结果明细
 }
 
 // OfflineDownloadTask 云下载记录（对应 t_offline_download_task 表）

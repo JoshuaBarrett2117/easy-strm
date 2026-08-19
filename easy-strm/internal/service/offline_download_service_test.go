@@ -30,22 +30,23 @@ func (f *fakeOfflineAccountStore) GetByID(id int) (*domain.Cloud115, error) {
 
 // fakeOfflineClient 内存115离线下载客户端桩
 type fakeOfflineClient struct {
-	mu          sync.Mutex
-	mkdirDirID  string
-	mkdirPath   string
-	mkdirErr    error
-	addHashes   []string
-	addErr      error
-	addFunc     func(uris []string) ([]string, error) // 可选：按调用动态返回，覆盖 addHashes/addErr
-	addedUrls   []string
-	addedDir    string
-	addCalls    int
-	listResp    *driver.OfflineTaskResp
-	listErr     error
-	listCalled  chan struct{}
-	deleteErr   error
-	deleted     []string
-	deleteFiles bool
+	mu           sync.Mutex
+	mkdirDirID   string
+	mkdirPath    string
+	mkdirErr     error
+	addHashes    []string
+	addErr       error
+	addFunc      func(uris []string) ([]string, error) // 可选：按调用动态返回，覆盖 addHashes/addErr
+	addedUrls    []string
+	addedBatches [][]string
+	addedDir     string
+	addCalls     int
+	listResp     *driver.OfflineTaskResp
+	listErr      error
+	listCalled   chan struct{}
+	deleteErr    error
+	deleted      []string
+	deleteFiles  bool
 }
 
 func (f *fakeOfflineClient) MkdirAll115(path string, cloud115ID int, cookie string) (string, error) {
@@ -60,6 +61,7 @@ func (f *fakeOfflineClient) AddOfflineTasks(uris []string, saveDirID string, clo
 	defer f.mu.Unlock()
 	f.addCalls++
 	f.addedUrls = append([]string{}, uris...)
+	f.addedBatches = append(f.addedBatches, append([]string(nil), uris...))
 	f.addedDir = saveDirID
 	if f.addFunc != nil {
 		return f.addFunc(uris)
@@ -500,5 +502,75 @@ func TestOfflineDownloadSubmitBatchFatalErrorNormalized(t *testing.T) {
 	}
 	if len(taskStore.tasks) != 0 {
 		t.Fatal("致命错误时不应创建任务中心任务")
+	}
+}
+
+// TestOfflineDownloadSubmitLargeBatchQueuesAndChunks 验证超过100条时入口立即返回，
+// 后台单worker再按100条切分并顺序调用115，而不是把大数组直接发送给115。
+func TestOfflineDownloadSubmitLargeBatchQueuesAndChunks(t *testing.T) {
+	svc, client, taskStore, mock, cleanup := newOfflineDownloadTestEnv(t)
+	defer cleanup()
+
+	urls := make([]string, 201)
+	for i := range urls {
+		urls[i] = fmt.Sprintf("https://example.com/file-%03d.mkv", i)
+	}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startOnce sync.Once
+	client.addFunc = func(uris []string) ([]string, error) {
+		startOnce.Do(func() { close(started) })
+		<-release
+		return make([]string, len(uris)), nil
+	}
+
+	insertPrefix := regexp.QuoteMeta(`INSERT INTO t_offline_download_task
+		(task_id, cloud115_id, url, info_hash, name, size, status, percent, error_message, save_dir_id)
+		VALUES `)
+	mock.ExpectExec(insertPrefix).WillReturnResult(sqlmock.NewResult(0, 100))
+	mock.ExpectExec(insertPrefix).WillReturnResult(sqlmock.NewResult(0, 100))
+	mock.ExpectExec(insertPrefix).WillReturnResult(sqlmock.NewResult(0, 1))
+
+	resp, err := svc.Submit(context.Background(), domain.OfflineDownloadSubmitRequest{
+		Cloud115ID: 1,
+		Urls:       urls,
+	})
+	if err != nil {
+		t.Fatalf("大批量任务入队失败: %v", err)
+	}
+	if !resp.Queued || resp.QueuedCount != 201 || resp.Accepted != 0 || resp.Total != 201 {
+		t.Fatalf("大批量入队响应不符合预期: %+v", resp)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("后台队列未开始发送第一批请求")
+	}
+	close(release)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		task, _ := taskStore.Get(resp.TaskId)
+		if task != nil && task["status"] == domain.TaskStatusFailed {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("后台队列未在预期时间内处理完成: %+v", task)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	client.mu.Lock()
+	batchSizes := make([]int, len(client.addedBatches))
+	for i, batch := range client.addedBatches {
+		batchSizes[i] = len(batch)
+	}
+	client.mu.Unlock()
+	if fmt.Sprint(batchSizes) != "[100 100 1]" {
+		t.Fatalf("后台分批大小不符合预期: %v", batchSizes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
 	}
 }

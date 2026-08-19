@@ -1,36 +1,38 @@
 {
-  "date": "2026-07-17",
+  "date": "2026-08-18",
   "executor": "Codex",
   "location": {
-    "themeShell": "easy-strm-front/src/views/Dashboard.vue",
-    "themeState": "easy-strm-front/src/composables/useTheme.js",
-    "databaseInitialization": "easy-strm/db.go",
-    "testGuide": "docs/开发与测试.md",
-    "browserScripts": ["easy-strm-front/scripts", ".codex/function-details-browser-test-2026-05-27.md"]
+    "frontend": "easy-strm-front/src/views/resources/OfflineDownload.vue",
+    "domain": "easy-strm/internal/domain/offline_download.go",
+    "service": "easy-strm/internal/service/offline_download_service.go",
+    "client": "easy-strm/115_offline.go",
+    "tests": "easy-strm/internal/service/offline_download_service_test.go"
   },
-  "stack": ["Vue 3", "Tailwind CSS 4", "Naive UI", "Go", "Gin", "PostgreSQL", "Redis", "Docker Compose"],
-  "similarCasesReviewed": [
-    "Dashboard 顶栏的 light 默认与 dark 覆盖",
-    "PageCard 和 StatCard 的深浅主题 class",
-    "db.go 内现有幂等 CREATE TABLE 初始化",
-    "migrate_v3.sql 的 t_notification_config 定义"
+  "current_behavior": [
+    "前端 handleSubmit 对 parsedUrlCount > 100 直接警告并返回",
+    "后端 Submit 对归一化后总数 > offlineMaxUrls 返回错误",
+    "后端在HTTP请求内调用 AddOfflineTasks，成功后才创建任务中心任务",
+    "115客户端支持批量AddOfflineTasks，现有单批约束常量为100"
   ],
-  "observations": [
-    "侧栏使用固定深色背景和文字 class，因此切换浅色主题时不会变化",
-    "远程 PostgreSQL 凭据失效，Docker 本地依赖可作为标准化测试环境",
-    "全新数据库缺少 t_notification_config，导致通知配置接口返回 500",
-    "Chrome 企业网络策略阻止代理访问 localhost，并禁止更换浏览器自动化方式绕过",
-    "115、TMDB、Emby 的真实成功路径需要外部账号和配置"
+  "similar_patterns": [
+    "TransferScheduler 使用有缓冲channel与worker处理后台任务",
+    "WatchService 使用受控goroutine执行持续后台工作",
+    "ShareTransferService 使用queued状态后异步推进任务中心"
   ],
   "questions": [
-    {"priority": "high", "question": "侧栏如何跟随主题？", "answer": "浅色 class 作为默认值，全部深色表现使用 dark: 变体。"},
-    {"priority": "high", "question": "后端如何在远程凭据失效时启动？", "answer": "启动 Docker Desktop，使用仓库 Compose 的 PostgreSQL、Redis 和主应用。"},
-    {"priority": "high", "question": "如何验证全部功能？", "answer": "执行构建、Go 测试、真实 API 模块矩阵和临时数据闭环；浏览器受企业策略阻塞的部分明确标记未覆盖。"}
+    {"priority": "high", "question": "超过100条时响应如何表达115尚未实际受理？", "answer": "新增queued字段，accepted/rejected保留115实际受理语义"},
+    {"priority": "high", "question": "如何满足115单批限制？", "answer": "后台单worker按100条切片并顺序调用现有批量接口"},
+    {"priority": "medium", "question": "如何保持现有小批次行为？", "answer": "仅超过100条进入异步队列，100条及以下沿用同步路径"}
   ],
   "sufficiency": {
-    "interfaceContract": true,
-    "technicalChoice": true,
-    "risksIdentified": true,
-    "verificationKnown": true
-  }
+    "interface_contract_known": true,
+    "technical_choice_understood": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "risks": [
+    "进程重启会丢失尚未消费的内存队列任务",
+    "后台任务不能继续使用HTTP请求context",
+    "异步响应不能把本地入队误称为115已受理"
+  ]
 }

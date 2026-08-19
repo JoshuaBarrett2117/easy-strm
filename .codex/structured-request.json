@@ -1,19 +1,18 @@
 {
-  "task": "修复亮色主题侧栏并启动真实后端执行全模块测试",
-  "date": "2026-07-17",
+  "date": "2026-08-18",
   "executor": "Codex",
+  "request": "当输入的云下载链接超过100个时允许直接提交，由后端队列按115单批上限发送请求",
   "scope": [
-    "easy-strm-front/src/views/Dashboard.vue",
-    "easy-strm/db.go",
-    "docs/开发与测试.md",
-    ".codex/testing.md",
-    ".codex/verification.md"
+    "easy-strm/internal/service/offline_download_service.go",
+    "easy-strm/internal/domain/offline_download.go",
+    "easy-strm-front/src/views/resources/OfflineDownload.vue",
+    "对应后端单元测试与项目验证记录"
   ],
   "acceptance": [
-    "亮色主题下侧栏、菜单与状态卡同步变为浅色",
-    "Docker PostgreSQL、Redis 与主应用启动成功",
-    "按测试文档覆盖主要后端模块和核心数据闭环",
-    "发现的可复现缺陷完成修复与复测",
-    "生成并更新最新测试文档，明确未覆盖项"
+    "前端不再拦截超过100个去重后的链接",
+    "超过100个链接的HTTP提交立即返回本地任务ID",
+    "后端单工作协程按每批最多100个链接顺序调用115",
+    "100个及以下链接维持原有同步受理与逐链接结果语义",
+    "后台批次完成后持久化记录并启动既有115状态跟踪"
   ]
 }

@@ -1,3 +1,13 @@
+# 2026-08-18 云下载大批量队列提交
+
+- 后端全量：`go test ./... -count=1`，通过。
+- 后端专项：`go test ./internal/service -run 'TestOfflineDownloadSubmit(LargeBatchQueuesAndChunks|HappyPathTracksToCompleted|BatchFatalErrorNormalized)$' -count=1 -v`，通过。
+- 专项断言：201 条输入立即返回 `queued=true`，后台实际调用批次大小为 `[100 100 1]`。
+- 前端生产构建：`npm run build`，通过，4248 modules transformed。
+- 格式检查：`git diff --check`，通过。
+- 竞态检测：`go test -race ./internal/service -run TestOfflineDownloadSubmitLargeBatchQueuesAndChunks -count=1` 未执行，当前 Go 环境未启用 CGO（`-race requires cgo`）；常规专项与全量测试均已通过。
+- 未执行真实115大批量请求，避免向用户账号实际创建201个下载任务；115客户端调用边界由注入桩自动验证。
+
 # 2026-07-17 亮色主题与全模块测试
 
 - 前端构建：通过，4231 modules transformed。

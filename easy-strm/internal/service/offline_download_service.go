@@ -21,7 +21,8 @@ import (
 const (
 	offlineTaskIDPrefix = "offline-"       // 任务中心任务ID前缀
 	offlineDefaultDir   = "/云下载"           // 未指定保存目录时的默认目录
-	offlineMaxUrls      = 100              // 单次提交链接数上限
+	offlineBatchSize    = 100              // 115单次云下载请求的链接数上限
+	offlineQueueSize    = 1000             // 后台大批量提交队列容量
 	offlinePollInterval = 10 * time.Second // 跟踪轮询115离线状态的间隔
 	offlinePollTimeout  = 6 * time.Hour    // 单个跟踪任务的最长运行时间（到期后任务中心终态，115侧下载不受影响）
 	offlineSyncMinGap   = 15 * time.Second // 列表查询触发同账号状态同步的最小间隔
@@ -56,6 +57,18 @@ type OfflineDownloadService struct {
 
 	syncMu   sync.Mutex
 	lastSync map[int]time.Time // 账号维度最近一次成功同步115离线状态的时间，用于限频
+	queue    chan offlineDownloadJob
+}
+
+// offlineDownloadJob 表示一个已通过入口校验、等待后台分批发送到115的大批量任务。
+type offlineDownloadJob struct {
+	taskID      string
+	cloud115ID  int
+	accountName string
+	cookie      string
+	directory   string
+	urls        []string
+	invalidURLs []string
 }
 
 // NewOfflineDownloadService 创建云下载服务实例
@@ -65,13 +78,16 @@ type OfflineDownloadService struct {
 //   - recordDAO: 云下载记录PG DAO
 //   - cloud115DAO: 115账号读取依赖（注入 *dao.Cloud115DAO）
 func NewOfflineDownloadService(client Offline115Client, taskDAO TaskDAO, recordDAO *dao.OfflineDownloadTaskDAO, cloud115DAO OfflineAccountStore) *OfflineDownloadService {
-	return &OfflineDownloadService{
+	service := &OfflineDownloadService{
 		client:      client,
 		taskDAO:     taskDAO,
 		recordDAO:   recordDAO,
 		cloud115DAO: cloud115DAO,
 		lastSync:    make(map[int]time.Time),
+		queue:       make(chan offlineDownloadJob, offlineQueueSize),
 	}
+	go service.runSubmissionQueue()
+	return service
 }
 
 // ==================== 提交云下载 ====================
@@ -83,9 +99,6 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 	urls, invalidUrls := normalizeOfflineUrls(req.Urls)
 	if len(urls) == 0 && len(invalidUrls) == 0 {
 		return nil, fmt.Errorf("请提供至少一个下载链接")
-	}
-	if len(urls)+len(invalidUrls) > offlineMaxUrls {
-		return nil, fmt.Errorf("单次最多提交%d个链接", offlineMaxUrls)
 	}
 	if len(urls) == 0 {
 		return nil, fmt.Errorf("没有有效的下载链接，仅支持 ed2k/magnet/http/https/ftp 格式")
@@ -102,6 +115,9 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 	directory := strings.TrimSpace(req.Directory)
 	if directory == "" {
 		directory = offlineDefaultDir
+	}
+	if len(urls)+len(invalidUrls) > offlineBatchSize {
+		return s.enqueueLargeSubmission(req.Cloud115ID, account, directory, urls, invalidUrls)
 	}
 	saveDirID, err := s.client.MkdirAll115(directory, req.Cloud115ID, account.Cookie)
 	if err != nil || strings.TrimSpace(saveDirID) == "" {
@@ -179,6 +195,163 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		Rejected: len(urls) + len(invalidUrls) - accepted,
 		Results:  results,
 	}, nil
+}
+
+// enqueueLargeSubmission 为超过115单批上限的请求创建任务并放入后台队列。
+// 入队响应只表示 easy-strm 已接收任务，不把尚未发送到115的链接误报为已受理。
+func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID int, account *domain.Cloud115, directory string, urls, invalidURLs []string) (*domain.OfflineDownloadSubmitResponse, error) {
+	taskID := offlineTaskIDPrefix + uuid.New().String()
+	total := len(urls) + len(invalidURLs)
+	if err := s.taskDAO.Create(taskID, string(domain.TaskTypeOfflineDownload), fmt.Sprintf("115云下载 - %d个任务", total)); err != nil {
+		return nil, fmt.Errorf("创建任务失败: %v", err)
+	}
+	s.taskDAO.UpdateMetadata(taskID, map[string]interface{}{
+		"cloud115_id":  cloud115ID,
+		"account_name": account.Name,
+		"directory":    directory,
+		"queue_status": "queued",
+	})
+	s.taskDAO.UpdateProgress(taskID, total, 0, 0, 0)
+	s.taskDAO.UpdateStatus(taskID, domain.TaskStatusRunning)
+
+	job := offlineDownloadJob{
+		taskID:      taskID,
+		cloud115ID:  cloud115ID,
+		accountName: account.Name,
+		cookie:      account.Cookie,
+		directory:   directory,
+		urls:        append([]string(nil), urls...),
+		invalidURLs: append([]string(nil), invalidURLs...),
+	}
+	select {
+	case s.queue <- job:
+		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=enqueue | total=%d | queueDepth=%d", taskID, total, len(s.queue))
+	default:
+		s.taskDAO.SetError(taskID, "云下载后台队列已满，请稍后重试")
+		return nil, fmt.Errorf("云下载后台队列已满，请稍后重试")
+	}
+
+	return &domain.OfflineDownloadSubmitResponse{
+		TaskId:      taskID,
+		Total:       total,
+		Rejected:    len(invalidURLs),
+		Queued:      true,
+		QueuedCount: len(urls),
+		Results:     []domain.OfflineDownloadUrlResult{},
+	}, nil
+}
+
+// runSubmissionQueue 使用单工作协程顺序消费大批量任务，避免多个批次同时冲击115接口。
+func (s *OfflineDownloadService) runSubmissionQueue() {
+	for job := range s.queue {
+		s.processQueuedSubmission(job)
+	}
+}
+
+// processQueuedSubmission 将一个大批量任务按115单批上限拆分、顺序发送并持久化结果。
+func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueWorker | panic=%v", job.taskID, recovered)
+			s.taskDAO.SetError(job.taskID, fmt.Sprintf("云下载后台提交异常: %v", recovered))
+		}
+	}()
+
+	if s.taskDAO.IsCancelled(job.taskID) {
+		return
+	}
+	saveDirID, err := s.client.MkdirAll115(job.directory, job.cloud115ID, job.cookie)
+	if err != nil || strings.TrimSpace(saveDirID) == "" {
+		s.failQueuedSubmission(job, fmt.Sprintf("创建保存目录失败: %v", err))
+		return
+	}
+
+	accepted := 0
+	rejected := 0
+	for start := 0; start < len(job.urls); start += offlineBatchSize {
+		end := start + offlineBatchSize
+		if end > len(job.urls) {
+			end = len(job.urls)
+		}
+		batch := job.urls[start:end]
+		results := make([]domain.OfflineDownloadUrlResult, 0, len(batch))
+		records := make([]domain.OfflineDownloadTask, 0, len(batch))
+		batchAccepted, batchErr := s.submitOfflineBatch(batch, saveDirID, job.cloud115ID, job.cookie, job.taskID, &results, &records)
+		if batchErr != nil {
+			message := normalizeOfflineErr(batchErr).Error()
+			records = buildQueuedFailureRecords(job, batch, saveDirID, message)
+		}
+		accepted += batchAccepted
+		rejected += len(batch) - batchAccepted
+		if insertErr := s.recordDAO.BatchInsert(context.Background(), records); insertErr != nil {
+			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsert | batchStart=%d | err=%v", job.taskID, start, insertErr)
+		}
+		s.taskDAO.UpdateProgress(job.taskID, len(job.urls)+len(job.invalidURLs), end+len(job.invalidURLs), accepted, rejected+len(job.invalidURLs))
+	}
+
+	if len(job.invalidURLs) > 0 {
+		invalidRecords := buildQueuedFailureRecords(job, job.invalidURLs, saveDirID, "链接格式无效，仅支持 ed2k/magnet/http/https/ftp")
+		if insertErr := s.recordDAO.BatchInsert(context.Background(), invalidRecords); insertErr != nil {
+			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsertInvalid | err=%v", job.taskID, insertErr)
+		}
+	}
+
+	s.taskDAO.UpdateMetadata(job.taskID, map[string]interface{}{
+		"cloud115_id":  job.cloud115ID,
+		"account_name": job.accountName,
+		"directory":    job.directory,
+		"queue_status": "submitted",
+		"accepted":     accepted,
+		"rejected":     rejected + len(job.invalidURLs),
+	})
+	if accepted == 0 {
+		s.taskDAO.SetError(job.taskID, "115未接受任何链接，后台云下载提交失败")
+		return
+	}
+	s.taskDAO.UpdateProgress(job.taskID, accepted, 0, 0, 0)
+	go s.trackBatch(context.Background(), job.taskID, job.cloud115ID, job.cookie)
+	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueSubmitted | accepted=%d | rejected=%d", job.taskID, accepted, rejected+len(job.invalidURLs))
+}
+
+// submitOfflineBatch 复用同步提交的批量与逐条降级规则，返回本批115实际受理数量。
+func (s *OfflineDownloadService) submitOfflineBatch(urls []string, saveDirID string, cloud115ID int, cookie, taskID string, results *[]domain.OfflineDownloadUrlResult, records *[]domain.OfflineDownloadTask) (int, error) {
+	hashes, err := s.client.AddOfflineTasks(urls, saveDirID, cloud115ID, cookie)
+	switch {
+	case err == nil:
+		return collectBatchResults(urls, hashes, taskID, cloud115ID, saveDirID, results, records), nil
+	case isOfflineDuplicateErr(err), isOfflineInvalidLinkErr(err):
+		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueBatchRejected | err=%v | fallback=perUrl", taskID, err)
+		return s.submitUrlsOneByOne(urls, saveDirID, cloud115ID, cookie, taskID, results, records), nil
+	default:
+		return 0, err
+	}
+}
+
+// failQueuedSubmission 在目录创建等整批前置失败时，为全部链接落失败记录并结束任务。
+func (s *OfflineDownloadService) failQueuedSubmission(job offlineDownloadJob, message string) {
+	allURLs := append(append([]string(nil), job.urls...), job.invalidURLs...)
+	records := buildQueuedFailureRecords(job, allURLs, "", message)
+	if err := s.recordDAO.BatchInsert(context.Background(), records); err != nil {
+		logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueFailInsert | err=%v", job.taskID, err)
+	}
+	s.taskDAO.UpdateProgress(job.taskID, len(allURLs), len(allURLs), 0, len(allURLs))
+	s.taskDAO.SetError(job.taskID, message)
+}
+
+// buildQueuedFailureRecords 构建后台发送失败的逐链接记录。
+func buildQueuedFailureRecords(job offlineDownloadJob, urls []string, saveDirID, message string) []domain.OfflineDownloadTask {
+	records := make([]domain.OfflineDownloadTask, 0, len(urls))
+	for _, url := range urls {
+		records = append(records, domain.OfflineDownloadTask{
+			TaskId:       job.taskID,
+			Cloud115ID:   job.cloud115ID,
+			Url:          url,
+			Status:       domain.OfflineStatusFailed,
+			ErrorMessage: message,
+			SaveDirID:    saveDirID,
+		})
+	}
+	return records
 }
 
 // collectBatchResults 汇总批量提交成功时的受理结果，生成逐链接结果与落库记录，返回受理数量

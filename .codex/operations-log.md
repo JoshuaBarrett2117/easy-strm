@@ -1,5 +1,15 @@
 # Operations Log
 
+## 2026-08-18 Codex 云下载大批量队列提交
+
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，分别改用结构化上下文文件、`update_plan` 与 `rg`；任务不需要外部资料，未调用网络搜索。
+- 使用 `rg`、`Get-Content`、`git status` 扫描云下载 domain/service/controller/DAO/前端 API 与测试链路。
+- 对照了三种既有后台模式：`TransferScheduler` 的 channel worker、`WatchService` 的受控 goroutine、`ShareTransferService` 的 queued 任务状态。
+- 接口决策：100条及以下保持同步受理；超过100条立即创建本地任务并返回 `queued=true`，后台单 worker 按100条顺序请求115。
+- 使用 `apply_patch` 完成 domain 响应契约、Service 队列 worker、前端提交提示与轮询状态修改，并补充201条分批单测。
+- 执行后端专项测试、`go test ./... -count=1` 与前端 `npm run build`，全部通过；未向真实115账号写入大批量测试任务。
+- 附加 `-race` 检查因当前 Go 环境未启用 CGO 无法执行（`-race requires cgo`），已在测试与验证报告记录。
+
 ## 2026-07-15 Codex 重构验收与发布
 
 - 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，分别改用结构化上下文扫描、`update_plan`、`rg`/`git diff`；本任务无外部资料需求，未调用网络搜索。

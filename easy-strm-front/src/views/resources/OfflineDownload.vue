@@ -43,7 +43,7 @@
           placeholder="ed2k://|file|xxx.mkv|123456|HASH|/&#10;magnet:?xt=urn:btih:xxxx&#10;https://example.com/file.zip"
         />
         <div class="url-hint">
-          已识别 {{ parsedUrlCount }} 个链接（单次最多 100 个，自动去重）
+          已识别 {{ parsedUrlCount }} 个链接（超过 100 个时由后台队列分批提交，自动去重）
         </div>
       </div>
 
@@ -154,6 +154,7 @@ const accountOptions = ref([])
 
 const submitResults = ref([])
 const lastTaskId = ref('')
+const awaitingQueuedRecords = ref(false)
 
 const records = ref([])
 const total = ref(0)
@@ -319,10 +320,6 @@ const onFolderSelect = (path) => {
 /** 提交云下载 */
 const handleSubmit = async () => {
   if (!canSubmit.value) return
-  if (parsedUrlCount.value > 100) {
-    message.warning('单次最多提交 100 个链接')
-    return
-  }
 
   submitting.value = true
   submitResults.value = []
@@ -335,7 +332,16 @@ const handleSubmit = async () => {
     const result = response.data?.data || response.data || {}
     lastTaskId.value = result.task_id || ''
     submitResults.value = result.results || []
-    if (submitRejectedCount.value === 0) {
+    if (result.queued) {
+      awaitingQueuedRecords.value = true
+      const invalidCount = Number(result.rejected) || 0
+      const queuedMessage = `已加入后台队列，将分批提交 ${result.queued_count ?? parsedUrlCount.value} 个云下载链接`
+      if (invalidCount > 0) {
+        message.warning(`${queuedMessage}，另有 ${invalidCount} 个链接格式无效`)
+      } else {
+        message.success(queuedMessage)
+      }
+    } else if (submitRejectedCount.value === 0) {
       message.success(`已提交 ${result.accepted ?? parsedUrlCount.value} 个云下载任务`)
     } else {
       message.warning(`部分链接未受理（${submitRejectedCount.value} 个），请查看明细`)
@@ -360,6 +366,9 @@ const loadRecords = async () => {
     const result = response.data?.data || response.data || {}
     records.value = result.data || []
     total.value = result.total || 0
+    if (awaitingQueuedRecords.value && records.value.some(r => r.task_id === lastTaskId.value)) {
+      awaitingQueuedRecords.value = false
+    }
     adjustPolling()
   } catch (err) {
     message.error('加载云下载记录失败')
@@ -394,7 +403,7 @@ const handleDelete = (row) => {
 
 // ===== 轮询：存在进行中任务时每 3 秒刷新 =====
 const hasActiveRecords = () => {
-  return records.value.some(r => r.status === 'pending' || r.status === 'downloading')
+  return awaitingQueuedRecords.value || records.value.some(r => r.status === 'pending' || r.status === 'downloading')
 }
 
 const adjustPolling = () => {
