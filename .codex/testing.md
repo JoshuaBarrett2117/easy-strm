@@ -139,6 +139,14 @@
 - 命令：`npm run build`
 - 结果：通过
 
+## 2026-08-19 115 绝对目录与目录树下拉
+
+- 执行者：Codex。
+- 单元测试：`go test ./...`，通过。
+- 前端目录树测试：`node src/components/resource/targetFolderTree.test.mjs`，3/3 通过。
+- 前端生产构建：`npm run build`，通过，4248 个模块完成转换。
+- 静态差异检查：`git diff --check`，通过。
+
 ## 2026-08-10 GitHub main 发布前测试
 
 - 后端：在 `easy-strm` 执行 `go test ./...`，全部通过。

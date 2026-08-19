@@ -526,10 +526,15 @@ func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[st
 	cidStr := resolveWatchPath(source)
 	if cidStr == "" || cidStr == "/" {
 		cidStr = "0"
+	} else if strings.HasPrefix(cidStr, "/") {
+		cidStr, err = ws.client.GetCIDByPath(cidStr, cloud115.ID, cloud115.Cookie)
+		if err != nil {
+			return nil, fmt.Errorf("解析 115 监控目录失败: %v", err)
+		}
 	}
 	cid, err := strconv.Atoi(cidStr)
 	if err != nil {
-		return nil, fmt.Errorf("CID 格式错误: %s", cidStr)
+		return nil, fmt.Errorf("115 监控目录解析结果无效")
 	}
 
 	fileList, err := ws.client.GetFileList(cid, 1, 0, 1000, cloud115.ID, cloud115.Cookie)

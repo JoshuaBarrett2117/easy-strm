@@ -1,5 +1,13 @@
 # Operations Log
 
+## 2026-08-19 Codex 115 绝对目录与目录树下拉
+
+- 工具降级：当前未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用 `rg`、本地文件读取和 `update_plan` 替代。
+- 扫描文件工作台、STRM、115 账号转存、资源转存和离线下载中的目录配置入口，复用现有 `/115/files` 与目录树转换工具。
+- 将 `TargetFolderPicker` 改为 Naive UI 下拉树，并让所有关联 115 账号的目录入口保存 `/影视资源` 形式的绝对路径。
+- 后端媒体源配置拒绝 CID，浏览、自动监控和整理扫描通过 `GetCIDByPath` 在运行时解析目录。
+- 验证通过：`go test ./...`、目录树 Node 测试、`npm run build`、`git diff --check`。
+
 ## 2026-08-18 Codex 云下载大批量队列提交
 
 - 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，分别改用结构化上下文文件、`update_plan` 与 `rg`；任务不需要外部资料，未调用网络搜索。

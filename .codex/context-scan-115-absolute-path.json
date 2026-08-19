@@ -1,0 +1,32 @@
+{
+  "date": "2026-08-19",
+  "executor": "Codex",
+  "locations": {
+    "frontend": [
+      "easy-strm-front/src/components/resource/TargetFolderPicker.vue",
+      "easy-strm-front/src/components/media/MediaSourceList.vue",
+      "easy-strm-front/src/components/media/OrganizeDialog.vue",
+      "easy-strm-front/src/views/StrmConfig.vue",
+      "easy-strm-front/src/views/Cloud115.vue",
+      "easy-strm-front/src/views/resources/OfflineDownload.vue"
+    ],
+    "backend": [
+      "easy-strm/internal/controller/media_source_files_controller.go",
+      "easy-strm/internal/service/media_source_service.go",
+      "easy-strm/internal/service/watch_service.go",
+      "easy-strm/internal/service/organize_scan.go"
+    ]
+  },
+  "existing_patterns": [
+    "TargetFolderPicker 已使用 /115/files 懒加载目录",
+    "ShareTransferService 与 OrganizeService 已使用 GetCIDByPath",
+    "目录配置字段均为字符串，不需要数据库迁移"
+  ],
+  "sufficiency": {
+    "interface_contract_known": true,
+    "technical_choice_understood": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallbacks": ["当前未提供 sequential-thinking、shrimp-task-manager、code-index，使用 rg、文件读取和 update_plan 替代"]
+}

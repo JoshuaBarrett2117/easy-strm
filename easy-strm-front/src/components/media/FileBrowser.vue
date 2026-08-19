@@ -307,8 +307,9 @@ const sourceRootPath = computed(() => {
 /** 115 云盘当前显示路径 */
 const currentCloud115DisplayPath = computed(() => {
   if (!isCloud115.value) return currentPath.value
-  if (directoryStack.value.length === 0) return '/'
-  return '/' + directoryStack.value.map(item => item.name).join('/')
+  const root = sourceRootPath.value === '/' ? '' : sourceRootPath.value.replace(/\/+$/g, '')
+  const suffix = directoryStack.value.map(item => item.name).join('/')
+  return `${root}/${suffix}`.replace(/\/{2,}/g, '/').replace(/\/$/, '') || '/'
 })
 
 /** 面包屑导航项 */

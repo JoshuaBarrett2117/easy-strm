@@ -34,7 +34,14 @@
         <n-form :model="form" label-placement="top" class="mb-2">
           <div class="grid gap-x-4 sm:grid-cols-2">
             <n-form-item label="目标目录" class="sm:col-span-2">
-              <n-input v-model:value="form.target_path" placeholder="请输入整理后的目标目录" />
+              <TargetFolderPicker
+                v-if="isCloud115"
+                :cloud-115-id="currentSource?.cloud115_id || 0"
+                :default-path="form.target_path"
+                placeholder="请选择整理后的目标目录"
+                @update:path="form.target_path = $event"
+              />
+              <n-input v-else v-model:value="form.target_path" placeholder="请输入整理后的目标目录" />
             </n-form-item>
 
             <n-form-item label="媒体类型">
@@ -157,6 +164,7 @@ import {
   startOrganizeCandidatesTaskAsync,
   getOrganizeCandidatesTaskStatus
 } from '../../utils/api/media'
+import TargetFolderPicker from '../resource/TargetFolderPicker.vue'
 
 const CANDIDATE_POLL_INTERVAL_MS = 1000
 const CANDIDATE_POLL_TIMEOUT_MS = 120000

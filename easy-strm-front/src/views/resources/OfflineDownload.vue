@@ -12,23 +12,19 @@
             :options="accountOptions"
             placeholder="选择执行云下载的账号"
             style="width:100%"
+            @update:value="directory = ''"
           />
         </div>
 
         <!-- 保存目录 -->
         <div class="field">
           <label class="field-label">保存目录</label>
-          <n-input
-            v-model:value="directory"
-            placeholder="留空默认保存到 /云下载"
-            clearable
-          />
           <TargetFolderPicker
-            v-if="cloud115Id > 0"
             :cloud-115-id="cloud115Id"
             :default-path="directory"
+            placeholder="请选择保存目录，留空默认保存到 /云下载"
             class="folder-picker"
-            @select="onFolderSelect"
+            @update:path="directory = $event"
           />
         </div>
       </div>
@@ -311,10 +307,6 @@ const formatTime = (raw) => {
   if (Number.isNaN(date.getTime())) return String(raw)
   const pad = (n) => String(n).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-
-const onFolderSelect = (path) => {
-  directory.value = path
 }
 
 /** 提交云下载 */

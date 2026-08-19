@@ -137,6 +137,32 @@ func normalizeWatchPath(sourceType, path, watchPath string, watchEnabled bool) (
 	return "", nil
 }
 
+// normalizeCloud115DirectoryPath 将 115 目录配置统一为以斜杠开头的绝对路径。
+func normalizeCloud115DirectoryPath(value, fieldName string, allowEmpty bool) (string, error) {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	if value == "" {
+		if allowEmpty {
+			return "", nil
+		}
+		return "", fmt.Errorf("%s不能为空", fieldName)
+	}
+	if !strings.HasPrefix(value, "/") {
+		return "", fmt.Errorf("%s必须使用绝对路径，例如 /影视资源", fieldName)
+	}
+	parts := make([]string, 0)
+	for _, part := range strings.Split(value, "/") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	if len(parts) == 0 {
+		return "/", nil
+	}
+	return "/" + strings.Join(parts, "/"), nil
+}
+
 // Create 创建媒体源
 // 参数:
 //   - name: 媒体源名称
@@ -195,6 +221,18 @@ func (s *MediaSourceService) Create(name, sourceType, path, watchPath string, cl
 		if cloud115 == nil {
 			logger.Errorf("MediaSourceService[Create] 115账号不存在: cloud115_id=%d", *cloud115ID)
 			return nil, fmt.Errorf("115账号不存在")
+		}
+		path, err = normalizeCloud115DirectoryPath(path, "115 媒体源目录", false)
+		if err != nil {
+			return nil, err
+		}
+		watchPath, err = normalizeCloud115DirectoryPath(watchPath, "115 监控目录", !watchEnabled)
+		if err != nil {
+			return nil, err
+		}
+		organizeTargetPath, err = normalizeCloud115DirectoryPath(organizeTargetPath, "115 整理目标目录", true)
+		if err != nil {
+			return nil, err
 		}
 		logger.Infof("MediaSourceService[Create] 验证115账号成功: cloud115_id=%d, name=%s", *cloud115ID, cloud115.Name)
 	}
@@ -262,6 +300,18 @@ func (s *MediaSourceService) Update(id int, name, sourceType, path, watchPath st
 		}
 		if cloud115 == nil {
 			return nil, fmt.Errorf("115账号不存在")
+		}
+		path, err = normalizeCloud115DirectoryPath(path, "115 媒体源目录", false)
+		if err != nil {
+			return nil, err
+		}
+		watchPath, err = normalizeCloud115DirectoryPath(watchPath, "115 监控目录", !watchEnabled)
+		if err != nil {
+			return nil, err
+		}
+		organizeTargetPath, err = normalizeCloud115DirectoryPath(organizeTargetPath, "115 整理目标目录", true)
+		if err != nil {
+			return nil, err
 		}
 	}
 

@@ -330,6 +330,9 @@ func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, 
 
 	cid := resolveCloud115ScanRootCID(source.Path)
 	// 如果 cidStr 是路径格式，先转为 CID
+	if cidStr == "/" {
+		cidStr = source.Path
+	}
 	if cidStr != "" && cidStr != "/" && (strings.Contains(cidStr, "/") || !s.isNumeric(cidStr)) {
 		realCID, err := s.client.GetCIDByPath(cidStr, cloud115.ID, cloud115.Cookie)
 		if err != nil {
@@ -340,6 +343,13 @@ func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, 
 		}
 	} else if cidStr != "" {
 		cid = cidStr
+	}
+	if strings.HasPrefix(cid, "/") {
+		realCID, resolveErr := s.client.GetCIDByPath(cid, cloud115.ID, cloud115.Cookie)
+		if resolveErr != nil {
+			return nil, fmt.Errorf("解析 115 媒体源目录失败: %w", resolveErr)
+		}
+		cid = realCID
 	}
 
 	logger.Infof("OrganizeService[scanCloud115Files] 开始执行 115 智能扫描, CID=%s", cid)

@@ -127,11 +127,21 @@
     <n-modal v-model:show="dialogVisible" preset="card" :title="dialogTitle" class="w-[92vw] max-w-2xl">
       <n-form ref="formRef" :model="form" :rules="rules" label-placement="left" label-width="100">
         <n-form-item label="115账号" path="cloud115_id">
-          <n-select v-model:value="form.cloud115_id" placeholder="请选择115账号" :options="cloud115Options" />
+          <n-select
+            v-model:value="form.cloud115_id"
+            placeholder="请选择115账号"
+            :options="cloud115Options"
+            @update:value="form.net_disk_path = ''"
+          />
         </n-form-item>
 
         <n-form-item label="网盘目录" path="net_disk_path">
-          <n-input v-model:value="form.net_disk_path" placeholder="请输入网盘目录路径" />
+          <TargetFolderPicker
+            :cloud-115-id="form.cloud115_id || 0"
+            :default-path="form.net_disk_path"
+            placeholder="请选择网盘目录"
+            @update:path="form.net_disk_path = $event"
+          />
         </n-form-item>
 
         <n-form-item label="本地目录" path="local_path">
@@ -223,6 +233,7 @@ import {
 import PageCard from '../components/common/PageCard.vue'
 import StatCard from '../components/common/StatCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
+import TargetFolderPicker from '../components/resource/TargetFolderPicker.vue'
 import { getCloud115List } from '../utils/api/cloud115'
 import { getCronTasks, runCronTask, updateCronTask } from '../utils/api/cron'
 import { createStrmConfig, deleteStrmConfig, generateFullStrmConfig, getStrmConfigList, getStrmTaskStatus, updateStrmConfig } from '../utils/api/strm'
@@ -568,7 +579,7 @@ const cronForm = ref({
 // 表单验证规则
 const rules = {
   cloud115_id: [{ required: true, type: 'number', message: '请选择115账号', trigger: 'change', validator: (rule, value) => !!value }],
-  net_disk_path: [{ required: true, message: '请输入网盘目录', trigger: ['blur', 'input'] }],
+  net_disk_path: [{ required: true, message: '请选择网盘目录', trigger: ['blur', 'change'] }],
   local_path: [{ required: true, message: '请输入本地目录', trigger: ['blur', 'input'] }],
   cron: [{ required: true, message: '请输入 Cron 表达式', trigger: ['blur', 'input'] }],
   extension: [{ required: true, message: '请输入后缀名', trigger: ['blur', 'input'] }]

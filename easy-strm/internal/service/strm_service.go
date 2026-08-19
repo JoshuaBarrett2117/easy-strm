@@ -49,6 +49,11 @@ func (s *StrmService) GetAllConfig(sortField, sortOrder string) ([]*domain.StrmC
 
 // CreateConfig 创建STRM配置
 func (s *StrmService) CreateConfig(cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
+	var err error
+	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := s.strmConfigDAO.Create(cloud115Id, netDiskPath, localPath, cron, extension)
 	if err != nil {
 		logger.Errorf("StrmService[CreateConfig] 创建配置失败: %v", err)
@@ -73,6 +78,11 @@ func (s *StrmService) CreateConfig(cloud115Id int, netDiskPath, localPath, cron,
 
 // UpdateConfig 更新STRM配置
 func (s *StrmService) UpdateConfig(id, cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
+	var err error
+	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := s.strmConfigDAO.Update(id, cloud115Id, netDiskPath, localPath, cron, extension)
 	if err != nil {
 		logger.Errorf("StrmService[UpdateConfig] 更新配置失败: %v", err)
@@ -122,6 +132,15 @@ func (s *StrmService) UpdateConfig(id, cloud115Id int, netDiskPath, localPath, c
 
 // CreateConfigExt 创建STRM配置（扩展版，包含秒传同步字段）
 func (s *StrmService) CreateConfigExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
+	var err error
+	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
+	if err != nil {
+		return nil, err
+	}
+	targetDirectory, err = normalizeCloud115DirectoryPath(targetDirectory, "115 转存目录", true)
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := s.strmConfigDAO.CreateExt(cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
 	if err != nil {
 		logger.Errorf("StrmService[CreateConfigExt] 创建配置失败: %v", err)
@@ -146,6 +165,15 @@ func (s *StrmService) CreateConfigExt(cloud115Id int, netDiskPath, localPath, cr
 
 // UpdateConfigExt 更新STRM配置（扩展版，包含秒传同步字段）
 func (s *StrmService) UpdateConfigExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
+	var err error
+	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
+	if err != nil {
+		return nil, err
+	}
+	targetDirectory, err = normalizeCloud115DirectoryPath(targetDirectory, "115 转存目录", true)
+	if err != nil {
+		return nil, err
+	}
 	cfg, err := s.strmConfigDAO.UpdateExt(id, cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
 	if err != nil {
 		logger.Errorf("StrmService[UpdateConfigExt] 更新配置失败: %v", err)

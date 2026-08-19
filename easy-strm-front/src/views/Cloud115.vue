@@ -129,7 +129,13 @@
         </n-form-item>
         <n-form-item label="转存目录" path="transfer_directory">
           <div class="w-full">
-            <n-input v-model:value="form.transfer_directory" placeholder="留空则转存到根目录" :disabled="transferDisabled" />
+            <TargetFolderPicker
+              :cloud-115-id="form.transfer_account_id || 0"
+              :default-path="form.transfer_directory"
+              placeholder="请选择转存目录，留空则使用根目录"
+              :disabled="transferDisabled"
+              @update:path="form.transfer_directory = $event"
+            />
             <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">文件转存的目标目录路径，例如：/视频/转存文件。</p>
           </div>
         </n-form-item>
@@ -290,6 +296,7 @@ import {
   testCloud115Connection,
   updateCloud115
 } from '../utils/api/cloud115'
+import TargetFolderPicker from '../components/resource/TargetFolderPicker.vue'
 
 const message = useMessage()
 

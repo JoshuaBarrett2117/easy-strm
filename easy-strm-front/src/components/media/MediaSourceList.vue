@@ -90,19 +90,32 @@
             </n-radio-group>
           </n-form-item>
           <n-form-item label="路径" path="path" class="sm:col-span-2">
-            <n-input v-model:value="form.path" placeholder="请输入路径" />
+            <TargetFolderPicker
+              v-if="form.source_type === 'cloud115'"
+              :cloud-115-id="form.cloud115_id || 0"
+              :default-path="form.path"
+              placeholder="请选择媒体源根目录"
+              @update:path="form.path = $event"
+            />
+            <n-input v-else v-model:value="form.path" placeholder="请输入本地绝对路径" />
           </n-form-item>
           <n-form-item v-if="form.source_type === 'cloud115'" label="关联账号" path="cloud115_id">
             <n-select
               v-model:value="form.cloud115_id"
               placeholder="请选择115账号"
               :options="cloud115Options"
+              @update:value="handleCloud115AccountChange"
             />
           </n-form-item>
           <n-form-item v-if="form.source_type === 'cloud115'" label="监控目录" path="watch_path">
             <div class="w-full">
-              <n-input v-model:value="form.watch_path" placeholder="请输入要轮询的 115 目录 CID" />
-              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">这里填写自动监控的目标目录，和上面的“路径”可以不同。</p>
+              <TargetFolderPicker
+                :cloud-115-id="form.cloud115_id || 0"
+                :default-path="form.watch_path"
+                placeholder="请选择要轮询的 115 目录"
+                @update:path="form.watch_path = $event"
+              />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">保存为绝对路径，例如 /影视资源；可以和媒体源根目录不同。</p>
             </div>
           </n-form-item>
           <n-form-item v-if="form.source_type !== 'cloud115'" label="整理目标目录" path="organize_target_path" class="sm:col-span-2">
@@ -161,9 +174,11 @@
             />
             <n-form-item label="整理目标目录" path="organize_target_path">
               <div class="w-full">
-                <n-input
-                  v-model:value="form.organize_target_path"
-                  placeholder="如 /电影库，留空则默认整理回当前媒体源路径"
+                <TargetFolderPicker
+                  :cloud-115-id="form.cloud115_id || 0"
+                  :default-path="form.organize_target_path"
+                  placeholder="请选择整理目标目录"
+                  @update:path="form.organize_target_path = $event"
                 />
                 <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">建议为 115 自动监控整理单独设置归档目录，便于后续浏览和复查。</p>
               </div>
@@ -279,6 +294,7 @@ import {
 } from '@vicons/ionicons5'
 import PageCard from '../common/PageCard.vue'
 import StatCard from '../common/StatCard.vue'
+import TargetFolderPicker from '../resource/TargetFolderPicker.vue'
 import { showConfirmDialog } from '../../utils/ui/messageBox'
 import {
   getMediaSources,
@@ -335,7 +351,7 @@ const form = ref({
 const rules = {
   name: [{ required: true, message: '请输入媒体源名称', trigger: 'blur' }],
   source_type: [{ required: true, message: '请选择类型', trigger: 'change' }],
-  path: [{ required: true, message: '请输入路径', trigger: 'blur' }]
+  path: [{ required: true, message: '请选择或输入路径', trigger: ['blur', 'change'] }]
 }
 
 const mediaTypeOptions = [
@@ -799,6 +815,9 @@ const resetForm = () => {
 
 const handleSourceTypeChange = () => {
   form.value.cloud115_id = null
+  form.value.path = ''
+  form.value.watch_path = ''
+  form.value.organize_target_path = ''
   if (form.value.source_type !== 'cloud115') {
     return
   }
@@ -808,6 +827,12 @@ const handleSourceTypeChange = () => {
   if (!['move', 'copy'].includes(form.value.operation_mode)) {
     form.value.operation_mode = 'move'
   }
+}
+
+const handleCloud115AccountChange = () => {
+  form.value.path = ''
+  form.value.watch_path = ''
+  form.value.organize_target_path = ''
 }
 
 const handleWatchEnabledChange = (enabled) => {

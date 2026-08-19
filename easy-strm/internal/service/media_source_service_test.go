@@ -53,6 +53,34 @@ func TestMediaSourceServiceCreateLocal(t *testing.T) {
 	}
 }
 
+func TestNormalizeCloud115DirectoryPath(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		allowEmpty bool
+		want       string
+		wantErr    bool
+	}{
+		{name: "absolute path", value: "/影视资源/电影", want: "/影视资源/电影"},
+		{name: "normalizes separators", value: `\\影视资源\\电影\\`, want: "/影视资源/电影"},
+		{name: "root", value: "///", want: "/"},
+		{name: "rejects cid", value: "123456", wantErr: true},
+		{name: "allows empty optional path", value: "", allowEmpty: true, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeCloud115DirectoryPath(tt.value, "测试目录", tt.allowEmpty)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("normalizeCloud115DirectoryPath() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeCloud115DirectoryPath() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMediaSourceServiceCreateDisablesAutoOrganizeWithoutWatch(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()

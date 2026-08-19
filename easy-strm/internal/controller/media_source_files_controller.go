@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -73,10 +74,17 @@ func (c *MediaSourceController) getCloud115Files(ctx *gin.Context, source *domai
 	}
 
 	cid := resolveCloud115CID(path, source.Path)
+	if strings.HasPrefix(cid, "/") {
+		cid, err = c.client.GetCIDByPath(cid, cloud115.ID, cloud115.Cookie)
+		if err != nil {
+			logger.Errorf("MediaSourceController[getCloud115Files] 绝对路径解析失败: path=%s, error=%v", cid, err)
+			return nil, fmt.Errorf("115 目录不存在或无法访问: %s", resolveCloud115CID(path, source.Path))
+		}
+	}
 	cidInt, err := strconv.Atoi(cid)
 	if err != nil {
-		logger.Errorf("MediaSourceController[getCloud115Files] CID格式错误: %s, error=%v", cid, err)
-		return nil, fmt.Errorf("目录ID格式错误: %s", cid)
+		logger.Errorf("MediaSourceController[getCloud115Files] 目录解析结果无效: %s, error=%v", cid, err)
+		return nil, fmt.Errorf("115 目录解析结果无效")
 	}
 
 	logger.Infof("MediaSourceController[getCloud115Files] 开始获取115文件列表: cloud115_id=%d, cid=%d", cloud115.ID, cidInt)
