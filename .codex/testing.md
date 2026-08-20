@@ -139,6 +139,33 @@
 - 命令：`npm run build`
 - 结果：通过
 
+## 2026-08-20 统一文件管理页
+
+- 执行者：Codex。
+- `go test ./internal/service ./internal/controller`：通过；覆盖本地浏览与越界拒绝、本地剪切、目录递归上传、跨115账号目录秒传、Controller 参数校验和任务创建。
+- `go test ./...`：通过；`easy-strm`、controller、dao、domain、service 全部成功。
+- `go vet ./...`：通过，无静态检查问题。
+- `npm run build`：通过，Vite 转换 4252 个模块并生成 `FileManager` 独立产物。
+- `git diff --check`：通过，仅有工作区既有 LF/CRLF 提示，无空白错误。
+- 未对真实本地媒体库或115账号执行写操作；上传、下载、秒传与删除通过注入假客户端验证调度契约。
+
+## 2026-08-20 文件名整理识别验证
+
+- 执行者：Codex。
+- 单元测试：`go test ./internal/service -run TestParseFilenameFairyTailHundredYearsQuest -v`，通过；解析为标题 `妖精的尾巴 百年任务`、类型 `tv`、`S01E05`。
+- 功能探针：使用项目当前 TMDB 配置调用 `GetCandidatesWithPath`，TMDB 返回 HTTP 401 `Invalid API key`；解析成功，在线元数据识别失败。
+- 全量回归：`go test ./...`，全部通过。
+
+## 2026-08-20 文件名识别测试页与规则配置
+
+- 执行者：Codex。
+- 定向测试：`go test ./internal/service ./internal/controller -run "Filename|Recognition" -v`，通过。
+- 覆盖：5 类默认剧集模板、S00 特别篇、画质元数据保留、自定义规则保存后立即生效、无效正则、缺少 episode 捕获组、解析接口空参数、规则接口成功与失败响应。
+- 后端回归：`go test ./...`，通过。
+- 静态检查：`go vet ./...`，通过。
+- 前端构建：`npm run build`，通过。
+- 浏览器冒烟：识别测试路由、导航菜单、测试表单、样例按钮、规则编辑列表在本地 Vite 页面正常渲染；认证会话过期后由既有拦截器跳转登录。
+
 ## 2026-08-19 115 绝对目录与目录树下拉
 
 - 执行者：Codex。

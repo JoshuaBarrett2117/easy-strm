@@ -153,7 +153,9 @@ import {
   MoonOutline,
   SunnyOutline,
   LogOutOutline,
-  LinkOutline
+  LinkOutline,
+  SearchOutline,
+  SwapHorizontalOutline
 } from '@vicons/ionicons5'
 import { useTheme } from '../composables/useTheme'
 import { showConfirmDialog } from '../utils/ui/messageBox'
@@ -177,10 +179,12 @@ const menuSections = [
     title: '支撑配置',
     items: [
       { path: '/dashboard/media-manager', label: '文件工作台', icon: FolderOpenOutline },
+      { path: '/dashboard/file-manager', label: '文件管理', icon: SwapHorizontalOutline },
       { path: '/dashboard/resources/transfer', label: '资源聚合', icon: LinkOutline },
       { path: '/dashboard/strm-config', label: 'STRM 配置', icon: DocumentTextOutline },
       { path: '/dashboard/cloud115', label: '115 云管理', icon: CloudOutline },
       { path: '/dashboard/category-strategy', label: '整理规则', icon: OptionsOutline },
+      { path: '/dashboard/filename-recognition', label: '识别测试', icon: SearchOutline },
       { path: '/dashboard/settings', label: '系统设置', icon: SettingsOutline }
     ]
   },

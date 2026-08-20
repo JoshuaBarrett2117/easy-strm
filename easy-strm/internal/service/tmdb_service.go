@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"easy-strm/internal/dao"
@@ -24,6 +25,12 @@ type TmdbService struct {
 	language     string
 	cacheDAO     *dao.TmdbCacheDAO
 	httpClient   *http.Client
+
+	filenameRuleMu        sync.RWMutex
+	filenameRuleStore     FilenameRecognitionRuleStore
+	filenameRulesLoaded   bool
+	filenameRules         []FilenameRecognitionRule
+	compiledFilenameRules []compiledFilenameRecognitionRule
 }
 
 // NewTmdbService 创建 TMDB 服务实例

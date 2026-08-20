@@ -148,7 +148,7 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 		fileInfo := driver.FileInfo{
 			Name:     f.GetName(),
 			Size:     driver.StringInt64(f.GetSize()),
-			PickCode: f.GetID(),
+			PickCode: f.PickCode,
 			Sha1:     f.Sha1,
 		}
 

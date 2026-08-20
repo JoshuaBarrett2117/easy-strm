@@ -1,0 +1,11 @@
+{
+  "date": "2026-08-20",
+  "executor": "Codex",
+  "task": "验证指定文件名的当前整理识别结果",
+  "location": ["easy-strm/internal/service/tmdb_parser.go", "easy-strm/internal/service/tmdb_service.go", "easy-strm/internal/service/organize_identify.go"],
+  "current_flow": "OrganizeService 通过 IdentifyFileWithPath 调用 TmdbService，先解析文件名，再查询 TMDB。",
+  "similar_cases": ["TestParseFilenameTV", "TestParseFilenameUsesParentDirectoryContext", "TestParseFilenameEnglishReleaseName"],
+  "stack": "Go testing + TMDB HTTP API",
+  "observation": "文件名解析成功；当前 TMDB API Key 在线请求返回 401。",
+  "sufficiency": {"interface_contract": true, "technical_choice": true, "main_risks": true, "verification_known": true}
+}

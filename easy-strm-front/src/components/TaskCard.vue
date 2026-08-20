@@ -184,7 +184,8 @@ import {
   FilmOutline,
   SearchOutline,
   LinkOutline,
-  CloudDownloadOutline
+  CloudDownloadOutline,
+  SwapHorizontalOutline
 } from '@vicons/ionicons5'
 
 const props = defineProps({
@@ -211,7 +212,8 @@ const taskTypeNames = {
   emby_refresh: 'Emby 库刷新',
   log_clean: '日志清理',
   sync_files: '文件同步',
-  offline_download: '115 云下载'
+  offline_download: '115 云下载',
+  file_transfer: '文件传输'
 }
 
 const taskTypeIcons = {
@@ -227,7 +229,8 @@ const taskTypeIcons = {
   emby_refresh: LinkOutline,
   log_clean: RefreshOutline,
   sync_files: TimerOutline,
-  offline_download: CloudDownloadOutline
+  offline_download: CloudDownloadOutline,
+  file_transfer: SwapHorizontalOutline
 }
 
 const taskTypeTagTypes = {
@@ -243,7 +246,8 @@ const taskTypeTagTypes = {
   emby_refresh: 'error',
   log_clean: 'warning',
   sync_files: 'info',
-  offline_download: 'info'
+  offline_download: 'info',
+  file_transfer: 'primary'
 }
 
 // 任务类型左侧强调色
@@ -260,7 +264,8 @@ const taskAccentClasses = {
   emby_refresh: 'border-l-teal-500',
   log_clean: 'border-l-amber-500',
   sync_files: 'border-l-slate-400',
-  offline_download: 'border-l-blue-500'
+  offline_download: 'border-l-blue-500',
+  file_transfer: 'border-l-indigo-500'
 }
 
 const taskAccentClass = computed(() => {

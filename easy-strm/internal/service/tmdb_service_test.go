@@ -33,6 +33,18 @@ func TestParseFilenameTV(t *testing.T) {
 	}
 }
 
+func TestParseFilenameFairyTailHundredYearsQuest(t *testing.T) {
+	svc := NewTmdbService("fake-key", nil)
+	parsed := svc.parseFilename("妖精的尾巴 百年任务 - S01E05 - 艰难的决断.mp4")
+
+	if parsed.Title != "妖精的尾巴 百年任务" {
+		t.Fatalf("unexpected title: %q", parsed.Title)
+	}
+	if parsed.MediaType != "tv" || parsed.Season != 1 || parsed.Episode != 5 {
+		t.Fatalf("unexpected tv parse: %+v", parsed)
+	}
+}
+
 func TestParseFilenameUsesParentDirectoryContext(t *testing.T) {
 	svc := NewTmdbService("fake-key", nil)
 	parsed := svc.parseFilename("默杀 2160P 高码率 非60帧版/默杀.A.Place.Called.Silence.2024.2160p.WEB-DL.H265.HQ.DDP5.1.mkv")

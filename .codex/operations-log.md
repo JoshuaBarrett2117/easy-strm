@@ -285,3 +285,40 @@
 - 凭据清理：真实 115 分享码与密码已从测试、POC 和文档中移除；live 测试改为读取 `EASY_STRM_LIVE_SHARE_CODE`、`EASY_STRM_LIVE_SHARE_PASSWORD`，未配置时跳过。
 - 同步检查：执行 `git fetch origin main` 后，本地 `main` 与 `origin/main` 均无领先或落后。
 - 发布前验证：`go test ./...`、`go vet ./...`、`npm run build`、目录选择器 3 条 Node 单元测试和 `git diff --check` 全部通过。
+
+# 2026-08-20 文件名整理识别验证
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，改用 `rg`、PowerShell、`apply_patch` 和 Go 测试完成等价分析与验证。
+- 定位 `OrganizeService -> IdentifyFileWithPath -> parseFilename -> SearchTV` 实际整理识别链路，并核对 3 个既有解析测试案例。
+- 新增指定文件名回归测试，确认标题 `妖精的尾巴 百年任务`、类型 `tv`、季 `1`、集 `5`。
+- 使用项目当前 TMDB 配置执行真实请求；TMDB 返回 HTTP 401 无效 API Key，未取得 TMDB ID、标准标题或候选列表。临时在线探针验证后已删除。
+- 在 `easy-strm` 执行 `go test ./...`，全部通过。
+
+# 2026-08-20 文件名识别测试页与规则配置
+
+- 执行者：Codex。
+- 工具降级：未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用计划工具、`rg`、PowerShell、`apply_patch`、Go 测试和本地浏览器验证替代。
+- 后端：新增可配置识别规则领域模型、默认模板、JSON 配置存储、编译/捕获组/示例校验、热更新缓存、本地解析接口和规则读写/重置接口。
+- 规则模板：覆盖 `S01E05`、`1x05`、`Season 1 Episode 5`、`第1季第5集`、`EP05`、电影年份；纯集数动漫模板默认关闭以避免误判年份。
+- 前端：新增“识别测试”路由与菜单，提供本地解析、TMDB 候选、季集展示、规则新增/删除/启停/排序/保存/恢复功能。
+- 浏览器验证：页面路由、布局、样例入口和规则编辑区成功渲染；浏览器保存的旧会话 Token 过期后按既有全局逻辑跳转登录页，未使用或修改用户登录凭据。
+- 运行验证：后端 `go test ./...`、`go vet ./...`、前端 `npm run build` 和 `git diff --check` 通过。
+
+# 2026-08-20 统一文件管理页
+
+- 执行者：Codex。
+- 工具降级：当前环境未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用 `update_plan`、`rg`、PowerShell、`apply_patch` 与本地测试替代。
+- 上下文：检查现有本地文件操作、115 原生复制/移动、跨账号秒传、115driver 上传/下载/删除、任务中心及前端路由和 API 约定。
+- 后端：新增统一位置、目录浏览、删除和异步传输契约；实现本地/115四种方向、同账号原生操作和跨账号递归秒传。
+- 115 适配：新增单级建目录、批量删除、本地上传、带签名请求头下载到临时文件后替换目标文件。
+- 前端：新增双栏文件管理页面、可复用文件栏组件、页级复制/剪切剪贴板、粘贴、删除确认、路由菜单和任务类型展示。
+- 验证：服务与控制器定向测试、后端全量测试、Go Vet、前端生产构建和差异检查通过。
+
+# 2026-08-20 GitHub main 发布
+
+- 执行者：Codex。
+- 发布范围：当前工作区内文件名识别测试与规则配置、统一文件管理页、跨位置传输、测试、审查记录和长期文档的全部变更。
+- 同步检查：执行 `git fetch origin main`，本地 `main` 与 `origin/main` 领先/落后均为 0。
+- 凭据检查：对全部新增和修改文件扫描 Cookie、Token、密码和 API Key 硬编码，未发现匹配。
+- 发布前验证：`go test ./...`、`go vet ./...`、`npm run build` 和 `git diff --check` 全部通过。

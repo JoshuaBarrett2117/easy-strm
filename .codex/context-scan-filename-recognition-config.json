@@ -1,0 +1,30 @@
+{
+  "date": "2026-08-20",
+  "executor": "Codex",
+  "location": {
+    "parser": "easy-strm/internal/service/tmdb_parser.go",
+    "identify": "easy-strm/internal/service/tmdb_service.go",
+    "organize_entry": "easy-strm/internal/service/organize_identify.go",
+    "routes": "easy-strm/auth.go",
+    "frontend_router": "easy-strm-front/src/main.js",
+    "frontend_menu": "easy-strm-front/src/views/Dashboard.vue",
+    "frontend_api": "easy-strm-front/src/utils/api/media.js"
+  },
+  "current_state": "整理链路已经统一调用 TmdbService；季集规则硬编码在 tmdb_parser.go，系统配置已有通用 JSON 字符串存储能力。",
+  "similar_cases": [
+    "TMDB 自动识别页面调用模式",
+    "NetworkCenter 独立测试页模式",
+    "系统设置通过 t_system_config 动态持久化模式"
+  ],
+  "key_questions": [
+    {"priority": "high", "question": "测试页面与生产整理如何保证规则一致？", "answer": "两者统一调用 TmdbService 的规则解析器。"},
+    {"priority": "high", "question": "规则如何持久化并热更新？", "answer": "以 JSON 写入 t_system_config，由 TmdbService 缓存并在保存后替换。"},
+    {"priority": "medium", "question": "如何避免错误正则破坏整理？", "answer": "保存前编译、校验命名捕获组并用示例执行验证；失败则拒绝整批保存。"}
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks": true,
+    "verification_known": true
+  }
+}

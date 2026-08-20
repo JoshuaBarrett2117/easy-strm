@@ -81,12 +81,13 @@ func compactSearchTitle(title string) string {
 //   - *ParsedFilename: 解析结果
 func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 	segments := splitPathSegments(filename)
-	result := parseMediaNameSegment(lastPathSegment(segments), true)
+	rules := s.compiledRulesForFilenameParsing()
+	result := parseMediaNameSegment(lastPathSegment(segments), true, rules)
 	searchTitles := make([]string, 0, 3)
 	searchTitles = appendUniqueNonEmpty(searchTitles, result.Title)
 
 	for i := len(segments) - 2; i >= 0 && len(segments)-i <= 3; i-- {
-		contextParsed := parseMediaNameSegment(segments[i], false)
+		contextParsed := parseMediaNameSegment(segments[i], false, rules)
 		if contextParsed.Year > 0 && result.Year == 0 {
 			result.Year = contextParsed.Year
 		}
@@ -105,44 +106,21 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 	return result
 }
 
-func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
+// ParseFilename 使用当前生效规则解析文件名，不发起 TMDB 网络请求。
+func (s *TmdbService) ParseFilename(filename string) *ParsedFilename {
+	return s.parseFilename(filename)
+}
+
+func parseMediaNameSegment(input string, trimExt bool, rules []compiledFilenameRecognitionRule) *ParsedFilename {
 	result := &ParsedFilename{
 		MediaType: "movie",
 	}
 
-	name := strings.TrimSpace(input)
-	if trimExt {
-		if ext := filepath.Ext(name); ext != "" {
-			name = strings.TrimSuffix(name, ext)
-		}
-	}
-
-	name = strings.ReplaceAll(name, ".", " ")
-	name = strings.ReplaceAll(name, "_", " ")
-	name = strings.ReplaceAll(name, "-", " ")
-
-	seasonEpisodePatterns := []string{
-		`(?i)S(\d{1,2})E(\d{1,2})`,
-		`(?i)Season\s*(\d{1,2})\s*Episode\s*(\d{1,2})`,
-		`(?i)(\d{1,2})x(\d{1,2})`,
-		`(?i)第(\d+)季第(\d+)集`,
-		`(?i)EP?(\d{1,3})`,
-	}
-
-	for _, pattern := range seasonEpisodePatterns {
-		re := regexp.MustCompile(pattern)
-		if matches := re.FindStringSubmatch(name); len(matches) >= 2 {
-			result.MediaType = "tv"
-			if len(matches) >= 3 {
-				result.Season, _ = strconv.Atoi(matches[1])
-				result.Episode, _ = strconv.Atoi(matches[2])
-			} else {
-				result.Episode, _ = strconv.Atoi(matches[1])
-				result.Season = 1
-			}
-			name = re.ReplaceAllString(name, "")
-			break
-		}
+	name := normalizeFilenameRecognitionInput(input, trimExt)
+	metadataName := name
+	if matched, ok := matchFilenameRecognitionRule(name, rules); ok {
+		result = matched
+		name = matched.Title
 	}
 
 	yearPattern := regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
@@ -163,7 +141,7 @@ func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
 		`(?i)\bBDRip\b`:   "BDRip",
 	}
 	for pattern, quality := range qualityPatterns {
-		if matched, _ := regexp.MatchString(pattern, name); matched {
+		if matched, _ := regexp.MatchString(pattern, metadataName); matched {
 			result.Quality = quality
 			break
 		}
@@ -177,7 +155,7 @@ func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
 		`(?i)\bATVP\b`: "ATVP",
 	}
 	for pattern, source := range sourcePatterns {
-		if matched, _ := regexp.MatchString(pattern, name); matched {
+		if matched, _ := regexp.MatchString(pattern, metadataName); matched {
 			result.Source = source
 			break
 		}
@@ -192,7 +170,7 @@ func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
 		`(?i)\bAVC\b`:     "AVC",
 	}
 	for pattern, codec := range codecPatterns {
-		if matched, _ := regexp.MatchString(pattern, name); matched {
+		if matched, _ := regexp.MatchString(pattern, metadataName); matched {
 			result.Codec = codec
 			break
 		}
@@ -219,22 +197,26 @@ func parseMediaNameSegment(input string, trimExt bool) *ParsedFilename {
 
 	title := strings.TrimSpace(name)
 	title = regexp.MustCompile(`\s+`).ReplaceAllString(title, " ")
-	title = trimReleaseGroupSuffix(title)
+	if result.MatchedRuleID == "" {
+		title = trimReleaseGroupSuffix(title)
+	}
 	result.Title = title
 	return result
 }
 
 // ParsedFilename 解析后的文件名信息
 type ParsedFilename struct {
-	Title        string
-	Year         int
-	MediaType    string // movie | tv
-	Season       int
-	Episode      int
-	Quality      string
-	Source       string
-	Codec        string
-	SearchTitles []string
+	Title           string   `json:"title"`
+	Year            int      `json:"year"`
+	MediaType       string   `json:"media_type"` // movie | tv
+	Season          int      `json:"season"`
+	Episode         int      `json:"episode"`
+	Quality         string   `json:"quality"`
+	Source          string   `json:"source"`
+	Codec           string   `json:"codec"`
+	SearchTitles    []string `json:"search_titles"`
+	MatchedRuleID   string   `json:"matched_rule_id"`
+	MatchedRuleName string   `json:"matched_rule_name"`
 }
 
 func splitPathSegments(input string) []string {

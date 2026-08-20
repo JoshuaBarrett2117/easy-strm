@@ -61,6 +61,18 @@ export const identifyFile = (data) => api.post('/media/tmdb/identify', data)
 // 自动识别文件（返回 Top 3 候选，不写入缓存）
 export const autoIdentifyFile = (data) => api.post('/media/tmdb/auto-identify', data)
 
+// 使用当前整理规则在本地解析文件名
+export const parseMediaFilename = (data) => api.post('/media/tmdb/parse-filename', data)
+
+// 获取文件名识别规则
+export const getFilenameRecognitionRules = () => api.get('/media/tmdb/filename-rules')
+
+// 保存文件名识别规则
+export const updateFilenameRecognitionRules = (data) => api.put('/media/tmdb/filename-rules', data)
+
+// 恢复内置常用文件名识别模板
+export const resetFilenameRecognitionRules = () => api.post('/media/tmdb/filename-rules/reset')
+
 // 批量识别文件
 export const batchIdentifyTmdb = (data) => api.post('/media/tmdb/batch-identify', data)
 

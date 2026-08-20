@@ -49,6 +49,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmService := service.NewStrmService(strmConfigDAO, strmFileDAO, cronTaskDAO)
 	cronService := service.NewCronService(cronTaskDAO)
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
+	fileManagerService := service.NewFileManagerService(mediaSourceDAO, cloud115DAO, client, taskService)
 	dashboardService := service.NewDashboardService(cloud115DAO, mediaSourceDAO, strmFileDAO, dao.NewTaskRedisDAOWithGlobal())
 	authService := service.NewAuthService(dao.NewUserDAO(), config.JWTSecret)
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
@@ -81,6 +82,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)
 	fileOperationController := controller.NewFileOperationController(fileOperationService, mediaSourceService)
+	fileManagerController := controller.NewFileManagerController(fileManagerService)
 	organizeController := controller.NewOrganizeController(organizeService)
 	organizeController.SetTaskService(taskService)
 	tmdbController := controller.NewTmdbController(tmdbService)
@@ -628,6 +630,12 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/media/files", mediaSourceController.GetFiles)
 		auth.GET("/media/files/search", mediaSourceController.SearchFiles)
 
+		// ========== 统一文件管理 ==========
+		auth.GET("/file-manager/locations", fileManagerController.ListLocations)
+		auth.GET("/file-manager/files", fileManagerController.Browse)
+		auth.POST("/file-manager/transfers", fileManagerController.Transfer)
+		auth.POST("/file-manager/delete", fileManagerController.Delete)
+
 		// ========== 文件操作 ==========
 		auth.POST("/media/files/move", fileOperationController.MoveFile)
 		auth.POST("/media/files/copy", fileOperationController.CopyFile)
@@ -778,6 +786,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/media/tmdb/search", tmdbController.Search)
 		auth.POST("/media/tmdb/identify", tmdbController.Identify)
 		auth.POST("/media/tmdb/auto-identify", tmdbController.AutoIdentify)
+		auth.POST("/media/tmdb/parse-filename", tmdbController.ParseFilename)
+		auth.GET("/media/tmdb/filename-rules", tmdbController.GetFilenameRecognitionRules)
+		auth.PUT("/media/tmdb/filename-rules", tmdbController.UpdateFilenameRecognitionRules)
+		auth.POST("/media/tmdb/filename-rules/reset", tmdbController.ResetFilenameRecognitionRules)
 		auth.POST("/media/tmdb/batch-identify", tmdbController.BatchIdentify)
 		auth.GET("/media/tmdb/movie/:id", tmdbController.GetMovieDetail)
 		auth.GET("/media/tmdb/tv/:id", tmdbController.GetTVDetail)

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,11 +24,66 @@ type TmdbController struct {
 
 // NewTmdbController 创建 TMDB 控制器实例
 func NewTmdbController(tmdbService *service.TmdbService) *TmdbController {
-	return &TmdbController{
+	controller := &TmdbController{
 		tmdbService:     tmdbService,
 		cacheDAO:        dao.NewTmdbCacheDAO(),
 		systemConfigDAO: dao.NewSystemConfigDAO(),
 	}
+	tmdbService.SetFilenameRecognitionRuleStore(controller.systemConfigDAO)
+	return controller
+}
+
+// ParseFilename 使用整理链路的当前规则解析文件名，不访问 TMDB。
+// POST /api/media/tmdb/parse-filename
+func (c *TmdbController) ParseFilename(ctx *gin.Context) {
+	var req struct {
+		Filename string `json:"filename" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "文件名不能为空")
+		return
+	}
+	req.Filename = strings.TrimSpace(req.Filename)
+	if req.Filename == "" {
+		ErrorResp(ctx, http.StatusBadRequest, "文件名不能为空")
+		return
+	}
+	SuccessResp(ctx, c.tmdbService.ParseFilename(req.Filename))
+}
+
+// GetFilenameRecognitionRules 获取当前文件名识别规则。
+// GET /api/media/tmdb/filename-rules
+func (c *TmdbController) GetFilenameRecognitionRules(ctx *gin.Context) {
+	SuccessResp(ctx, c.tmdbService.GetFilenameRecognitionRules())
+}
+
+// UpdateFilenameRecognitionRules 校验并保存文件名识别规则。
+// PUT /api/media/tmdb/filename-rules
+func (c *TmdbController) UpdateFilenameRecognitionRules(ctx *gin.Context) {
+	var req struct {
+		Rules []service.FilenameRecognitionRule `json:"rules" binding:"required"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的文件名识别规则")
+		return
+	}
+	result, err := c.tmdbService.SaveFilenameRecognitionRules(req.Rules)
+	if err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+	SuccessResp(ctx, result)
+}
+
+// ResetFilenameRecognitionRules 恢复内置常用文件名识别模板。
+// POST /api/media/tmdb/filename-rules/reset
+func (c *TmdbController) ResetFilenameRecognitionRules(ctx *gin.Context) {
+	result, err := c.tmdbService.ResetFilenameRecognitionRules()
+	if err != nil {
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	SuccessResp(ctx, result)
 }
 
 // Search 搜索媒体信息

@@ -16,6 +16,8 @@ const SystemLogs = () => import('./views/dashboard/SystemLogs.vue')
 const NetworkCenter = () => import('./views/dashboard/NetworkCenter.vue')
 const CacheCenter = () => import('./views/dashboard/CacheCenter.vue')
 const ResourceAggregation = () => import('./views/ResourceAggregation.vue')
+const FilenameRecognition = () => import('./views/FilenameRecognition.vue')
+const FileManager = () => import('./views/FileManager.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -95,6 +97,22 @@ const routes = [
         meta: {
           title: '整理规则',
           description: '分类策略、整理规则与媒体归档的策略配置。'
+        }
+      },
+      {
+        path: 'file-manager',
+        component: FileManager,
+        meta: {
+          title: '文件管理',
+          description: '在本地媒体源与任意115账号之间复制、剪切、粘贴和删除文件。'
+        }
+      },
+      {
+        path: 'filename-recognition',
+        component: FilenameRecognition,
+        meta: {
+          title: '识别测试',
+          description: '模拟媒体文件名解析与 TMDB 匹配，并维护整理链路使用的识别规则。'
         }
       },
       {

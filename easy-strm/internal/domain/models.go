@@ -131,6 +131,7 @@ const (
 	TaskTypeScrape          TaskType = "scrape"
 	TaskTypeEmbyRefresh     TaskType = "emby_refresh"
 	TaskTypeOfflineDownload TaskType = "offline_download"
+	TaskTypeFileTransfer    TaskType = "file_transfer"
 )
 
 // TaskTypeNames 任务类型中文名称映射
@@ -145,6 +146,7 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeScrape:          "NFO刮削",
 	TaskTypeEmbyRefresh:     "Emby库刷新",
 	TaskTypeOfflineDownload: "115云下载",
+	TaskTypeFileTransfer:    "文件传输",
 }
 
 // TaskStatus 任务运行状态
@@ -258,16 +260,16 @@ type ShareTransferFileItem struct {
 
 // TransferRequest 转存任务请求
 type TransferRequest struct {
-	ShareCode        string                  `json:"share_code"`        // 分享码
-	Password         string                  `json:"password"`          // 分享密码
-	TargetCloud115Id int                     `json:"target_cloud115_id"` // 目标115账号ID
-	TargetDirectory  string                  `json:"target_directory"`   // 目标目录路径
-	Files            []ShareTransferFileItem `json:"files"`              // 待转存文件列表
-	ConflictStrategy string                  `json:"conflict_strategy"` // 冲突策略：skip/overwrite/rename
-	AutoOrganize     bool                    `json:"auto_organize"`     // 是否转存完成后自动整理
-	AutoScrape       bool                    `json:"auto_scrape"`       // 是否整理完成后自动刮削（115 云盘目标本期优雅降级为 skipped）
-	OrganizeSourceID int                     `json:"organize_source_id"` // 复用已有媒体源的规则（0=使用临时/方案B源）
-	OrganizeTargetPath string                `json:"organize_target_path"` // 整理目标路径（可选，缺省=TargetDirectory）
+	ShareCode          string                  `json:"share_code"`           // 分享码
+	Password           string                  `json:"password"`             // 分享密码
+	TargetCloud115Id   int                     `json:"target_cloud115_id"`   // 目标115账号ID
+	TargetDirectory    string                  `json:"target_directory"`     // 目标目录路径
+	Files              []ShareTransferFileItem `json:"files"`                // 待转存文件列表
+	ConflictStrategy   string                  `json:"conflict_strategy"`    // 冲突策略：skip/overwrite/rename
+	AutoOrganize       bool                    `json:"auto_organize"`        // 是否转存完成后自动整理
+	AutoScrape         bool                    `json:"auto_scrape"`          // 是否整理完成后自动刮削（115 云盘目标本期优雅降级为 skipped）
+	OrganizeSourceID   int                     `json:"organize_source_id"`   // 复用已有媒体源的规则（0=使用临时/方案B源）
+	OrganizeTargetPath string                  `json:"organize_target_path"` // 整理目标路径（可选，缺省=TargetDirectory）
 }
 
 // TransferResponse 转存任务提交响应
@@ -312,9 +314,9 @@ type CancelResponse struct {
 
 // RetryResponse 重试转存响应
 type RetryResponse struct {
-	TaskId      string `json:"task_id"`      // 任务ID
-	RetriedFiles int   `json:"retried_files"` // 重试文件数
-	Message     string `json:"message"`      // 提示信息
+	TaskId       string `json:"task_id"`       // 任务ID
+	RetriedFiles int    `json:"retried_files"` // 重试文件数
+	Message      string `json:"message"`       // 提示信息
 }
 
 // ShareTransferLog 分享转存日志（对应 t_share_transfer_log 表）
