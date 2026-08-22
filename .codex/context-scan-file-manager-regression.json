@@ -1,0 +1,28 @@
+{
+  "date": "2026-08-22",
+  "executor": "Codex",
+  "implementation": {
+    "backend": "easy-strm/internal/service/file_manager_service.go",
+    "controller": "easy-strm/internal/controller/file_manager_controller.go",
+    "frontend": [
+      "easy-strm-front/src/views/FileManager.vue",
+      "easy-strm-front/src/components/file-manager/FileManagerPane.vue",
+      "easy-strm-front/src/utils/api/fileManager.js"
+    ]
+  },
+  "existing_tests": [
+    "本地浏览与越界拒绝",
+    "本地到本地剪切",
+    "本地目录递归上传",
+    "跨账号115目录秒传"
+  ],
+  "gaps": [
+    "本地复制和删除",
+    "115到本地递归下载",
+    "同账号115复制与移动",
+    "跨账号移动成功后的源删除",
+    "失败时不得删除源项",
+    "浏览器端完整操作矩阵"
+  ],
+  "risk": "异步任务完成时间可能超过前端固定刷新延迟；真实115接口受账号状态、风控和秒传校验影响"
+}

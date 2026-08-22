@@ -75,7 +75,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 		return "", fmt.Errorf("get upload info failed: %v", err)
 	}
 
-	Debug("Target account upload info: UserID=%d, UserKey=%s", targetDriver.UserID, targetDriver.Userkey)
+	Debug("Target account upload info loaded for UserID=%d", targetDriver.UserID)
 
 	// 5. 使用OpenList的方法执行秒传（使用ECDH加密）
 	Debug("Attempting rapid transfer using initupload API with ECDH encryption")
@@ -153,7 +153,7 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 			}
 
 			formEncoded := form.Encode()
-			Debug("Attempt %d: Full form data (unencrypted): %s", sigRetryCount+1, formEncoded)
+			Debug("Attempt %d: submitting rapid transfer request", sigRetryCount+1)
 
 			encrypted, err := ecdhCipher.Encrypt([]byte(formEncoded))
 			if err != nil {
@@ -188,11 +188,9 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 				lastErr = fmt.Errorf("decrypt response failed: %v", err)
 				break
 			}
-			decryptedStr := string(decrypted)
 			Info("=== Rapid Transfer Response ===")
 			Info("Source account ID: %d, Target account ID: %d", sourceCloud115ID, targetCloud115ID)
 			Info("File SHA1: %s", sourceFile.Sha1)
-			Info("Raw response: %s", decryptedStr)
 
 			result = driver.UploadInitResp{}
 			if err = driver.CheckErr(json.Unmarshal(decrypted, &result), &result, resp); err != nil {
@@ -320,7 +318,7 @@ func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int,
 		return "", fmt.Errorf("get upload info failed: %v", err)
 	}
 
-	Debug("Target account upload info: UserID=%d, UserKey=%s", targetDriver.UserID, targetDriver.Userkey)
+	Debug("Target account upload info loaded for UserID=%d", targetDriver.UserID)
 
 	// 5. Go115秒传实现：使用简化版签名算法
 	// 115driver使用的签名算法有时会导致sig invalid，go115使用不同的签名策略
@@ -391,7 +389,7 @@ func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int,
 			form.Set("token", token)
 
 			formEncoded := form.Encode()
-			Debug("Go115 Attempt %d: Full form data (unencrypted): %s", sigRetryCount+1, formEncoded)
+			Debug("Go115 attempt %d: submitting rapid transfer request", sigRetryCount+1)
 
 			encrypted, err := ecdhCipher.Encrypt([]byte(formEncoded))
 			if err != nil {
@@ -426,9 +424,7 @@ func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int,
 				lastErr = fmt.Errorf("decrypt response failed: %v", err)
 				break
 			}
-			decryptedStr := string(decrypted)
 			Info("=== Go115 Rapid Transfer Response ===")
-			Info("Raw response: %s", decryptedStr)
 
 			result = driver.UploadInitResp{}
 			if err = driver.CheckErr(json.Unmarshal(decrypted, &result), &result, resp); err != nil {
@@ -652,20 +648,15 @@ func parseCookieToCredential(cookie string) *elevengo.Credential {
 		switch name {
 		case "UID":
 			cr.UID = value
-			Info("Parsed UID: %s", value)
 		case "CID":
 			cr.CID = value
-			Info("Parsed CID: %s", value)
 		case "KID":
 			cr.KID = value
-			Info("Parsed KID: %s", value)
 		case "SEID":
 			cr.SEID = value
-			Info("Parsed SEID: %s", value)
 		}
 	}
 
-	Info("Final credential: UID=%s, CID=%s, KID=%s, SEID=%s",
-		cr.UID, cr.CID, cr.KID, cr.SEID)
+	Debug("115 credential parsed")
 	return cr
 }

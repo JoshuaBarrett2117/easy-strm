@@ -21,8 +21,8 @@
     <n-alert v-else-if="!locations.length" type="warning">暂无可用位置，请先添加本地媒体源或115账号。</n-alert>
 
     <div v-else class="flex flex-col gap-4 xl:flex-row">
-      <FileManagerPane ref="leftPane" title="左侧位置" :locations="locations" :preferred-index="0" :clipboard-count="clipboard?.items?.length || 0" @copy="setClipboard('copy', $event)" @cut="setClipboard('move', $event)" @paste="pasteTo($event, 'left')" @delete="deleteEntries($event, 'left')" />
-      <FileManagerPane ref="rightPane" title="右侧位置" :locations="locations" :preferred-index="1" :clipboard-count="clipboard?.items?.length || 0" @copy="setClipboard('copy', $event)" @cut="setClipboard('move', $event)" @paste="pasteTo($event, 'right')" @delete="deleteEntries($event, 'right')" />
+      <FileManagerPane ref="leftPane" title="左侧位置" :locations="locations" :preferred-index="0" :clipboard-count="clipboard?.items?.length || 0" :pasting="transferPending" @copy="setClipboard('copy', $event)" @cut="setClipboard('move', $event)" @paste="pasteTo($event)" @delete="deleteEntries($event, 'left')" />
+      <FileManagerPane ref="rightPane" title="右侧位置" :locations="locations" :preferred-index="1" :clipboard-count="clipboard?.items?.length || 0" :pasting="transferPending" @copy="setClipboard('copy', $event)" @cut="setClipboard('move', $event)" @paste="pasteTo($event)" @delete="deleteEntries($event, 'right')" />
     </div>
   </div>
 </template>
@@ -33,12 +33,14 @@ import { NAlert, NButton, NIcon, NTag } from 'naive-ui'
 import { SwapHorizontalOutline } from '@vicons/ionicons5'
 import FileManagerPane from '../components/file-manager/FileManagerPane.vue'
 import { createFileManagerTransfer, deleteFileManagerEntries, getFileManagerLocations } from '../utils/api/fileManager'
+import { getTaskDetail } from '../utils/api/task'
 import { message } from '../utils/ui/feedback'
 import { showConfirmDialog } from '../utils/ui/messageBox'
 
 const locations = ref([])
 const loadingLocations = ref(false)
 const clipboard = ref(null)
+const transferPending = ref(false)
 const leftPane = ref(null)
 const rightPane = ref(null)
 
@@ -57,8 +59,26 @@ const setClipboard = (operation, payload) => {
   message.success(`已${operation === 'move' ? '剪切' : '复制'} ${payload.items.length} 项，请选择目标目录后粘贴`)
 }
 
-const pasteTo = async (target, pane) => {
-  if (!clipboard.value) return
+const waitForTransferTask = async taskId => {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const response = await getTaskDetail(taskId)
+    const task = response.data?.data || {}
+    if (task.status === 'completed') return task
+    if (task.status === 'failed') throw new Error(task.error_message || '文件传输任务执行失败')
+    if (task.status === 'cancelled') throw new Error('文件传输任务已取消')
+    await new Promise(resolve => setTimeout(resolve, 1000))
+  }
+  throw new Error('文件传输任务等待超时，请前往任务中心查看')
+}
+
+const refreshBothPanes = () => {
+  leftPane.value?.refresh?.()
+  rightPane.value?.refresh?.()
+}
+
+const pasteTo = async target => {
+  if (!clipboard.value || transferPending.value) return
+  transferPending.value = true
   try {
     const response = await createFileManagerTransfer({
       operation: clipboard.value.operation,
@@ -68,11 +88,16 @@ const pasteTo = async (target, pane) => {
       items: clipboard.value.items.map(item => ({ id: item.id, name: item.name, path: item.path, is_directory: item.is_directory, pick_code: item.pick_code || '' }))
     })
     const task = response.data?.data || {}
-    message.success(`文件传输任务已创建${task.task_id ? `：${task.task_id}` : ''}，可在任务中心查看进度`)
+    if (!task.task_id) throw new Error('文件传输任务未返回任务ID')
+    message.info(`文件传输任务已创建：${task.task_id}`)
+    await waitForTransferTask(task.task_id)
     if (clipboard.value.operation === 'move') clipboard.value = null
-    setTimeout(() => refreshPane(pane), 800)
+    refreshBothPanes()
+    message.success('文件传输完成')
   } catch (error) {
-    message.error(error?.response?.data?.error || '创建文件传输任务失败')
+    message.error(error?.response?.data?.error || error?.message || '文件传输任务失败')
+  } finally {
+    transferPending.value = false
   }
 }
 

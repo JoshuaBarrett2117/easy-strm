@@ -325,13 +325,35 @@ func (s *FileManagerService) transferCloudToLocal(ctx context.Context, sourceID,
 	if err != nil {
 		return err
 	}
-	if err := s.downloadCloudEntry(ctx, item, filepath.Join(targetDir, item.Name), source); err != nil {
+	if err := s.downloadCloudItemToLocal(ctx, item, targetDir, source); err != nil {
 		return err
 	}
 	if move {
 		return s.cloudClient.DeleteFiles115([]string{item.ID}, source.ID, source.Cookie)
 	}
 	return nil
+}
+
+func (s *FileManagerService) downloadCloudItemToLocal(ctx context.Context, item domain.FileManagerTransferItem, targetDir string, source *domain.Cloud115) error {
+	targetPath := filepath.Join(targetDir, item.Name)
+	if !item.IsDirectory {
+		return s.downloadCloudEntry(ctx, item, targetPath, source)
+	}
+	tempRoot, err := os.MkdirTemp(targetDir, ".easy-strm-download-dir-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tempRoot)
+	tempTarget := filepath.Join(tempRoot, item.Name)
+	if err := s.downloadCloudEntry(ctx, item, tempTarget, source); err != nil {
+		return err
+	}
+	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+		return os.Rename(tempTarget, targetPath)
+	} else if err != nil {
+		return err
+	}
+	return copyLocalEntry(tempTarget, targetPath)
 }
 
 func (s *FileManagerService) downloadCloudEntry(ctx context.Context, item domain.FileManagerTransferItem, targetPath string, source *domain.Cloud115) error {
@@ -390,12 +412,25 @@ func (s *FileManagerService) copyCloudEntryAcrossAccounts(ctx context.Context, i
 		return err
 	}
 	if !item.IsDirectory {
+		// 115 私有秒传签名会随服务端版本变化。文件管理使用稳定的下载上传链路，
+		// 避免跨账号目录中的每个文件都经历多轮无效秒传重试。
+		tempDir, err := os.MkdirTemp("", ".easy-strm-cross-account-*")
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tempDir)
+		tempPath := filepath.Join(tempDir, item.Name)
 		pickCode := item.PickCode
 		if pickCode == "" {
 			pickCode = item.ID
 		}
-		_, err := s.cloudClient.RapidTransferFile(pickCode, source.ID, source.Cookie, targetCID, target.ID, target.Cookie, item.Name)
-		return err
+		if err := s.cloudClient.DownloadFile115(pickCode, tempPath, source.ID, source.Cookie); err != nil {
+			return fmt.Errorf("跨账号复制下载失败: %w", err)
+		}
+		if err := s.cloudClient.UploadLocalFile115(tempPath, targetCID, item.Name, target.ID, target.Cookie); err != nil {
+			return fmt.Errorf("跨账号复制上传失败: %w", err)
+		}
+		return nil
 	}
 	dirCID, err := s.cloudClient.CreateDirectory115(targetCID, item.Name, target.ID, target.Cookie)
 	if err != nil {

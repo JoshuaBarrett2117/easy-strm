@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // CreateDirectory115 在指定115父目录中创建目录并返回新目录CID。
@@ -90,7 +91,7 @@ func (c *Client) DownloadFile115(pickCode, targetPath string, cloud115ID int, co
 	if err != nil {
 		return err
 	}
-	info, err := d.DownloadWithUA(pickCode, "Mozilla/5.0 115Browser/27.0.5.7")
+	info, err := d.DownloadWithUAByAndroidAPI(pickCode, "")
 	if err != nil {
 		return fmt.Errorf("get 115 download link failed: %w", err)
 	}
@@ -99,15 +100,23 @@ func (c *Client) DownloadFile115(pickCode, targetPath string, cloud115ID int, co
 		return err
 	}
 	request.Header = info.Header.Clone()
+	normalize115DownloadCookies(request.Header)
+	request.Header.Set("Range", "bytes=0-")
 	downloader := *c.httpClient
 	downloader.Timeout = 0
+	downloader.CheckRedirect = func(redirected *http.Request, _ []*http.Request) error {
+		redirected.Header = request.Header.Clone()
+		return nil
+	}
 	response, err := downloader.Do(request)
 	if err != nil {
-		return fmt.Errorf("download 115 file failed: %w", err)
+		return fmt.Errorf("download 115 file request failed: %w", err)
 	}
-	defer response.Body.Close()
+	body := response.Body
+	defer body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("download 115 file failed: HTTP %d", response.StatusCode)
+		detail, _ := io.ReadAll(io.LimitReader(body, 1024))
+		return fmt.Errorf("download 115 file failed: HTTP %d %s", response.StatusCode, strings.TrimSpace(string(detail)))
 	}
 	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 		return err
@@ -124,7 +133,7 @@ func (c *Client) DownloadFile115(pickCode, targetPath string, cloud115ID int, co
 			_ = os.Remove(tempPath)
 		}
 	}()
-	if _, err := io.Copy(temp, response.Body); err != nil {
+	if _, err := io.Copy(temp, body); err != nil {
 		return fmt.Errorf("write downloaded file failed: %w", err)
 	}
 	if err := temp.Close(); err != nil {
@@ -138,4 +147,29 @@ func (c *Client) DownloadFile115(pickCode, targetPath string, cloud115ID int, co
 	}
 	completed = true
 	return nil
+}
+
+// normalize115DownloadCookies 将驱动返回的响应 Cookie 转换为合法的请求 Cookie。
+func normalize115DownloadCookies(header http.Header) {
+	request := &http.Request{Header: header}
+	validCookies := make([]*http.Cookie, 0)
+	for _, cookie := range request.Cookies() {
+		if cookie.Value == "" || isCookieAttribute(cookie.Name) {
+			continue
+		}
+		validCookies = append(validCookies, &http.Cookie{Name: cookie.Name, Value: cookie.Value})
+	}
+	header.Del("Cookie")
+	for _, cookie := range validCookies {
+		request.AddCookie(cookie)
+	}
+}
+
+func isCookieAttribute(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "path", "domain", "expires", "max-age", "secure", "httponly", "samesite", "partitioned":
+		return true
+	default:
+		return false
+	}
 }

@@ -22,7 +22,7 @@
     <div class="flex flex-wrap gap-1.5 border-b border-slate-200/70 px-3 py-2 dark:border-white/[0.07]">
       <n-button size="small" :disabled="!selectedItems.length" @click="emitClipboard('copy')"><template #icon><n-icon :component="CopyOutline" /></template>复制</n-button>
       <n-button size="small" :disabled="!selectedItems.length" @click="emitClipboard('move')"><template #icon><n-icon :component="CutOutline" /></template>剪切</n-button>
-      <n-button size="small" type="primary" secondary :disabled="clipboardCount === 0 || !currentLocation" @click="emitPaste"><template #icon><n-icon :component="ClipboardOutline" /></template>粘贴<span v-if="clipboardCount">（{{ clipboardCount }}）</span></n-button>
+      <n-button size="small" type="primary" secondary :loading="pasting" :disabled="pasting || clipboardCount === 0 || !currentLocation" @click="emitPaste"><template #icon><n-icon :component="ClipboardOutline" /></template>粘贴<span v-if="clipboardCount">（{{ clipboardCount }}）</span></n-button>
       <n-button size="small" type="error" secondary :disabled="!selectedItems.length" @click="emitDelete"><template #icon><n-icon :component="TrashOutline" /></template>删除</n-button>
     </div>
 
@@ -46,7 +46,8 @@ const props = defineProps({
   title: { type: String, required: true },
   locations: { type: Array, default: () => [] },
   preferredIndex: { type: Number, default: 0 },
-  clipboardCount: { type: Number, default: 0 }
+  clipboardCount: { type: Number, default: 0 },
+  pasting: { type: Boolean, default: false }
 })
 const emit = defineEmits(['copy', 'cut', 'paste', 'delete'])
 const loading = ref(false)
@@ -58,8 +59,7 @@ const history = ref([])
 
 const locationOptions = computed(() => props.locations.map(location => ({
   label: `${location.type === 'local' ? '本地' : '115'} · ${location.name}`,
-  value: `${location.type}:${location.id}`,
-  disabled: location.status === 'disabled'
+  value: `${location.type}:${location.id}`
 })))
 const currentLocation = computed(() => props.locations.find(location => `${location.type}:${location.id}` === selectedLocationKey.value) || null)
 const selectedItems = computed(() => {

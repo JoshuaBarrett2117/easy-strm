@@ -322,3 +322,23 @@
 - 同步检查：执行 `git fetch origin main`，本地 `main` 与 `origin/main` 领先/落后均为 0。
 - 凭据检查：对全部新增和修改文件扫描 Cookie、Token、密码和 API Key 硬编码，未发现匹配。
 - 发布前验证：`go test ./...`、`go vet ./...`、`npm run build` 和 `git diff --check` 全部通过。
+
+# 2026-08-22 文件管理跨账号复制修复与本地目录验证
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用计划工具、`rg`、PowerShell、`apply_patch`、Go 测试和本地浏览器验证完成等价流程。
+- 诊断失败任务 `dd33e1b5-4dc2-4d43-8724-5b1623cfcfa8`，确认不同账号 115 秒传把 `pickcode` 错传给内部要求 `file_id` 的 `GetFile`，因此返回 `990002 参数错误`。
+- 修复 `FileManagerService.copyCloudEntryAcrossAccounts`，跨账号文件秒传改为传入 `item.ID`；同步更新目录递归秒传回归测试。
+- 创建并配置本地媒体源“产品测试”，路径为 `C:\Users\a3875\Downloads\产品`，自动整理与目录监控均关闭。
+- 浏览器验证文件管理页成功读取该目录的 16 项内容；未执行任何 115 云盘写操作。
+- 验证：`go test ./...`、`go vet ./...`、`npm run build`、`git diff --check` 全部通过。
+
+# 2026-08-22 文件管理全链路回归与修复
+
+- 执行者：Codex。
+- 真实覆盖本地浏览/复制/剪切/删除、本地到115、115到本地、同账号115复制/剪切、主号到小号复制/剪切以及两账号115批量删除。
+- 修复115下载：升级 `115driver` 至 v1.3.5，使用空 User-Agent 生成链接，规范化驱动返回的响应 Cookie；真实下载 13,090 字节文件成功。
+- 修复跨账号复制：115私有秒传返回 `sig invalid`，文件管理改用受控临时文件下载后上传；目录递归处理，跨账号剪切仅在完整复制成功后删除源目录。
+- 修复前端：禁用监控的媒体源仍可选择；异步粘贴按任务终态轮询并同步刷新双栏，传输中阻止重复提交。
+- 清理：主号恢复至16项，小号恢复至11项；本地两个 `_Codex文件管理测试*` 目录已删除；`proxy_domains` 恢复为空。
+- 验证：`go test ./...`、`go vet ./...`、`npm run build`、`git diff --check` 通过。
