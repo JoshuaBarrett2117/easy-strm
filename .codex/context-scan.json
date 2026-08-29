@@ -1,38 +1,36 @@
 {
-  "date": "2026-08-18",
+  "date": "2026-08-29",
   "executor": "Codex",
   "location": {
-    "frontend": "easy-strm-front/src/views/resources/OfflineDownload.vue",
-    "domain": "easy-strm/internal/domain/offline_download.go",
-    "service": "easy-strm/internal/service/offline_download_service.go",
-    "client": "easy-strm/115_offline.go",
-    "tests": "easy-strm/internal/service/offline_download_service_test.go"
+    "backend": [
+      "easy-strm/internal/service/notification_service.go",
+      "easy-strm/internal/dao/notif_config_dao.go",
+      "easy-strm/internal/controller/cloud115_notification_controller.go",
+      "easy-strm/auth.go"
+    ],
+    "frontend": [
+      "easy-strm-front/src/views/Settings.vue",
+      "easy-strm-front/src/utils/api"
+    ]
   },
-  "current_behavior": [
-    "前端 handleSubmit 对 parsedUrlCount > 100 直接警告并返回",
-    "后端 Submit 对归一化后总数 > offlineMaxUrls 返回错误",
-    "后端在HTTP请求内调用 AddOfflineTasks，成功后才创建任务中心任务",
-    "115客户端支持批量AddOfflineTasks，现有单批约束常量为100"
+  "current_state": [
+    "已有 Telegram Bot Token + Chat ID 的单向 sendMessage 文本通知",
+    "已有 Telegram、Server酱、SMTP 通知配置 CRUD 和测试接口",
+    "现有通知配置没有前端页面，任务与账号通知方法也未接入业务链路",
+    "任务统一存储在 Redis，但存在 main 包与 internal/dao 两套访问实现",
+    "Dashboard、Task、Cron、Emby Service 可直接复用为机器人操作依赖"
   ],
   "similar_patterns": [
-    "TransferScheduler 使用有缓冲channel与worker处理后台任务",
-    "WatchService 使用受控goroutine执行持续后台工作",
-    "ShareTransferService 使用queued状态后异步推进任务中心"
+    "EmbyService 使用代理感知 HTTP 客户端和独立 Controller",
+    "TaskCard 维护任务类型、状态和可执行动作映射",
+    "Settings.vue 使用分栏配置、连接测试和密码输入"
   ],
-  "questions": [
-    {"priority": "high", "question": "超过100条时响应如何表达115尚未实际受理？", "answer": "新增queued字段，accepted/rejected保留115实际受理语义"},
-    {"priority": "high", "question": "如何满足115单批限制？", "answer": "后台单worker按100条切片并顺序调用现有批量接口"},
-    {"priority": "medium", "question": "如何保持现有小批次行为？", "answer": "仅超过100条进入异步队列，100条及以下沿用同步路径"}
-  ],
-  "sufficiency": {
-    "interface_contract_known": true,
-    "technical_choice_understood": true,
-    "main_risks_identified": true,
-    "verification_known": true
-  },
-  "risks": [
-    "进程重启会丢失尚未消费的内存队列任务",
-    "后台任务不能继续使用HTTP请求context",
-    "异步响应不能把本地入队误称为115已受理"
+  "technology": ["Go 1.25", "Gin", "PostgreSQL", "Redis", "Vue 3", "Naive UI"],
+  "tests": ["go test ./...", "npm run build", "Go httptest 与注入 fake service"],
+  "observations": [
+    "通知配置职责错误地位于 Cloud115Service/Cloud115Controller，需要迁移到专用层",
+    "通过轮询统一任务 Redis 状态比修改所有任务生产者更可靠，且能覆盖两套任务实现",
+    "Telegram 卡片应使用 HTML 文本和 Inline Keyboard，不生成图片",
+    "sequential-thinking、code-index、shrimp-task-manager、exa 在当前工具集中不可用"
   ]
 }

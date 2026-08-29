@@ -194,6 +194,102 @@
           </n-form>
         </n-tab-pane>
 
+        <!-- Telegram 通知 -->
+        <n-tab-pane name="notification" tab="通知">
+          <n-form :model="telegramForm" label-placement="top" class="max-w-2xl">
+            <div class="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-white/5">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-sm font-bold text-slate-700 dark:text-slate-200">机器人状态</span>
+                <n-tag :type="telegramStatus.running ? 'success' : 'default'" size="small" round>
+                  {{ telegramStatus.running ? '运行中' : '未运行' }}
+                </n-tag>
+                <span v-if="telegramStatus.bot_username" class="text-sm text-slate-500 dark:text-slate-400">
+                  @{{ telegramStatus.bot_username }}
+                </span>
+              </div>
+              <n-alert
+                v-if="telegramStatus.last_error"
+                type="error"
+                :show-icon="true"
+                :closable="false"
+                class="mt-3"
+              >
+                {{ telegramStatus.last_error }}
+              </n-alert>
+            </div>
+
+            <n-form-item label="启用 Telegram 机器人">
+              <n-switch v-model:value="telegramForm.enabled">
+                <template #checked>启用</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+            </n-form-item>
+
+            <n-form-item label="Bot Token">
+              <div class="w-full">
+                <n-input
+                  v-model:value="telegramForm.bot_token"
+                  type="password"
+                  show-password-on="click"
+                  clearable
+                  :placeholder="telegramForm.has_bot_token ? '已配置，留空则保持不变' : '请输入 BotFather 提供的 Bot Token'"
+                />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  Token 不会通过配置读取接口返回；保存时留空会保留原值。
+                </p>
+              </div>
+            </n-form-item>
+
+            <n-form-item label="管理员私聊 Chat ID">
+              <div class="w-full">
+                <n-input
+                  v-model:value="telegramForm.chat_id"
+                  placeholder="例如：123456789"
+                  clearable
+                />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  仅该私聊可以接收通知和执行机器人操作，不支持群组或多用户。
+                </p>
+              </div>
+            </n-form-item>
+
+            <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">通知事件</h3>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务成功</span>
+                <n-switch v-model:value="telegramForm.notify_task_completed" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务失败</span>
+                <n-switch v-model:value="telegramForm.notify_task_failed" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务取消</span>
+                <n-switch v-model:value="telegramForm.notify_task_cancelled" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">115 账号状态</span>
+                <n-switch v-model:value="telegramForm.notify_account_status" class="float-right" />
+              </div>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-2">
+              <n-button type="primary" :loading="telegramLoading" @click="handleTelegramSubmit">
+                <template #icon><n-icon :component="CheckmarkOutline" /></template>
+                保存并应用
+              </n-button>
+              <n-button type="success" :loading="telegramTesting" @click="handleTelegramTest">
+                <template #icon><n-icon :component="PaperPlaneOutline" /></template>
+                发送测试卡片
+              </n-button>
+              <n-button :loading="telegramStatusLoading" @click="fetchTelegramStatus">
+                <template #icon><n-icon :component="RefreshOutline" /></template>
+                刷新状态
+              </n-button>
+            </div>
+          </n-form>
+        </n-tab-pane>
+
         <!-- 刮削 -->
         <n-tab-pane name="scrape" tab="刮削">
           <n-form :model="form" label-placement="top" class="max-w-2xl">
@@ -331,11 +427,17 @@ import {
   NIcon,
   useMessage
 } from 'naive-ui'
-import { CheckmarkOutline, RefreshOutline, LinkOutline } from '@vicons/ionicons5'
+import { CheckmarkOutline, RefreshOutline, LinkOutline, PaperPlaneOutline } from '@vicons/ionicons5'
 import PageCard from '../components/common/PageCard.vue'
 import { getSettings, updateSettings } from '../utils/api/setting'
 import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media'
 import { getEmbyStatus } from '../utils/api/emby'
+import {
+  getTelegramConfig,
+  updateTelegramConfig,
+  getTelegramStatus,
+  testTelegram
+} from '../utils/api/notification'
 
 const message = useMessage()
 
@@ -396,6 +498,60 @@ const embyLoading = ref(false)
 const embyTesting = ref(false)
 const embyConnectionStatus = ref(null)
 const embyServerInfo = ref(null)
+
+// --- Telegram 配置 ---
+const telegramForm = ref({
+  enabled: false,
+  bot_token: '',
+  chat_id: '',
+  has_bot_token: false,
+  notify_task_completed: true,
+  notify_task_failed: true,
+  notify_task_cancelled: true,
+  notify_account_status: true
+})
+const telegramStatus = ref({
+  enabled: false,
+  running: false,
+  bot_username: '',
+  chat_id: '',
+  last_update_time: '',
+  last_error: ''
+})
+const telegramLoading = ref(false)
+const telegramTesting = ref(false)
+const telegramStatusLoading = ref(false)
+
+const fetchTelegramConfig = async () => {
+  try {
+    const response = await getTelegramConfig({ skipGlobalErrorMessage: true })
+    const data = response.data.data || {}
+    telegramForm.value = {
+      enabled: data.enabled || false,
+      bot_token: '',
+      chat_id: data.chat_id || '',
+      has_bot_token: data.has_bot_token || false,
+      notify_task_completed: data.notify_task_completed !== false,
+      notify_task_failed: data.notify_task_failed !== false,
+      notify_task_cancelled: data.notify_task_cancelled !== false,
+      notify_account_status: data.notify_account_status !== false
+    }
+  } catch (error) {
+    console.error('获取 Telegram 配置失败:', error)
+  }
+}
+
+const fetchTelegramStatus = async () => {
+  telegramStatusLoading.value = true
+  try {
+    const response = await getTelegramStatus({ skipGlobalErrorMessage: true })
+    telegramStatus.value = response.data.data || telegramStatus.value
+  } catch (error) {
+    console.error('获取 Telegram 状态失败:', error)
+  } finally {
+    telegramStatusLoading.value = false
+  }
+}
 
 const fetchSettings = async () => {
   try {
@@ -599,8 +755,57 @@ const handleEmbyReset = () => {
   embyServerInfo.value = null
 }
 
+const handleTelegramSubmit = async () => {
+  if (telegramForm.value.enabled) {
+    if (!telegramForm.value.bot_token.trim() && !telegramForm.value.has_bot_token) {
+      message.warning('请输入 Bot Token')
+      return
+    }
+    if (!telegramForm.value.chat_id.trim()) {
+      message.warning('请输入管理员私聊 Chat ID')
+      return
+    }
+  }
+  telegramLoading.value = true
+  try {
+    await updateTelegramConfig(
+      {
+        enabled: telegramForm.value.enabled,
+        bot_token: telegramForm.value.bot_token.trim(),
+        chat_id: telegramForm.value.chat_id.trim(),
+        notify_task_completed: telegramForm.value.notify_task_completed,
+        notify_task_failed: telegramForm.value.notify_task_failed,
+        notify_task_cancelled: telegramForm.value.notify_task_cancelled,
+        notify_account_status: telegramForm.value.notify_account_status
+      },
+      { skipGlobalErrorMessage: true }
+    )
+    message.success('Telegram 配置已保存并应用')
+    await Promise.all([fetchTelegramConfig(), fetchTelegramStatus()])
+  } catch (error) {
+    message.error(error.response?.data?.error || '保存 Telegram 配置失败')
+  } finally {
+    telegramLoading.value = false
+  }
+}
+
+const handleTelegramTest = async () => {
+  telegramTesting.value = true
+  try {
+    await testTelegram({ skipGlobalErrorMessage: true })
+    message.success('Telegram 测试卡片发送成功')
+    await fetchTelegramStatus()
+  } catch (error) {
+    message.error(error.response?.data?.error || 'Telegram 测试失败')
+  } finally {
+    telegramTesting.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
   fetchTmdbConfig()
+  fetchTelegramConfig()
+  fetchTelegramStatus()
 })
 </script>

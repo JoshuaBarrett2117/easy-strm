@@ -1,18 +1,20 @@
 {
-  "date": "2026-08-18",
+  "date": "2026-08-29",
   "executor": "Codex",
-  "request": "当输入的云下载链接超过100个时允许直接提交，由后端队列按115单批上限发送请求",
+  "goal": "在现有通知模块上新增可交互 Telegram 机器人、任务与账号通知卡片及前端配置界面",
   "scope": [
-    "easy-strm/internal/service/offline_download_service.go",
-    "easy-strm/internal/domain/offline_download.go",
-    "easy-strm-front/src/views/resources/OfflineDownload.vue",
-    "对应后端单元测试与项目验证记录"
+    "Telegram 长轮询机器人",
+    "系统概览、任务、定时任务和 Emby 操作",
+    "任务终态与 115 账号状态通知",
+    "Telegram 专用配置与状态接口",
+    "系统设置通知页签",
+    "本地自动化测试和文档"
   ],
-  "acceptance": [
-    "前端不再拦截超过100个去重后的链接",
-    "超过100个链接的HTTP提交立即返回本地任务ID",
-    "后端单工作协程按每批最多100个链接顺序调用115",
-    "100个及以下链接维持原有同步受理与逐链接结果语义",
-    "后台批次完成后持久化记录并启动既有115状态跟踪"
+  "constraints": [
+    "仅允许单一私聊 Chat ID",
+    "写操作直接执行",
+    "不使用公网 Webhook",
+    "不新增数据库表",
+    "通知失败不得影响业务任务"
   ]
 }

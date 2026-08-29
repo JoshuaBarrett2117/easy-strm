@@ -1,91 +1,13 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
-	"time"
 
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
-
-// --- 通知配置相关处理器（已有，保持不变） ---
-
-func (c *Cloud115Controller) GetNotificationConfig(ctx *gin.Context) {
-	list, err := c.cloud115Service.GetAllNotificationConfig()
-	if err != nil {
-		logger.Errorf("Cloud115Controller[GetNotificationConfig] 获取通知配置失败: %v", err)
-		ErrorResp(ctx, http.StatusInternalServerError, "获取通知配置失败")
-		return
-	}
-	SuccessResp(ctx, gin.H{"data": list})
-}
-
-func (c *Cloud115Controller) UpdateNotificationConfig(ctx *gin.Context) {
-	var reqData struct {
-		Channel string `json:"channel" binding:"required"`
-		Config  string `json:"config"`
-		Enabled bool   `json:"enabled"`
-	}
-	if err := ctx.ShouldBindJSON(&reqData); err != nil {
-		logger.Warnf("Cloud115Controller[UpdateNotificationConfig] 请求体无效: %v", err)
-		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
-		return
-	}
-	validChannels := map[string]bool{"telegram": true, "serverchan": true, "email": true}
-	if !validChannels[reqData.Channel] {
-		ErrorResp(ctx, http.StatusBadRequest, "无效的通知渠道")
-		return
-	}
-	config, err := c.cloud115Service.UpsertNotificationConfig(reqData.Channel, reqData.Config, reqData.Enabled)
-	if err != nil {
-		logger.Errorf("Cloud115Controller[UpdateNotificationConfig] 更新通知配置失败: %v", err)
-		ErrorResp(ctx, http.StatusInternalServerError, "更新通知配置失败")
-		return
-	}
-	logger.Infof("Cloud115Controller[UpdateNotificationConfig] 更新通知配置成功: %s", reqData.Channel)
-	SuccessResp(ctx, gin.H{"message": "通知配置更新成功", "data": config})
-}
-
-func (c *Cloud115Controller) DeleteNotificationConfig(ctx *gin.Context) {
-	channel := ctx.Param("channel")
-	if err := c.cloud115Service.DeleteNotificationConfig(channel); err != nil {
-		logger.Errorf("Cloud115Controller[DeleteNotificationConfig] 删除通知配置失败: %v", err)
-		ErrorResp(ctx, http.StatusInternalServerError, "删除通知配置失败")
-		return
-	}
-	logger.Infof("Cloud115Controller[DeleteNotificationConfig] 删除通知配置成功: %s", channel)
-	SuccessResp(ctx, gin.H{"message": "通知配置删除成功"})
-}
-
-func (c *Cloud115Controller) TestNotification(ctx *gin.Context) {
-	var reqData struct {
-		Channel string `json:"channel" binding:"required"`
-	}
-	if err := ctx.ShouldBindJSON(&reqData); err != nil {
-		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
-		return
-	}
-	config, err := c.cloud115Service.GetNotificationConfigByChannel(reqData.Channel)
-	if err != nil || config == nil {
-		ErrorResp(ctx, http.StatusNotFound, "通知配置不存在")
-		return
-	}
-
-	testTitle := "[Easy-STRM] 测试通知"
-	testMessage := fmt.Sprintf("这是一条测试通知，渠道: %s\n发送时间: %s", reqData.Channel, time.Now().Format("2006-01-02 15:04:05"))
-
-	if err := c.notificationService.SendToChannel(reqData.Channel, config.Config, testTitle, testMessage); err != nil {
-		logger.Errorf("Cloud115Controller[TestNotification] 测试通知发送失败: %v", err)
-		ErrorResp(ctx, http.StatusInternalServerError, fmt.Sprintf("测试通知发送失败: %v", err))
-		return
-	}
-
-	logger.Infof("Cloud115Controller[TestNotification] 测试通知发送成功: %s", reqData.Channel)
-	SuccessResp(ctx, gin.H{"message": "测试通知发送成功", "channel": reqData.Channel})
-}
 
 func (c *Cloud115Controller) InstantTransfer(ctx *gin.Context) {
 	var reqData struct {

@@ -11,14 +11,12 @@ import (
 
 type Cloud115Service struct {
 	cloud115DAO            *dao.Cloud115DAO
-	notificationConfigDAO  *dao.NotificationConfigDAO
 	instantTransferService *InstantTransferService
 }
 
-func NewCloud115Service(cloud115DAO *dao.Cloud115DAO, notificationConfigDAO *dao.NotificationConfigDAO) *Cloud115Service {
+func NewCloud115Service(cloud115DAO *dao.Cloud115DAO) *Cloud115Service {
 	return &Cloud115Service{
-		cloud115DAO:           cloud115DAO,
-		notificationConfigDAO: notificationConfigDAO,
+		cloud115DAO: cloud115DAO,
 	}
 }
 
@@ -99,30 +97,6 @@ func (s *Cloud115Service) Delete(id int) error {
 	}
 	logger.Infof("Cloud115Service[Delete] 删除账号成功: ID %d", id)
 	return nil
-}
-
-// GetAllNotificationConfig 获取所有通知配置
-func (s *Cloud115Service) GetAllNotificationConfig() ([]*domain.NotificationConfig, error) {
-	configs, err := s.notificationConfigDAO.GetAll()
-	if err != nil {
-		return nil, err
-	}
-	return configs, nil
-}
-
-// GetNotificationConfigByChannel 根据渠道获取通知配置
-func (s *Cloud115Service) GetNotificationConfigByChannel(channel string) (*domain.NotificationConfig, error) {
-	return s.notificationConfigDAO.GetByChannel(channel)
-}
-
-// UpsertNotificationConfig 创建或更新通知配置
-func (s *Cloud115Service) UpsertNotificationConfig(channel, configJSON string, enabled bool) (*domain.NotificationConfig, error) {
-	return s.notificationConfigDAO.Upsert(channel, configJSON, enabled)
-}
-
-// DeleteNotificationConfig 删除通知配置
-func (s *Cloud115Service) DeleteNotificationConfig(channel string) error {
-	return s.notificationConfigDAO.Delete(channel)
 }
 
 // InstantTransfer 秒传文件

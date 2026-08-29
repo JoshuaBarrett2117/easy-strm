@@ -35,9 +35,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// 初始化 Service
 	mediaSourceService := service.NewMediaSourceService(mediaSourceDAO, cloud115DAO)
-	cloud115Service := service.NewCloud115Service(cloud115DAO, notificationConfigDAO)
+	cloud115Service := service.NewCloud115Service(cloud115DAO)
 	fileOperationService := service.NewFileOperationService(mediaSourceService, cloud115DAO, client)
-	notificationService := service.NewNotificationService(notificationConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
+	notificationHTTPClient := NewProxyAwareHTTPClient(15 * time.Second)
+	notificationService := service.NewNotificationService(notificationConfigDAO, notificationHTTPClient)
+	notificationConfigService := service.NewNotificationConfigService(notificationConfigDAO)
 	tmdbAPIKey := ""
 	if apiKeyConfig, err := GetSystemConfigByKey("tmdb_api_key"); err == nil {
 		tmdbAPIKey = apiKeyConfig.ConfigVal
@@ -57,6 +59,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	cacheAdminService := service.NewCacheAdminService(dao.DB, dao.GetGlobalRedisClient())
 	mediaCategoryService := service.NewMediaCategoryService(mediaCategoryDAO)
 	systemConfigService := service.NewSystemConfigService(systemConfigDAO)
+	telegramBotService := service.NewTelegramBotService(notificationConfigService, dashboardService, taskService, cronService, embyService, notificationHTTPClient)
+	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient())
 
 	// --- 分享转存服务初始化 ---
 	shareTransferTaskDAO := dao.NewTaskRedisDAOWithGlobal()
@@ -89,7 +93,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)
 	scrapeController := controller.NewScrapeController(scrapeService, organizeService)
 	strmController := controller.NewStrmController(strmService)
-	cloud115Controller := controller.NewCloud115Controller(cloud115Service, notificationService)
+	cloud115Controller := controller.NewCloud115Controller(cloud115Service)
 	settingsController := controller.NewSettingsController(systemConfigService)
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
 	logController := controller.NewLogController(systemConfigService)
@@ -98,7 +102,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	embyController := controller.NewEmbyController(embyService)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
+	notificationController := controller.NewNotificationController(notificationConfigService, notificationService, telegramBotService)
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
+		return watchService.RetryAutoOrganizeTask(taskID)
+	})
+	telegramBotService.SetRetryTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
 
@@ -467,7 +475,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	if scheduler != nil {
 		cronController.SetScheduler(scheduler)
 	}
-	cronController.SetExecuteCronTaskFn(func(task *domain.CronTask) {
+	runCronTask := func(task *domain.CronTask) {
 		mainTask := &CronTask{
 			ID:             task.ID,
 			TaskName:       task.TaskName,
@@ -484,7 +492,13 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			UpdateTime:     task.UpdateTime,
 		}
 		ExecuteCronTask(mainTask)
-	})
+	}
+	cronController.SetExecuteCronTaskFn(runCronTask)
+	telegramBotService.SetRunCronTask(runCronTask)
+	if err := telegramBotService.Reload(); err != nil {
+		Warn("Telegram bot is not running: %v", err)
+	}
+	notificationEventMonitor.Start()
 
 	// --- 注入 LogController 回调依赖 ---
 	if logger != nil {
@@ -581,10 +595,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/115/export-dir/status", cloud115Controller.GetExportDirectoryTreeStatus)
 
 		// ========== 通知配置 ==========
-		auth.GET("/notify/config", cloud115Controller.GetNotificationConfig)
-		auth.PUT("/notify/config", cloud115Controller.UpdateNotificationConfig)
-		auth.DELETE("/notify/config/:channel", cloud115Controller.DeleteNotificationConfig)
-		auth.POST("/notify/test", cloud115Controller.TestNotification)
+		auth.GET("/notify/config", notificationController.GetAll)
+		auth.PUT("/notify/config", notificationController.Update)
+		auth.DELETE("/notify/config/:channel", notificationController.Delete)
+		auth.POST("/notify/test", notificationController.Test)
+		auth.GET("/notify/telegram/config", notificationController.GetTelegramConfig)
+		auth.PUT("/notify/telegram/config", notificationController.UpdateTelegramConfig)
+		auth.GET("/notify/telegram/status", notificationController.GetTelegramStatus)
+		auth.POST("/notify/telegram/test", notificationController.TestTelegram)
 
 		// ========== 系统配置 ==========
 		auth.GET("/settings", settingsController.GetAll)

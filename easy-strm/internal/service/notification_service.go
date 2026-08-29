@@ -2,6 +2,7 @@ package service
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/pkg/logger"
+	telegram "github.com/go-telegram/bot"
+	telegrammodels "github.com/go-telegram/bot/models"
 )
 
 // NotificationService 通知服务，负责通过各渠道发送通知
@@ -39,6 +42,12 @@ func NewNotificationService(notificationConfigDAO *dao.NotificationConfigDAO, ht
 // SendNotification 通过所有已启用的渠道发送通知
 // 通知失败不影响主流程，仅记录错误日志
 func (s *NotificationService) SendNotification(title, message string) error {
+	return s.SendCard(NotificationCard{Title: title, Detail: message})
+}
+
+// SendCard 通过所有已启用渠道发送结构化通知卡片。
+// Telegram 保留富文本和按钮，其他渠道降级为纯文本。
+func (s *NotificationService) SendCard(card NotificationCard) error {
 	configs, err := s.notificationConfigDAO.GetAllEnabled()
 	if err != nil {
 		return fmt.Errorf("查询启用配置失败: %v", err)
@@ -50,7 +59,14 @@ func (s *NotificationService) SendNotification(title, message string) error {
 
 	var lastErr error
 	for _, cfg := range configs {
-		if err := s.SendToChannel(cfg.Channel, cfg.Config, title, message); err != nil {
+		var sendErr error
+		if cfg.Channel == "telegram" {
+			sendErr = s.sendTelegramCard(cfg.Config, card)
+		} else {
+			sendErr = s.SendToChannel(cfg.Channel, cfg.Config, card.Title, card.PlainText())
+		}
+		if sendErr != nil {
+			err = sendErr
 			logger.Errorf("[NotificationService] 渠道 %s 发送失败: %v", cfg.Channel, err)
 			lastErr = err
 		} else {
@@ -58,6 +74,18 @@ func (s *NotificationService) SendNotification(title, message string) error {
 		}
 	}
 	return lastErr
+}
+
+// SendTelegramCard 仅向已启用的 Telegram 渠道发送卡片。
+func (s *NotificationService) SendTelegramCard(card NotificationCard) error {
+	config, err := s.notificationConfigDAO.GetByChannel("telegram")
+	if err != nil {
+		return fmt.Errorf("查询Telegram配置失败: %v", err)
+	}
+	if config == nil || !config.Enabled {
+		return nil
+	}
+	return s.sendTelegramCard(config.Config, card)
 }
 
 // SendToChannel 通过指定渠道发送通知
@@ -103,54 +131,39 @@ func (s *NotificationService) SendAccountStatusNotification(accountName, oldStat
 
 // --- Telegram ---
 
-type telegramConfig struct {
-	BotToken string `json:"bot_token"`
-	ChatID   string `json:"chat_id"`
+func (s *NotificationService) sendTelegram(configJSON, title, message string) error {
+	return s.sendTelegramCard(configJSON, NotificationCard{Title: title, Detail: message})
 }
 
-func (s *NotificationService) sendTelegram(configJSON, title, message string) error {
-	var cfg telegramConfig
-	if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
+func (s *NotificationService) sendTelegramCard(configJSON string, card NotificationCard) error {
+	cfg, err := ParseTelegramConfig(configJSON)
+	if err != nil {
 		return fmt.Errorf("Telegram配置解析失败: %v", err)
 	}
-	if cfg.BotToken == "" || cfg.ChatID == "" {
-		return fmt.Errorf("Telegram配置不完整: bot_token或chat_id为空")
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("Telegram配置不完整: %v", err)
 	}
 
-	text := fmt.Sprintf("<b>%s</b>\n\n%s", title, message)
-	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", cfg.BotToken)
-
-	body, _ := json.Marshal(map[string]interface{}{
-		"chat_id":    cfg.ChatID,
-		"text":       text,
-		"parse_mode": "HTML",
-	})
-
-	req, err := http.NewRequest(http.MethodPost, apiURL, bytes.NewReader(body))
+	client, err := telegram.New(
+		cfg.BotToken,
+		telegram.WithHTTPClient(10*time.Second, s.httpClient),
+		telegram.WithSkipGetMe(),
+	)
 	if err != nil {
-		return fmt.Errorf("Telegram创建请求失败: %v", err)
+		return fmt.Errorf("Telegram客户端创建失败: %v", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := s.httpClient.Do(req)
+	params := &telegram.SendMessageParams{
+		ChatID:    cfg.ChatID,
+		Text:      card.TelegramText(),
+		ParseMode: telegrammodels.ParseModeHTML,
+	}
+	if markup := card.TelegramMarkup(); markup != nil {
+		params.ReplyMarkup = markup
+	}
+	_, err = client.SendMessage(context.Background(), params)
 	if err != nil {
-		return fmt.Errorf("Telegram请求失败: %v", err)
+		return fmt.Errorf("Telegram发送失败: %v", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Telegram返回非200状态码: %d", resp.StatusCode)
-	}
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return fmt.Errorf("Telegram响应解析失败: %v", err)
-	}
-	if ok, _ := result["ok"].(bool); !ok {
-		desc, _ := result["description"].(string)
-		return fmt.Errorf("Telegram发送失败: %s", desc)
-	}
-
 	return nil
 }
 

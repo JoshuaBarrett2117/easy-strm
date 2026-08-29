@@ -11,8 +11,7 @@ import (
 )
 
 type Cloud115Controller struct {
-	cloud115Service     *service.Cloud115Service
-	notificationService *service.NotificationService
+	cloud115Service *service.Cloud115Service
 
 	// --- 回调依赖：main 包全局函数通过依赖注入解耦 ---
 	// NOTE: 以下函数属于 main 包，无法在 controller 层直接引用，
@@ -54,10 +53,9 @@ type Cloud115Controller struct {
 	testAccountCookie func(cloud115ID int, cookie string) (interface{}, error)
 }
 
-func NewCloud115Controller(cloud115Service *service.Cloud115Service, notificationService *service.NotificationService) *Cloud115Controller {
+func NewCloud115Controller(cloud115Service *service.Cloud115Service) *Cloud115Controller {
 	return &Cloud115Controller{
-		cloud115Service:     cloud115Service,
-		notificationService: notificationService,
+		cloud115Service: cloud115Service,
 	}
 }
 

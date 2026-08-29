@@ -139,6 +139,24 @@
 - 命令：`npm run build`
 - 结果：通过
 
+## 2026-08-29 Telegram 机器人通知与运维操作
+
+- 执行者：Codex。
+- `go test ./... -count=1`：通过；覆盖卡片转义/截断、按钮、配置默认值与 Token 保留、私聊授权、任务动作和 Redis 事件去重。
+- `go vet ./...`：通过。
+- `npm run build`：通过，通知设置页签完成生产构建。
+- `git diff --check`：通过。
+- 真实 Telegram 测试未执行：未配置 Bot Token 和管理员 Chat ID，部署后使用页面测试按钮验证。
+
+## 2026-08-29 Telegram 发布门禁复验
+
+- 执行者：Codex。
+- `go test ./... -count=1`：通过。
+- `go vet ./...`：通过。
+- `npm run build`：通过。
+- `git diff --check`：通过。
+- 敏感信息扫描：全部变更文件未发现真实 Telegram Bot Token 或私钥。
+
 ## 2026-08-29
 
 - 执行者：Codex。

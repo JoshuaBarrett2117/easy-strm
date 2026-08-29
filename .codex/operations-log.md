@@ -361,3 +361,20 @@
 - 发布范围：当前工作区内115目录树签名修复、cron任务身份迁移、单元/真实集成测试和审计记录的全部变更。
 - 凭据检查：扫描全部新增文件，未发现Cookie、Token、密码、Secret或API Key硬编码。
 - 发布前验证：`go test ./... -count=1`、`go vet ./...`、`npm run build` 和 `git diff --check` 全部通过。
+
+# 2026-08-29 Telegram 机器人通知与运维操作
+
+- 执行者：Codex。
+- 工具降级：当前环境未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`、`exa`，使用 `rg`、PowerShell、结构化上下文和计划工具完成等价流程。
+- 上下文扫描：确认已有 Telegram 单向文本发送与通知配置表，缺少机器人长轮询、命令操作、事件接线和前端配置。
+- 技术决策：采用 `github.com/go-telegram/bot v1.24.0`、单一私聊 Chat ID、长轮询、HTML 卡片和 Inline Keyboard。
+- 后端实现：新增通知配置服务、Telegram 机器人生命周期与命令处理、统一卡片模型、任务/账号事件监控和专用配置接口。
+- 前端实现：系统设置新增通知页签，支持脱敏 Token、Chat ID、事件开关、运行状态和测试卡片。
+
+# 2026-08-29 Telegram 功能 GitHub main 发布准备
+
+- 执行者：Codex。
+- 分支与同步：本地位于 `main`；执行 `git fetch origin main` 后，本地与远端 ahead/behind 均为 0。
+- 凭据审计：扫描全部修改和新增文件，未发现真实 Telegram Bot Token 或私钥。
+- 发布门禁：`go test ./... -count=1`、`go vet ./...`、`npm run build`、`git diff --check` 全部通过。
+- 发布策略：创建功能提交并以非强制方式推送到 `origin/main`；推送完成后核验远端提交。
