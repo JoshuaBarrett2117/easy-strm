@@ -378,3 +378,4 @@
 - 凭据审计：扫描全部修改和新增文件，未发现真实 Telegram Bot Token 或私钥。
 - 发布门禁：`go test ./... -count=1`、`go vet ./...`、`npm run build`、`git diff --check` 全部通过。
 - 发布策略：创建功能提交并以非强制方式推送到 `origin/main`；推送完成后核验远端提交。
+- 发布结果：功能提交 `2c894e5` 已成功推送到 GitHub `origin/main`，未使用强制推送。
