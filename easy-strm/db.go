@@ -454,7 +454,7 @@ END $$;
 	createCronTaskTableSQL := `
 	CREATE TABLE IF NOT EXISTS t_cron_task (
 		id SERIAL PRIMARY KEY,
-		task_name VARCHAR(100) UNIQUE NOT NULL,
+		task_name VARCHAR(100) NOT NULL,
 		task_type VARCHAR(50) NOT NULL,
 		cloud115_id INTEGER NOT NULL,
 		strm_config_id INTEGER NOT NULL,
@@ -493,6 +493,33 @@ END $$;
 	_, err = db.Exec(alterCronTaskTableSQL)
 	if err != nil {
 		Error("Failed to alter cron_task table: %v", err)
+		return err
+	}
+
+	// task_name 仅用于展示；任务身份由 STRM 配置和任务类型共同确定。
+	_, err = db.Exec(`ALTER TABLE t_cron_task DROP CONSTRAINT IF EXISTS t_cron_task_task_name_key`)
+	if err != nil {
+		Error("Failed to drop cron task name unique constraint: %v", err)
+		return err
+	}
+
+	// 全量任务名称使用 STRM 配置 ID，保持展示名称稳定并避免同名目录产生歧义。
+	_, err = db.Exec(`
+		UPDATE t_cron_task
+		SET task_name = 'STRM全量生成-' || strm_config_id::text
+		WHERE task_type = 'full_generate'
+		  AND task_name IS DISTINCT FROM 'STRM全量生成-' || strm_config_id::text
+	`)
+	if err != nil {
+		Error("Failed to normalize full generate cron task names: %v", err)
+		return err
+	}
+	_, err = db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_task_config_type
+		ON t_cron_task(strm_config_id, task_type)
+	`)
+	if err != nil {
+		Error("Failed to create cron task identity index: %v", err)
 		return err
 	}
 

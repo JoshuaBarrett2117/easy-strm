@@ -2,8 +2,11 @@ package main
 
 import (
 	"fmt"
-	"path/filepath"
 )
+
+func buildFullGenerateCronTaskName(strmConfigID int) string {
+	return fmt.Sprintf("STRM全量生成-%d", strmConfigID)
+}
 
 func GetStrmConfigByID(id int) (*StrmConfig, error) {
 	Debug("Getting strm config by ID: %d", id)
@@ -99,7 +102,7 @@ func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension st
 	Info("Created new strm config (ID: %d)", strmConfig.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(strmConfig.ID)
 		cronTask, err := CreateCronTask(taskName, "full_generate", cloud115Id, strmConfig.ID, cron)
 		if err != nil {
 			Warn("Failed to create cron task for strm config: %v", err)
@@ -141,7 +144,7 @@ func UpdateStrmConfig(id, cloud115Id int, netDiskPath, localPath, cron, extensio
 	existingTask, _ := GetCronTaskByStrmConfigID(strmConfig.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(strmConfig.ID)
 		if existingTask != nil {
 			_, err = UpdateCronTask(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
 			if err != nil {

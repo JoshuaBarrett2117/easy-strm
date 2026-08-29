@@ -139,6 +139,22 @@
 - 命令：`npm run build`
 - 结果：通过
 
+## 2026-08-29
+
+- 执行者：Codex。
+- 命令：`go test . ./internal/service -run "TestDownloadDirectoryTreeFile|TestBuildFullGenerateCronTaskName" -count=1`
+- 结果：通过；覆盖签名UA一致、签名请求头与Cookie复用、403错误详情以及cron配置ID命名。
+- 命令：`$env:EASY_STRM_REAL_115_TEST='1'; $env:EASY_STRM_STRM_CONFIG_ID='2'; go test . -run '^TestDirectoryTreeDownloadSignatureReal$' -count=1 -v`
+- 结果：通过；真实115目录树导出和签名下载成功，下载7,608字节并解析通过。
+- 命令：`go test ./... -count=1`
+- 结果：通过。
+- 命令：`go vet ./...`
+- 结果：通过。
+- 命令：`npm run build`
+- 结果：通过。
+- 命令：`git diff --check`
+- 结果：通过。
+
 ## 2026-08-22 文件管理全链路真实验证
 
 - `go test ./...`：通过，包含下载 Cookie 规范化、跨账号下载上传、目录递归、失败不删源、下载失败无残留测试。

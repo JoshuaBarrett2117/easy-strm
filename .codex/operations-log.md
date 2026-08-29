@@ -342,3 +342,22 @@
 - 修复前端：禁用监控的媒体源仍可选择；异步粘贴按任务终态轮询并同步刷新双栏，传输中阻止重复提交。
 - 清理：主号恢复至16项，小号恢复至11项；本地两个 `_Codex文件管理测试*` 目录已删除；`proxy_domains` 恢复为空。
 - 验证：`go test ./...`、`go vet ./...`、`npm run build`、`git diff --check` 通过。
+
+# 2026-08-29 115目录树签名与cron任务唯一性修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用计划工具、`rg`、PowerShell、`apply_patch`、Go 测试和真实115只读下载验证完成等价流程。
+- 上下文扫描：定位 `115_directory_tree.go`、`115client.go`、`db_strm_config.go`、`internal/service/strm_service.go`、`db.go` 以及相邻下载和cron测试实现。
+- 依赖检查：执行 `go list -m -versions`、`go list -m -json @latest` 和 `go list -m -u -json`；`github.com/SheltonZhu/115driver v1.3.5` 仍为最新版本，未降级或修改依赖。
+- 签名修复：显式使用 `UA115Browser` 获取下载地址，实际下载复用 `DownloadInfo.Header` 中的User-Agent和Cookie，重定向时继续透传同一组签名请求头；删除固定调试文件写入副作用。
+- cron修复：`task_name` 改为展示字段，全量任务名称使用 `strm_config_id`；数据库移除任务名全局唯一约束，新增 `(strm_config_id, task_type)` 唯一索引，并提供启动归一化和 `migrate_v16_cron_task_identity.sql`。
+- 真实验证：使用现有 STRM 配置 ID 2 触发115目录树导出并完成签名下载，获得7,608字节内容，解析通过且未出现403。
+- 本地验证：签名定向测试、后端全量测试、Go Vet、前端生产构建和差异检查通过。
+
+# 2026-08-29 GitHub main 发布准备
+
+- 执行者：Codex。
+- 同步检查：执行 `git fetch origin main`，本地 `main` 与 `origin/main` ahead/behind 均为0。
+- 发布范围：当前工作区内115目录树签名修复、cron任务身份迁移、单元/真实集成测试和审计记录的全部变更。
+- 凭据检查：扫描全部新增文件，未发现Cookie、Token、密码、Secret或API Key硬编码。
+- 发布前验证：`go test ./... -count=1`、`go vet ./...`、`npm run build` 和 `git diff --check` 全部通过。

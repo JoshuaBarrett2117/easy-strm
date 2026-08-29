@@ -1,0 +1,46 @@
+{
+  "date": "2026-08-29",
+  "executor": "Codex",
+  "locations": {
+    "directory_tree_download": "easy-strm/115_directory_tree.go",
+    "driver_factory": "easy-strm/115client.go",
+    "cron_legacy": "easy-strm/db_strm_config.go",
+    "cron_service": "easy-strm/internal/service/strm_service.go",
+    "schema": "easy-strm/db.go",
+    "tests": [
+      "easy-strm/115_file_manager_test.go",
+      "easy-strm/internal/dao/cron_dao_test.go",
+      "easy-strm/internal/service/strm_service_test.go"
+    ]
+  },
+  "findings": [
+    "115driver v1.3.5的Download会通过DownloadWithUA传入空UA并真正移除User-Agent，但项目随后使用带UA115Browser的driver请求签名URL，导致115 CDN判定签名无效",
+    "driver.DownloadInfo.Header已经提供签名请求对应的User-Agent与Cookie，应原样用于文件下载",
+    "全量cron任务名只使用网盘路径basename，而数据库task_name全局唯一，不同账号或路径的同名末级目录会冲突；业务身份实际应为strm_config_id与task_type",
+    "仓库同时保留main旧链路和internal/service新链路，两处名称生成逻辑都必须同步修改",
+    "115driver远端最新版本仍为v1.3.5，当前依赖无需升级"
+  ],
+  "similar_patterns": [
+    "easy-strm/115_file_manager.go已使用DownloadInfo.Header下载115文件并规范化响应Cookie",
+    "easy-strm/115client.go的直链逻辑显式透传客户端User-Agent以匹配CDN签名",
+    "easy-strm/migrations中的版本化SQL用于记录可独立执行的数据结构或数据修复"
+  ],
+  "questions": [
+    {
+      "priority": "high",
+      "question": "如何确保签名上下文一致？",
+      "answer": "显式用UA115Browser获取下载信息，并用DownloadInfo.Header构建实际GET请求"
+    },
+    {
+      "priority": "high",
+      "question": "如何保证cron显示名稳定且唯一？",
+      "answer": "task_name降级为展示字段，使用strm_config_id与task_type建立唯一索引；全量展示名使用配置ID并在启动阶段迁移历史数据"
+    }
+  ],
+  "sufficiency": {
+    "interface_contract_known": true,
+    "technical_choice_understood": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  }
+}

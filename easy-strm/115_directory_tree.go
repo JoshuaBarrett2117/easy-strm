@@ -367,34 +367,53 @@ func (c *Client) DownloadDirectoryTreeFile(pickCode string, cloud115ID int, cook
 		return nil, err
 	}
 
-	downloadInfo, err := d.Download(pickCode)
+	return downloadDirectoryTreeFile(d, c.httpClient, pickCode)
+}
+
+type directoryTreeDownloadURLProvider interface {
+	DownloadWithUA(pickCode, ua string) (*driver.DownloadInfo, error)
+}
+
+// downloadDirectoryTreeFile 使用同一组 User-Agent、Cookie 和签名请求头下载目录树文件。
+func downloadDirectoryTreeFile(provider directoryTreeDownloadURLProvider, httpClient *http.Client, pickCode string) ([]byte, error) {
+	downloadInfo, err := provider.DownloadWithUA(pickCode, driver.UA115Browser)
 	if err != nil {
 		Error("Failed to get download info: %v", err)
 		return nil, fmt.Errorf("get download info failed: %v", err)
 	}
+	if downloadInfo == nil || downloadInfo.Url.Url == "" {
+		return nil, fmt.Errorf("get download info failed: empty download URL")
+	}
 
 	Debug("Download info - Size: %d, Name: %s, URL: %s", downloadInfo.FileSize, downloadInfo.FileName, downloadInfo.Url.Url)
 
-	// 使用 d 客户端来下载文件（它会自动带上 Cookie，且 User-Agent 与获取下载链接时一致）
-	resp, err := d.NewRequest().Get(downloadInfo.Url.Url)
+	req, err := http.NewRequest(http.MethodGet, downloadInfo.Url.Url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create download request failed: %v", err)
+	}
+	req.Header = downloadInfo.Header.Clone()
+	normalize115DownloadCookies(req.Header)
+
+	downloader := *httpClient
+	downloader.CheckRedirect = func(redirected *http.Request, _ []*http.Request) error {
+		redirected.Header = req.Header.Clone()
+		return nil
+	}
+	resp, err := downloader.Do(req)
 	if err != nil {
 		Error("Failed to download file: %v", err)
 		return nil, fmt.Errorf("download file failed: %v", err)
 	}
+	defer resp.Body.Close()
 
-	fileData := resp.Body()
-
-	if resp.StatusCode() != http.StatusOK {
-		Error("Download failed with status %d: %s", resp.StatusCode(), string(fileData))
-		return nil, fmt.Errorf("download failed with status %d: %s", resp.StatusCode(), string(fileData))
+	fileData, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read downloaded file failed: %v", err)
 	}
 
-	// 保存目录树文件到本地用于调试
-	debugFilePath := "debug_directory_tree.txt"
-	if err := os.WriteFile(debugFilePath, fileData, 0644); err != nil {
-		Warn("Failed to save debug file: %v", err)
-	} else {
-		Debug("Saved directory tree file to %s for debugging", debugFilePath)
+	if resp.StatusCode != http.StatusOK {
+		Error("Download failed with status %d: %s", resp.StatusCode, string(fileData))
+		return nil, fmt.Errorf("download failed with status %d: %s", resp.StatusCode, string(fileData))
 	}
 
 	Info("Downloaded directory tree file successfully, size: %d bytes", len(fileData))

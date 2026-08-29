@@ -2,7 +2,6 @@ package service
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"easy-strm/internal/dao"
@@ -47,6 +46,10 @@ func (s *StrmService) GetAllConfig(sortField, sortOrder string) ([]*domain.StrmC
 	return s.strmConfigDAO.GetAll(sortField, sortOrder)
 }
 
+func buildFullGenerateCronTaskName(strmConfigID int) string {
+	return fmt.Sprintf("STRM全量生成-%d", strmConfigID)
+}
+
 // CreateConfig 创建STRM配置
 func (s *StrmService) CreateConfig(cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
 	var err error
@@ -62,7 +65,7 @@ func (s *StrmService) CreateConfig(cloud115Id int, netDiskPath, localPath, cron,
 	logger.Infof("StrmService[CreateConfig] 创建配置成功: ID %d", cfg.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(cfg.ID)
 		cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
 		if err != nil {
 			logger.Warnf("StrmService[CreateConfig] 创建定时任务失败: %v", err)
@@ -93,7 +96,7 @@ func (s *StrmService) UpdateConfig(id, cloud115Id int, netDiskPath, localPath, c
 	existingTask, _ := s.cronTaskDAO.GetByStrmConfigID(cfg.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(cfg.ID)
 		if existingTask != nil {
 			_, err = s.cronTaskDAO.Update(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
 			if err != nil {
@@ -149,7 +152,7 @@ func (s *StrmService) CreateConfigExt(cloud115Id int, netDiskPath, localPath, cr
 	logger.Infof("StrmService[CreateConfigExt] 创建配置成功: ID %d", cfg.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(cfg.ID)
 		cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
 		if err != nil {
 			logger.Warnf("StrmService[CreateConfigExt] 创建定时任务失败: %v", err)
@@ -184,7 +187,7 @@ func (s *StrmService) UpdateConfigExt(id, cloud115Id int, netDiskPath, localPath
 	existingTask, _ := s.cronTaskDAO.GetByStrmConfigID(cfg.ID)
 
 	if cron != "" {
-		taskName := fmt.Sprintf("STRM全量生成-%s", filepath.Base(netDiskPath))
+		taskName := buildFullGenerateCronTaskName(cfg.ID)
 		if existingTask != nil {
 			_, err = s.cronTaskDAO.Update(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
 			if err != nil {

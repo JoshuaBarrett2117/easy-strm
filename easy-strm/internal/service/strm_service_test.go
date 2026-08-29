@@ -6,6 +6,14 @@ import (
 	"easy-strm/internal/domain"
 )
 
+func TestBuildFullGenerateCronTaskNameUsesConfigID(t *testing.T) {
+	t.Parallel()
+
+	if actual := buildFullGenerateCronTaskName(23); actual != "STRM全量生成-23" {
+		t.Fatalf("全量任务名称 = %q，期望 %q", actual, "STRM全量生成-23")
+	}
+}
+
 func TestNormalizeStrmPath(t *testing.T) {
 	t.Parallel()
 

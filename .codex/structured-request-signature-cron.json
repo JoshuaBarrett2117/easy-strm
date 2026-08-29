@@ -1,0 +1,20 @@
+{
+  "date": "2026-08-29",
+  "executor": "Codex",
+  "request": "修复115目录树下载 invalid signature 和 cron task_name 唯一键冲突，检查115driver升级并验证签名链路",
+  "scope": [
+    "easy-strm/115_directory_tree.go",
+    "easy-strm/db_strm_config.go",
+    "easy-strm/internal/service/strm_service.go",
+    "easy-strm/db.go",
+    "easy-strm/migrations/migrate_v16_cron_task_identity.sql",
+    "对应单元测试与验证记录"
+  ],
+  "acceptance": [
+    "获取签名链接和实际下载使用相同User-Agent及签名响应头",
+    "同名网盘目录的STRM配置不再产生cron任务名称冲突",
+    "启动时自动归一化已有全量任务名称",
+    "确认115driver是否存在更新并使用可用最新版",
+    "签名回归测试和后端全量测试通过"
+  ]
+}
