@@ -379,3 +379,219 @@
 - 发布门禁：`go test ./... -count=1`、`go vet ./...`、`npm run build`、`git diff --check` 全部通过。
 - 发布策略：创建功能提交并以非强制方式推送到 `origin/main`；推送完成后核验远端提交。
 - 发布结果：功能提交 `2c894e5` 已成功推送到 GitHub `origin/main`，未使用强制推送。
+# 2026-08-30 STRM 配置列表与全量清理
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用 `update_plan`、`rg`、PowerShell、`apply_patch` 与本地测试完成等价流程。
+- 上下文扫描：检查 `StrmConfig.vue`、`cron.go`、`strm.go`，以及 MediaSourceList、FileBrowser、FileManagerService 三类相似实现。
+- 根因：更新时间列仍存在于表格列模型；操作容器允许换行；全量生成只清理数据库记录，未清理本地目录。
+- 充分性检查：接口契约、技术选型、清理风险与本地验证方式均已明确。
+- 测试先行：新增目录清理回归测试，旧实现按预期失败；实现后专项测试通过。
+- 前端实现：删除 `update_time` 列，操作按钮改用 `tiny` 尺寸和禁止换行布局，表格横向宽度同步收窄。
+- 后端实现：`CleanupStrmFiles` 改为保留目标目录并清空全部子项；`RunFullStrmGenerate` 在生成前调用，零视频也清理。
+- 验证结果：`go test ./... -count=1`、`go vet ./...`、`npm run build`、`git diff --check` 全部通过。
+- 浏览器验证降级：本地前后端未运行；为避免连接现有数据库并加载定时任务，未启动真实后端，使用生产构建与静态列模型核对替代。
+- 用户请求验证后启动本地服务：后端 `go run .` 监听 `:8082`，前端 `npm run dev -- --host 127.0.0.1` 监听 `:3001`；标准输出与错误日志写入 `.codex/runtime/*-strm-ui.*.log`。
+- 可达性检查：前端根地址返回 HTTP 200；后端根地址返回预期 HTTP 404，Gin 服务和业务路由已成功监听，启动日志无错误。
+
+# 2026-08-30 本地登录失败诊断
+
+- 执行者：Codex。
+- 后端日志显示浏览器旧 JWT 已过期，但登录页随后正常调用 `POST /login`，因此旧 Token 不是最终阻塞点。
+- `admin` 用户可从数据库正常查询；提交默认密码 `admin` 的前端 MD5 后，后端因数据库已存密码哈希不同而返回 HTTP 401。`joshua` 用户在用户表中不存在。
+- 启动日志确认本地进程实际连接局域网 PostgreSQL 的 `easy_strm_prod` 数据库和同机 Redis，并非独立本地数据库。
+- 根因：`SeedAdmin` 仅在 `admin` 不存在时写入默认密码；共享数据库已有 admin，因此不会重置为默认密码。
+- 未修改用户记录或数据库配置，避免未经确认影响共享环境账号。
+# 2026-08-30 115 账号列表紧凑布局
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用计划工具、`rg`、PowerShell、`apply_patch`、Vite 构建和本地页面验证替代。
+- 上下文：核对 Cloud115、StrmConfig、MediaSourceList 和 FileBrowser 的表格操作区模式。
+- 实现：移除 `update_time` 列；四个操作按钮改为 `tiny`；容器改为 `flex-nowrap whitespace-nowrap`；操作列从 320px 收窄至 280px，横向滚动宽度从 1720 调整为 1520。
+- 验证：`npm run build` 与 `git diff --check` 通过；本地已登录页面表头不含更新时间，两行四个操作按钮的纵坐标分别一致，确认单行展示。
+- 页面验证全程只读，未点击编辑、扫码更新、测试或删除。
+
+# 2026-08-30 仪表盘账号配额修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，使用结构化分析、`update_plan`、`rg`、PowerShell、`apply_patch` 和本地自动化测试替代。
+- 检索：使用 `rg` 定位 `DashboardHome.vue`、`dashboard_service.go`、115 客户端及 `115driver v1.3.5` 的 `GetInfo`/`SpaceInfo` 契约。
+- 根因：后端把 `total` 固定为 0，`quota_used` 又没有实时同步；前端将零比例替换为 12% 假进度，因此只能看到 `0 B` 和无意义进度条。
+- 实现：为 Dashboard Service 注入最小容量查询接口；主程序复用现有 `Client` 调用 `115driver.GetInfo`；逐账号返回已用、总量、真实比例和可用状态；前端展示“已用 / 总量”，失败账号显示明确状态。
+- 测试：新增正常容量、比例上限和单账号失败隔离回归测试。
+- 验证：Dashboard 专项测试、后端全量测试、Go Vet、前端生产构建和差异检查通过。
+
+## 运行时异常复核
+
+- 用户反馈页面显示两个账号均“容量获取失败”。
+- 进程核对：`8082` 上的 `easy-strm.exe` 于 10:45 启动，早于容量修复代码，仍返回不含 `available` 的旧契约；前端已热更新，因此把缺失字段判定为失败。
+- 处置：仅停止端口 `8082` 上已核验的本地 `easy-strm.exe`，以 `go run .` 隐藏重启；新后端于 11:12:22 成功监听。
+- 真实只读验证：仪表盘显示115主号 `21.5 TB / 63.4 TB`、115小号 `1.5 TB / 15.6 TB`；后端两次 Dashboard 请求均返回 HTTP 200，无容量查询警告。
+- 本轮未新增代码修改，异常根因是运行进程未重载。
+
+# 2026-08-30 账号配额五分钟缓存
+
+- 执行者：Codex。
+- 上下文扫描：检查 TMDB、分享解析、任务、通知事件等 Redis 缓存模式，以及缓存管理页与 miniredis 测试约定。
+- 技术决策：新增 `AccountQuotaCache` DAO，键为 `easy_strm:dashboard:account_quota:<账号ID>`，JSON 保存 `used/total`，TTL 固定五分钟。
+- 读取策略：Dashboard Service 优先读 Redis；命中即返回且不调用115；未命中、过期、损坏或 Redis 异常时调用115并回填。缓存故障不阻断页面。
+- 管理集成：新增“115账号容量缓存”缓存组，支持现有缓存管理页统计和清理。
+- 自动验证：覆盖TTL、到期未命中、损坏缓存删除、缓存优先、未命中回源、回源回填和单账号失败隔离。
+- 运行验证：重启本地后端后首次加载调用115并写缓存；九秒后再次加载仍正常显示容量，日志没有新的115驱动调用，确认优先命中缓存。
+- 2026-08-30：新增 Telegram 115 分享自动转存与云下载。复用现有分享解析/转存、离线下载和任务终态通知；实现 `链接 [账号名称] [/目录]` 语法、分享资源号选择、云下载 VIP/兼顾/资源类型排序、优先级与 ID 决胜、指定账号和标准 URL 密码解析。执行者：Codex。
+- 2026-08-30：修复 Telegram 任务终态重复通知。根因是 Redis `EXISTS -> 发送 -> SET` 去重流程存在并发竞态；改为 `SET NX` 原子抢占发送权，发送失败释放抢占以允许重试。新增 8 路并发去重和发送失败释放回归测试。执行者：Codex。
+
+# 2026-08-30 115自动转存目标目录修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`、`exa`，使用结构化分析、`update_plan`、`rg`、PowerShell、`apply_patch` 和本地测试替代。
+- 扫描：检索 `TransferDirectory`、`TargetDirectory`、`GetCIDByPath`、`ReceiveShare` 及三个相似的115目录操作链路。
+- 根因：`ShareTransferService` 已传入目标CID，但 `Client.ReceiveShare` 使用115不识别的 `save_folder_id` 表单字段；接口要求字段名为 `cid`，未知字段被忽略后文件进入默认的“最近接收”。
+- 测试先行：新增表单协议回归测试，首次执行因构造函数不存在而失败；实现后通过。
+- 实现：统一由 `buildReceiveShareForm` 构造请求并发送 `cid`；目标路径解析失败、空CID或非根路径返回CID=0时停止任务并记录明确错误，不再静默回退。
+- 专项验证：根包协议测试与ShareTransferService失败保护/向后兼容测试通过。
+
+# 2026-08-30 Emby 管理工作台
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用结构化需求文件、`rg`/代码阅读及内置任务清单替代。
+- 新增 `t_emby_server`、媒体源 `emby_server_id` 关联和旧单实例配置迁移。
+- 新增多实例、用户/权限/媒体库授权、媒体库 CRUD、刷新、封面及神医助手 API。
+- 复用 Redis 任务中心；Emby 写操作记录实例、目标、发起方式、执行步骤、真实进度和最终结论。
+- 前端新增 Emby 管理一级入口及实例、用户、媒体库、封面、插件和最近任务页面；任务中心增加 Emby 筛选与步骤展示。
+- 新增 OpenAI 官方及兼容图片接口配置，手动/拼图/AI 封面均在确认后应用。
+- 新增服务刷新终态、实例隔离和 Controller 参数测试；完成全量 Go 测试与前端构建。
+
+## Emby 最终收口
+
+- 使用 `rg`、PowerShell 和代码阅读复核刷新、头像、任务中心和路由权限链路；现有会话仍未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`。
+- 使用 `apply_patch` 将“刷新全部”改为逐库提交，增加 `partial_success`、失败明细、成功/失败统计及本地模拟回归测试。
+- 使用 `apply_patch` 增加用户头像读取代理与前端预览/上传入口，浏览器不直接接触 Emby API Key。
+- 使用 `apply_patch` 将新增 Emby 管理接口纳入 `admin` 中间件，并在前端隐藏非管理员菜单、阻止直接路由访问。
+- 使用 `gofmt`、Go 测试、Go Vet、Vite 构建和 `git diff --check` 验证；末次全量 Go 复跑被工作区同时发生的非 Emby 测试变化阻断，详情记录于 `.codex/testing.md`。
+- 并行改动稳定后再次执行后端全量测试和 Go Vet，最终均通过。
+
+# 2026-08-30 神医助手 STRM 扫描与视频封面
+
+- 通过 StrmAssistant 公开源码和 Wiki 核对契约：截图由 `Extract MediaInfo` 计划任务结合媒体库 `Image Capture` 完成，不存在独立的“扫描 STRM”插件计划任务。
+- 后端新增 `strm_scan_capture` 组合动作，串联 Emby 媒体库扫描、插件任务、有限轮询和选定媒体库结果回读。
+- 前端新增独立操作卡、必选媒体库、配置前置提示；任务中心新增 STRM 和主图统计字段。
+- 使用本地 HTTP 模拟测试验证完整链路，并执行全量 Go 测试、Go Vet 和 Vite 构建。
+
+# 2026-08-30 文件工作台自动整理与监控修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`、`exa`，使用结构化分析、`update_plan`、`rg`、PowerShell、应用内浏览器只读核对、`apply_patch` 和本地自动化测试替代。
+- 运行证据：后端启动后没有任何监控初始化请求；页面热更新按 `enabled` 重算后，3 个媒体源均明确显示“媒体源已停用”，监控统计由错误的 2 变为真实的 0。
+- 根因：前端媒体源表单遗漏 `enabled`，新建请求被后端 bool 零值保存为停用；状态展示却只看 `watch_enabled/auto_organize`，造成“显示运行、后台过滤”的假开启。
+- 实现：创建接口缺省 `enabled=true`；编辑表单恢复媒体源状态开关；统计与状态文案同时校验 `enabled`；115 关联账号按账号列表映射显示。
+- 运行态：媒体源列表由 WatchService 填充 `watch_running`，配置开启但启动失败时显示“监控未运行”，保存动作返回警告而非假成功提示。
+- 监控增强：本地递归注册已有和新建子目录；115 递归完整分页；115 初始快照失败时拒绝启动，避免误整理历史文件。
+- 测试先行：新增测试在旧实现下因默认值错误和递归扫描函数缺失而失败，实现后专项与全量测试通过。
+- 运行处置：核验并重启 8082 上由 `go run` 启动的本地后端；未替用户开启媒体源，未触发真实文件整理或115写操作。
+# 2026-08-30 115 自动整理文件名修复
+
+- 根据任务中心截图和本地后端日志定位：115 监控以 PickCode 做增量判重后，错误地把 PickCode 直接作为 `OrganizeDirectory` 的 `file_ids`，导致扫描不到源文件，任务中也只能显示 `csn9...` 标识。
+- 调整 `collectCloud115VideoFileSet`：仍以 PickCode/文件 ID 作为稳定判重键，同时保存文件名及相对监控目录的完整路径；新增文件触发整理时传递相对路径。
+- 增加旧失败任务兼容：恢复 115 自动整理任务时，将历史 PickCode 重新解析为当前相对文件路径。
+- 已执行定向回归、`go test ./... -count=1`、`go vet ./...`、`npm run build` 和 `git diff --check`，均通过。
+
+# 2026-08-30 内置站点默认代理
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`、`exa`；使用结构化分析、`update_plan`、`rg`、PowerShell、`apply_patch` 和本地测试替代。
+- 扫描：定位网络探测、代理域名归一化、TMDB/Telegram/Emby HTTP 客户端及系统配置页面。
+- 根因：空 `proxy_domains` 被解释为不匹配任何站点，且 TMDB Service 使用独立直连客户端。
+- 测试先行：新增内置域名和自定义追加测试，并为 TMDB HTTP 客户端注入补断言；旧实现按预期编译失败，实现后专项测试通过。
+- 实现：代理地址有效时默认代理 Telegram、GitHub、TMDB；自定义域名作为追加规则；TMDB 真实请求接入代理感知客户端；前端字段改为可选追加项并明确内置站点。
+- 审查修正：内置域名始终存在后，补充代理地址有效性判断，确保未配置 `proxy_url` 时探测结果与实际请求均显示并保持直连。
+- 验证：专项测试、`go test ./... -count=1`、`go vet ./...`、`npm run build` 和目标文件 `git diff --check` 全部通过。
+
+# 2026-08-30 TMDB 网络探测鉴权
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`、`exa`；使用结构化分析、`update_plan`、`rg`、PowerShell、`apply_patch` 和本地测试替代。
+- 根因：网络探测直接访问 TMDB `/3/configuration`，没有携带系统配置中的 `tmdb_api_key`，因此代理连通时仍固定返回 HTTP 401。
+- 测试先行：新增 TMDB 参数附加、原查询参数保留、非 TMDB 地址不修改和错误密钥脱敏测试；旧实现按预期编译失败。
+- 实现：每轮探测动态读取最新 TMDB Key，仅为 `api.themoviedb.org` 实际请求附加 `api_key`；结果继续返回原始公开 URL，底层错误统一替换明文 Key。
+- 验证：专项测试、后端全量测试、Go Vet、前端生产构建和差异检查全部通过。
+
+# 2026-08-30 默认命名模板调整
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`、`exa`；使用结构化分析、`update_plan`、`rg`、PowerShell、`apply_patch` 和本地测试替代。
+- 扫描：定位 `RenameService` 内置模板、系统配置读取、数据库官方预设和旧值迁移、设置页面变量标签及模板测试。
+- 实现：电影默认目录加入年份和 TMDB ID；剧集默认目录加入年份、TMDB ID 与 `Season N`，文件名按条件输出英文标题、画质、来源和编码。
+- 兼容：只将与两代历史官方默认模板完全一致的系统配置和官方预设升级，自定义模板不覆盖。
+- 验证：模板专项测试、后端全量测试、前端生产构建和差异检查通过；随后工作区并行新增的 Emby 管理未完成代码阻塞了 `go vet` 和测试复跑，已作为非本任务风险记录。
+
+## 2026-08-30 Codex — 115 Cookie 来源
+
+- 工具降级：当前会话未提供 sequential-thinking、code-index、shrimp-task-manager，改用模型深度分析、`rg`/PowerShell 只读检索和 `update_plan`。
+- `view_image`：核对参考图，确认需求是把 Cookie 获取端/渠道作为账号可见元数据。
+- `rg`、`Get-Content`、`git diff/status`：定位 Cloud115 模型、双 DAO 链路、Controller 回调、扫码登录及前端表格/表单，并确认工作区已有未提交改动。
+- 决策：新增自由文本 `cookie_source`；扫码渠道自动写入中文标签；历史数据保持空值并显示“未标注”；同步修正扫码更新未消费 `cloud_id` 的问题。
+- `apply_patch`、`gofmt`：完成数据库迁移、双模型/DAO、HTTP 契约、扫码创建/更新、前端表单与列表、文档和测试修改。
+- 首轮 `go test ./...`：发现并修正既有 sqlmock 的旧列断言；第二轮全量测试通过。
+- `npm run build`：Vite 生产构建通过，4254 个模块完成转换。
+- `go vet ./...`：后端静态检查通过。
+- `git diff --check`：无空白错误，仅有工作区既有换行符提示。
+
+## 2026-08-30 Codex — 已有 Cookie 渠道来源资料核查
+
+- 工具降级：项目要求优先 exa，但当前会话未提供；按 Browser skill 使用网页检索，并结合 GitHub API 与本地 Go 模块缓存核对源码。
+- p115client 文档与源码确认：`UID` 值格式为 `<user_id>_<ssoent>_<timestamp>`，可直接从已有 Cookie 提取设备码；`R1=wechatmini`、`R2=alipaymini`。
+- p115client 还提供 `login_device`、`login_devices`、`login_online` 等接口，但文档明确当前 Cookie 不一定出现在设备列表中，不能以账号最近设备替代当前 Cookie 的来源。
+- 115driver v1.3.5 已有 `GetInfo()`，请求 `https://webapi.115.com/files/index_info`，响应包含 `login_devices_info.list[].ssoent/is_current`；适合作为在线校验或补充信息。
+- 结论：历史 Cookie 来源优先本地解析 UID，零网络开销且对应当前 Cookie；接口只作为 UID 异常/未知码时的补充，不应作为主判断路径。
+
+## 2026-08-30 Codex — 历史 Cookie 来源自动识别实现
+
+- `rg`、`Get-Content`、`git diff`：复核上一阶段 `cookie_source` 模型、API 与页面现状，保留工作区既有修改。
+- `apply_patch`：新增 domain 层 UID 三段式解析与完整 ssoent 映射；Controller 对历史空来源进行只读推断并返回 UID/设备码；Vue 账号列组合显示 UID 与渠道。
+- 规则：人工来源优先；A1 保留“网页版 / 115 浏览器”歧义；未知码显示“未知渠道”；无法解析时显示“未标注”。
+- `gofmt`、`go test ./...`：格式化并执行后端全量测试，全部通过。
+- `go vet ./...`：静态检查通过。
+- `npm run build`：Vite 生产构建通过，4843 个模块完成转换；仅输出既存分块大小提示。
+
+## 2026-08-30 Codex — 神医助手截图依赖一键配置
+
+- 工具降级：当前会话未提供 sequential-thinking、code-index、shrimp-task-manager、exa，改用结构化分析、`rg`、PowerShell、`apply_patch` 与本地测试。
+- 源码核验：StrmAssistant 的空 `LibraryScope` 表示全部媒体库；适用类型的 `ImageFetchers` 包含 `Image Capture` 才代表真正启用。
+- 浏览器只读核验：确认 Emby Generic UI 使用 `UI/View` 读取配置、`UI/Command` 的 `PageSave` 保存配置；未点击保存或修改真实 Emby 设置。
+- 实现：确认弹窗后由同一后台任务读取、增量修改、回读核验 Image Capture 与 Library Scope，核验成功后才扫描媒体库并触发 Extract MediaInfo。
+- 兼容：Generic UI 不接受普通服务器 API Key 时明确失败并停止，不盲写或伪报配置成功。
+# 2026-08-30 Codex — Emby 观影监控中心
+
+- 工具降级：会话未提供 sequential-thinking、code-index、shrimp-task-manager、exa；使用结构化分析、`rg`、PowerShell、`apply_patch`、GitHub API 只读调研和本地测试替代。
+- 上下文：确认未提交的 Emby 多实例实现为基线，新增独立 Monitor Domain/DAO/Service/Controller，避免把统计逻辑并入管理 Service。
+- 数据：新增 v19 迁移、30 秒会话采集、5 分钟媒体基线、Playback Reporting 优先/本地整套降级和 60 秒 Redis 缓存。
+- 前端：新增仅管理员可见的 Emby 监控菜单、六个模块、ECharts 图表、15 秒实时刷新和图片代理兜底。
+- E2E：连续三次失败后暂停复盘，定位 Naive UI 标签延迟挂载导致首次进入不加载，增加 immediate 监听后恢复并通过。
+
+## 2026-08-30 Codex — 历史 Cookie 来源最终审查
+
+- 聚焦审查：确认人工来源优先、历史空来源按 UID 动态推断、未知设备码保留原码、无效 UID 不误判。
+- `apply_patch`：修正编辑表单回填逻辑，UID 推断值仅用于展示，不会在编辑其他字段时被误固化为人工来源。
+- `go test ./...`、`go vet ./...`：后端全量测试与静态检查通过。
+- `npm run build`：Vite 生产构建通过，4843 个模块完成转换；仅保留既存 Emby 大分块提示。
+
+## 2026-08-30 Codex — 已配置 Cookie 来源运行时刷新
+
+- 截图复核：页面显示“Cookie UID 无法识别 / 未标注”，与当前源码预期不一致。
+- Browser skill 降级：已登录页面没有可接管标签，本地 8082 被浏览器策略拦截；改用本地只读数据库诊断。
+- 只读诊断：两个既有账号 UID 均为合法三段式，设备码分别为 R2、R1；未输出 Cookie 内容，临时诊断测试已删除。
+- 根因：8082 仍由旧 `go run .` 进程提供服务，没有加载来源识别实现。
+- 运行时处理：仅重启明确监听 8082 的 easy-strm 后端，未修改数据库 Cookie；新进程已于 17:42:55 正常监听。
+
+# 2026-08-30 企业微信应用通知渠道
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`、`exa`；使用既有结构化上下文、计划工具、`rg`、PowerShell、`apply_patch` 和本地测试完成。
+- 架构扫描：复用现有通知配置表、代理感知 HTTP 客户端、结构化通知卡片与任务/账号事件监控，不新增数据库表或第二套 HTTP 客户端。
+- 后端实现：接入企业微信自建应用 `gettoken`、`message/send` 官方接口，增加内存 Token 缓存、Markdown 字节截断、Secret 脱敏/留空保留、专用配置与测试接口。
+- 事件实现：通知监控按渠道加载事件开关，Redis 基线、任务终态抢占和账号状态快照按 Telegram/企业微信隔离。
+- 前端实现：设置页通知页签新增企业微信应用表单、接收范围、事件开关、保存和测试操作。
+- 验证：企业微信专项测试、后端全量测试、Go Vet、前端生产构建和差异检查通过。
+- 运行时修复：用户保存时企业微信接口返回 404；确认 8082 后端启动时间早于企业微信路由源码修改时间，而 Telegram 路由正常存在。仅重启监听 8082 的 `easy-strm` 进程后，企业微信 GET/PUT/POST 路由均进入 JWT 中间件并返回未授权 401，证明新路由已生效。
+- API 接收消息：引入企业微信官方示例 `wxbizmsgcrypt`，新增公开 GET/POST 回调、Token/AESKey 脱敏配置、签名与 Corp/Agent 校验、消息解密、Redis 去重和异步应用回复。文本支持帮助、状态、任务及115资源操作；前端新增回调 URL、随机 Token/AESKey 和接收开关。

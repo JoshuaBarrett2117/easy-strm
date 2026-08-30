@@ -31,6 +31,15 @@ func (m *mockWatchLifecycle) StopWatching(sourceID int) {
 	m.stopped = append(m.stopped, sourceID)
 }
 
+func (m *mockWatchLifecycle) IsWatching(sourceID int) bool {
+	for _, startedID := range m.started {
+		if startedID == sourceID {
+			return true
+		}
+	}
+	return false
+}
+
 func setupMediaSourceControllerTest(t *testing.T) (*MediaSourceController, sqlmock.Sqlmock, func(), *mockWatchLifecycle) {
 	t.Helper()
 
@@ -96,7 +105,7 @@ func extractMediaSourcePayload(t *testing.T, recorder *httptest.ResponseRecorder
 	return data
 }
 
-func TestMediaSourceControllerCreateDisablesAutoOrganizeWhenWatchOff(t *testing.T) {
+func TestMediaSourceControllerCreateDefaultsToEnabledAndDisablesAutoOrganizeWhenWatchOff(t *testing.T) {
 	controller, mock, cleanup, watch := setupMediaSourceControllerTest(t)
 	defer cleanup()
 
@@ -117,7 +126,6 @@ func TestMediaSourceControllerCreateDisablesAutoOrganizeWhenWatchOff(t *testing.
 		"path":                 sourcePath,
 		"watch_path":           sourcePath,
 		"priority":             10,
-		"enabled":              true,
 		"organize_target_path": "/organized",
 		"media_type":           "all",
 		"conflict_policy":      "skip",
@@ -145,6 +153,12 @@ func TestMediaSourceControllerCreateDisablesAutoOrganizeWhenWatchOff(t *testing.
 	}
 	if data["watch_enabled"] != false {
 		t.Fatalf("expected watch_enabled to stay disabled, got %#v", data["watch_enabled"])
+	}
+	if data["enabled"] != true {
+		t.Fatalf("expected omitted enabled to default to true, got %#v", data["enabled"])
+	}
+	if data["watch_running"] != false {
+		t.Fatalf("expected disabled watch not to be running, got %#v", data["watch_running"])
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -208,6 +222,9 @@ func TestMediaSourceControllerUpdateStartsWatchWhenEnabled(t *testing.T) {
 	if data["auto_organize"] != true {
 		t.Fatalf("expected auto_organize to stay enabled, got %#v", data["auto_organize"])
 	}
+	if data["watch_running"] != true {
+		t.Fatalf("expected watch to be reported as running, got %#v", data["watch_running"])
+	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
@@ -218,4 +235,5 @@ func TestMediaSourceControllerSyncWatchStateNilSafety(t *testing.T) {
 	controller := NewMediaSourceController(nil, nil, nil, nil)
 	controller.syncWatchState(nil)
 	controller.stopWatchState(1)
+	controller.populateWatchStatus(nil)
 }

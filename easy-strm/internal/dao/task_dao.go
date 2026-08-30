@@ -154,6 +154,23 @@ func (t *TaskRedisDAO) UpdateProgress(taskID string, totalFiles, processedFiles,
 	return t.save(taskID, task)
 }
 
+// UpdateProgressPercent 更新非文件型任务的真实百分比，不伪造文件统计。
+func (t *TaskRedisDAO) UpdateProgressPercent(taskID string, progress int) error {
+	task, err := t.Get(taskID)
+	if err != nil || task == nil {
+		return err
+	}
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 100 {
+		progress = 100
+	}
+	task["progress"] = progress
+	task["update_time"] = time.Now().Format("2006-01-02 15:04:05")
+	return t.save(taskID, task)
+}
+
 // SetError 设置任务错误信息
 func (t *TaskRedisDAO) SetError(taskID, errMsg string) error {
 	task, err := t.Get(taskID)

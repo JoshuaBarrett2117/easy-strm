@@ -59,7 +59,7 @@
           :columns="columns"
           :data="cloud115List"
           :row-key="(row) => row.id"
-          :scroll-x="1720"
+          :scroll-x="1760"
           size="small"
           @update:sorter="handleSorterChange"
         >
@@ -91,6 +91,12 @@
         </n-form-item>
         <n-form-item label="Cookie" path="cookie">
           <n-input v-model:value="form.cookie" type="textarea" placeholder="请输入 115 云账号 Cookie" :rows="3" />
+        </n-form-item>
+        <n-form-item label="Cookie 来源" path="cookie_source">
+          <div class="w-full">
+            <n-input v-model:value="form.cookie_source" placeholder="例如：R2 支付宝小程序、浏览器手动获取" maxlength="100" show-count />
+            <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">用于区分 Cookie 的获取端；扫码登录时会自动记录所选渠道。</p>
+          </div>
         </n-form-item>
         <n-form-item label="账号类型" path="account_type">
           <div>
@@ -337,6 +343,7 @@ const form = ref({
   id: null,
   name: '',
   cookie: '',
+  cookie_source: '',
   access_token: '',
   refresh_token: '',
   transfer_account_id: null,
@@ -468,10 +475,36 @@ const statusRailItems = computed(() => [
   { label: '转存配置覆盖', value: transferCoverageText.value }
 ])
 
+/**
+ * 格式化从 Cookie UID 自动解析出的账号与渠道信息。
+ * @param {Object} row - 账号数据
+ * @returns {string} UID 与渠道说明
+ */
+const formatCookieIdentity = (row) => {
+  if (!row.cookie_uid) return ''
+  const source = row.cookie_source || '未知渠道'
+  const ssoent = row.cookie_ssoent || ''
+  const channel = ssoent && !source.toUpperCase().startsWith(ssoent)
+    ? `${ssoent} ${source}`
+    : source
+  return `UID - ${row.cookie_uid}${channel ? ` (${channel})` : ''}`
+}
+
 // 表格列定义
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 64, align: 'center', sorter: true, defaultSortOrder: 'ascend' },
-  { title: '名称', key: 'name', minWidth: 120, sorter: true },
+  {
+    title: '账号',
+    key: 'name',
+    minWidth: 230,
+    sorter: true,
+    render: (row) => h('div', { class: 'space-y-1' }, [
+      h('div', { class: 'font-medium text-slate-800 dark:text-slate-100' }, row.name || `账号 ${row.id}`),
+      row.cookie_uid
+        ? h('div', { class: 'text-xs text-slate-500 dark:text-slate-400' }, formatCookieIdentity(row))
+        : h('div', { class: 'text-xs text-slate-400 dark:text-slate-500' }, 'Cookie UID 无法识别')
+    ])
+  },
   {
     title: '账号类型',
     key: 'account_type',
@@ -524,6 +557,20 @@ const columns = computed(() => [
     ])
   },
   {
+    title: 'Cookie 来源',
+    key: 'cookie_source',
+    minWidth: 130,
+    align: 'center',
+    render: (row) => row.cookie_source
+      ? h('div', { class: 'flex flex-col items-center gap-1' }, [
+          h(NTag, { type: 'info', size: 'small', bordered: false }, { default: () => row.cookie_source }),
+          row.cookie_source_inferred
+            ? h('span', { class: 'text-[11px] text-slate-400 dark:text-slate-500' }, '由 UID 自动识别')
+            : null
+        ])
+      : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '未标注')
+  },
+  {
     title: '转存账号',
     key: 'transfer_account_id',
     minWidth: 110,
@@ -554,29 +601,28 @@ const columns = computed(() => [
       : h('span', { class: 'text-xs text-slate-400 dark:text-slate-500' }, '-')
   },
   { title: '创建时间', key: 'create_time', width: 160, align: 'center', sorter: true },
-  { title: '更新时间', key: 'update_time', width: 160, align: 'center', sorter: true },
   {
     title: '操作',
     key: 'actions',
-    width: 320,
+    width: 280,
     align: 'center',
     fixed: 'right',
-    render: (row) => h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' }, [
+    render: (row) => h('div', { class: 'flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap' }, [
       h(
         NButton,
-        { type: 'primary', size: 'small', onClick: () => handleEdit(row) },
+        { type: 'primary', size: 'tiny', onClick: () => handleEdit(row) },
         { icon: () => h(NIcon, { component: CreateOutline }), default: () => '编辑' }
       ),
       h(
         NButton,
-        { type: 'success', size: 'small', onClick: () => handleQRCodeUpdate(row) },
+        { type: 'success', size: 'tiny', onClick: () => handleQRCodeUpdate(row) },
         { icon: () => h(NIcon, { component: KeyOutline }), default: () => '扫码更新' }
       ),
       h(
         NButton,
         {
           type: 'warning',
-          size: 'small',
+          size: 'tiny',
           loading: testingAccountId.value === row.id,
           onClick: () => handleTest(row)
         },
@@ -584,7 +630,7 @@ const columns = computed(() => [
       ),
       h(
         NButton,
-        { type: 'error', size: 'small', onClick: () => handleDelete(row) },
+        { type: 'error', size: 'tiny', onClick: () => handleDelete(row) },
         { icon: () => h(NIcon, { component: TrashOutline }), default: () => '删除' }
       )
     ])
@@ -700,6 +746,8 @@ const handleEdit = (row) => {
     id: row.id,
     name: row.name || '',
     cookie: row.cookie || '',
+    // UID 推断值只用于展示，避免编辑其他字段时将旧渠道误固化为人工来源。
+    cookie_source: row.cookie_source_inferred ? '' : (row.cookie_source || ''),
     access_token: row.access_token || '',
     refresh_token: row.refresh_token || '',
     transfer_account_id: row.transfer_account_id || null,
@@ -784,6 +832,7 @@ const resetForm = () => {
     id: null,
     name: '',
     cookie: '',
+    cookie_source: '',
     access_token: '',
     refresh_token: '',
     transfer_account_id: null,

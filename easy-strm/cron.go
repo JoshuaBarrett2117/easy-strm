@@ -539,15 +539,20 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	Info("[cron] Found %d files for full STRM generation", result.Total)
 	UpdateTaskProgress(taskID, result.Total, 0, 0, 0)
 
-	if result.Total == 0 {
-		return result, nil
+	// 全量生成必须先清空目标目录，避免已从网盘移除的旧文件继续残留。
+	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	if err := generator.CleanupStrmFiles(); err != nil {
+		return nil, fmt.Errorf("清空STRM目标目录失败: %v", err)
 	}
 
 	if err := DeleteStrmFilesByConfigID(strmConfig.ID); err != nil {
 		Warn("[cron] Failed to delete existing STRM file records: %v", err)
 	}
 
-	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	if result.Total == 0 {
+		return result, nil
+	}
+
 	processedFiles := 0
 	successFiles := 0
 	failedFiles := 0

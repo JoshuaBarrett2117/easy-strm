@@ -1,0 +1,34 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "location": {
+    "backend_model": ["easy-strm/db_models.go", "easy-strm/internal/domain/models.go"],
+    "backend_data": ["easy-strm/db.go", "easy-strm/db_cloud115.go", "easy-strm/internal/dao/cloud115_dao.go"],
+    "backend_api": ["easy-strm/internal/controller/cloud115_controller.go", "easy-strm/internal/controller/cloud115_login_controller.go", "easy-strm/auth.go"],
+    "frontend": ["easy-strm-front/src/views/Cloud115.vue", "easy-strm-front/src/utils/api/cloud115.js"]
+  },
+  "current_behavior": "账号仅保存 Cookie 本体；Cookie 扫码登录已携带 app 渠道，但持久化时丢弃该信息，列表无法判断 Cookie 来源。",
+  "similar_patterns": [
+    "account_type、transfer_method 等账号元数据均作为 t_cloud_115 独立字段贯穿模型、DAO、接口和表单",
+    "登录渠道接口已返回 value、label、description，可复用 label 作为自动来源文案",
+    "历史字段通过 COALESCE 和 db.go 的幂等 ALTER TABLE 兼容已有数据库"
+  ],
+  "stack": ["Go", "Gin", "PostgreSQL", "Vue 3", "Naive UI", "Vite"],
+  "tests": ["go test ./...", "npm run build"],
+  "observations": [
+    "主程序仍通过 db_cloud115.go 与回调适配器访问账号，internal DAO 同时被服务层使用，因此两条数据链都要同步。",
+    "Cloud115.vue 已有用户未提交的操作列布局修改，本任务只在其现状上追加字段。",
+    "扫码更新请求携带 cloud_id，但现有回调未消费；为了保证来源与 Cookie 同步更新，需要一并修正该链路。"
+  ],
+  "questions": [
+    {"priority": "high", "question": "来源是自动枚举还是自由文本？", "decision": "持久化自由文本；扫码渠道自动填充可读标签，手动配置可自行填写，以支持图示中的自定义来源。"},
+    {"priority": "high", "question": "历史数据如何处理？", "decision": "字段默认空字符串；API 从 UID 三段式结构识别用户 ID、ssoent 与渠道，人工来源优先。"},
+    {"priority": "medium", "question": "开放平台 Token 是否属于 Cookie 来源？", "decision": "不写 Cookie 来源；该字段只描述 Cookie。"}
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "risks_identified": true,
+    "verification_known": true
+  }
+}

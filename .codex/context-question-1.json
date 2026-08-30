@@ -1,0 +1,11 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "why": "确认全量生成的清理时机与空结果语义，避免远端读取失败时提前删除现有文件。",
+  "evidence": [
+    "easy-strm/cron.go 先导出、下载并解析 115 目录树，再进入本地生成循环。",
+    "easy-strm/strm.go 的 GenerateSingleStrmFile 会按需重建子目录。",
+    "现有 CleanupStrmFiles 未被调用且会删除输出目录本身。"
+  ],
+  "decision": "复用并修正 CleanupStrmFiles，使其保留目标目录、删除所有直接子项；RunFullStrmGenerate 在远端解析完成后无条件调用，再删除数据库记录，最后按视频集合重建。"
+}

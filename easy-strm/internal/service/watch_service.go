@@ -3,12 +3,15 @@ package service
 import (
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	driver "github.com/SheltonZhu/115driver/pkg/driver"
 	"github.com/fsnotify/fsnotify"
 
 	"easy-strm/internal/dao"
@@ -35,6 +38,7 @@ var videoExtensions = map[string]bool{
 
 const defaultDebounceInterval = 30 * time.Second
 const defaultCloud115MinInterval = 60
+const cloud115WatchPageSize = 1000
 const watchAutoOrganizeTaskType = "watch_auto_organize"
 
 type watchTaskManager interface {
@@ -62,16 +66,22 @@ type WatchService struct {
 }
 
 type localWatchState struct {
-	source     *domain.MediaSource
-	debounce   map[string]*time.Timer
-	debounceMu sync.Mutex
+	source      *domain.MediaSource
+	debounce    map[string]*time.Timer
+	watchedDirs map[string]struct{}
+	debounceMu  sync.Mutex
 }
 
 type cloud115WatchState struct {
 	source     *domain.MediaSource
 	ticker     *time.Ticker
 	stopCh     chan struct{}
-	knownFiles map[string]bool
+	knownFiles map[string]cloud115WatchFile
+}
+
+type cloud115WatchFile struct {
+	FileID   string
+	FileName string
 }
 
 type watchFailureItem struct {
@@ -89,6 +99,115 @@ func resolveWatchPath(source *domain.MediaSource) string {
 		return trimmed
 	}
 	return strings.TrimSpace(source.Path)
+}
+
+func collectLocalWatchTree(root string) ([]string, []string, error) {
+	directories := make([]string, 0)
+	videos := make([]string, 0)
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			directories = append(directories, path)
+			return nil
+		}
+		if videoExtensions[strings.ToLower(filepath.Ext(entry.Name()))] {
+			videos = append(videos, path)
+		}
+		return nil
+	})
+	return directories, videos, err
+}
+
+func collectCloud115VideoFileSet(rootCID int, listPage func(cid, offset, limit int) (*driver.FileListResp, error)) (map[string]cloud115WatchFile, error) {
+	type pendingDirectory struct {
+		cid          int
+		relativePath string
+	}
+
+	fileSet := make(map[string]cloud115WatchFile)
+	pending := []pendingDirectory{{cid: rootCID}}
+	visited := make(map[int]bool)
+
+	for len(pending) > 0 {
+		current := pending[0]
+		pending = pending[1:]
+		cid := current.cid
+		if visited[cid] {
+			continue
+		}
+		visited[cid] = true
+
+		for offset := 0; ; offset += cloud115WatchPageSize {
+			page, err := listPage(cid, offset, cloud115WatchPageSize)
+			if err != nil {
+				return nil, err
+			}
+			if page == nil || len(page.Files) == 0 {
+				break
+			}
+
+			for _, file := range page.Files {
+				if file.FileID == "" || file.Type == "folder" {
+					directoryID, parseErr := strconv.Atoi(string(file.CategoryID))
+					if parseErr != nil {
+						return nil, fmt.Errorf("115 子目录ID无效: name=%s, cid=%s", file.Name, file.CategoryID)
+					}
+					pending = append(pending, pendingDirectory{
+						cid:          directoryID,
+						relativePath: path.Join(current.relativePath, file.Name),
+					})
+					continue
+				}
+				if !videoExtensions[strings.ToLower(filepath.Ext(file.Name))] {
+					continue
+				}
+				pickcode := file.PickCode
+				if pickcode == "" {
+					pickcode = file.FileID
+				}
+				if pickcode != "" {
+					fileSet[pickcode] = cloud115WatchFile{
+						FileID:   path.Join(current.relativePath, file.Name),
+						FileName: file.Name,
+					}
+				}
+			}
+
+			if len(page.Files) < cloud115WatchPageSize {
+				break
+			}
+		}
+	}
+
+	return fileSet, nil
+}
+
+func findNewCloud115FileIDs(knownFiles, currentFiles map[string]cloud115WatchFile) []string {
+	newFiles := make([]string, 0)
+	for identity, file := range currentFiles {
+		if _, exists := knownFiles[identity]; exists {
+			continue
+		}
+		if file.FileID != "" {
+			newFiles = append(newFiles, file.FileID)
+		}
+	}
+	sort.Strings(newFiles)
+	return newFiles
+}
+
+func resolveCloud115WatchFileIDs(fileIDs []string, currentFiles map[string]cloud115WatchFile) []string {
+	resolved := make([]string, 0, len(fileIDs))
+	for _, fileID := range fileIDs {
+		if file, exists := currentFiles[fileID]; exists && file.FileID != "" {
+			resolved = append(resolved, file.FileID)
+			continue
+		}
+		resolved = append(resolved, fileID)
+	}
+	return resolved
 }
 
 func NewWatchService(
@@ -303,6 +422,17 @@ func (ws *WatchService) StartWatching(sourceID int) error {
 	}
 }
 
+// IsWatching 返回指定媒体源是否已在当前进程中实际运行监控。
+func (ws *WatchService) IsWatching(sourceID int) bool {
+	ws.mu.RLock()
+	defer ws.mu.RUnlock()
+	if _, exists := ws.localWatches[sourceID]; exists {
+		return true
+	}
+	_, exists := ws.cloud115Watches[sourceID]
+	return exists
+}
+
 func (ws *WatchService) StopWatching(sourceID int) {
 	ws.mu.Lock()
 	defer ws.mu.Unlock()
@@ -314,7 +444,21 @@ func (ws *WatchService) StopWatching(sourceID int) {
 		}
 		state.debounceMu.Unlock()
 		if ws.watcher != nil {
-			_ = ws.watcher.Remove(resolveWatchPath(state.source))
+			for directory := range state.watchedDirs {
+				usedByAnotherSource := false
+				for otherID, otherState := range ws.localWatches {
+					if otherID == sourceID {
+						continue
+					}
+					if _, exists := otherState.watchedDirs[directory]; exists {
+						usedByAnotherSource = true
+						break
+					}
+				}
+				if !usedByAnotherSource {
+					_ = ws.watcher.Remove(directory)
+				}
+			}
 		}
 		delete(ws.localWatches, sourceID)
 	}
@@ -349,14 +493,31 @@ func (ws *WatchService) startLocalWatching(source *domain.MediaSource) error {
 		return fmt.Errorf("目录不存在或不可访问: %s", watchPath)
 	}
 
-	if err := ws.watcher.Add(watchPath); err != nil {
-		return fmt.Errorf("添加监控目录失败: %s, error: %v", watchPath, err)
+	directories, _, err := collectLocalWatchTree(watchPath)
+	if err != nil {
+		return fmt.Errorf("扫描监控目录失败: %s, error: %v", watchPath, err)
+	}
+	addedDirectories := make([]string, 0, len(directories))
+	for _, directory := range directories {
+		if err := ws.watcher.Add(directory); err != nil {
+			for _, addedDirectory := range addedDirectories {
+				_ = ws.watcher.Remove(addedDirectory)
+			}
+			return fmt.Errorf("添加监控目录失败: %s, error: %v", directory, err)
+		}
+		addedDirectories = append(addedDirectories, directory)
 	}
 
-	ws.localWatches[source.ID] = &localWatchState{
-		source:   source,
-		debounce: make(map[string]*time.Timer),
+	watchedDirs := make(map[string]struct{}, len(directories))
+	for _, directory := range directories {
+		watchedDirs[directory] = struct{}{}
 	}
+	ws.localWatches[source.ID] = &localWatchState{
+		source:      source,
+		debounce:    make(map[string]*time.Timer),
+		watchedDirs: watchedDirs,
+	}
+	logger.Infof("[WatchService] local watch started: source_id=%d, directories=%d", source.ID, len(directories))
 	return nil
 }
 
@@ -385,15 +546,10 @@ func (ws *WatchService) processLocalEvent(event fsnotify.Event) {
 	}
 
 	filePath := event.Name
-	ext := strings.ToLower(filepath.Ext(filePath))
-	if !videoExtensions[ext] {
-		return
-	}
-
 	ws.mu.RLock()
 	var matchedState *localWatchState
 	for _, state := range ws.localWatches {
-		if strings.HasPrefix(filePath, resolveWatchPath(state.source)) {
+		if isPathWithin(resolveWatchPath(state.source), filePath) {
 			matchedState = state
 			break
 		}
@@ -403,19 +559,71 @@ func (ws *WatchService) processLocalEvent(event fsnotify.Event) {
 	if matchedState == nil {
 		return
 	}
+	if info, err := os.Stat(filePath); err == nil && info.IsDir() {
+		ws.registerLocalDirectoryTree(matchedState.source.ID, filePath)
+		return
+	}
+	if !videoExtensions[strings.ToLower(filepath.Ext(filePath))] {
+		return
+	}
 
-	source := matchedState.source
-	matchedState.debounceMu.Lock()
-	if timer, exists := matchedState.debounce[filePath]; exists {
+	ws.scheduleLocalFile(matchedState, filePath)
+}
+
+func isPathWithin(root, target string) bool {
+	relative, err := filepath.Rel(filepath.Clean(root), filepath.Clean(target))
+	if err != nil {
+		return false
+	}
+	return relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)))
+}
+
+func (ws *WatchService) registerLocalDirectoryTree(sourceID int, root string) {
+	directories, videos, err := collectLocalWatchTree(root)
+	if err != nil {
+		logger.Warnf("[WatchService] scan new local directory failed: source_id=%d, path=%s, error=%v", sourceID, root, err)
+		return
+	}
+
+	ws.mu.Lock()
+	state, exists := ws.localWatches[sourceID]
+	if !exists || ws.watcher == nil {
+		ws.mu.Unlock()
+		return
+	}
+	for _, directory := range directories {
+		if _, exists := state.watchedDirs[directory]; exists {
+			continue
+		}
+		if err := ws.watcher.Add(directory); err != nil {
+			logger.Warnf("[WatchService] add new local directory failed: source_id=%d, path=%s, error=%v", sourceID, directory, err)
+			continue
+		}
+		state.watchedDirs[directory] = struct{}{}
+	}
+	ws.mu.Unlock()
+
+	for _, video := range videos {
+		ws.scheduleLocalFile(state, video)
+	}
+}
+
+func (ws *WatchService) scheduleLocalFile(state *localWatchState, filePath string) {
+	if state == nil {
+		return
+	}
+	source := state.source
+	state.debounceMu.Lock()
+	if timer, exists := state.debounce[filePath]; exists {
 		timer.Stop()
 	}
-	matchedState.debounce[filePath] = time.AfterFunc(defaultDebounceInterval, func() {
-		matchedState.debounceMu.Lock()
-		delete(matchedState.debounce, filePath)
-		matchedState.debounceMu.Unlock()
+	state.debounce[filePath] = time.AfterFunc(defaultDebounceInterval, func() {
+		state.debounceMu.Lock()
+		delete(state.debounce, filePath)
+		state.debounceMu.Unlock()
 		ws.processNewLocalFile(source, filePath)
 	})
-	matchedState.debounceMu.Unlock()
+	state.debounceMu.Unlock()
 }
 
 func (ws *WatchService) processNewLocalFile(source *domain.MediaSource, filePath string) {
@@ -454,8 +662,7 @@ func (ws *WatchService) startCloud115Watching(source *domain.MediaSource) error 
 
 	knownFiles, err := ws.fetchCloud115FileSet(source)
 	if err != nil {
-		logger.Warnf("[WatchService] init cloud115 file list failed: source_id=%d, error=%v", source.ID, err)
-		knownFiles = make(map[string]bool)
+		return fmt.Errorf("初始化115监控目录失败: %w", err)
 	}
 
 	state := &cloud115WatchState{
@@ -466,6 +673,7 @@ func (ws *WatchService) startCloud115Watching(source *domain.MediaSource) error 
 	}
 	ws.cloud115Watches[source.ID] = state
 	go ws.cloud115PollLoop(state)
+	logger.Infof("[WatchService] cloud115 watch started: source_id=%d, known_files=%d, interval=%d", source.ID, len(knownFiles), interval)
 	return nil
 }
 
@@ -499,12 +707,7 @@ func (ws *WatchService) pollCloud115Directory(state *cloud115WatchState) {
 		return
 	}
 
-	var newFiles []string
-	for pickcode := range currentFiles {
-		if !state.knownFiles[pickcode] {
-			newFiles = append(newFiles, pickcode)
-		}
-	}
+	newFiles := findNewCloud115FileIDs(state.knownFiles, currentFiles)
 	state.knownFiles = currentFiles
 
 	if len(newFiles) == 0 || !latestSource.AutoOrganize {
@@ -513,7 +716,7 @@ func (ws *WatchService) pollCloud115Directory(state *cloud115WatchState) {
 	ws.triggerAutoOrganize(latestSource, resolveWatchPath(latestSource), newFiles)
 }
 
-func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[string]bool, error) {
+func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[string]cloud115WatchFile, error) {
 	if source.Cloud115ID == nil {
 		return nil, fmt.Errorf("未关联 115 账号")
 	}
@@ -537,31 +740,12 @@ func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[st
 		return nil, fmt.Errorf("115 监控目录解析结果无效")
 	}
 
-	fileList, err := ws.client.GetFileList(cid, 1, 0, 1000, cloud115.ID, cloud115.Cookie)
+	fileSet, err := collectCloud115VideoFileSet(cid, func(currentCID, offset, limit int) (*driver.FileListResp, error) {
+		return ws.client.GetFileList(currentCID, 1, offset, limit, cloud115.ID, cloud115.Cookie)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("获取 115 文件列表失败: %v", err)
 	}
-
-	fileSet := make(map[string]bool, len(fileList.Files))
-	for _, f := range fileList.Files {
-		isDir := f.FileID == "" || f.Type == "folder"
-		if isDir {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(f.Name))
-		if !videoExtensions[ext] {
-			continue
-		}
-
-		pickcode := f.PickCode
-		if pickcode == "" {
-			pickcode = f.FileID
-		}
-		if pickcode != "" {
-			fileSet[pickcode] = true
-		}
-	}
-
 	return fileSet, nil
 }
 
@@ -708,6 +892,13 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 	}
 	if source == nil {
 		return fmt.Errorf("媒体源不存在")
+	}
+	if source.SourceType == domain.SourceTypeCloud115 {
+		currentFiles, fetchErr := ws.fetchCloud115FileSet(source)
+		if fetchErr != nil {
+			return fmt.Errorf("恢复任务前解析 115 文件失败: %v", fetchErr)
+		}
+		fileIDs = resolveCloud115WatchFileIDs(fileIDs, currentFiles)
 	}
 
 	sourcePath := resolveRetrySourcePath(metadata, source, fileIDs)

@@ -18,6 +18,8 @@ const CacheCenter = () => import('./views/dashboard/CacheCenter.vue')
 const ResourceAggregation = () => import('./views/ResourceAggregation.vue')
 const FilenameRecognition = () => import('./views/FilenameRecognition.vue')
 const FileManager = () => import('./views/FileManager.vue')
+const EmbyManagement = () => import('./views/EmbyManagement.vue')
+const EmbyMonitor = () => import('./views/EmbyMonitor.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -116,6 +118,24 @@ const routes = [
         }
       },
       {
+        path: 'emby-management',
+        component: EmbyManagement,
+        meta: {
+          adminOnly: true,
+          title: 'Emby 管理',
+          description: '管理多个 Emby 实例、用户、媒体库、封面和神医助手任务。'
+        }
+      },
+      {
+        path: 'emby-monitor',
+        component: EmbyMonitor,
+        meta: {
+          adminOnly: true,
+          title: 'Emby 监控',
+          description: '查看 Emby 实时播放、历史排行、活跃热力图和最近入库。'
+        }
+      },
+      {
         path: 'settings',
         component: Settings,
         meta: {
@@ -147,6 +167,8 @@ router.beforeEach((to, from, next) => {
   if (!token && !isLoginPage) {
     next('/login')
   } else if (token && isLoginPage) {
+    next('/dashboard/home')
+  } else if (to.meta.adminOnly && localStorage.getItem('user_name') !== 'admin') {
     next('/dashboard/home')
   } else {
     next()

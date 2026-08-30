@@ -37,6 +37,7 @@ type Cloud115AccountBrief struct {
 	ID                int
 	Name              string
 	Cookie            string
+	CookieSource      string
 	RefreshToken      string
 	AccessToken       string
 	ExpiresIn         int

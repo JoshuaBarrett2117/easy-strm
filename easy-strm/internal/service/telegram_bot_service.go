@@ -520,7 +520,7 @@ func sendTelegramCard(ctx context.Context, instance *telegram.Bot, chatID string
 
 func buildTaskCard(task map[string]interface{}, detailed bool) NotificationCard {
 	status := fmt.Sprint(task["status"])
-	statusIcon := map[string]string{"completed": "✅", "failed": "❌", "partial_failed": "⚠️", "cancelled": "⏹", "running": "🔄", "pending": "⏳"}[status]
+	statusIcon := map[string]string{"completed": "✅", "success": "✅", "failed": "❌", "partial_failed": "⚠️", "partial_success": "⚠️", "unknown": "❔", "cancelled": "⏹", "running": "🔄", "pending": "⏳"}[status]
 	if statusIcon == "" {
 		statusIcon = "ℹ️"
 	}

@@ -1,0 +1,44 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "企业微信应用通知渠道",
+  "location": [
+    "easy-strm/internal/service/notification_service.go",
+    "easy-strm/internal/service/notification_config_service.go",
+    "easy-strm/internal/service/notification_event_monitor.go",
+    "easy-strm/internal/controller/notification_controller.go",
+    "easy-strm/auth.go",
+    "easy-strm-front/src/utils/api/notification.js",
+    "easy-strm-front/src/views/Settings.vue"
+  ],
+  "current_state": [
+    "通知配置统一保存在 t_notification_config 的渠道 JSON 中",
+    "Telegram 已有结构化卡片、专用配置接口和任务/账号事件监控",
+    "Server 酱和 SMTP 继续使用通用通知接口",
+    "应用已提供可复用的代理感知 http.Client"
+  ],
+  "similar_patterns": [
+    "Telegram 配置的敏感字段脱敏和空值保留",
+    "Telegram 任务终态与账号状态事件基线及 Redis 去重",
+    "Server 酱通过 NotificationService 复用注入的 HTTP 客户端"
+  ],
+  "interface_contract": {
+    "config": "GET/PUT /notify/wecom/config",
+    "test": "POST /notify/wecom/test",
+    "provider_api": "GET /cgi-bin/gettoken; POST /cgi-bin/message/send",
+    "message_type": "markdown"
+  },
+  "risks": [
+    "应用 Secret 不得通过读取和兼容接口返回",
+    "企业微信 Markdown 按字节限制而非字符限制",
+    "企业微信和 Telegram 不能共享事件抢占键",
+    "首次启用企业微信不能补发历史任务"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前会话未提供 sequential-thinking、shrimp-task-manager、code-index、exa；使用结构化分析、update_plan、rg、PowerShell、apply_patch 和本地自动化测试替代。"
+}

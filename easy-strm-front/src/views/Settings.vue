@@ -34,16 +34,16 @@
               </div>
             </n-form-item>
 
-            <n-form-item label="代理站点列表">
+            <n-form-item label="自定义代理站点（可选）">
               <div class="w-full">
                 <n-input
                   v-model:value="form.proxy_domains"
                   type="textarea"
                   :rows="3"
-                  placeholder="支持逗号或换行,例如:tg,github"
+                  placeholder="填写需要额外走代理的域名"
                 />
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
-                  按域名匹配,可填 `tg`、`github` 或完整域名(如 `api.telegram.org`)。
+                  Telegram、GitHub、TMDB 已默认走代理；此处仅需填写额外站点，支持别名或完整域名。
                 </p>
               </div>
             </n-form-item>
@@ -194,8 +194,9 @@
           </n-form>
         </n-tab-pane>
 
-        <!-- Telegram 通知 -->
+        <!-- 通知渠道 -->
         <n-tab-pane name="notification" tab="通知">
+          <h2 class="mb-4 text-base font-bold text-slate-800 dark:text-white">Telegram 机器人</h2>
           <n-form :model="telegramForm" label-placement="top" class="max-w-2xl">
             <div class="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-white/5">
               <div class="flex flex-wrap items-center gap-2">
@@ -285,6 +286,155 @@
               <n-button :loading="telegramStatusLoading" @click="fetchTelegramStatus">
                 <template #icon><n-icon :component="RefreshOutline" /></template>
                 刷新状态
+              </n-button>
+            </div>
+
+            <h3 class="mb-3 mt-8 text-sm font-bold text-slate-800 dark:text-white">第三方 API</h3>
+            <n-form-item label="启用全局 API Key">
+              <n-switch v-model:value="globalApiForm.enabled" />
+            </n-form-item>
+            <n-form-item label="外部 API 地址">
+              <n-input v-model:value="globalApiForm.base_url" placeholder="例如 https://example.com/api" clearable />
+            </n-form-item>
+            <n-form-item label="API Key">
+              <n-input v-model:value="globalApiForm.api_key" type="password" show-password-on="click" :placeholder="globalApiForm.has_api_key ? '已配置，留空保持不变' : '保存时自动生成'" />
+              <p class="mt-1 text-xs text-slate-400">第三方请求请使用 X-API-Key 请求头访问现有 API。</p>
+            </n-form-item>
+            <n-button type="primary" :loading="globalApiLoading" @click="saveGlobalApi">保存 API 配置</n-button>
+          </n-form>
+
+          <n-divider class="my-8" />
+          <h2 class="mb-1 text-base font-bold text-slate-800 dark:text-white">企业微信应用</h2>
+          <p class="mb-5 text-sm text-slate-500 dark:text-slate-400">
+            使用企业微信自建应用发送 Markdown 通知，请在应用可见范围内配置接收成员、部门或标签。
+          </p>
+          <n-form :model="weComForm" label-placement="top" class="max-w-2xl">
+            <n-form-item label="启用企业微信应用通知">
+              <n-switch v-model:value="weComForm.enabled">
+                <template #checked>启用</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+            </n-form-item>
+
+            <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+              <n-form-item label="企业 ID（Corp ID）">
+                <n-input v-model:value="weComForm.corp_id" placeholder="例如：wwxxxxxxxxxxxxxxxx" clearable />
+              </n-form-item>
+              <n-form-item label="应用 Agent ID">
+                <n-input v-model:value="weComForm.agent_id" placeholder="例如：1000002" clearable />
+              </n-form-item>
+            </div>
+
+            <n-form-item label="应用 Secret">
+              <div class="w-full">
+                <n-input
+                  v-model:value="weComForm.secret"
+                  type="password"
+                  show-password-on="click"
+                  clearable
+                  :placeholder="weComForm.has_secret ? '已配置，留空则保持不变' : '请输入企业微信应用 Secret'"
+                />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  Secret 不会通过配置读取接口返回；保存时留空会保留原值。
+                </p>
+              </div>
+            </n-form-item>
+
+            <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-2">
+              <n-form-item label="接收成员">
+                <n-input v-model:value="weComForm.to_user" placeholder="成员账号用 | 分隔，全部成员填 @all" clearable />
+              </n-form-item>
+              <n-form-item label="接收部门">
+                <n-input v-model:value="weComForm.to_party" placeholder="部门 ID 用 | 分隔" clearable />
+              </n-form-item>
+              <n-form-item label="接收标签">
+                <n-input v-model:value="weComForm.to_tag" placeholder="标签 ID 用 | 分隔" clearable />
+              </n-form-item>
+            </div>
+            <p class="-mt-3 mb-5 text-xs text-slate-400 dark:text-slate-500">
+              接收成员、部门、标签至少填写一项。
+            </p>
+
+            <n-divider class="my-6" />
+            <h3 class="mb-3 text-sm font-bold text-slate-800 dark:text-white">API 接收消息</h3>
+            <n-form-item label="启用 API 接收消息">
+              <n-switch v-model:value="weComForm.receive_enabled">
+                <template #checked>启用</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+            </n-form-item>
+            <n-alert type="info" :show-icon="true" :closable="false" class="mb-5">
+              企业微信必须能通过公网 HTTPS 访问下方 URL。回调接口不使用系统登录 Token，而是校验企业微信消息签名并解密消息。
+            </n-alert>
+            <n-form-item label="回调 URL">
+              <n-input-group>
+                <n-input :value="weComCallbackURL" readonly />
+                <n-button @click="copyWeComCallbackURL">复制</n-button>
+              </n-input-group>
+            </n-form-item>
+            <n-form-item label="回调 Token">
+              <div class="w-full">
+                <n-input-group>
+                  <n-input
+                    v-model:value="weComForm.callback_token"
+                    type="password"
+                    show-password-on="click"
+                    clearable
+                    :placeholder="weComForm.has_callback_token ? '已配置，留空则保持不变' : '填写企业微信 API 接收消息页面中的 Token'"
+                  />
+                  <n-button @click="generateWeComCallbackToken">随机生成</n-button>
+                </n-input-group>
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  保存后将同一个 Token 填入企业微信后台；读取接口不会返回明文。
+                </p>
+              </div>
+            </n-form-item>
+            <n-form-item label="EncodingAESKey">
+              <div class="w-full">
+                <n-input-group>
+                  <n-input
+                    v-model:value="weComForm.encoding_aes_key"
+                    type="password"
+                    show-password-on="click"
+                    clearable
+                    :placeholder="weComForm.has_encoding_aes_key ? '已配置，留空则保持不变' : '请输入 43 位 EncodingAESKey'"
+                  />
+                  <n-button @click="generateWeComEncodingAESKey">随机生成</n-button>
+                </n-input-group>
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  必须为 43 位，并与企业微信后台保持完全一致；读取接口不会返回明文。
+                </p>
+              </div>
+            </n-form-item>
+
+            <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">通知事件</h3>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务成功</span>
+                <n-switch v-model:value="weComForm.notify_task_completed" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务失败</span>
+                <n-switch v-model:value="weComForm.notify_task_failed" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务取消</span>
+                <n-switch v-model:value="weComForm.notify_task_cancelled" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">115 账号状态</span>
+                <n-switch v-model:value="weComForm.notify_account_status" class="float-right" />
+              </div>
+            </div>
+
+            <div class="mt-6 flex flex-wrap gap-2">
+              <n-button type="primary" :loading="weComLoading" @click="handleWeComSubmit">
+                <template #icon><n-icon :component="CheckmarkOutline" /></template>
+                保存并应用
+              </n-button>
+              <n-button type="success" :loading="weComTesting" @click="handleWeComTest">
+                <template #icon><n-icon :component="PaperPlaneOutline" /></template>
+                发送测试通知
               </n-button>
             </div>
           </n-form>
@@ -411,7 +561,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   NTabs,
   NTabPane,
@@ -430,19 +580,25 @@ import {
 import { CheckmarkOutline, RefreshOutline, LinkOutline, PaperPlaneOutline } from '@vicons/ionicons5'
 import PageCard from '../components/common/PageCard.vue'
 import { getSettings, updateSettings } from '../utils/api/setting'
+import { getGlobalApiConfig, updateGlobalApiConfig } from '../utils/api/systemApi'
 import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media'
 import { getEmbyStatus } from '../utils/api/emby'
 import {
   getTelegramConfig,
   updateTelegramConfig,
   getTelegramStatus,
-  testTelegram
+  testTelegram,
+  getWeComConfig,
+  updateWeComConfig,
+  testWeCom
 } from '../utils/api/notification'
 
 const message = useMessage()
 
 const activeTab = ref('basic')
 const loading = ref(false)
+const globalApiLoading = ref(false)
+const globalApiForm = ref({ enabled: false, base_url: '', api_key: '', has_api_key: false })
 const tmdbLoading = ref(false)
 const initialForm = ref({})
 
@@ -480,8 +636,8 @@ const tmdbLanguageOptions = [
   { label: '韩语', value: 'ko' }
 ]
 
-const movieTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ year }}', '{{ videoFormat }}', '{{ fileExt }}']
-const tvTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ season }}', '{{ episode }}', '{{ year }}', '{{ videoFormat }}', '{{ fileExt }}']
+const movieTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ year }}', '{{ tmdbid }}', '{{ videoFormat }}', '{{ fileExt }}']
+const tvTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ season }}', '{{ episode }}', '{{ year }}', '{{ tmdbid }}', '{{ videoFormat }}', '{{ source }}', '{{ codec }}', '{{ fileExt }}']
 
 // --- Emby 配置 ---
 const embyForm = ref({
@@ -521,6 +677,69 @@ const telegramStatus = ref({
 const telegramLoading = ref(false)
 const telegramTesting = ref(false)
 const telegramStatusLoading = ref(false)
+
+// --- 企业微信应用配置 ---
+const weComForm = ref({
+  enabled: false,
+  corp_id: '',
+  agent_id: '',
+  secret: '',
+  has_secret: false,
+  receive_enabled: false,
+  callback_token: '',
+  has_callback_token: false,
+  encoding_aes_key: '',
+  has_encoding_aes_key: false,
+  to_user: '',
+  to_party: '',
+  to_tag: '',
+  notify_task_completed: true,
+  notify_task_failed: true,
+  notify_task_cancelled: true,
+  notify_account_status: true
+})
+const weComLoading = ref(false)
+const weComTesting = ref(false)
+const weComCallbackURL = computed(() => {
+  const base = (globalApiForm.value.base_url || window.location.origin).replace(/\/$/, '')
+  return `${base}${base.endsWith('/api') ? '' : '/api'}/notify/wecom/callback`
+})
+
+const fetchGlobalApiConfig = async () => {
+  try { const response = await getGlobalApiConfig({ skipGlobalErrorMessage: true }); const data = response.data.data || {}; globalApiForm.value = { enabled: !!data.enabled, base_url: data.base_url || '', api_key: '', has_api_key: !!data.has_api_key } } catch (error) { console.error('获取全局 API 配置失败:', error) }
+}
+const saveGlobalApi = async () => {
+  globalApiLoading.value = true
+  try { const response = await updateGlobalApiConfig(globalApiForm.value, { skipGlobalErrorMessage: true }); const data = response.data.data || {}; globalApiForm.value.has_api_key = !!data.has_api_key; globalApiForm.value.api_key = ''; message.success('全局 API 配置已保存') } catch (error) { message.error(error?.response?.data?.error || '保存失败') } finally { globalApiLoading.value = false }
+}
+
+const fetchWeComConfig = async () => {
+  try {
+    const response = await getWeComConfig({ skipGlobalErrorMessage: true })
+    const data = response.data.data || {}
+    weComForm.value = {
+      enabled: data.enabled || false,
+      corp_id: data.corp_id || '',
+      agent_id: data.agent_id || '',
+      secret: '',
+      has_secret: data.has_secret || false,
+      receive_enabled: data.receive_enabled || false,
+      callback_token: '',
+      has_callback_token: data.has_callback_token || false,
+      encoding_aes_key: '',
+      has_encoding_aes_key: data.has_encoding_aes_key || false,
+      to_user: data.to_user || '',
+      to_party: data.to_party || '',
+      to_tag: data.to_tag || '',
+      notify_task_completed: data.notify_task_completed !== false,
+      notify_task_failed: data.notify_task_failed !== false,
+      notify_task_cancelled: data.notify_task_cancelled !== false,
+      notify_account_status: data.notify_account_status !== false
+    }
+  } catch (error) {
+    console.error('获取企业微信配置失败:', error)
+  }
+}
 
 const fetchTelegramConfig = async () => {
   try {
@@ -802,10 +1021,115 @@ const handleTelegramTest = async () => {
   }
 }
 
+const handleWeComSubmit = async () => {
+  if (weComForm.value.enabled || weComForm.value.receive_enabled) {
+    if (!weComForm.value.corp_id.trim()) {
+      message.warning('请输入企业 ID')
+      return
+    }
+    if (!/^[1-9]\d*$/.test(weComForm.value.agent_id.trim())) {
+      message.warning('应用 Agent ID 必须是正整数')
+      return
+    }
+    if (!weComForm.value.secret.trim() && !weComForm.value.has_secret) {
+      message.warning('请输入应用 Secret')
+      return
+    }
+  }
+  if (weComForm.value.enabled && !weComForm.value.to_user.trim() && !weComForm.value.to_party.trim() && !weComForm.value.to_tag.trim()) {
+    message.warning('接收成员、部门或标签至少填写一项')
+    return
+  }
+  if (weComForm.value.receive_enabled) {
+    if (!weComForm.value.callback_token.trim() && !weComForm.value.has_callback_token) {
+      message.warning('请输入企业微信回调 Token')
+      return
+    }
+    if (weComForm.value.encoding_aes_key.trim()) {
+      if (weComForm.value.encoding_aes_key.trim().length !== 43) {
+        message.warning('EncodingAESKey 必须是 43 位')
+        return
+      }
+    } else if (!weComForm.value.has_encoding_aes_key) {
+      message.warning('请输入企业微信 EncodingAESKey')
+      return
+    }
+  }
+  weComLoading.value = true
+  try {
+    await updateWeComConfig(
+      {
+        enabled: weComForm.value.enabled,
+        corp_id: weComForm.value.corp_id.trim(),
+        agent_id: weComForm.value.agent_id.trim(),
+        secret: weComForm.value.secret.trim(),
+        receive_enabled: weComForm.value.receive_enabled,
+        callback_token: weComForm.value.callback_token.trim(),
+        encoding_aes_key: weComForm.value.encoding_aes_key.trim(),
+        to_user: weComForm.value.to_user.trim(),
+        to_party: weComForm.value.to_party.trim(),
+        to_tag: weComForm.value.to_tag.trim(),
+        notify_task_completed: weComForm.value.notify_task_completed,
+        notify_task_failed: weComForm.value.notify_task_failed,
+        notify_task_cancelled: weComForm.value.notify_task_cancelled,
+        notify_account_status: weComForm.value.notify_account_status
+      },
+      { skipGlobalErrorMessage: true }
+    )
+    message.success('企业微信配置已保存并应用')
+    await fetchWeComConfig()
+  } catch (error) {
+    message.error(error.response?.data?.error || '保存企业微信配置失败')
+  } finally {
+    weComLoading.value = false
+  }
+}
+
+const randomAlphaNumeric = length => {
+  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const values = new Uint8Array(length)
+  window.crypto.getRandomValues(values)
+  return Array.from(values, value => alphabet[value % alphabet.length]).join('')
+}
+
+const generateWeComCallbackToken = () => {
+  weComForm.value.callback_token = randomAlphaNumeric(32)
+}
+
+const generateWeComEncodingAESKey = () => {
+  const values = new Uint8Array(32)
+  window.crypto.getRandomValues(values)
+  const binary = Array.from(values, value => String.fromCharCode(value)).join('')
+  weComForm.value.encoding_aes_key = window.btoa(binary).replace(/=/g, '')
+}
+
+const copyWeComCallbackURL = async () => {
+  try {
+    await navigator.clipboard.writeText(weComCallbackURL.value)
+    message.success('企业微信回调 URL 已复制')
+  } catch (error) {
+    message.error('复制失败，请手动选择 URL')
+  }
+}
+
+const handleWeComTest = async () => {
+  weComTesting.value = true
+  try {
+    await testWeCom({ skipGlobalErrorMessage: true })
+    message.success('企业微信测试通知发送成功')
+  } catch (error) {
+    message.error(error.response?.data?.error || '企业微信测试失败')
+  } finally {
+    weComTesting.value = false
+  }
+}
+
 onMounted(() => {
   fetchSettings()
+  fetchGlobalApiConfig()
   fetchTmdbConfig()
   fetchTelegramConfig()
   fetchTelegramStatus()
+  fetchWeComConfig()
 })
 </script>

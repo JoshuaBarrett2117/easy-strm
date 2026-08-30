@@ -2,14 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
-	driver "github.com/SheltonZhu/115driver/pkg/driver"
 	"github.com/DATA-DOG/go-sqlmock"
+	driver "github.com/SheltonZhu/115driver/pkg/driver"
 )
 
 // 编译期接口一致性断言：确保 OrganizeService 满足 PostTransferOrganizer，
@@ -341,7 +342,11 @@ func TestRunPostTransferScrape115Degrade(t *testing.T) {
 
 // mockCloud115Client 实现 Cloud115Client 接口的测试桩：
 // 所有文件操作均成功返回，用于驱动 executeTransfer 完成一次完整转存。
-type mockCloud115Client struct{}
+type mockCloud115Client struct {
+	cid          string
+	cidErr       error
+	receiveCalls int
+}
 
 func (m *mockCloud115Client) GetFileList(cid int, showDir int, offset int, limit int, cloud115ID int, cookie string) (*driver.FileListResp, error) {
 	return &driver.FileListResp{}, nil
@@ -350,6 +355,12 @@ func (m *mockCloud115Client) GetPickCodeByPath(filePath string, cloud115ID int, 
 	return "", nil
 }
 func (m *mockCloud115Client) GetCIDByPath(path string, cloud115ID int, cookie string) (string, error) {
+	if m.cidErr != nil {
+		return "", m.cidErr
+	}
+	if m.cid != "" {
+		return m.cid, nil
+	}
 	return "123", nil
 }
 func (m *mockCloud115Client) RenameFile(fileID, newName string, cloud115ID int, cookie string) error {
@@ -374,7 +385,38 @@ func (m *mockCloud115Client) GetShareSnap(shareCode, receiveCode, dirID string, 
 	return &driver.ShareSnapResp{}, nil
 }
 func (m *mockCloud115Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error {
+	m.receiveCalls++
 	return nil
+}
+
+// TestExecuteTransferStopsWhenTargetDirectoryCannotResolve 验证指定目录解析失败时不会回退转存。
+// 静默回退会让115把文件放到根目录或“最近接收”，造成难以发现的错放。
+func TestExecuteTransferStopsWhenTargetDirectoryCannotResolve(t *testing.T) {
+	daoStore := newFakeTaskDAO()
+	if err := daoStore.Create("transfer-1", "share_transfer", "测试转存"); err != nil {
+		t.Fatalf("创建测试任务失败: %v", err)
+	}
+	client := &mockCloud115Client{cidErr: errors.New("directory lookup failed")}
+	svc := &ShareTransferService{taskDAO: daoStore, client: client}
+	req := domain.TransferRequest{
+		ShareCode:        "abc123",
+		TargetCloud115Id: 1,
+		TargetDirectory:  "/指定目录",
+		Files:            []domain.ShareTransferFileItem{{Fid: "fid1", Name: "movie.mkv"}},
+	}
+
+	svc.executeTransfer(context.Background(), "transfer-1", req, &domain.Cloud115{ID: 1})
+
+	if client.receiveCalls != 0 {
+		t.Fatalf("目录解析失败后不应调用ReceiveShare，实际调用 %d 次", client.receiveCalls)
+	}
+	task, err := daoStore.Get("transfer-1")
+	if err != nil || task == nil {
+		t.Fatalf("读取测试任务失败: %v", err)
+	}
+	if got := task["status"]; got != "failed" {
+		t.Fatalf("任务状态 = %v，期望 failed", got)
+	}
 }
 
 // TestExecuteTransferAutoOrganizeDisabledDoesNotCreateChildTasks 守护向后兼容硬约束：

@@ -156,6 +156,7 @@ import {
   LinkOutline,
   SearchOutline,
   SwapHorizontalOutline
+  ,PulseOutline
 } from '@vicons/ionicons5'
 import { useTheme } from '../composables/useTheme'
 import { showConfirmDialog } from '../utils/ui/messageBox'
@@ -167,7 +168,7 @@ const { isDark, toggleTheme } = useTheme()
 
 const mobileMenuOpen = ref(false)
 
-const menuSections = [
+const allMenuSections = [
   {
     title: '资源整理',
     items: [
@@ -183,6 +184,7 @@ const menuSections = [
       { path: '/dashboard/resources/transfer', label: '资源聚合', icon: LinkOutline },
       { path: '/dashboard/strm-config', label: 'STRM 配置', icon: DocumentTextOutline },
       { path: '/dashboard/cloud115', label: '115 云管理', icon: CloudOutline },
+      { path: '/dashboard/emby-management', label: 'Emby 管理', icon: ServerOutline },
       { path: '/dashboard/category-strategy', label: '整理规则', icon: OptionsOutline },
       { path: '/dashboard/filename-recognition', label: '识别测试', icon: SearchOutline },
       { path: '/dashboard/settings', label: '系统设置', icon: SettingsOutline }
@@ -191,6 +193,7 @@ const menuSections = [
   {
     title: '运维观察',
     items: [
+      { path: '/dashboard/emby-monitor', label: 'Emby 监控', icon: PulseOutline },
       { path: '/dashboard/system-logs', label: '系统日志', icon: ReaderOutline },
       { path: '/dashboard/network', label: '网络测试', icon: WifiOutline },
       { path: '/dashboard/cache', label: '缓存管理', icon: ServerOutline }
@@ -198,10 +201,16 @@ const menuSections = [
   }
 ]
 
+const isAdmin = computed(() => localStorage.getItem('user_name') === 'admin')
+const menuSections = computed(() => allMenuSections.map(section => ({
+  ...section,
+  items: section.items.filter(item => !['/dashboard/emby-management', '/dashboard/emby-monitor'].includes(item.path) || isAdmin.value)
+})))
+
 const currentTitle = computed(() => route.meta?.title || '控制台')
 const currentDescription = computed(() => route.meta?.description || '')
 const currentSection = computed(() => {
-  return menuSections.find(section => section.items.some(item => item.path === route.path))?.title || '工作台'
+  return menuSections.value.find(section => section.items.some(item => item.path === route.path))?.title || '工作台'
 })
 
 watch(() => route.path, () => {

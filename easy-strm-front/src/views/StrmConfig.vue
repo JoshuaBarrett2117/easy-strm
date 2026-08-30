@@ -110,7 +110,7 @@
           :columns="columns"
           :data="strmConfigList"
           :row-key="(row) => row.id"
-          :scroll-x="1660"
+          :scroll-x="1460"
           size="small"
           @update:sorter="handleSorterChange"
         >
@@ -452,11 +452,10 @@ const columns = computed(() => [
     render: (row) => h('span', { class: 'font-mono text-xs text-slate-500 dark:text-slate-400' }, row.extension || '-')
   },
   { title: '创建时间', key: 'create_time', width: 160, align: 'center', sorter: true },
-  { title: '更新时间', key: 'update_time', width: 160, align: 'center', sorter: true },
   {
     title: '操作',
     key: 'actions',
-    width: 360,
+    width: 320,
     align: 'center',
     fixed: 'right',
     render: (row) => {
@@ -464,19 +463,19 @@ const columns = computed(() => [
       const buttons = [
         h(
           NButton,
-          { type: 'primary', size: 'small', onClick: () => handleEdit(row) },
+          { type: 'primary', size: 'tiny', onClick: () => handleEdit(row) },
           { icon: () => h(NIcon, { component: CreateOutline }), default: () => '编辑' }
         ),
         h(
           NButton,
-          { type: 'error', size: 'small', onClick: () => handleDelete(row.id) },
+          { type: 'error', size: 'tiny', onClick: () => handleDelete(row.id) },
           { icon: () => h(NIcon, { component: TrashOutline }), default: () => '删除' }
         ),
         h(
           NButton,
           {
             type: 'warning',
-            size: 'small',
+            size: 'tiny',
             loading: isGenerating(row.id),
             disabled: isGenerating(row.id),
             onClick: () => handleFullGenerate(row.id)
@@ -499,7 +498,7 @@ const columns = computed(() => [
             {
               default: () => h(
                 NButton,
-                { type: 'info', size: 'small' },
+                { type: 'info', size: 'tiny' },
                 {
                   icon: () => h(NIcon, { component: AlarmOutline }),
                   default: () => [
@@ -512,7 +511,7 @@ const columns = computed(() => [
           )
         )
       }
-      return h('div', { class: 'flex flex-wrap items-center justify-center gap-1.5' }, buttons)
+      return h('div', { class: 'flex flex-nowrap items-center justify-center gap-1 whitespace-nowrap' }, buttons)
     }
   }
 ])
@@ -742,7 +741,7 @@ const handleDelete = (id) => {
 
 // 全量生成 STRM 文件
 const handleFullGenerate = (id) => {
-  showConfirmDialog('确定要全量生成 STRM 文件吗？这将清除并重建全部 STRM 文件。', '提示', {
+  showConfirmDialog('确定要全量生成 STRM 文件吗？这将清空目标目录内的所有内容并重新生成 STRM 文件。', '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消'
   }).then(() => {

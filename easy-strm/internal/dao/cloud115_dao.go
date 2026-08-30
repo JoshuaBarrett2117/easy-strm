@@ -17,7 +17,7 @@ func NewCloud115DAO() *Cloud115DAO {
 func (c *Cloud115DAO) GetByID(id int) (*domain.Cloud115, error) {
 	cloud115 := &domain.Cloud115{}
 	err := DB.QueryRow(
-		`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
 		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),
@@ -25,7 +25,7 @@ func (c *Cloud115DAO) GetByID(id int) (*domain.Cloud115, error) {
 		create_time, update_time FROM t_cloud_115 WHERE id = $1`,
 		id,
 	).Scan(
-		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken,
 		&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
 		&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
 		&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
@@ -51,7 +51,7 @@ func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, e
 	}
 
 	rows, err := DB.Query(
-		fmt.Sprintf(`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		fmt.Sprintf(`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
 		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),
@@ -66,7 +66,7 @@ func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, e
 	for rows.Next() {
 		cloud115 := &domain.Cloud115{}
 		err := rows.Scan(
-			&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+			&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken,
 			&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
 			&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
 			&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
@@ -80,7 +80,7 @@ func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, e
 	}
 	return list, nil
 }
-func (c *Cloud115DAO) Create(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
+func (c *Cloud115DAO) Create(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
 	if accountType == "" {
 		accountType = "resource"
 	}
@@ -92,17 +92,17 @@ func (c *Cloud115DAO) Create(name, cookie, refreshToken, accessToken string, exp
 	}
 	cloud115 := &domain.Cloud115{}
 	err := DB.QueryRow(
-		`INSERT INTO t_cloud_115 (name, cookie, refresh_token, access_token, expires_in, transfer_account_id, transfer_directory, account_type, priority, status, transfer_method, alist_url, alist_token)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', $10, $11, $12)
-        RETURNING id, name, cookie, refresh_token, access_token, expires_in,
+		`INSERT INTO t_cloud_115 (name, cookie, cookie_source, refresh_token, access_token, expires_in, transfer_account_id, transfer_directory, account_type, priority, status, transfer_method, alist_url, alist_token)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', $11, $12, $13)
+		RETURNING id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
         COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
         COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
         COALESCE(status, 'active'), cooling_start_time, transfer_method,
         COALESCE(alist_url, ''), COALESCE(alist_token, ''),
         create_time, update_time`,
-		name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken,
+		name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken,
 	).Scan(
-		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken,
 		&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
 		&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
 		&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
@@ -114,21 +114,21 @@ func (c *Cloud115DAO) Create(name, cookie, refreshToken, accessToken string, exp
 	}
 	return cloud115, nil
 }
-func (c *Cloud115DAO) Update(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
+func (c *Cloud115DAO) Update(id int, name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
 	cloud115 := &domain.Cloud115{}
 	err := DB.QueryRow(
-		`UPDATE t_cloud_115 SET name=$2, cookie=$3, refresh_token=$4, access_token=$5,
-        expires_in=$6, transfer_account_id=$7, transfer_directory=$8, account_type=$9, priority=$10, status=$11, transfer_method=$12, alist_url=$13, alist_token=$14
-        WHERE id=$1
-        RETURNING id, name, cookie, refresh_token, access_token, expires_in,
+		`UPDATE t_cloud_115 SET name=$2, cookie=$3, cookie_source=$4, refresh_token=$5, access_token=$6,
+		expires_in=$7, transfer_account_id=$8, transfer_directory=$9, account_type=$10, priority=$11, status=$12, transfer_method=$13, alist_url=$14, alist_token=$15
+		WHERE id=$1
+		RETURNING id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
         COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
         COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
         COALESCE(status, 'active'), cooling_start_time, transfer_method,
         COALESCE(alist_url, ''), COALESCE(alist_token, ''),
         create_time, update_time`,
-		id, name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken,
+		id, name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken,
 	).Scan(
-		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+		&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken,
 		&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
 		&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
 		&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,
@@ -173,7 +173,7 @@ func (c *Cloud115DAO) Delete(id int) error {
 }
 func (c *Cloud115DAO) GetByStatus(status string) ([]*domain.Cloud115, error) {
 	rows, err := DB.Query(
-		`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+		`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
 		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),
@@ -189,7 +189,7 @@ func (c *Cloud115DAO) GetByStatus(status string) ([]*domain.Cloud115, error) {
 	for rows.Next() {
 		cloud115 := &domain.Cloud115{}
 		err := rows.Scan(
-			&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.RefreshToken,
+			&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken,
 			&cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID,
 			&cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed,
 			&cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime,

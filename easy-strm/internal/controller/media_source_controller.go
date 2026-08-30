@@ -24,6 +24,7 @@ type MediaSourceController struct {
 type watchLifecycle interface {
 	StartWatching(sourceID int) error
 	StopWatching(sourceID int)
+	IsWatching(sourceID int) bool
 }
 
 // NewMediaSourceController 创建媒体源控制器实例
@@ -49,6 +50,9 @@ func (c *MediaSourceController) GetList(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusInternalServerError, "获取媒体源列表失败")
 		return
 	}
+	for _, source := range list {
+		c.populateWatchStatus(source)
+	}
 
 	SuccessResp(ctx, gin.H{
 		"data":  list,
@@ -71,6 +75,7 @@ func (c *MediaSourceController) GetByID(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusNotFound, "媒体源不存在")
 		return
 	}
+	c.populateWatchStatus(source)
 
 	SuccessResp(ctx, source)
 }
@@ -85,7 +90,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 		WatchPath          string `json:"watch_path"`
 		Cloud115ID         *int   `json:"cloud115_id"`
 		Priority           int    `json:"priority"`
-		Enabled            bool   `json:"enabled"`
+		Enabled            *bool  `json:"enabled"`
 		OrganizeTargetPath string `json:"organize_target_path"`
 		MediaType          string `json:"media_type"`
 		ConflictPolicy     string `json:"conflict_policy"`
@@ -105,6 +110,10 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 	// 设置默认值
 	if req.Priority == 0 {
 		req.Priority = 10
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
 	}
 
 	// 验证本地路径（路径不存在时仅警告，不阻止创建）
@@ -129,7 +138,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 		req.WatchPath,
 		req.Cloud115ID,
 		req.Priority,
-		req.Enabled,
+		enabled,
 		req.OrganizeTargetPath,
 		req.MediaType,
 		req.ConflictPolicy,
@@ -147,6 +156,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 
 	logger.Infof("MediaSourceController[Create] 创建媒体源成功: %s (ID: %d)", source.Name, source.ID)
 	c.syncWatchState(source)
+	c.populateWatchStatus(source)
 	SuccessResp(ctx, gin.H{
 		"message": "创建成功",
 		"data":    source,
@@ -314,6 +324,7 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 
 	logger.Infof("MediaSourceController[Update] 更新媒体源成功: %s (ID: %d)", source.Name, id)
 	c.syncWatchState(source)
+	c.populateWatchStatus(source)
 	SuccessResp(ctx, gin.H{
 		"message": "更新成功",
 		"data":    source,
@@ -360,4 +371,11 @@ func (c *MediaSourceController) stopWatchState(sourceID int) {
 		return
 	}
 	c.watchService.StopWatching(sourceID)
+}
+
+func (c *MediaSourceController) populateWatchStatus(source *domain.MediaSource) {
+	if source == nil || c.watchService == nil {
+		return
+	}
+	source.WatchRunning = c.watchService.IsWatching(source.ID)
 }

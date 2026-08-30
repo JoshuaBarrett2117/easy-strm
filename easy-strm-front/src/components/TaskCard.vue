@@ -210,6 +210,11 @@ const taskTypeNames = {
   watch_auto_organize: '115 自动整理',
   scrape: 'NFO 刮削',
   emby_refresh: 'Emby 库刷新',
+  emby_server: 'Emby 实例管理',
+  emby_user: 'Emby 用户管理',
+  emby_library: 'Emby 媒体库管理',
+  emby_cover: 'Emby 媒体库封面',
+  emby_plugin: '神医助手任务',
   log_clean: '日志清理',
   sync_files: '文件同步',
   offline_download: '115 云下载',
@@ -227,6 +232,11 @@ const taskTypeIcons = {
   watch_auto_organize: FilmOutline,
   scrape: SearchOutline,
   emby_refresh: LinkOutline,
+  emby_server: LinkOutline,
+  emby_user: LinkOutline,
+  emby_library: FilmOutline,
+  emby_cover: FilmOutline,
+  emby_plugin: LinkOutline,
   log_clean: RefreshOutline,
   sync_files: TimerOutline,
   offline_download: CloudDownloadOutline,
@@ -244,6 +254,11 @@ const taskTypeTagTypes = {
   watch_auto_organize: 'success',
   scrape: 'warning',
   emby_refresh: 'error',
+  emby_server: 'info',
+  emby_user: 'info',
+  emby_library: 'primary',
+  emby_cover: 'success',
+  emby_plugin: 'warning',
   log_clean: 'warning',
   sync_files: 'info',
   offline_download: 'info',
@@ -262,6 +277,11 @@ const taskAccentClasses = {
   watch_auto_organize: 'border-l-emerald-500',
   scrape: 'border-l-orange-500',
   emby_refresh: 'border-l-teal-500',
+  emby_server: 'border-l-sky-500',
+  emby_user: 'border-l-sky-500',
+  emby_library: 'border-l-cyan-500',
+  emby_cover: 'border-l-emerald-500',
+  emby_plugin: 'border-l-violet-500',
   log_clean: 'border-l-amber-500',
   sync_files: 'border-l-slate-400',
   offline_download: 'border-l-blue-500',
@@ -291,6 +311,9 @@ const taskStatusType = computed(() => {
     pending: 'info',
     running: 'warning',
     completed: 'success',
+    success: 'success',
+    partial_success: 'warning',
+    unknown: 'warning',
     failed: 'error',
     cancelled: 'info',
     scheduled: 'default'
@@ -303,6 +326,9 @@ const taskStatusText = computed(() => {
     pending: '待执行',
     running: '执行中',
     completed: '已完成',
+    success: '成功',
+    partial_success: '部分成功',
+    unknown: '结果未知',
     failed: '失败',
     cancelled: '已取消',
     scheduled: '已调度'
@@ -314,7 +340,7 @@ const taskStatusIcon = computed(() => {
   const t = task.value
   if (!t) return TimerOutline
   if (t.status === 'running') return SyncOutline
-  if (t.status === 'completed') return CheckmarkCircleOutline
+  if (t.status === 'completed' || t.status === 'success') return CheckmarkCircleOutline
   if (t.status === 'failed' || t.status === 'cancelled') return CloseCircleOutline
   if (t.status === 'scheduled') return TimeOutline
   return taskTypeIcons[t.task_type] || TimerOutline
@@ -332,7 +358,7 @@ const canResume = computed(() => {
 
 const showProgress = computed(() => {
   const t = task.value
-  return !!t && ['pending', 'running', 'completed', 'failed', 'cancelled'].includes(t.status)
+  return !!t && ['pending', 'running', 'completed', 'success', 'partial_success', 'unknown', 'failed', 'cancelled'].includes(t.status)
 })
 
 const showFileStats = computed(() => {
@@ -343,7 +369,8 @@ const showFileStats = computed(() => {
 const progressStatus = computed(() => {
   const t = task.value
   if (!t) return 'default'
-  if (t.status === 'completed') return 'success'
+  if (t.status === 'completed' || t.status === 'success') return 'success'
+  if (t.status === 'partial_success' || t.status === 'unknown') return 'warning'
   if (t.status === 'failed') return 'error'
   if (t.status === 'cancelled') return 'warning'
   return 'default'
@@ -352,7 +379,9 @@ const progressStatus = computed(() => {
 const progressFormat = (percentage) => {
   const t = task.value
   if (!t) return ''
-  if (t.status === 'completed') return '完成'
+  if (t.status === 'completed' || t.status === 'success') return '完成'
+  if (t.status === 'partial_success') return '部分成功'
+  if (t.status === 'unknown') return '结果未知'
   if (t.status === 'cancelled') return '已取消'
   if (t.status === 'running' && t.total_files === 0) return '准备中...'
   return `${percentage}%`
@@ -492,6 +521,14 @@ const taskSummaryItems = computed(() => {
   if (!t) return []
 
   const items = []
+
+  if (String(t.task_type || '').startsWith('emby_')) {
+    if (t.metadata?.server_name) items.push({ label: 'Emby 实例', value: t.metadata.server_name })
+    if (t.metadata?.target) items.push({ label: '操作目标', value: t.metadata.target })
+    if (t.metadata?.origin) items.push({ label: '发起方式', value: ({ manual: '页面手动', organize_linkage: '整理联动', automatic: '系统自动' })[t.metadata.origin] || t.metadata.origin })
+    if (t.metadata?.current_step) items.push({ label: '当前步骤', value: t.metadata.current_step })
+    if (t.metadata?.conclusion) items.push({ label: '执行结论', value: t.metadata.conclusion })
+  }
 
   if (t.task_type === 'watch_auto_organize') {
     if (watchSourceName.value) {

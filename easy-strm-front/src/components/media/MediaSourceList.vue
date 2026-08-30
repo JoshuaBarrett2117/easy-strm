@@ -89,6 +89,15 @@
               <n-radio value="cloud115">115云盘</n-radio>
             </n-radio-group>
           </n-form-item>
+          <n-form-item label="媒体源状态">
+            <div class="w-full">
+              <n-switch v-model:value="form.enabled">
+                <template #checked>启用</template>
+                <template #unchecked>停用</template>
+              </n-switch>
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">停用后不会启动目录监控或自动整理。</p>
+            </div>
+          </n-form-item>
           <n-form-item label="路径" path="path" class="sm:col-span-2">
             <TargetFolderPicker
               v-if="form.source_type === 'cloud115'"
@@ -342,6 +351,7 @@ const form = ref({
   media_type: 'all',
   conflict_policy: 'skip',
   operation_mode: 'move',
+  enabled: true,
   auto_organize: false,
   watch_enabled: false,
   watch_interval: 1800,
@@ -378,6 +388,11 @@ const cloud115Options = computed(() => cloud115List.value.map((account) => ({
   value: account.id
 })))
 
+const getCloud115Name = (source) => {
+  if (!source?.cloud115_id) return '-'
+  return cloud115List.value.find(account => account.id === source.cloud115_id)?.name || '-'
+}
+
 const embyLibraryOptions = computed(() => [
   { label: '不绑定', value: '' },
   ...embyLibraries.value.map((lib) => ({
@@ -387,19 +402,25 @@ const embyLibraryOptions = computed(() => [
 ])
 
 const getWatchStatusType = (source) => {
+  if (!source?.enabled) return 'default'
   if (!source?.watch_enabled) return 'info'
+  if (source.watch_running === false) return 'error'
   if (source.auto_organize) return 'success'
   return 'warning'
 }
 
 const getWatchStatusLabel = (source) => {
+  if (!source?.enabled) return '媒体源已停用'
   if (!source?.watch_enabled) return '未开启'
+  if (source.watch_running === false) return '监控未运行'
   if (source.auto_organize) return '自动整理中'
   return source?.source_type === 'local' ? '自动监控中' : '仅监控'
 }
 
 const getWatchStatusDescription = (source) => {
+  if (!source?.enabled) return '停用状态下不会启动监控'
   if (!source?.watch_enabled) return '未监控新增文件'
+  if (source.watch_running === false) return '配置已保存，但后台监听启动失败'
   if (source?.source_type === 'local') {
     if (source.auto_organize) return '本地目录实时监控并自动整理'
     return '本地目录实时监控，当前仅监控不整理'
@@ -478,8 +499,8 @@ const cloud115FeatureStatus = computed(() => {
 
 const localSourceCount = computed(() => mediaSources.value.filter(item => item.source_type === 'local').length)
 const cloudSourceCount = computed(() => mediaSources.value.filter(item => item.source_type === 'cloud115').length)
-const watchEnabledCount = computed(() => mediaSources.value.filter(item => item.watch_enabled).length)
-const autoOrganizeCount = computed(() => mediaSources.value.filter(item => item.auto_organize).length)
+const watchEnabledCount = computed(() => mediaSources.value.filter(item => item.watch_running).length)
+const autoOrganizeCount = computed(() => mediaSources.value.filter(item => item.watch_running && item.auto_organize).length)
 const sourceOverviewCards = computed(() => [
   {
     label: '媒体源总数',
@@ -600,7 +621,7 @@ const columns = [
     align: 'center',
     render: (row) => (
       row.cloud115_id
-        ? h('span', row.cloud115_name || '-')
+        ? h('span', getCloud115Name(row))
         : h('span', { class: mutedText }, '-')
     )
   },
@@ -724,6 +745,7 @@ const handleEdit = (row) => {
     media_type: row.media_type || 'all',
     conflict_policy: row.conflict_policy || 'skip',
     operation_mode: row.operation_mode || 'move',
+    enabled: row.enabled !== false,
     auto_organize: row.auto_organize || false,
     watch_enabled: row.watch_enabled || false,
     watch_interval: row.watch_interval || 1800,
@@ -770,12 +792,17 @@ const handleSubmit = () => {
       }
       submitLoading.value = true
       try {
+        let response
         if (form.value.id) {
-          await updateMediaSource(form.value.id, form.value)
-          message.success('编辑成功')
+          response = await updateMediaSource(form.value.id, form.value)
         } else {
-          await createMediaSource(form.value)
-          message.success('新增成功')
+          response = await createMediaSource(form.value)
+        }
+        const savedSource = response?.data?.data?.data
+        if (form.value.enabled && form.value.watch_enabled && savedSource?.watch_running === false) {
+          message.warning('配置已保存，但监控未启动，请检查目录、账号或后端日志')
+        } else {
+          message.success(form.value.id ? '编辑成功' : '新增成功')
         }
         dialogVisible.value = false
         fetchMediaSources()
@@ -803,6 +830,7 @@ const resetForm = () => {
     media_type: 'all',
     conflict_policy: 'skip',
     operation_mode: 'move',
+    enabled: true,
     auto_organize: false,
     watch_enabled: false,
     watch_interval: 1800,

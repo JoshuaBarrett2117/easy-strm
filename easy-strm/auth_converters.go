@@ -12,6 +12,7 @@ func convertCloud115ToBrief(acc *Cloud115) *controller.Cloud115AccountBrief {
 		ID:                acc.ID,
 		Name:              acc.Name,
 		Cookie:            acc.Cookie,
+		CookieSource:      acc.CookieSource,
 		RefreshToken:      acc.RefreshToken,
 		AccessToken:       acc.AccessToken,
 		ExpiresIn:         acc.ExpiresIn,

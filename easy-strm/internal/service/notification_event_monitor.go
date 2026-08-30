@@ -14,16 +14,14 @@ import (
 )
 
 const (
-	notificationBaselineKey      = "easy_strm:notification:telegram:baseline:v1"
-	notificationTaskEventPrefix  = "easy_strm:notification:telegram:task:"
-	notificationAccountStatusKey = "easy_strm:notification:telegram:accounts"
-	notificationEventTTL         = 24 * time.Hour
-	notificationEventClaimTTL    = time.Minute
+	notificationNamespace     = "easy_strm:notification:"
+	notificationEventTTL      = 24 * time.Hour
+	notificationEventClaimTTL = time.Minute
 )
 
 // NotificationEventMonitor 统一观察 Redis 任务终态和 115 账号状态变化。
 type NotificationEventMonitor struct {
-	configService telegramConfigReader
+	configService notificationEventConfigReader
 	notifications notificationCardSender
 	taskDAO       notificationTaskStore
 	accountDAO    notificationAccountStore
@@ -34,12 +32,12 @@ type NotificationEventMonitor struct {
 	cancel context.CancelFunc
 }
 
-type telegramConfigReader interface {
-	GetTelegramConfig() (TelegramConfig, TelegramConfigView, error)
+type notificationEventConfigReader interface {
+	GetNotificationEventChannels() ([]NotificationEventChannel, error)
 }
 
 type notificationCardSender interface {
-	SendTelegramCard(card NotificationCard) error
+	SendCardToChannel(channel, configJSON string, card NotificationCard) error
 }
 
 type notificationTaskStore interface {
@@ -52,7 +50,7 @@ type notificationAccountStore interface {
 
 // NewNotificationEventMonitor 创建通知事件监控器。
 func NewNotificationEventMonitor(
-	configService telegramConfigReader,
+	configService notificationEventConfigReader,
 	notifications notificationCardSender,
 	taskDAO notificationTaskStore,
 	accountDAO notificationAccountStore,
@@ -109,8 +107,8 @@ func (m *NotificationEventMonitor) run(ctx context.Context) {
 }
 
 func (m *NotificationEventMonitor) runOnce(ctx context.Context) error {
-	config, view, err := m.configService.GetTelegramConfig()
-	if err != nil || !view.Enabled {
+	channels, err := m.configService.GetNotificationEventChannels()
+	if err != nil || len(channels) == 0 {
 		return err
 	}
 	tasks, err := m.taskDAO.GetUnified()
@@ -121,39 +119,47 @@ func (m *NotificationEventMonitor) runOnce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	initialized, err := m.redis.Exists(ctx, notificationBaselineKey).Result()
-	if err != nil {
-		return err
+	for _, channel := range channels {
+		initialized, checkErr := m.redis.Exists(ctx, notificationBaselineKey(channel.Channel)).Result()
+		if checkErr != nil {
+			return checkErr
+		}
+		if initialized == 0 {
+			if initErr := m.initializeBaseline(ctx, channel.Channel, tasks, accounts); initErr != nil {
+				return initErr
+			}
+			continue
+		}
+		if processErr := m.processTasks(ctx, channel, tasks); processErr != nil {
+			logger.Warnf("[NotificationEventMonitor] 渠道 %s 处理任务通知失败: %v", channel.Channel, processErr)
+		}
+		if processErr := m.processAccounts(ctx, channel, accounts); processErr != nil {
+			logger.Warnf("[NotificationEventMonitor] 渠道 %s 处理账号通知失败: %v", channel.Channel, processErr)
+		}
 	}
-	if initialized == 0 {
-		return m.initializeBaseline(ctx, tasks, accounts)
-	}
-	if err := m.processTasks(ctx, config, tasks); err != nil {
-		logger.Warnf("[NotificationEventMonitor] 处理任务通知失败: %v", err)
-	}
-	return m.processAccounts(ctx, config, accounts)
+	return nil
 }
 
-func (m *NotificationEventMonitor) initializeBaseline(ctx context.Context, tasks []map[string]interface{}, accounts []*domain.Cloud115) error {
+func (m *NotificationEventMonitor) initializeBaseline(ctx context.Context, channel string, tasks []map[string]interface{}, accounts []*domain.Cloud115) error {
 	pipe := m.redis.TxPipeline()
 	for _, task := range tasks {
 		status := normalizeTerminalStatus(fmt.Sprint(task["status"]))
 		if status == "" {
 			continue
 		}
-		pipe.Set(ctx, taskEventKey(fmt.Sprint(task["task_id"]), status), "1", notificationEventTTL)
+		pipe.Set(ctx, taskEventKeyForChannel(channel, fmt.Sprint(task["task_id"]), status), "1", notificationEventTTL)
 	}
 	for _, account := range accounts {
-		pipe.HSet(ctx, notificationAccountStatusKey, strconv.Itoa(account.ID), account.Status)
+		pipe.HSet(ctx, notificationAccountStatusKey(channel), strconv.Itoa(account.ID), account.Status)
 	}
-	pipe.Expire(ctx, notificationAccountStatusKey, notificationEventTTL)
-	pipe.Set(ctx, notificationBaselineKey, time.Now().Format(time.RFC3339), notificationEventTTL)
+	pipe.Expire(ctx, notificationAccountStatusKey(channel), notificationEventTTL)
+	pipe.Set(ctx, notificationBaselineKey(channel), time.Now().Format(time.RFC3339), notificationEventTTL)
 	_, err := pipe.Exec(ctx)
 	return err
 }
 
-func (m *NotificationEventMonitor) processTasks(ctx context.Context, config TelegramConfig, tasks []map[string]interface{}) error {
-	if err := m.redis.Expire(ctx, notificationBaselineKey, notificationEventTTL).Err(); err != nil {
+func (m *NotificationEventMonitor) processTasks(ctx context.Context, channel NotificationEventChannel, tasks []map[string]interface{}) error {
+	if err := m.redis.Expire(ctx, notificationBaselineKey(channel.Channel), notificationEventTTL).Err(); err != nil {
 		return err
 	}
 	for _, task := range tasks {
@@ -161,7 +167,7 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, config Tele
 		if status == "" {
 			continue
 		}
-		key := taskEventKey(fmt.Sprint(task["task_id"]), status)
+		key := taskEventKeyForChannel(channel.Channel, fmt.Sprint(task["task_id"]), status)
 		claimed, err := m.redis.SetNX(ctx, key, "processing", notificationEventClaimTTL).Result()
 		if err != nil {
 			return err
@@ -169,7 +175,7 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, config Tele
 		if !claimed {
 			continue
 		}
-		if !taskEventEnabled(config, status) {
+		if !taskEventEnabled(channel, status) {
 			if err := m.redis.Set(ctx, key, "disabled", notificationEventTTL).Err(); err != nil {
 				return err
 			}
@@ -178,7 +184,7 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, config Tele
 		card := buildTaskCard(task, true)
 		card.Title = "任务通知 · " + card.Title
 		card.Actions = append(card.Actions, []NotificationAction{{Text: "最近任务", Data: "tasks"}})
-		if err := m.notifications.SendTelegramCard(card); err != nil {
+		if err := m.notifications.SendCardToChannel(channel.Channel, channel.ConfigJSON, card); err != nil {
 			// 发送失败时释放抢占，允许下一轮重新尝试该事件。
 			_ = m.redis.Del(ctx, key).Err()
 			return err
@@ -190,17 +196,18 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, config Tele
 	return nil
 }
 
-func (m *NotificationEventMonitor) processAccounts(ctx context.Context, config TelegramConfig, accounts []*domain.Cloud115) error {
+func (m *NotificationEventMonitor) processAccounts(ctx context.Context, channel NotificationEventChannel, accounts []*domain.Cloud115) error {
+	accountStatusKey := notificationAccountStatusKey(channel.Channel)
 	for _, account := range accounts {
 		field := strconv.Itoa(account.ID)
-		oldStatus, err := m.redis.HGet(ctx, notificationAccountStatusKey, field).Result()
+		oldStatus, err := m.redis.HGet(ctx, accountStatusKey, field).Result()
 		if err != nil && err != redis.Nil {
 			return err
 		}
 		if err == redis.Nil {
 			oldStatus = account.Status
 		}
-		if oldStatus != account.Status && config.NotifyAccountStatus {
+		if oldStatus != account.Status && channel.NotifyAccountStatus {
 			icon := "⚠️"
 			title := "115 账号状态异常"
 			if account.Status == domain.AccountStatusActive {
@@ -213,22 +220,22 @@ func (m *NotificationEventMonitor) processAccounts(ctx context.Context, config T
 				Fields:  [][2]string{{"账号", account.Name}, {"原状态", accountStatusName(oldStatus)}, {"新状态", accountStatusName(account.Status)}, {"时间", time.Now().Format("2006-01-02 15:04:05")}},
 				Actions: [][]NotificationAction{{{Text: "系统状态", Data: "status"}}},
 			}
-			if err := m.notifications.SendTelegramCard(card); err != nil {
+			if err := m.notifications.SendCardToChannel(channel.Channel, channel.ConfigJSON, card); err != nil {
 				return err
 			}
 		}
-		if err := m.redis.HSet(ctx, notificationAccountStatusKey, field, account.Status).Err(); err != nil {
+		if err := m.redis.HSet(ctx, accountStatusKey, field, account.Status).Err(); err != nil {
 			return err
 		}
 	}
-	return m.redis.Expire(ctx, notificationAccountStatusKey, notificationEventTTL).Err()
+	return m.redis.Expire(ctx, accountStatusKey, notificationEventTTL).Err()
 }
 
 func normalizeTerminalStatus(status string) string {
 	switch strings.ToLower(status) {
-	case "completed":
+	case "completed", "success":
 		return "completed"
-	case "failed", "partial_failed":
+	case "failed", "partial_failed", "partial_success", "unknown":
 		return "failed"
 	case "cancelled":
 		return "cancelled"
@@ -237,7 +244,7 @@ func normalizeTerminalStatus(status string) string {
 	}
 }
 
-func taskEventEnabled(config TelegramConfig, status string) bool {
+func taskEventEnabled(config NotificationEventChannel, status string) bool {
 	switch status {
 	case "completed":
 		return config.NotifyTaskCompleted
@@ -250,8 +257,20 @@ func taskEventEnabled(config TelegramConfig, status string) bool {
 	}
 }
 
+func notificationBaselineKey(channel string) string {
+	return notificationNamespace + channel + ":baseline:v1"
+}
+
+func notificationAccountStatusKey(channel string) string {
+	return notificationNamespace + channel + ":accounts"
+}
+
+func taskEventKeyForChannel(channel, taskID, status string) string {
+	return notificationNamespace + channel + ":task:" + taskID + ":" + status
+}
+
 func taskEventKey(taskID, status string) string {
-	return notificationTaskEventPrefix + taskID + ":" + status
+	return taskEventKeyForChannel("telegram", taskID, status)
 }
 
 func accountStatusName(status string) string {

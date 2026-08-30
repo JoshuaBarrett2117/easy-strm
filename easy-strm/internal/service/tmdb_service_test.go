@@ -173,12 +173,17 @@ func TestSettersAndHelpers(t *testing.T) {
 	svc := NewTmdbService("k1", nil)
 	svc.SetAPIKey("k2")
 	svc.SetLanguage("en")
+	customHTTPClient := &http.Client{}
+	svc.SetHTTPClient(customHTTPClient)
 
 	if svc.GetAPIKey() != "k2" {
 		t.Fatalf("unexpected api key: %s", svc.GetAPIKey())
 	}
 	if svc.GetLanguage() != "en" {
 		t.Fatalf("unexpected language: %s", svc.GetLanguage())
+	}
+	if svc.httpClient != customHTTPClient {
+		t.Fatal("TMDB 服务应使用注入的 HTTP 客户端")
 	}
 	if svc.buildCacheKey("Inception.2010.mkv", "movie") != "inception.2010.mkv" {
 		t.Fatalf("cache key should be lowercased")

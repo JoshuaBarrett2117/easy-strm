@@ -1,0 +1,15 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "why": "确认账号容量缓存应复用的存储、键规范、过期语义和故障降级方式。",
+  "known": [
+    "项目统一使用 go-redis/v8 和 easy_strm 业务前缀",
+    "缓存管理页通过 RedisPatterns 动态统计与清理 Redis 缓存",
+    "miniredis 已用于 TTL 和 Redis 行为测试"
+  ],
+  "questions": [
+    {"priority": "high", "question": "缓存应存在哪里？", "answer": "复用现有 Redis，不新增进程内缓存。"},
+    {"priority": "high", "question": "缓存读取失败是否阻断仪表盘？", "answer": "不阻断，记录警告后回源115。"},
+    {"priority": "high", "question": "如何验证五分钟过期？", "answer": "miniredis 断言初始 TTL，并快进五分钟验证未命中。"}
+  ]
+}

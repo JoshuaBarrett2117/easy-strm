@@ -1,0 +1,40 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "将带 TMDB 目录结构的电影和剧集命名模板设为系统默认值",
+  "locations": [
+    "easy-strm/internal/service/rename_service.go",
+    "easy-strm/internal/service/rename_template.go",
+    "easy-strm/db.go",
+    "easy-strm-front/src/views/Settings.vue",
+    "easy-strm/internal/service/rename_service_test.go"
+  ],
+  "current_flow": "RenameService 优先读取系统配置，配置缺失时回退内置模板；数据库启动逻辑初始化并迁移官方预设；整理流程将模板中的目录部分转换为实际目标目录。",
+  "similar_cases": [
+    "legacyDefaultMovieTemplate 到 defaultMovieTemplate 的兼容归一化",
+    "legacyDefaultTVTemplate 到 defaultTVTemplate 的兼容归一化",
+    "t_system_config 与 t_rename_preset 中旧官方模板的精确值迁移"
+  ],
+  "contract": {
+    "movie": "标题 (年份) [tmdbid=ID]/标题 (年份) [tmdbid=ID] - 画质.扩展名",
+    "tv": "标题 (年份) [tmdbid=ID]/Season N/标题.英文标题.年份.SxxExx.画质.来源.编码.扩展名"
+  },
+  "risks": [
+    "不能覆盖用户自定义模板，只迁移与历史官方默认值完全一致的配置",
+    "TMDB ID、年份、画质等缺失时不得留下多余占位文本",
+    "当前工作区存在与本任务无关的并行未提交修改"
+  ],
+  "verification": [
+    "默认模板渲染单元测试",
+    "旧默认模板归一化测试",
+    "后端全量测试",
+    "前端生产构建",
+    "差异格式检查"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "major_risks": true,
+    "verification_known": true
+  }
+}

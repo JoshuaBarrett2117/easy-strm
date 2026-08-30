@@ -111,13 +111,13 @@ func expectCloud115Account(t *testing.T, mock sqlmock.Sqlmock) {
 
 	now := time.Now()
 	rows := sqlmock.NewRows([]string{
-		"id", "name", "cookie", "refresh_token", "access_token", "expires_in",
+		"id", "name", "cookie", "cookie_source", "refresh_token", "access_token", "expires_in",
 		"transfer_account_id", "transfer_directory", "account_type", "quota_used", "priority",
 		"status", "cooling_start_time", "transfer_method", "alist_url", "alist_token",
 		"create_time", "update_time",
-	}).AddRow(1, "115", "cookie", "", "", 0, 0, "", "resource", 0, 5, "active", nil, "115driver", "", "", now, now)
+	}).AddRow(1, "115", "cookie", "支付宝小程序", "", "", 0, 0, "", "resource", 0, 5, "active", nil, "115driver", "", "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, cookie, refresh_token, access_token, expires_in,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
 		COALESCE(status, 'active'), cooling_start_time, COALESCE(transfer_method, ''),

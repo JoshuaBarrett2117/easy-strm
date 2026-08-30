@@ -45,6 +45,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		tmdbAPIKey = apiKeyConfig.ConfigVal
 	}
 	tmdbService := service.NewTmdbService(tmdbAPIKey, tmdbCacheDAO)
+	tmdbService.SetHTTPClient(NewProxyAwareHTTPClient(10 * time.Second))
 	renameService := service.NewRenameService(mediaSourceService, tmdbService, renamePresetDAO, systemConfigDAO)
 	scrapeService := service.NewScrapeService(tmdbCacheDAO, mediaFileCacheDAO, mediaSourceDAO, systemConfigDAO, tmdbService)
 	organizeService := service.NewOrganizeService(mediaSourceService, tmdbService, renameService, fileOperationService, mediaCategoryDAO, cloud115DAO, systemConfigDAO, scrapeService, client, dao.GetGlobalRedisClient())
@@ -52,13 +53,27 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	cronService := service.NewCronService(cronTaskDAO)
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
 	fileManagerService := service.NewFileManagerService(mediaSourceDAO, cloud115DAO, client, taskService)
-	dashboardService := service.NewDashboardService(cloud115DAO, mediaSourceDAO, strmFileDAO, dao.NewTaskRedisDAOWithGlobal())
+	dashboardService := service.NewDashboardService(
+		cloud115DAO,
+		mediaSourceDAO,
+		strmFileDAO,
+		dao.NewTaskRedisDAOWithGlobal(),
+		client,
+		dao.NewAccountQuotaCache(dao.GetGlobalRedisClient()),
+	)
 	authService := service.NewAuthService(dao.NewUserDAO(), config.JWTSecret)
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
 	embyService := service.NewEmbyService(systemConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
+	embyServerDAO := dao.NewEmbyServerDAO(dao.DB)
+	embyManagementService := service.NewEmbyManagementService(embyServerDAO, taskService, systemConfigDAO, NewProxyAwareHTTPClient(60*time.Second))
+	embyMonitorDAO := dao.NewEmbyMonitorDAO(dao.DB)
+	embyMonitorService := service.NewEmbyMonitorService(embyServerDAO, embyMonitorDAO, NewProxyAwareHTTPClient(30*time.Second), dao.GetGlobalRedisClient())
+	embyMonitorCollector := service.NewEmbyMonitorCollector(embyMonitorService)
 	cacheAdminService := service.NewCacheAdminService(dao.DB, dao.GetGlobalRedisClient())
 	mediaCategoryService := service.NewMediaCategoryService(mediaCategoryDAO)
 	systemConfigService := service.NewSystemConfigService(systemConfigDAO)
+	globalAPIService := service.NewGlobalAPIService(systemConfigDAO)
+	mcpController := controller.NewMCPController(globalAPIService, taskService)
 	telegramBotService := service.NewTelegramBotService(notificationConfigService, dashboardService, taskService, cronService, embyService, notificationHTTPClient)
 	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient())
 
@@ -82,7 +97,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	offlineDownloadDAO := dao.NewOfflineDownloadTaskDAO(dao.DB)
 	offlineDownloadService := service.NewOfflineDownloadService(client, dao.NewTaskRedisDAOWithGlobal(), offlineDownloadDAO, cloud115DAO)
 	offlineDownloadController := controller.NewOfflineDownloadController(offlineDownloadService)
-	telegramBotService.SetResourceService(service.NewTelegramResourceService(shareTransferService, offlineDownloadService, cloud115DAO))
+	resourceMessageService := service.NewTelegramResourceService(shareTransferService, offlineDownloadService, cloud115DAO)
+	telegramBotService.SetResourceService(resourceMessageService)
 
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)
@@ -96,14 +112,26 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	strmController := controller.NewStrmController(strmService)
 	cloud115Controller := controller.NewCloud115Controller(cloud115Service)
 	settingsController := controller.NewSettingsController(systemConfigService)
+	globalAPIController := controller.NewGlobalAPIController(globalAPIService)
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
 	logController := controller.NewLogController(systemConfigService)
 	taskController := controller.NewTaskController(taskService)
 	networkController := controller.NewNetworkController()
 	embyController := controller.NewEmbyController(embyService)
+	embyManagementController := controller.NewEmbyManagementController(embyManagementService)
+	embyMonitorController := controller.NewEmbyMonitorController(embyMonitorService)
 	dashboardController := controller.NewDashboardController(dashboardService)
 	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
 	notificationController := controller.NewNotificationController(notificationConfigService, notificationService, telegramBotService)
+	weComCallbackService := service.NewWeComCallbackService(
+		notificationConfigService,
+		notificationService,
+		dashboardService,
+		taskService,
+		dao.GetGlobalRedisClient(),
+	)
+	weComCallbackService.SetResourceService(resourceMessageService)
+	notificationController.SetWeComCallbackService(weComCallbackService)
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
@@ -113,7 +141,14 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// --- 注入 OrganizeController 的 Emby 刷新回调 ---
 	organizeController.SetEmbyRefreshCallback(func(sourceID int) *service.EmbyLibraryRefreshResult {
-		return embyService.RefreshLibraryBySourceID(mediaSourceDAO, sourceID)
+		taskID, libraryID, err := embyManagementService.StartRefreshBySourceID(sourceID)
+		if err != nil {
+			return &service.EmbyLibraryRefreshResult{Success: false, Message: err.Error(), LibraryID: libraryID}
+		}
+		if taskID == "" {
+			return nil
+		}
+		return &service.EmbyLibraryRefreshResult{Success: true, Message: "Emby 刷新任务已提交到任务中心", LibraryID: libraryID, TaskID: taskID}
 	})
 
 	// --- 注入 StrmController 回调依赖 ---
@@ -240,15 +275,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		}
 		return convertCloud115ToBrief(cloud115), nil
 	})
-	cloud115Controller.SetCreateCloud115(func(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*controller.Cloud115AccountBrief, error) {
-		acc, err := CreateCloud115(name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken)
+	cloud115Controller.SetCreateCloud115(func(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*controller.Cloud115AccountBrief, error) {
+		acc, err := CreateCloud115(name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken)
 		if err != nil {
 			return nil, err
 		}
 		return convertCloud115ToBrief(acc), nil
 	})
-	cloud115Controller.SetUpdateCloud115(func(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*controller.Cloud115AccountBrief, error) {
-		acc, err := UpdateCloud115(id, name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken)
+	cloud115Controller.SetUpdateCloud115(func(id int, name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*controller.Cloud115AccountBrief, error) {
+		acc, err := UpdateCloud115(id, name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken)
 		if err != nil {
 			return nil, err
 		}
@@ -302,7 +337,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			},
 		}, nil
 	})
-	cloud115Controller.SetQRCodeLogin(func(session interface{}) (interface{}, error) {
+	cloud115Controller.SetQRCodeLogin(func(session interface{}, name string, cloudID int) (interface{}, error) {
 		s := session.(map[string]interface{})
 		qrSession := &driver.QRCodeSession{
 			UID:           s["uid"].(string),
@@ -315,9 +350,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			return nil, err
 		}
 		cookie := cred.Cookie()
-		name := "115账号"
-		// 创建新账号
-		_, err = CreateCloud115(name, cookie, "", "", 0, 0, "", "resource", 5, "115driver", "", "")
+		_, err = saveCloud115CookieLogin(name, cloudID, cookie, cloud115CookieSourceLabel("web"))
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +359,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			"cookie":  cookie,
 		}, nil
 	})
-	cloud115Controller.SetQRCodeLoginWithApp(func(session interface{}, app string) (interface{}, error) {
+	cloud115Controller.SetQRCodeLoginWithApp(func(session interface{}, app, name string, cloudID int) (interface{}, error) {
 		s := session.(map[string]interface{})
 		qrSession := &driver.QRCodeSession{
 			UID:           s["uid"].(string),
@@ -339,8 +372,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			return nil, err
 		}
 		cookie := cred.Cookie()
-		name := "115账号"
-		_, err = CreateCloud115(name, cookie, "", "", 0, 0, "", "resource", 5, "115driver", "", "")
+		_, err = saveCloud115CookieLogin(name, cloudID, cookie, cloud115CookieSourceLabel(app))
 		if err != nil {
 			return nil, err
 		}
@@ -382,7 +414,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			return nil, err
 		}
 		name := "115账号"
-		_, err = CreateCloud115(name, "", token.RefreshToken, token.AccessToken, token.ExpiresIn, 0, "", "resource", 5, "115driver", "", "")
+		_, err = CreateCloud115(name, "", "", token.RefreshToken, token.AccessToken, token.ExpiresIn, 0, "", "resource", 5, "115driver", "", "")
 		if err != nil {
 			return nil, err
 		}
@@ -500,6 +532,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		Warn("Telegram bot is not running: %v", err)
 	}
 	notificationEventMonitor.Start()
+	embyMonitorCollector.Start()
 
 	// --- 注入 LogController 回调依赖 ---
 	if logger != nil {
@@ -524,6 +557,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// --- 初始化 AuthController（用于 JWT 中间件和用户信息）---
 	authController := controller.NewAuthController(authService)
+	authController.SetGlobalAPIService(globalAPIService)
 	authController.SetJWTSecret(config.JWTSecret)
 	authController.SetVerifyTokenAndReturnUserID(func(tokenString string, secret string) (int, error) {
 		claims, err := VerifyToken(tokenString, secret)
@@ -548,6 +582,27 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			UpdateTime: user.UpdateTime,
 		}, nil
 	})
+	requireAdmin := func(ctx *gin.Context) {
+		userID, ok := ctx.Get("userID")
+		id, validID := userID.(int)
+		if !ok || !validID {
+			controller.ErrorResp(ctx, http.StatusForbidden, "仅管理员可以访问 Emby 管理")
+			ctx.Abort()
+			return
+		}
+		user, err := GetUserByID(id)
+		if err != nil || user == nil || user.Name != "admin" {
+			controller.ErrorResp(ctx, http.StatusForbidden, "仅管理员可以访问 Emby 管理")
+			ctx.Abort()
+			return
+		}
+		ctx.Next()
+	}
+
+	// 企业微信回调由平台签名校验，不能经过用户 JWT 中间件。
+	r.POST("/mcp", mcpController.HandleMCP)
+	r.GET("/notify/wecom/callback", notificationController.VerifyWeComCallback)
+	r.POST("/notify/wecom/callback", notificationController.ReceiveWeComCallback)
 
 	// 需要验证token的路由组
 	auth := r.Group("/")
@@ -604,9 +659,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.PUT("/notify/telegram/config", notificationController.UpdateTelegramConfig)
 		auth.GET("/notify/telegram/status", notificationController.GetTelegramStatus)
 		auth.POST("/notify/telegram/test", notificationController.TestTelegram)
+		auth.GET("/notify/wecom/config", notificationController.GetWeComConfig)
+		auth.PUT("/notify/wecom/config", notificationController.UpdateWeComConfig)
+		auth.POST("/notify/wecom/test", notificationController.TestWeCom)
 
 		// ========== 系统配置 ==========
 		auth.GET("/settings", settingsController.GetAll)
+		auth.GET("/system-api/config", globalAPIController.GetConfig)
+		auth.PUT("/system-api/config", globalAPIController.Update)
+		auth.POST("/system-api/key/regenerate", globalAPIController.Regenerate)
 		auth.GET("/settings/:key", settingsController.GetByKey)
 		auth.PUT("/settings/:key", settingsController.UpdateByKey)
 		auth.PUT("/settings", settingsController.BatchUpdate)
@@ -860,6 +921,42 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/emby/status", embyController.GetStatus)
 		auth.GET("/emby/libraries", embyController.GetLibraries)
 		auth.POST("/emby/refresh", embyController.Refresh)
+
+		// ========== Emby 多实例管理 ==========
+		embyAdmin := auth.Group("/emby")
+		embyAdmin.Use(requireAdmin)
+		embyAdmin.GET("/servers", embyManagementController.ListServers)
+		embyAdmin.POST("/servers", embyManagementController.CreateServer)
+		embyAdmin.PUT("/servers/:server_id", embyManagementController.UpdateServer)
+		embyAdmin.DELETE("/servers/:server_id", embyManagementController.DeleteServer)
+		embyAdmin.POST("/servers/:server_id/test", embyManagementController.CheckServer)
+		embyAdmin.GET("/servers/:server_id/users", embyManagementController.ListUsers)
+		embyAdmin.POST("/servers/:server_id/users", embyManagementController.CreateUser)
+		embyAdmin.PUT("/servers/:server_id/users/:user_id", embyManagementController.UpdateUser)
+		embyAdmin.PUT("/servers/:server_id/users/:user_id/password", embyManagementController.SetUserPassword)
+		embyAdmin.GET("/servers/:server_id/users/:user_id/avatar", embyManagementController.GetUserAvatar)
+		embyAdmin.POST("/servers/:server_id/users/:user_id/avatar", embyManagementController.UploadUserAvatar)
+		embyAdmin.DELETE("/servers/:server_id/users/:user_id", embyManagementController.DeleteUser)
+		embyAdmin.GET("/servers/:server_id/libraries", embyManagementController.ListLibraries)
+		embyAdmin.POST("/servers/:server_id/libraries", embyManagementController.CreateLibrary)
+		embyAdmin.PUT("/servers/:server_id/libraries/:library_id", embyManagementController.UpdateLibrary)
+		embyAdmin.DELETE("/servers/:server_id/libraries/:library_id", embyManagementController.DeleteLibrary)
+		embyAdmin.POST("/servers/:server_id/libraries/refresh-all", embyManagementController.RefreshAllLibraries)
+		embyAdmin.POST("/servers/:server_id/libraries/:library_id/refresh", embyManagementController.RefreshLibrary)
+		embyAdmin.POST("/servers/:server_id/libraries/:library_id/cover", embyManagementController.UploadLibraryCover)
+		embyAdmin.POST("/servers/:server_id/libraries/:library_id/cover/generate", embyManagementController.GenerateLibraryCover)
+		embyAdmin.POST("/servers/:server_id/libraries/:library_id/cover/apply", embyManagementController.ApplyLibraryCover)
+		embyAdmin.GET("/cover-previews/:task_id", embyManagementController.GetCoverPreview)
+		embyAdmin.GET("/servers/:server_id/plugin/strm-assistant", embyManagementController.GetPluginStatus)
+		embyAdmin.POST("/servers/:server_id/plugin/strm-assistant/tasks", embyManagementController.RunPluginTask)
+		embyAdmin.GET("/cover-ai/config", embyManagementController.GetAIConfig)
+		embyAdmin.PUT("/cover-ai/config", embyManagementController.SaveAIConfig)
+		embyAdmin.PUT("/servers/:server_id/media-sources/:source_id", embyManagementController.BindMediaSource)
+		embyAdmin.GET("/servers/:server_id/monitor/overview", embyMonitorController.GetOverview)
+		embyAdmin.GET("/servers/:server_id/monitor/rankings/:dimension", embyMonitorController.GetRankings)
+		embyAdmin.GET("/servers/:server_id/monitor/heatmap", embyMonitorController.GetHeatmap)
+		embyAdmin.GET("/servers/:server_id/monitor/recent-items", embyMonitorController.GetRecentItems)
+		embyAdmin.GET("/servers/:server_id/monitor/items/:item_id/image", embyMonitorController.GetItemImage)
 
 		// ========== 日志查看 ==========
 		auth.GET("/logs", logController.GetFileList)

@@ -153,7 +153,7 @@ func TestApplyTemplate_Jinja2默锟较碉拷影模锟斤拷锟斤拷锟斤拷锟
 		t.Fatalf("锟斤拷染 Jinja2 锟斤拷影默锟斤拷模锟斤拷失锟斤拷: %v", err)
 	}
 
-	want := "锟斤拷锟轿空硷拷 (2010)/锟斤拷锟轿空硷拷 (2010) [1080p].mkv"
+	want := "锟斤拷锟轿空硷拷 (2010) [tmdbid=27205]/锟斤拷锟轿空硷拷 (2010) [tmdbid=27205] - 1080p.mkv"
 	if got != want {
 		t.Fatalf("Jinja2 锟斤拷影默锟斤拷模锟斤拷锟斤拷染锟斤拷锟斤拷锟狡ワ拷锟? got=%q, want=%q", got, want)
 	}
@@ -168,7 +168,7 @@ func TestApplyTemplate_Jinja2默锟较剧集模锟斤拷锟斤拷锟斤拷锟斤
 		t.Fatalf("锟斤拷染 Jinja2 锟界集默锟斤拷模锟斤拷失锟斤拷: %v", err)
 	}
 
-	want := "锟斤拷锟斤拷锟斤拷师 (2008)/Season 01/锟斤拷锟斤拷锟斤拷师 - S01E02 [1080p].mkv"
+	want := "锟斤拷锟斤拷锟斤拷师 (2008) [tmdbid=1396]/Season 1/锟斤拷锟斤拷锟斤拷师.Breaking Bad.2008.S01E02.1080p.mkv"
 	if got != want {
 		t.Fatalf("Jinja2 锟界集默锟斤拷模锟斤拷锟斤拷染锟斤拷锟斤拷锟狡ワ拷锟? got=%q, want=%q", got, want)
 	}
@@ -180,9 +180,43 @@ func TestNormalizeBuiltinTemplate_锟斤拷锟捷旧官凤拷模锟斤拷(t *tes
 	if got := svc.normalizeBuiltinTemplate(legacyDefaultMovieTemplate, "movie"); got != defaultMovieTemplate {
 		t.Fatalf("锟缴碉拷影锟劫凤拷模锟斤拷锟斤拷锟绞э拷锟? got=%q", got)
 	}
+	if got := svc.normalizeBuiltinTemplate(previousDefaultMovieTemplate, "movie"); got != defaultMovieTemplate {
+		t.Fatalf("旧版电影默认模板未升级: got=%q", got)
+	}
 
 	if got := svc.normalizeBuiltinTemplate(legacyDefaultTVTemplate, "tv"); got != defaultTVTemplate {
 		t.Fatalf("锟缴剧集锟劫凤拷模锟斤拷锟斤拷锟绞э拷锟? got=%q", got)
+	}
+	if got := svc.normalizeBuiltinTemplate(previousDefaultTVTemplate, "tv"); got != defaultTVTemplate {
+		t.Fatalf("旧版剧集默认模板未升级: got=%q", got)
+	}
+}
+
+func TestApplyTemplate_新默认电影模板生成Tmdb目录(t *testing.T) {
+	svc := &RenameService{}
+
+	got, err := svc.applyTemplate(defaultMovieTemplate, "飞驰人生2", "Pegasus 2", 2024, 0, 0, "2160p", "", "", ".mkv", 1228891)
+	if err != nil {
+		t.Fatalf("渲染电影默认模板失败: %v", err)
+	}
+
+	want := "飞驰人生2 (2024) [tmdbid=1228891]/飞驰人生2 (2024) [tmdbid=1228891] - 2160p.mkv"
+	if got != want {
+		t.Fatalf("电影默认模板结果不匹配: got=%q, want=%q", got, want)
+	}
+}
+
+func TestApplyTemplate_新默认剧集模板生成Tmdb季目录(t *testing.T) {
+	svc := &RenameService{}
+
+	got, err := svc.applyTemplate(defaultTVTemplate, "间谍过家家", "SPY x FAMILY", 2022, 1, 16, "1080p", "", "AVC", ".mkv", 120089)
+	if err != nil {
+		t.Fatalf("渲染剧集默认模板失败: %v", err)
+	}
+
+	want := "间谍过家家 (2022) [tmdbid=120089]/Season 1/间谍过家家.SPY x FAMILY.2022.S01E16.1080p.AVC.mkv"
+	if got != want {
+		t.Fatalf("剧集默认模板结果不匹配: got=%q, want=%q", got, want)
 	}
 }
 

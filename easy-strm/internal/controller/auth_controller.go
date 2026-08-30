@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 	"time"
 
 	"easy-strm/internal/pkg/logger"
@@ -20,8 +21,9 @@ type UserInfo struct {
 }
 
 type AuthController struct {
-	authService *service.AuthService
-	redisClient interface {
+	authService      *service.AuthService
+	globalAPIService *service.GlobalAPIService
+	redisClient      interface {
 		Set(key string, value interface{}, expiration int) error
 		Get(key string) (string, error)
 		Del(key string) error
@@ -48,6 +50,9 @@ type AuthController struct {
 	// verifyTokenAndReturnUserID: 验证token并返回userID（main.VerifyToken 的包装）
 	verifyTokenAndReturnUserID func(tokenString string, secret string) (int, error)
 }
+
+// SetGlobalAPIService 注入全局 API Key 校验服务。
+func (c *AuthController) SetGlobalAPIService(s *service.GlobalAPIService) { c.globalAPIService = s }
 
 func NewAuthController(authService *service.AuthService) *AuthController {
 	return &AuthController{
@@ -197,6 +202,43 @@ func (c *AuthController) GetUserInfo(ctx *gin.Context) {
 // 保持与原 auth.go 中间件一致的逻辑
 func (c *AuthController) JWTMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
+		if c.globalAPIService != nil {
+			candidate := ctx.GetHeader("X-API-Key")
+			if candidate == "" {
+				a := ctx.GetHeader("Authorization")
+				if strings.HasPrefix(a, "ApiKey ") {
+					candidate = strings.TrimSpace(strings.TrimPrefix(a, "ApiKey "))
+				}
+			}
+			if candidate != "" {
+				valid, err := c.globalAPIService.ValidateAPIKey(candidate)
+				if err != nil {
+					ctx.JSON(http.StatusUnauthorized, gin.H{"error": "API key validation failed"})
+					ctx.Abort()
+					return
+				}
+				if valid {
+					if c.getUserByName == nil {
+						ctx.JSON(http.StatusUnauthorized, gin.H{"error": "API key user unavailable"})
+						ctx.Abort()
+						return
+					}
+					admin, err := c.getUserByName("admin")
+					if err != nil || admin == nil {
+						ctx.JSON(http.StatusUnauthorized, gin.H{"error": "API key user unavailable"})
+						ctx.Abort()
+						return
+					}
+					ctx.Set("userID", admin.ID)
+					ctx.Set("authType", "api_key")
+					ctx.Next()
+					return
+				}
+				ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid API key"})
+				ctx.Abort()
+				return
+			}
+		}
 		authHeader := ctx.GetHeader("Authorization")
 		if authHeader == "" {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header is required"})

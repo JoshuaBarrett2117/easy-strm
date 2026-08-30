@@ -67,6 +67,14 @@ func (s *TmdbService) SetLanguage(language string) {
 	s.language = language
 }
 
+// SetHTTPClient 设置 TMDB 请求使用的 HTTP 客户端。
+// 传入 nil 时保留当前客户端，避免运行期意外切回无超时的默认客户端。
+func (s *TmdbService) SetHTTPClient(httpClient *http.Client) {
+	if httpClient != nil {
+		s.httpClient = httpClient
+	}
+}
+
 // GetAPIKey 获取 API Key
 // 返回:
 //   - string: API Key

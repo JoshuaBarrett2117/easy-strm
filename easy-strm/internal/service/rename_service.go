@@ -22,10 +22,12 @@ type RenameService struct {
 }
 
 const (
-	legacyDefaultMovieTemplate = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
-	legacyDefaultTVTemplate    = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
-	defaultMovieTemplate       = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
-	defaultTVTemplate          = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	legacyDefaultMovieTemplate   = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	legacyDefaultTVTemplate      = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	previousDefaultMovieTemplate = `{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	previousDefaultTVTemplate    = `{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}`
+	defaultMovieTemplate         = `{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}{% if videoFormat %} - {{ videoFormat }}{% endif %}{{ fileExt }}`
+	defaultTVTemplate            = `{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/Season {{ season }}/{{ title }}{% if en_title and en_title != title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}.S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %}.{{ videoFormat }}{% endif %}{% if source %}.{{ source }}{% endif %}{% if codec %}.{{ codec }}{% endif %}{{ fileExt }}`
 )
 
 // NewRenameService 创建更名服务实例

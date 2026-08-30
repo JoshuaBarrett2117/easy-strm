@@ -203,26 +203,36 @@ func (c *Client) GetUser(cookie string) (*driver.UserInfo, error) {
 	return userInfo, nil
 }
 
+// GetAccountStorage 获取指定115账号的已用容量和总容量，单位为字节。
+func (c *Client) GetAccountStorage(cloud115ID int, cookie string) (int64, int64, error) {
+	d, err := getOrCreateDriver(cloud115ID, cookie)
+	if err != nil {
+		return 0, 0, fmt.Errorf("初始化115账号失败: %w", err)
+	}
+
+	info, err := d.GetInfo()
+	if err != nil {
+		return 0, 0, fmt.Errorf("获取115账号容量失败: %w", err)
+	}
+	return info.SpaceInfo.AllUse.Size, info.SpaceInfo.AllTotal.Size, nil
+}
+
 // ReceiveShare 将分享文件转存到目标账号指定目录
 // 调用 115 官方接口 POST https://webapi.115.com/share/receive
 // 基于分享文件的 file_id（fid）而非 pickcode，避免跨账号秒传的 status=7 内容校验问题
-func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error {
+func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string, targetCloud115ID int, targetCookie string) error {
 	masked := shareCode
 	if len(masked) > 4 {
 		masked = masked[:4] + "***"
 	}
-	Debug("[ReceiveShare] start | shareCode=%s | files=%s | saveFolderID=%s", masked, fileIDs, saveFolderID)
+	Debug("[ReceiveShare] start | shareCode=%s | files=%s | targetCID=%s", masked, fileIDs, targetCID)
 
 	d, err := getOrCreateDriver(targetCloud115ID, targetCookie)
 	if err != nil {
 		return err
 	}
 
-	form := url.Values{}
-	form.Set("share_code", shareCode)
-	form.Set("receive_code", receiveCode)
-	form.Set("file_id", fileIDs)
-	form.Set("save_folder_id", saveFolderID)
+	form := buildReceiveShareForm(shareCode, receiveCode, fileIDs, targetCID)
 
 	resp, err := d.NewRequest().
 		SetHeaderVerbatim("Content-Type", "application/x-www-form-urlencoded").
@@ -250,4 +260,15 @@ func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID stri
 	}
 	Info("[ReceiveShare] success | shareCode=%s | files=%s", masked, fileIDs)
 	return nil
+}
+
+// buildReceiveShareForm 构造115分享转存表单。
+// 目标目录必须使用官方share/receive接口定义的cid字段；其它字段名会被接口忽略。
+func buildReceiveShareForm(shareCode, receiveCode, fileIDs, targetCID string) url.Values {
+	form := url.Values{}
+	form.Set("share_code", shareCode)
+	form.Set("receive_code", receiveCode)
+	form.Set("file_id", fileIDs)
+	form.Set("cid", targetCID)
+	return form
 }

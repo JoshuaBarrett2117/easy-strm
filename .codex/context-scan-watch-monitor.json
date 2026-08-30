@@ -1,0 +1,43 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "修复自动整理与监控未生效",
+  "location": [
+    "easy-strm-front/src/components/media/MediaSourceList.vue",
+    "easy-strm/internal/controller/media_source_controller.go",
+    "easy-strm/internal/service/watch_service.go",
+    "easy-strm/internal/service/watch_service_test.go"
+  ],
+  "current_state": [
+    "前端新建表单未提交enabled，后端bool零值会把新媒体源保存为停用",
+    "页面只依据watch_enabled和auto_organize显示运行中，未考虑enabled与真实运行状态",
+    "WatchService仅加载enabled=true且watch_enabled=true的媒体源，因此截图配置不会启动",
+    "本地fsnotify只注册根目录，115轮询只读取首批1000个直接文件"
+  ],
+  "similar_patterns": [
+    "Cloud115账号表单显式维护status",
+    "FileManagerService.listAllCloudFiles按offset完整分页",
+    "OrganizeService递归扫描115目录并按文件ID筛选"
+  ],
+  "technical_stack": ["Go", "Gin", "fsnotify", "115driver", "Vue 3", "Naive UI"],
+  "tests": [
+    "媒体源Controller创建默认启用测试",
+    "WatchService本地递归目录发现测试",
+    "WatchService 115递归与分页发现测试",
+    "go test ./... -count=1",
+    "npm run build"
+  ],
+  "key_questions": [
+    {"priority": "high", "question": "配置为何显示开启但启动日志无监控请求？", "answer": "媒体源enabled为false，StartAll查询会过滤掉。"},
+    {"priority": "high", "question": "目录形式进入的新媒体是否会被发现？", "answer": "不会；当前本地和115实现都只处理监控根目录的直接视频文件。"},
+    {"priority": "medium", "question": "如何避免继续显示假运行？", "answer": "状态展示必须同时校验enabled，并恢复表单中的媒体源启用开关。"}
+  ],
+  "decision": "创建接口未显式传enabled时默认启用；前端恢复启用开关且状态基于enabled；监控扫描复用现有fsnotify与115客户端补递归和分页，不引入新组件。",
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前会话未提供sequential-thinking、shrimp-task-manager、code-index、exa；使用结构化分析、update_plan、rg、PowerShell、应用内浏览器只读核对、apply_patch和本地自动化测试替代。"
+}

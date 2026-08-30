@@ -20,6 +20,7 @@ type MediaSource struct {
 	AutoOrganize       bool      `json:"auto_organize"`        // 是否自动整理
 	WatchEnabled       bool      `json:"watch_enabled"`        // 是否启用监控
 	WatchInterval      int       `json:"watch_interval"`       // 轮询间隔（秒）
+	WatchRunning       bool      `json:"watch_running"`        // 当前进程是否已实际运行监控
 	EmbyLibraryID      string    `json:"emby_library_id"`      // Emby 媒体库 ID
 	CreateTime         time.Time `json:"create_time"`          // 创建时间
 	UpdateTime         time.Time `json:"update_time"`          // 更新时间

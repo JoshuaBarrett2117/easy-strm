@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "goal": "新增仅管理员可见、按 Emby 实例切换的六模块观影监控中心",
+  "deliverables": ["播放历史自采", "Playback Reporting 优先统计", "监控只读 API", "Vue 监控页面", "测试与文档"],
+  "constraints": ["复用现有多实例与管理员路由", "不覆盖工作区无关修改", "本地自动验证"]
+}

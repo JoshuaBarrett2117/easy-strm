@@ -69,6 +69,14 @@ func (s *TaskService) UpdateProgress(taskID string, totalFiles, processedFiles, 
 	return nil
 }
 
+// UpdateProgressPercent 更新非文件型任务的可信进度百分比。
+func (s *TaskService) UpdateProgressPercent(taskID string, progress int) error {
+	if err := s.taskRedisDAO.UpdateProgressPercent(taskID, progress); err != nil {
+		return fmt.Errorf("更新任务进度失败: %v", err)
+	}
+	return nil
+}
+
 // SetError 设置任务错误信息
 func (s *TaskService) SetError(taskID, errMsg string) error {
 	if err := s.taskRedisDAO.SetError(taskID, errMsg); err != nil {

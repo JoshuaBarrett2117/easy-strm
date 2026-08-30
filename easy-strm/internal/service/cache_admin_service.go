@@ -94,6 +94,13 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			},
 		},
 		{
+			Key:           "account_quota_cache",
+			Name:          "115账号容量缓存",
+			Storage:       "redis",
+			Description:   "保存115账号已用容量与总容量，五分钟内优先复用。",
+			RedisPatterns: []string{"easy_strm:dashboard:account_quota:*"},
+		},
+		{
 			Key:           "task_cache",
 			Name:          "任务状态缓存",
 			Storage:       "redis",

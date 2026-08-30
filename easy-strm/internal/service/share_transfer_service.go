@@ -488,10 +488,19 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 	if req.TargetDirectory != "" {
 		cid, err := s.client.GetCIDByPath(req.TargetDirectory, req.TargetCloud115Id, targetAccount.Cookie)
 		if err != nil {
-			logger.Warnf("[INFO] ShareTransfer | taskId=%s | action=execute | getCIDErr=%v | 回退到根目录", taskId, err)
-		} else if cid != "" {
-			targetDirCID = cid
+			errMsg := fmt.Sprintf("解析目标目录失败，已停止转存以避免文件错放: %v", err)
+			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=execute | getCIDErr=%v | transfer=aborted", taskId, err)
+			s.taskDAO.SetError(taskId, errMsg)
+			return
 		}
+		if cid == "" || (cid == "0" && strings.Trim(req.TargetDirectory, "/\\ ") != "") {
+			errMsg := fmt.Sprintf("目标目录不存在或CID无效，已停止转存: %s", req.TargetDirectory)
+			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=execute | targetDirectory=%s | cid=%s | transfer=aborted",
+				taskId, req.TargetDirectory, cid)
+			s.taskDAO.SetError(taskId, errMsg)
+			return
+		}
+		targetDirCID = cid
 	}
 
 	// 注意：share/receive 接口由 115 后台处理转存，仅需目标账号登录态（targetAccount.Cookie），

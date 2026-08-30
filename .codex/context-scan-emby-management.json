@@ -1,0 +1,22 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "existing": {
+    "backend": "EmbyService 已支持全局配置、连接检查、媒体库列表及刷新",
+    "frontend": "Settings 已提供 Emby URL/API Key，媒体源可绑定 emby_library_id",
+    "tasks": "TaskService/TaskRedisDAO 已支持状态、百分比、文件统计和 metadata"
+  },
+  "decisions": [
+    "新增 t_emby_server 并迁移旧系统配置",
+    "复用 TaskService，通过 metadata.steps 表达 Emby 操作步骤",
+    "耗时操作由后端轮询 Emby，短操作生成已结束任务记录",
+    "封面预览存于系统临时目录，不建立永久图片表",
+    "StrmAssistant 通过插件和计划任务名称进行能力检测"
+  ],
+  "verification": [
+    "go test ./...",
+    "npm run build",
+    "Emby 管理服务刷新终态和用户接口单元测试"
+  ]
+}
+

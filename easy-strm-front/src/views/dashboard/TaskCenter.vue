@@ -27,11 +27,21 @@
       <StatCard label="已完成" :value="taskCounts.completed" :icon="CheckmarkCircleOutline" tone="green" />
     </section>
 
+    <PageCard title="任务筛选" subtitle="按 Emby 实例、类型、状态、发起方式和时间筛选">
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <n-select v-model:value="filters.serverId" :options="embyServerOptions" clearable placeholder="Emby 实例" />
+        <n-select v-model:value="filters.taskType" :options="embyTaskTypeOptions" clearable placeholder="任务类型" />
+        <n-select v-model:value="filters.status" :options="statusOptions" clearable placeholder="执行状态" />
+        <n-select v-model:value="filters.origin" :options="originOptions" clearable placeholder="发起方式" />
+        <n-date-picker v-model:value="filters.timeRange" type="datetimerange" clearable />
+      </div>
+    </PageCard>
+
     <!-- 任务列表 -->
     <PageCard>
-      <div v-if="taskList.length > 0" class="flex flex-col gap-3">
+      <div v-if="filteredTaskList.length > 0" class="flex flex-col gap-3">
         <TaskCard
-          v-for="task in taskList"
+          v-for="task in filteredTaskList"
           :key="task.task_id"
           :task="task"
           @cancel="handleCancelTask"
@@ -68,6 +78,16 @@
                 </n-descriptions-item>
                 <n-descriptions-item label="错误信息">{{ taskDetailData.error_message || '-' }}</n-descriptions-item>
               </n-descriptions>
+
+              <div v-if="taskDetailSteps.length > 0">
+                <div class="mb-3 text-sm font-bold text-slate-800 dark:text-white">执行步骤</div>
+                <div class="space-y-2">
+                  <div v-for="(step, index) in taskDetailSteps" :key="`${index}-${step.name}`" class="flex gap-3 rounded-xl border border-slate-100 px-3 py-2.5 dark:border-white/5">
+                    <n-tag size="small" :type="stepStatusType(step.status)">{{ stepStatusText(step.status) }}</n-tag>
+                    <div><div class="text-sm font-medium text-slate-700 dark:text-slate-200">{{ step.name }}</div><div v-if="step.message" class="mt-0.5 text-xs text-slate-500">{{ step.message }}</div></div>
+                  </div>
+                </div>
+              </div>
 
               <!-- 任务元数据 -->
               <div>
@@ -140,8 +160,10 @@ import {
   NDescriptionsItem,
   NDrawer,
   NDrawerContent,
+  NDatePicker,
   NIcon,
   NSpin,
+  NSelect,
   NSwitch,
   NTag,
   useMessage
@@ -170,6 +192,7 @@ const taskDetailLoading = ref(false)
 const taskDetailData = ref(null)
 const taskDetailError = ref('')
 const activeTaskId = ref('')
+const filters = ref({ serverId: null, taskType: null, status: null, origin: null, timeRange: null })
 let timer = null
 let taskDetailTimer = null
 
@@ -185,9 +208,45 @@ const taskCounts = computed(() => {
   return taskList.value.reduce((acc, item) => {
     const key = item.status || 'other'
     acc[key] = (acc[key] || 0) + 1
+    if (key === 'success' || key === 'partial_success') acc.completed += 1
     return acc
   }, { running: 0, failed: 0, completed: 0 })
 })
+
+const embyServerOptions = computed(() => {
+  const seen = new Map()
+  taskList.value.forEach(task => {
+    const id = task.metadata?.server_id
+    if (id !== undefined && id !== null) seen.set(Number(id), task.metadata?.server_name || `实例 ${id}`)
+  })
+  return [...seen.entries()].map(([value, label]) => ({ value, label }))
+})
+const embyTaskTypeOptions = [
+  { label: 'Emby 实例管理', value: 'emby_server' },
+  { label: 'Emby 库刷新', value: 'emby_refresh' },
+  { label: 'Emby 用户管理', value: 'emby_user' },
+  { label: 'Emby 媒体库管理', value: 'emby_library' },
+  { label: 'Emby 媒体库封面', value: 'emby_cover' },
+  { label: '神医助手任务', value: 'emby_plugin' }
+]
+const statusOptions = [
+  { label: '待执行/待确认', value: 'pending' }, { label: '执行中', value: 'running' },
+  { label: '成功', value: 'success' }, { label: '部分成功', value: 'partial_success' },
+  { label: '失败', value: 'failed' }, { label: '已取消', value: 'cancelled' }, { label: '结果未知', value: 'unknown' }
+]
+const originOptions = [{ label: '页面手动', value: 'manual' }, { label: '整理联动', value: 'organize_linkage' }, { label: '系统自动', value: 'automatic' }]
+const filteredTaskList = computed(() => taskList.value.filter(task => {
+  const filter = filters.value
+  if (filter.serverId && Number(task.metadata?.server_id) !== Number(filter.serverId)) return false
+  if (filter.taskType && task.task_type !== filter.taskType) return false
+  if (filter.status && task.status !== filter.status) return false
+  if (filter.origin && task.metadata?.origin !== filter.origin) return false
+  if (Array.isArray(filter.timeRange) && filter.timeRange.length === 2) {
+    const timestamp = Date.parse(String(task.create_time || '').replace(' ', 'T'))
+    if (Number.isFinite(timestamp) && (timestamp < filter.timeRange[0] || timestamp > filter.timeRange[1])) return false
+  }
+  return true
+}))
 
 const taskDetailMetadataRows = computed(() => {
   const metadata = taskDetailData.value?.metadata
@@ -213,11 +272,29 @@ const taskDetailMetadataRows = computed(() => {
     result_summary: '结果概览',
     failure_category: '失败分类',
     failure_reason: '失败原因',
-    failed_item_count: '失败文件数'
+    failed_item_count: '失败文件数',
+    server_id: 'Emby 实例 ID',
+    server_name: 'Emby 实例',
+    operation: '操作类型',
+    target: '操作目标',
+    origin: '发起方式',
+    current_step: '当前步骤',
+    remote_task_id: 'Emby 任务 ID',
+    success_count: '成功数量',
+    failed_count: '失败数量',
+    submitted_count: '已提交数量',
+    library_id: 'Emby 媒体库 ID',
+    library_name: 'Emby 媒体库',
+    strm_count: 'STRM 视频数量',
+    covered_before: '执行前已有主图',
+    covered_after: '执行后已有主图',
+    generated_cover_count: '本次新增主图',
+    missing_cover_count: '仍缺少主图',
+    conclusion: '执行结论'
   }
 
   return Object.entries(metadata)
-    .filter(([key, value]) => key !== 'failed_items' && value !== null && value !== undefined && value !== '')
+    .filter(([key, value]) => key !== 'failed_items' && key !== 'steps' && key !== 'preview_path' && value !== null && value !== undefined && value !== '')
     .map(([key, value]) => {
       let formatted = value
       if (key === 'trigger_mode') {
@@ -228,6 +305,8 @@ const taskDetailMetadataRows = computed(() => {
         formatted = ({ skip: '跳过', overwrite: '覆盖', suffix: '追加序号' })[value] || value
       } else if (key === 'operation_mode') {
         formatted = ({ move: '移动', copy: '复制', hardlink: '硬链接', symlink: '软链接' })[value] || value
+      } else if (key === 'operation') {
+        formatted = ({ strm_scan_capture: '扫描 STRM 并生成视频封面', media_info: '媒体信息提取', subtitle_scan: '外挂字幕扫描', metadata_refresh: '元数据刷新' })[value] || value
       } else if (key === 'watch_interval' && Number.isFinite(Number(value))) {
         formatted = `${value} 秒`
       } else if (Array.isArray(value)) {
@@ -243,6 +322,10 @@ const taskDetailMetadataRows = computed(() => {
       }
     })
 })
+
+const taskDetailSteps = computed(() => Array.isArray(taskDetailData.value?.metadata?.steps) ? taskDetailData.value.metadata.steps : [])
+const stepStatusText = status => ({ pending: '待执行', running: '执行中', success: '成功', skipped: '已跳过', failed: '失败', unknown: '未知', cancelled: '已取消' })[status] || status
+const stepStatusType = status => ({ running: 'info', success: 'success', failed: 'error', unknown: 'warning', cancelled: 'default' })[status] || 'default'
 
 const taskDetailFailedItems = computed(() => {
   const items = taskDetailData.value?.metadata?.failed_items
@@ -266,7 +349,7 @@ const taskDetailFailureGroups = computed(() => {
     return []
   }
 
-  const groupOrder = ['identify_failed', 'organize_failed', 'cloud115_auth_failed', 'cloud115_failed', 'scan_failed', 'target_path', 'partial_failed', 'conflict_skipped', 'panic', 'other']
+  const groupOrder = ['emby_library_refresh_failed', 'identify_failed', 'organize_failed', 'cloud115_auth_failed', 'cloud115_failed', 'scan_failed', 'target_path', 'partial_failed', 'conflict_skipped', 'panic', 'other']
   const groupMap = new Map()
 
   const getGroupKey = (category, reason) => {
@@ -287,6 +370,7 @@ const taskDetailFailureGroups = computed(() => {
 
   const getGroupMeta = (key) => {
     const meta = {
+      emby_library_refresh_failed: { label: 'Emby 媒体库刷新失败', tagType: 'error' },
       identify_failed: { label: '识别失败', tagType: 'warning' },
       organize_failed: { label: '整理失败', tagType: 'error' },
       cloud115_auth_failed: { label: '115 账号失效', tagType: 'error' },
@@ -321,6 +405,7 @@ const taskDetailFailureGroups = computed(() => {
 
 const taskDetailFailureTagLabel = (category) => {
   const map = {
+    emby_library_refresh_failed: 'Emby 媒体库刷新失败',
     identify_failed: '识别失败',
     organize_failed: '整理失败',
     cloud115_auth_failed: '115 账号失效',
@@ -338,7 +423,7 @@ const taskDetailFailureTagLabel = (category) => {
 const taskDetailFailureTagType = (category) => {
   const key = String(category || '').trim()
   if (key === 'identify_failed' || key === 'scan_failed' || key === 'target_path') return 'warning'
-  if (key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'error'
+  if (key === 'emby_library_refresh_failed' || key === 'organize_failed' || key === 'cloud115_auth_failed' || key === 'cloud115_failed' || key === 'panic') return 'error'
   if (key === 'partial_failed') return 'warning'
   return 'info'
 }
@@ -481,6 +566,7 @@ onBeforeUnmount(() => {
 })
 
 onMounted(async () => {
+  if (route.query.emby_server_id) filters.value.serverId = Number(route.query.emby_server_id)
   await loadTasks()
   await openRouteTask()
 })

@@ -8,14 +8,17 @@
     "build": "vite build",
     "preview": "vite preview",
     "e2e:organize-preview-refresh": "node scripts/e2e-organize-preview-refresh.mjs",
-    "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs"
+    "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs",
+    "e2e:emby-monitor": "node scripts/e2e-emby-monitor.mjs"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
     "axios": "^1.13.5",
     "crypto-js": "^4.2.0",
+    "echarts": "^6.1.0",
     "naive-ui": "^2.41.0",
     "vue": "^3.5.13",
+    "vue-echarts": "^8.2.0",
     "vue-router": "^4.4.5"
   },
   "devDependencies": {

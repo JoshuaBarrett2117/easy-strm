@@ -1,0 +1,36 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "location": [
+    "easy-strm/network_proxy.go",
+    "easy-strm/auth.go",
+    "easy-strm/internal/service/tmdb_service.go",
+    "easy-strm-front/src/views/Settings.vue"
+  ],
+  "current_state": "代理客户端仅匹配数据库 proxy_domains；空列表不代理。Telegram 通知已使用代理客户端，TMDB Service 仍使用独立直连客户端。",
+  "similar_cases": [
+    "NotificationService 通过构造注入复用代理客户端",
+    "EmbyService 通过构造注入复用代理客户端",
+    "115 Client 在创建时复用代理客户端"
+  ],
+  "stack": ["Go", "net/http", "Vue 3", "Naive UI"],
+  "tests": ["Go 单元测试", "go test ./...", "go vet ./...", "npm run build"],
+  "questions": [
+    {
+      "priority": "high",
+      "question": "默认规则是否只影响探测？",
+      "answer": "否，必须作用于所有 NewProxyAwareHTTPClient，并显式接入 TMDB Service。"
+    },
+    {
+      "priority": "high",
+      "question": "自定义列表与默认列表如何组合？",
+      "answer": "追加合并，避免用户保存自定义域名后意外关闭内置站点代理。"
+    }
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "risks_identified": true,
+    "verification_known": true
+  }
+}

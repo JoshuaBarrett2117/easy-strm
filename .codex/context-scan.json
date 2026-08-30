@@ -1,36 +1,41 @@
 {
-  "date": "2026-08-29",
+  "date": "2026-08-30",
   "executor": "Codex",
-  "location": {
-    "backend": [
-      "easy-strm/internal/service/notification_service.go",
-      "easy-strm/internal/dao/notif_config_dao.go",
-      "easy-strm/internal/controller/cloud115_notification_controller.go",
-      "easy-strm/auth.go"
-    ],
-    "frontend": [
-      "easy-strm-front/src/views/Settings.vue",
-      "easy-strm-front/src/utils/api"
-    ]
-  },
+  "task": "修复115自动转存目标目录失效",
+  "location": [
+    "easy-strm/115client.go",
+    "easy-strm/internal/service/share_transfer_service.go",
+    "easy-strm/internal/service/cloud115_client.go",
+    "easy-strm/internal/service/share_transfer_service_test.go"
+  ],
   "current_state": [
-    "已有 Telegram Bot Token + Chat ID 的单向 sendMessage 文本通知",
-    "已有 Telegram、Server酱、SMTP 通知配置 CRUD 和测试接口",
-    "现有通知配置没有前端页面，任务与账号通知方法也未接入业务链路",
-    "任务统一存储在 Redis，但存在 main 包与 internal/dao 两套访问实现",
-    "Dashboard、Task、Cron、Emby Service 可直接复用为机器人操作依赖"
+    "ShareTransferService已把目标路径解析为CID，并传给Client.ReceiveShare",
+    "Client.ReceiveShare错误地把CID写入save_folder_id，115接口忽略后按默认位置接收",
+    "目标路径解析失败时现有实现会静默回退CID=0并继续转存"
   ],
   "similar_patterns": [
-    "EmbyService 使用代理感知 HTTP 客户端和独立 Controller",
-    "TaskCard 维护任务类型、状态和可执行动作映射",
-    "Settings.vue 使用分栏配置、连接测试和密码输入"
+    "DirectLinkController在转存前解析TransferDirectory为CID",
+    "OfflineDownloadService通过MkdirAll115取得目标目录CID",
+    "FileOperationService的移动与复制接口均显式传递目标目录CID"
   ],
-  "technology": ["Go 1.25", "Gin", "PostgreSQL", "Redis", "Vue 3", "Naive UI"],
-  "tests": ["go test ./...", "npm run build", "Go httptest 与注入 fake service"],
-  "observations": [
-    "通知配置职责错误地位于 Cloud115Service/Cloud115Controller，需要迁移到专用层",
-    "通过轮询统一任务 Redis 状态比修改所有任务生产者更可靠，且能覆盖两套任务实现",
-    "Telegram 卡片应使用 HTML 文本和 Inline Keyboard，不生成图片",
-    "sequential-thinking、code-index、shrimp-task-manager、exa 在当前工具集中不可用"
-  ]
+  "technical_stack": ["Go", "Gin", "115driver v1.3.5", "115 webapi share/receive"],
+  "tests": [
+    "easy-strm/115client_receive_test.go",
+    "easy-strm/internal/service/share_transfer_service_test.go",
+    "go test ./... -count=1",
+    "go vet ./..."
+  ],
+  "key_questions": [
+    {"priority": "high", "question": "业务层是否成功生成目标CID？", "answer": "是，executeTransfer通过GetCIDByPath生成并传入ReceiveShare。"},
+    {"priority": "high", "question": "115接口是否识别当前字段？", "answer": "否，share/receive要求cid，当前save_folder_id被忽略。"},
+    {"priority": "medium", "question": "目录解析失败是否可能继续错放？", "answer": "是，旧实现会回退CID=0继续执行。"}
+  ],
+  "decision": "使用标准url.Values构造115官方share/receive表单并发送cid；指定路径解析失败或返回无效CID时停止任务。",
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前会话未提供 sequential-thinking、shrimp-task-manager、code-index；使用结构化分析、update_plan、rg、PowerShell、apply_patch 和本地自动化测试替代。"
 }

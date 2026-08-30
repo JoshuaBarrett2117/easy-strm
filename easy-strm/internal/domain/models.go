@@ -18,6 +18,7 @@ type Cloud115 struct {
 	ID                int        `json:"id"`
 	Name              string     `json:"name"`
 	Cookie            string     `json:"cookie"`
+	CookieSource      string     `json:"cookie_source"`
 	RefreshToken      string     `json:"refresh_token"`
 	AccessToken       string     `json:"access_token"`
 	ExpiresIn         int        `json:"expires_in"`
@@ -130,6 +131,11 @@ const (
 	TaskTypeOrganize        TaskType = "organize"
 	TaskTypeScrape          TaskType = "scrape"
 	TaskTypeEmbyRefresh     TaskType = "emby_refresh"
+	TaskTypeEmbyServer      TaskType = "emby_server"
+	TaskTypeEmbyUser        TaskType = "emby_user"
+	TaskTypeEmbyLibrary     TaskType = "emby_library"
+	TaskTypeEmbyCover       TaskType = "emby_cover"
+	TaskTypeEmbyPlugin      TaskType = "emby_plugin"
 	TaskTypeOfflineDownload TaskType = "offline_download"
 	TaskTypeFileTransfer    TaskType = "file_transfer"
 )
@@ -145,6 +151,11 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeOrganize:        "媒体整理",
 	TaskTypeScrape:          "NFO刮削",
 	TaskTypeEmbyRefresh:     "Emby库刷新",
+	TaskTypeEmbyServer:      "Emby实例管理",
+	TaskTypeEmbyUser:        "Emby用户管理",
+	TaskTypeEmbyLibrary:     "Emby媒体库管理",
+	TaskTypeEmbyCover:       "Emby媒体库封面",
+	TaskTypeEmbyPlugin:      "神医助手任务",
 	TaskTypeOfflineDownload: "115云下载",
 	TaskTypeFileTransfer:    "文件传输",
 }
@@ -188,12 +199,15 @@ type FileInfo struct {
 
 // 任务状态常量
 const (
-	TaskStatusPending   = "pending"
-	TaskStatusRunning   = "running"
-	TaskStatusCompleted = "completed"
-	TaskStatusFailed    = "failed"
-	TaskStatusCancelled = "cancelled"
-	TaskStatusSkipped   = "skipped"
+	TaskStatusPending        = "pending"
+	TaskStatusRunning        = "running"
+	TaskStatusCompleted      = "completed"
+	TaskStatusSuccess        = "success"
+	TaskStatusPartialSuccess = "partial_success"
+	TaskStatusUnknown        = "unknown"
+	TaskStatusFailed         = "failed"
+	TaskStatusCancelled      = "cancelled"
+	TaskStatusSkipped        = "skipped"
 )
 
 // FileListRequest 文件列表请求

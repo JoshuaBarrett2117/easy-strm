@@ -131,21 +131,52 @@ func (sg *StrmGenerator) buildStrmContent(video VideoFile) string {
 
 // CleanupStrmFiles 清理生成的STRM文件
 func (sg *StrmGenerator) CleanupStrmFiles() error {
-	Debug("Cleaning up STRM files in: %s", sg.OutputDir)
+	outputDir := strings.TrimSpace(sg.OutputDir)
+	if outputDir == "" {
+		return fmt.Errorf("STRM输出目录不能为空")
+	}
+	if filepath.Clean(outputDir) == "." {
+		return fmt.Errorf("STRM输出目录不能是当前工作目录")
+	}
+
+	absOutputDir, err := filepath.Abs(outputDir)
+	if err != nil {
+		return fmt.Errorf("解析STRM输出目录失败: %v", err)
+	}
+	volumeRoot := filepath.VolumeName(absOutputDir) + string(filepath.Separator)
+	if filepath.Clean(absOutputDir) == filepath.Clean(volumeRoot) {
+		return fmt.Errorf("STRM输出目录不能是磁盘根目录: %s", absOutputDir)
+	}
+
+	Debug("Cleaning up STRM files in: %s", absOutputDir)
 
 	// 检查目录是否存在
-	if _, err := os.Stat(sg.OutputDir); os.IsNotExist(err) {
-		Info("Output directory %s does not exist, skipping cleanup", sg.OutputDir)
+	info, err := os.Stat(absOutputDir)
+	if os.IsNotExist(err) {
+		Info("Output directory %s does not exist, skipping cleanup", absOutputDir)
 		return nil
 	}
-
-	// 删除目录及其所有内容
-	if err := os.RemoveAll(sg.OutputDir); err != nil {
-		Error("Failed to cleanup STRM files in %s: %v", sg.OutputDir, err)
-		return fmt.Errorf("cleanup STRM files failed: %v", err)
+	if err != nil {
+		return fmt.Errorf("读取STRM输出目录失败: %v", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("STRM输出路径不是目录: %s", absOutputDir)
 	}
 
-	Info("STRM files cleanup completed successfully for directory: %s", sg.OutputDir)
+	// 仅删除目录内的全部内容，保留配置的目标目录本身。
+	entries, err := os.ReadDir(absOutputDir)
+	if err != nil {
+		return fmt.Errorf("读取STRM输出目录内容失败: %v", err)
+	}
+	for _, entry := range entries {
+		entryPath := filepath.Join(absOutputDir, entry.Name())
+		if err := os.RemoveAll(entryPath); err != nil {
+			Error("Failed to cleanup STRM path %s: %v", entryPath, err)
+			return fmt.Errorf("清理STRM目录项%s失败: %v", entry.Name(), err)
+		}
+	}
+
+	Info("STRM files cleanup completed successfully for directory: %s", absOutputDir)
 	return nil
 }
 

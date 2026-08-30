@@ -103,6 +103,7 @@ func InitDB(config *Config) error {
 		id SERIAL PRIMARY KEY,
 		name VARCHAR(50) UNIQUE NOT NULL,
 		cookie TEXT,
+		cookie_source VARCHAR(100) NOT NULL DEFAULT '',
 		refresh_token TEXT,
 		access_token TEXT,
 		expires_in INTEGER,
@@ -125,6 +126,9 @@ func InitDB(config *Config) error {
 		END IF;
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'update_time') THEN
 			ALTER TABLE t_cloud_115 ADD COLUMN update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'cookie_source') THEN
+			ALTER TABLE t_cloud_115 ADD COLUMN cookie_source VARCHAR(100) NOT NULL DEFAULT '';
 		END IF;
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_cloud_115' AND column_name = 'transfer_account_id') THEN
 			ALTER TABLE t_cloud_115 ADD COLUMN transfer_account_id INTEGER DEFAULT 0;
@@ -572,6 +576,57 @@ END $$;
 		return err
 	}
 
+	// Emby 管理模块使用独立实例表；启动建表与迁移脚本保持一致。
+	createEmbyServerTableSQL := `
+	CREATE TABLE IF NOT EXISTS t_emby_server (
+		id SERIAL PRIMARY KEY,
+		name VARCHAR(100) NOT NULL,
+		base_url VARCHAR(1000) NOT NULL,
+		api_key TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN NOT NULL DEFAULT TRUE,
+		is_default BOOLEAN NOT NULL DEFAULT FALSE,
+		create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		update_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS uk_emby_server_default
+		ON t_emby_server (is_default) WHERE is_default = TRUE;
+	`
+	if _, err = db.Exec(createEmbyServerTableSQL); err != nil {
+		Error("Failed to create t_emby_server table: %v", err)
+		return err
+	}
+
+	// Emby 观影监控表；与 migrate_v19_emby_monitor.sql 保持一致。
+	createEmbyMonitorTablesSQL := `
+	CREATE TABLE IF NOT EXISTS t_emby_playback_event (
+		id BIGSERIAL PRIMARY KEY, server_id INTEGER NOT NULL REFERENCES t_emby_server(id) ON DELETE CASCADE,
+		session_id VARCHAR(200) NOT NULL, user_id VARCHAR(200) NOT NULL DEFAULT '', user_name VARCHAR(300) NOT NULL DEFAULT '',
+		item_id VARCHAR(200) NOT NULL, item_type VARCHAR(50) NOT NULL DEFAULT '', item_name VARCHAR(500) NOT NULL DEFAULT '',
+		series_id VARCHAR(200) NOT NULL DEFAULT '', series_name VARCHAR(500) NOT NULL DEFAULT '', image_tag VARCHAR(300) NOT NULL DEFAULT '',
+		client_name VARCHAR(300) NOT NULL DEFAULT '', device_name VARCHAR(300) NOT NULL DEFAULT '', playback_method VARCHAR(100) NOT NULL DEFAULT '',
+		started_at TIMESTAMPTZ NOT NULL, ended_at TIMESTAMPTZ, watched_seconds BIGINT NOT NULL DEFAULT 0,
+		last_seen_at TIMESTAMPTZ NOT NULL, is_paused BOOLEAN NOT NULL DEFAULT FALSE
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS uk_emby_playback_active_session ON t_emby_playback_event(server_id, session_id) WHERE ended_at IS NULL;
+	CREATE INDEX IF NOT EXISTS idx_emby_playback_server_started ON t_emby_playback_event(server_id, started_at DESC);
+	CREATE TABLE IF NOT EXISTS t_emby_monitor_item (
+		server_id INTEGER NOT NULL REFERENCES t_emby_server(id) ON DELETE CASCADE, item_id VARCHAR(200) NOT NULL,
+		item_type VARCHAR(50) NOT NULL DEFAULT '', name VARCHAR(500) NOT NULL DEFAULT '', series_name VARCHAR(500) NOT NULL DEFAULT '',
+		production_year INTEGER NOT NULL DEFAULT 0, image_tag VARCHAR(300) NOT NULL DEFAULT '', date_created TIMESTAMPTZ NOT NULL,
+		first_seen_at TIMESTAMPTZ NOT NULL, is_baseline BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(server_id, item_id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_emby_monitor_item_created ON t_emby_monitor_item(server_id, date_created DESC);
+	CREATE INDEX IF NOT EXISTS idx_emby_monitor_item_seen ON t_emby_monitor_item(server_id, first_seen_at DESC);
+	CREATE TABLE IF NOT EXISTS t_emby_monitor_state (
+		server_id INTEGER PRIMARY KEY REFERENCES t_emby_server(id) ON DELETE CASCADE, baseline_completed_at TIMESTAMPTZ,
+		last_session_poll_at TIMESTAMPTZ, last_item_poll_at TIMESTAMPTZ, plugin_available BOOLEAN NOT NULL DEFAULT FALSE,
+		last_error TEXT NOT NULL DEFAULT '', update_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);`
+	if _, err = db.Exec(createEmbyMonitorTablesSQL); err != nil {
+		Error("Failed to create Emby monitor tables: %v", err)
+		return err
+	}
+
 	// 创建媒体源表索引
 	_, err = db.Exec(`CREATE INDEX IF NOT EXISTS idx_media_source_type ON t_media_source(source_type)`)
 	if err != nil {
@@ -662,9 +717,9 @@ END $$;
 	_, err = db.Exec(`
 		INSERT INTO t_rename_preset (name, media_type, template, enabled)
 		SELECT * FROM (VALUES
-			('电影（官方）', 'movie', '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('电影（官方）', 'movie', '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}{% if videoFormat %} - {{ videoFormat }}{% endif %}{{ fileExt }}', true),
 			('电影（简洁）', 'movie', '{{ title }}{{ fileExt }}', true),
-			('剧集（官方）', 'tv', '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}', true),
+			('剧集（官方）', 'tv', '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/Season {{ season }}/{{ title }}{% if en_title and en_title != title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}.S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %}.{{ videoFormat }}{% endif %}{% if source %}.{{ source }}{% endif %}{% if codec %}.{{ codec }}{% endif %}{{ fileExt }}', true),
 			('剧集（简洁）', 'tv', '{{ title }}/S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{{ fileExt }}', true)
 		) AS v(name, media_type, template, enabled)
 		WHERE NOT EXISTS (SELECT 1 FROM t_rename_preset WHERE name = v.name)
@@ -676,10 +731,14 @@ END $$;
 	_, err = db.Exec(`
 		UPDATE t_system_config
 		SET config_val = CASE
-			WHEN config_key = 'movie_naming_template' AND config_val = '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-			WHEN config_key = 'tv_naming_template' AND config_val = '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			WHEN config_key = 'movie_naming_template' AND config_val IN (
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}',
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			) THEN '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}{% if videoFormat %} - {{ videoFormat }}{% endif %}{{ fileExt }}'
+			WHEN config_key = 'tv_naming_template' AND config_val IN (
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}',
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			) THEN '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/Season {{ season }}/{{ title }}{% if en_title and en_title != title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}.S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %}.{{ videoFormat }}{% endif %}{% if source %}.{{ source }}{% endif %}{% if codec %}.{{ codec }}{% endif %}{{ fileExt }}'
 			ELSE config_val
 		END,
 		update_time = CURRENT_TIMESTAMP
@@ -692,10 +751,14 @@ END $$;
 	_, err = db.Exec(`
 		UPDATE t_rename_preset
 		SET template = CASE
-			WHEN media_type = 'movie' AND template = '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-			WHEN media_type = 'tv' AND template = '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
-				THEN '{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			WHEN media_type = 'movie' AND template IN (
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}',
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			) THEN '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}{% if videoFormat %} - {{ videoFormat }}{% endif %}{{ fileExt }}'
+			WHEN media_type = 'tv' AND template IN (
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }}{% if en_title and en_title != title %} - {{ en_title }}{% endif %} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}',
+				'{{ title }}{% if year %} ({{ year }}){% endif %}/Season {{ "%02d"|format(season|int) }}/{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %} [{{ videoFormat }}]{% endif %}{{ fileExt }}'
+			) THEN '{{ title }}{% if year %} ({{ year }}){% endif %}{% if tmdbid %} [tmdbid={{ tmdbid }}]{% endif %}/Season {{ season }}/{{ title }}{% if en_title and en_title != title %}.{{ en_title }}{% endif %}{% if year %}.{{ year }}{% endif %}.S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}{% if videoFormat %}.{{ videoFormat }}{% endif %}{% if source %}.{{ source }}{% endif %}{% if codec %}.{{ codec }}{% endif %}{{ fileExt }}'
 			ELSE template
 		END,
 		update_time = CURRENT_TIMESTAMP
@@ -845,11 +908,33 @@ DO $$ BEGIN
 	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'emby_library_id') THEN
 		ALTER TABLE t_media_source ADD COLUMN emby_library_id VARCHAR(100) DEFAULT '';
 	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'emby_server_id') THEN
+		ALTER TABLE t_media_source ADD COLUMN emby_server_id INTEGER REFERENCES t_emby_server(id) ON DELETE SET NULL;
+	END IF;
 END $$;
 `
 	_, err = db.Exec(alterMediaSourceTargetPathSQL)
 	if err != nil {
 		Error("Failed to add organize_target_path to t_media_source: %v", err)
+		return err
+	}
+
+	// 首次升级时把旧的全局 Emby 配置迁移成默认实例，并关联已有媒体源。
+	legacyEmbyMigrationSQL := `
+	INSERT INTO t_emby_server(name, base_url, api_key, enabled, is_default)
+	SELECT '默认 Emby', url.config_val, COALESCE(key.config_val, ''),
+	       COALESCE(enabled.config_val, 'false') IN ('true', '1'), TRUE
+	FROM t_system_config url
+	LEFT JOIN t_system_config key ON key.config_key = 'emby_api_key'
+	LEFT JOIN t_system_config enabled ON enabled.config_key = 'emby_enabled'
+	WHERE url.config_key = 'emby_url' AND BTRIM(url.config_val) <> ''
+	  AND NOT EXISTS (SELECT 1 FROM t_emby_server);
+	UPDATE t_media_source
+	SET emby_server_id = (SELECT id FROM t_emby_server ORDER BY is_default DESC, id ASC LIMIT 1)
+	WHERE emby_library_id <> '' AND emby_server_id IS NULL;
+	`
+	if _, err = db.Exec(legacyEmbyMigrationSQL); err != nil {
+		Error("Failed to migrate legacy Emby config: %v", err)
 		return err
 	}
 

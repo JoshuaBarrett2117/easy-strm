@@ -2,9 +2,12 @@ package service
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	driver "github.com/SheltonZhu/115driver/pkg/driver"
 
 	"easy-strm/internal/domain"
 )
@@ -115,6 +118,65 @@ func TestCloud115FileSetDifference(t *testing.T) {
 	}
 }
 
+func TestCollectLocalWatchTreeIncludesNestedDirectoriesAndVideos(t *testing.T) {
+	root := t.TempDir()
+	nested := filepath.Join(root, "show", "season-01")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatalf("创建嵌套目录失败: %v", err)
+	}
+	videoPath := filepath.Join(nested, "S01E01.mkv")
+	if err := os.WriteFile(videoPath, []byte("video"), 0o644); err != nil {
+		t.Fatalf("创建视频文件失败: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nested, "poster.jpg"), []byte("image"), 0o644); err != nil {
+		t.Fatalf("创建非视频文件失败: %v", err)
+	}
+
+	directories, videos, err := collectLocalWatchTree(root)
+	if err != nil {
+		t.Fatalf("递归扫描本地监控目录失败: %v", err)
+	}
+	if len(directories) != 3 {
+		t.Fatalf("expected 3 watched directories, got %d: %#v", len(directories), directories)
+	}
+	if len(videos) != 1 || videos[0] != videoPath {
+		t.Fatalf("expected nested video %q, got %#v", videoPath, videos)
+	}
+}
+
+func TestCollectCloud115VideoFileSetRecursesAndPaginates(t *testing.T) {
+	firstPage := make([]driver.FileInfo, 0, cloud115WatchPageSize)
+	firstPage = append(firstPage, driver.FileInfo{Name: "season-01", Type: "folder", CategoryID: driver.IntString("20")})
+	for index := 1; index < cloud115WatchPageSize; index++ {
+		firstPage = append(firstPage, driver.FileInfo{FileID: fmt.Sprintf("text-%d", index), Name: fmt.Sprintf("note-%d.txt", index)})
+	}
+
+	fileSet, err := collectCloud115VideoFileSet(10, func(cid, offset, limit int) (*driver.FileListResp, error) {
+		switch {
+		case cid == 10 && offset == 0:
+			return &driver.FileListResp{Files: firstPage}, nil
+		case cid == 10 && offset == cloud115WatchPageSize:
+			return &driver.FileListResp{Files: []driver.FileInfo{{FileID: "root-video", Name: "movie.mp4", PickCode: "root-pick"}}}, nil
+		case cid == 20 && offset == 0:
+			return &driver.FileListResp{Files: []driver.FileInfo{{FileID: "nested-video", Name: "S01E01.mkv", PickCode: "nested-pick"}}}, nil
+		default:
+			return &driver.FileListResp{}, nil
+		}
+	})
+	if err != nil {
+		t.Fatalf("递归扫描115监控目录失败: %v", err)
+	}
+	if len(fileSet) != 2 {
+		t.Fatalf("expected root and nested videos, got %#v", fileSet)
+	}
+	if got := fileSet["root-pick"]; got.FileID != "movie.mp4" || got.FileName != "movie.mp4" {
+		t.Fatalf("expected root video to keep its filename instead of pickcode, got %#v", got)
+	}
+	if got := fileSet["nested-pick"]; got.FileID != "season-01/S01E01.mkv" || got.FileName != "S01E01.mkv" {
+		t.Fatalf("expected nested video to keep its relative path and filename, got %#v", got)
+	}
+}
+
 func TestWatchServiceLocalWatchState(t *testing.T) {
 	source := &domain.MediaSource{
 		ID:            1,
@@ -146,6 +208,22 @@ func TestWatchServiceLocalWatchState(t *testing.T) {
 	}
 }
 
+func TestWatchServiceIsWatchingUsesRuntimeState(t *testing.T) {
+	ws := NewWatchService(nil, nil, nil, nil, nil)
+	ws.localWatches[1] = &localWatchState{}
+	ws.cloud115Watches[2] = &cloud115WatchState{}
+
+	if !ws.IsWatching(1) {
+		t.Fatal("expected local runtime watch to be reported as running")
+	}
+	if !ws.IsWatching(2) {
+		t.Fatal("expected cloud115 runtime watch to be reported as running")
+	}
+	if ws.IsWatching(3) {
+		t.Fatal("expected missing runtime watch not to be reported as running")
+	}
+}
+
 func TestWatchServiceCloud115WatchState(t *testing.T) {
 	sourceID := 2
 	source := &domain.MediaSource{
@@ -160,11 +238,11 @@ func TestWatchServiceCloud115WatchState(t *testing.T) {
 
 	state := &cloud115WatchState{
 		source:     source,
-		knownFiles: make(map[string]bool),
+		knownFiles: make(map[string]cloud115WatchFile),
 	}
 
-	state.knownFiles["file1"] = true
-	state.knownFiles["file2"] = true
+	state.knownFiles["pick-1"] = cloud115WatchFile{FileID: "file1.mkv", FileName: "file1.mkv"}
+	state.knownFiles["pick-2"] = cloud115WatchFile{FileID: "file2.mkv", FileName: "file2.mkv"}
 
 	if len(state.knownFiles) != 2 {
 		t.Errorf("Expected 2 known files, got %d", len(state.knownFiles))
@@ -174,6 +252,32 @@ func TestWatchServiceCloud115WatchState(t *testing.T) {
 	}
 	if *state.source.Cloud115ID != 2 {
 		t.Errorf("Expected cloud115 ID 2, got %d", *state.source.Cloud115ID)
+	}
+}
+
+func TestFindNewCloud115FileIDsReturnsRelativePathsInsteadOfPickCodes(t *testing.T) {
+	known := map[string]cloud115WatchFile{
+		"old-pick": {FileID: "old.mkv", FileName: "old.mkv"},
+	}
+	current := map[string]cloud115WatchFile{
+		"old-pick": {FileID: "old.mkv", FileName: "old.mkv"},
+		"csn9-new": {FileID: "Series/Season 01/Episode 01.mkv", FileName: "Episode 01.mkv"},
+	}
+
+	got := findNewCloud115FileIDs(known, current)
+	if len(got) != 1 || got[0] != "Series/Season 01/Episode 01.mkv" {
+		t.Fatalf("expected the organizer to receive the relative filename path, got %#v", got)
+	}
+}
+
+func TestResolveCloud115WatchFileIDsSupportsLegacyPickCodes(t *testing.T) {
+	current := map[string]cloud115WatchFile{
+		"csn9-old": {FileID: "Series/Season 01/Episode 01.mkv", FileName: "Episode 01.mkv"},
+	}
+
+	got := resolveCloud115WatchFileIDs([]string{"csn9-old", "Movie.mkv"}, current)
+	if len(got) != 2 || got[0] != "Series/Season 01/Episode 01.mkv" || got[1] != "Movie.mkv" {
+		t.Fatalf("expected legacy pickcodes to be resolved without changing path inputs, got %#v", got)
 	}
 }
 

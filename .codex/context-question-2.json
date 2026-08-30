@@ -1,0 +1,15 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "why": "确认账号配额应展示的真实数据来源，以及单账号外部请求失败时的页面语义。",
+  "known": [
+    "前端契约已经包含 used、total、percentage",
+    "115driver GetInfo 可返回账号已用容量和总容量",
+    "数据库 quota_used 只能作为失败时的历史缓存，不能提供总容量"
+  ],
+  "questions": [
+    {"priority": "high", "question": "是否有现成官方客户端能力可读取容量？", "answer": "有，复用115driver.GetInfo。"},
+    {"priority": "high", "question": "一个账号查询失败是否应清空整个卡片？", "answer": "不应；逐账号降级并标记容量获取失败。"},
+    {"priority": "medium", "question": "零比例是否应显示视觉占位？", "answer": "不应；移除12%假进度，按真实比例显示。"}
+  ]
+}

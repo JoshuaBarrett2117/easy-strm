@@ -116,15 +116,29 @@ type AccountStorage struct {
 	Used       int64   `json:"used"`
 	Total      int64   `json:"total"`
 	Percentage float64 `json:"percentage"`
+	Available  bool    `json:"available"`
+}
+
+// DashboardStorageProvider 定义仪表盘读取115账号容量所需的最小能力。
+type DashboardStorageProvider interface {
+	GetAccountStorage(cloud115ID int, cookie string) (used int64, total int64, err error)
+}
+
+// DashboardStorageCache 定义仪表盘账号容量缓存所需的最小能力。
+type DashboardStorageCache interface {
+	GetAccountStorage(accountID int) (used int64, total int64, found bool, err error)
+	SetAccountStorage(accountID int, used, total int64) error
 }
 
 // DashboardService Dashboard 数据聚合服务
 // 聚合 Cloud115DAO、MediaSourceDAO、StrmFileDAO、TaskRedisDAO 的数据
 type DashboardService struct {
-	cloud115DAO    *dao.Cloud115DAO
-	mediaSourceDAO *dao.MediaSourceDAO
-	strmFileDAO    *dao.StrmFileDAO
-	taskRedisDAO   *dao.TaskRedisDAO
+	cloud115DAO     *dao.Cloud115DAO
+	mediaSourceDAO  *dao.MediaSourceDAO
+	strmFileDAO     *dao.StrmFileDAO
+	taskRedisDAO    *dao.TaskRedisDAO
+	storageProvider DashboardStorageProvider
+	storageCache    DashboardStorageCache
 }
 
 // NewDashboardService 创建 Dashboard 服务实例
@@ -133,12 +147,16 @@ func NewDashboardService(
 	mediaSourceDAO *dao.MediaSourceDAO,
 	strmFileDAO *dao.StrmFileDAO,
 	taskRedisDAO *dao.TaskRedisDAO,
+	storageProvider DashboardStorageProvider,
+	storageCache DashboardStorageCache,
 ) *DashboardService {
 	return &DashboardService{
-		cloud115DAO:    cloud115DAO,
-		mediaSourceDAO: mediaSourceDAO,
-		strmFileDAO:    strmFileDAO,
-		taskRedisDAO:   taskRedisDAO,
+		cloud115DAO:     cloud115DAO,
+		mediaSourceDAO:  mediaSourceDAO,
+		strmFileDAO:     strmFileDAO,
+		taskRedisDAO:    taskRedisDAO,
+		storageProvider: storageProvider,
+		storageCache:    storageCache,
 	}
 }
 
@@ -269,7 +287,7 @@ func (s *DashboardService) GetDashboardTrend(kind string, days int) (*DashboardT
 
 		counter.value++
 		status, _ := task["status"].(string)
-		if status == "completed" {
+		if status == "completed" || status == "success" {
 			counter.success++
 		} else if status == "failed" {
 			counter.failed++
@@ -382,7 +400,7 @@ func (s *DashboardService) fillTaskStats(stats *DashboardStats) error {
 		}
 		// 按创建时间前缀匹配今日日期
 		if strings.HasPrefix(createTime, todayStr) {
-			if status == "completed" {
+			if status == "completed" || status == "success" {
 				result.CompletedToday++
 			} else if status == "failed" {
 				result.FailedToday++
@@ -393,8 +411,7 @@ func (s *DashboardService) fillTaskStats(stats *DashboardStats) error {
 	return nil
 }
 
-// fillStorageStats 填充存储空间统计：从数据库 quota_used 读取已用空间
-// NOTE: total 字段依赖外部回调（115 API），若未注入则返回 0
+// fillStorageStats 填充存储空间统计，单个账号查询失败不会阻断其余账号。
 func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 	accounts, err := s.cloud115DAO.GetAll("id", "ASC")
 	if err != nil {
@@ -404,12 +421,35 @@ func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 	var accountStorages []AccountStorage
 	for _, acc := range accounts {
 		storage := AccountStorage{
-			Name:  acc.Name,
-			Used:  acc.QuotaUsed,
-			Total: 0, // total 需要通过 115 API 获取，此处暂不填充
+			Name: acc.Name,
+			Used: acc.QuotaUsed,
 		}
-		if storage.Total > 0 {
-			storage.Percentage = float64(storage.Used) / float64(storage.Total) * 100
+		if s.storageCache != nil {
+			used, total, found, cacheErr := s.storageCache.GetAccountStorage(acc.ID)
+			if cacheErr != nil {
+				logger.Warnf("DashboardService[fillStorageStats] 读取账号 %s 容量缓存失败: %v", acc.Name, cacheErr)
+			} else if found {
+				accountStorages = append(accountStorages, buildAccountStorage(acc.Name, used, total))
+				continue
+			}
+		}
+		if s.storageProvider == nil {
+			logger.Warnf("DashboardService[fillStorageStats] 账号 %s 未配置容量查询能力", acc.Name)
+			accountStorages = append(accountStorages, storage)
+			continue
+		}
+
+		used, total, storageErr := s.storageProvider.GetAccountStorage(acc.ID, acc.Cookie)
+		if storageErr != nil {
+			logger.Warnf("DashboardService[fillStorageStats] 查询账号 %s 容量失败: %v", acc.Name, storageErr)
+			accountStorages = append(accountStorages, storage)
+			continue
+		}
+		storage = buildAccountStorage(acc.Name, used, total)
+		if s.storageCache != nil {
+			if cacheErr := s.storageCache.SetAccountStorage(acc.ID, used, total); cacheErr != nil {
+				logger.Warnf("DashboardService[fillStorageStats] 写入账号 %s 容量缓存失败: %v", acc.Name, cacheErr)
+			}
 		}
 		accountStorages = append(accountStorages, storage)
 	}
@@ -420,6 +460,18 @@ func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 	}
 	stats.Storage = StorageStats{Accounts: accountStorages}
 	return nil
+}
+
+func buildAccountStorage(name string, used, total int64) AccountStorage {
+	storage := AccountStorage{Name: name, Used: used, Total: total, Available: true}
+	if total <= 0 {
+		return storage
+	}
+	storage.Percentage = float64(used) / float64(total) * 100
+	if storage.Percentage > 100 {
+		storage.Percentage = 100
+	}
+	return storage
 }
 
 func (s *DashboardService) buildTaskOverview(tasks []map[string]interface{}, acceptedTypes []string) TaskOverview {
@@ -479,7 +531,7 @@ func (s *DashboardService) buildRecentActivity(tasks []map[string]interface{}, l
 	for _, task := range tasks {
 		taskType, _ := task["task_type"].(string)
 		status, _ := task["status"].(string)
-		if status != "completed" {
+		if status != "completed" && status != "success" {
 			continue
 		}
 		if taskType != "organize" && taskType != "watch_auto_organize" && taskType != "strm_generate" {

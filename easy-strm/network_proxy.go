@@ -10,12 +10,22 @@ import (
 const (
 	systemConfigProxyURLKey     = "proxy_url"
 	systemConfigProxyDomainsKey = "proxy_domains"
+	systemConfigTMDBAPIKey      = "tmdb_api_key"
 )
 
 var proxyDomainAlias = map[string][]string{
 	"tg":       {"telegram.org", "t.me", "api.telegram.org"},
 	"telegram": {"telegram.org", "t.me", "api.telegram.org"},
 	"github":   {"github.com", "api.github.com", "raw.githubusercontent.com", "gist.github.com"},
+	"tmdb":     {"themoviedb.org"},
+}
+
+// defaultProxyDomains 是启用代理后始终通过代理访问的内置站点。
+var defaultProxyDomains = []string{
+	"telegram.org",
+	"t.me",
+	"github.com",
+	"themoviedb.org",
 }
 
 type NetworkProbeSite struct {
@@ -37,10 +47,7 @@ func NewProxyAwareHTTPClient(timeout time.Duration) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = func(req *http.Request) (*url.URL, error) {
 		proxyURL, domains := loadProxyConfigFromSystem()
-		if proxyURL == nil {
-			return nil, nil
-		}
-		if !shouldProxyHost(req.URL.Hostname(), domains) {
+		if !shouldUseProxy(proxyURL, req.URL.Hostname(), domains) {
 			return nil, nil
 		}
 		return proxyURL, nil
@@ -55,19 +62,21 @@ func NewProxyAwareHTTPClient(timeout time.Duration) *http.Client {
 func RunNetworkProbe(sites []NetworkProbeSite, timeout time.Duration) []NetworkProbeResult {
 	results := make([]NetworkProbeResult, 0, len(sites))
 	httpClient := NewProxyAwareHTTPClient(timeout)
-	_, proxyDomains := loadProxyConfigFromSystem()
+	proxyURL, proxyDomains := loadProxyConfigFromSystem()
+	tmdbAPIKey := loadTMDBAPIKeyFromSystem()
 
 	for _, site := range sites {
 		result := NetworkProbeResult{
 			Name:     site.Name,
 			URL:      site.URL,
-			ViaProxy: shouldProxySiteURL(site.URL, proxyDomains),
+			ViaProxy: shouldProxySiteURL(proxyURL, site.URL, proxyDomains),
 		}
 
 		start := time.Now()
-		req, err := http.NewRequest(http.MethodGet, site.URL, nil)
+		requestURL := buildNetworkProbeRequestURL(site.URL, tmdbAPIKey)
+		req, err := http.NewRequest(http.MethodGet, requestURL, nil)
 		if err != nil {
-			result.Error = err.Error()
+			result.Error = redactNetworkProbeSecret(err.Error(), tmdbAPIKey)
 			result.DurationMS = time.Since(start).Milliseconds()
 			results = append(results, result)
 			continue
@@ -77,7 +86,7 @@ func RunNetworkProbe(sites []NetworkProbeSite, timeout time.Duration) []NetworkP
 		resp, err := httpClient.Do(req)
 		result.DurationMS = time.Since(start).Milliseconds()
 		if err != nil {
-			result.Error = err.Error()
+			result.Error = redactNetworkProbeSecret(err.Error(), tmdbAPIKey)
 			results = append(results, result)
 			continue
 		}
@@ -89,6 +98,46 @@ func RunNetworkProbe(sites []NetworkProbeSite, timeout time.Duration) []NetworkP
 	}
 
 	return results
+}
+
+func loadTMDBAPIKeyFromSystem() string {
+	config, err := GetSystemConfigByKey(systemConfigTMDBAPIKey)
+	if err != nil || config == nil {
+		return ""
+	}
+
+	apiKey := strings.TrimSpace(config.ConfigVal)
+	if strings.Contains(apiKey, "****") {
+		return ""
+	}
+	return apiKey
+}
+
+// buildNetworkProbeRequestURL 为 TMDB 探测请求附加鉴权参数，其他站点保持原样。
+func buildNetworkProbeRequestURL(rawURL, tmdbAPIKey string) string {
+	apiKey := strings.TrimSpace(tmdbAPIKey)
+	if apiKey == "" {
+		return rawURL
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil || !strings.EqualFold(parsed.Hostname(), "api.themoviedb.org") {
+		return rawURL
+	}
+
+	query := parsed.Query()
+	query.Set("api_key", apiKey)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
+// redactNetworkProbeSecret 避免底层 HTTP 错误将 TMDB API Key 回传到页面。
+func redactNetworkProbeSecret(message, secret string) string {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return message
+	}
+	return strings.ReplaceAll(message, secret, "******")
 }
 
 func loadProxyConfigFromSystem() (*url.URL, []string) {
@@ -105,10 +154,21 @@ func loadProxyConfigFromSystem() (*url.URL, []string) {
 	}
 
 	if config, err := GetSystemConfigByKey(systemConfigProxyDomainsKey); err == nil && config != nil {
-		domains = normalizeProxyDomains(config.ConfigVal)
+		domains = buildProxyDomains(config.ConfigVal)
+	} else {
+		domains = buildProxyDomains("")
 	}
 
 	return proxyURL, domains
+}
+
+// buildProxyDomains 合并内置代理站点与用户追加的自定义站点。
+func buildProxyDomains(raw string) []string {
+	parts := append([]string{}, defaultProxyDomains...)
+	if custom := strings.TrimSpace(raw); custom != "" {
+		parts = append(parts, custom)
+	}
+	return normalizeProxyDomains(strings.Join(parts, "\n"))
 }
 
 func normalizeProxyDomains(raw string) []string {
@@ -166,10 +226,14 @@ func shouldProxyHost(host string, domains []string) bool {
 	return false
 }
 
-func shouldProxySiteURL(rawURL string, domains []string) bool {
+func shouldUseProxy(proxyURL *url.URL, host string, domains []string) bool {
+	return proxyURL != nil && shouldProxyHost(host, domains)
+}
+
+func shouldProxySiteURL(proxyURL *url.URL, rawURL string, domains []string) bool {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return false
 	}
-	return shouldProxyHost(parsed.Hostname(), domains)
+	return shouldUseProxy(proxyURL, parsed.Hostname(), domains)
 }

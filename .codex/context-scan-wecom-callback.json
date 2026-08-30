@@ -1,0 +1,36 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "企业微信 API 接收消息",
+  "current_state": [
+    "企业微信渠道已支持自建应用 Token 获取和 Markdown 主动发送",
+    "通知配置存储于 t_notification_config 的 wecom JSON，不需要新增表",
+    "Telegram 已提供状态、任务和 115 资源文本操作，可复用对应 Service",
+    "受保护 API 使用 JWT，企业微信回调必须作为签名保护的公开路由"
+  ],
+  "protocol_contract": {
+    "verify": "GET /notify/wecom/callback?msg_signature&timestamp&nonce&echostr",
+    "receive": "POST /notify/wecom/callback?msg_signature&timestamp&nonce",
+    "public_proxy_path": "/api/notify/wecom/callback",
+    "encryption": "企业微信 EncodingAESKey / AES-CBC / XML"
+  },
+  "technical_choice": [
+    "复用企业微信官方示例仓库 github.com/sbzhu/weworkapi_golang/wxbizmsgcrypt",
+    "回调成功立即返回 success，耗时查询和115任务提交异步执行",
+    "复用 NotificationService 以应用消息回复触发成员",
+    "Redis 按 MsgId 或解密消息摘要去重 24 小时"
+  ],
+  "risks": [
+    "回调 URL 必须为企业微信可访问的公网 HTTPS 地址",
+    "Token 与 EncodingAESKey 必须脱敏且与企业微信后台完全一致",
+    "公开路由不能经过 JWT，但必须拒绝错误签名、Corp ID 和 Agent ID",
+    "企业微信可能重复投递，不能重复提交115任务"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前环境没有 sequential-thinking、code-index、shrimp-task-manager 或 exa；使用结构化分析、update_plan、rg、Go 模块工具、apply_patch 和本地测试替代。"
+}

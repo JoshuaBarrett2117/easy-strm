@@ -51,6 +51,20 @@ func TestCacheAdminServiceGetOverviewWithDatabaseCaches(t *testing.T) {
 	}
 }
 
+func TestCacheAdminServiceIncludesAccountQuotaCache(t *testing.T) {
+	svc := NewCacheAdminService(nil, nil)
+	for _, group := range svc.groupDefinitions() {
+		if group.Key != "account_quota_cache" {
+			continue
+		}
+		if len(group.RedisPatterns) != 1 || group.RedisPatterns[0] != "easy_strm:dashboard:account_quota:*" {
+			t.Fatalf("账号容量缓存匹配规则不正确: %+v", group.RedisPatterns)
+		}
+		return
+	}
+	t.Fatal("缓存管理缺少账号容量缓存分组")
+}
+
 func TestCacheAdminServiceClearGroupDeletesDatabaseRows(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()

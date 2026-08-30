@@ -3,7 +3,10 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"strings"
+	"unicode/utf8"
 
+	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 
@@ -22,9 +25,9 @@ type Cloud115Controller struct {
 	// getCloud115ByID: 根据 ID 获取 115 账号（main.GetCloud115ByID）
 	getCloud115ByID func(id int) (*Cloud115AccountBrief, error)
 	// createCloud115: 创建 115 账号（main.CreateCloud115）
-	createCloud115 func(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)
+	createCloud115 func(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)
 	// updateCloud115: 更新 115 账号（main.UpdateCloud115）
-	updateCloud115 func(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)
+	updateCloud115 func(id int, name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)
 	// deleteCloud115: 删除 115 账号（main.DeleteCloud115）
 	deleteCloud115 func(id int) error
 	// getQRCode: 获取登录二维码（main.Client.GetQRCode）
@@ -32,9 +35,9 @@ type Cloud115Controller struct {
 	// checkLoginStatus: 检查登录状态（main.Client.CheckLoginStatus）
 	checkLoginStatus func(session interface{}) (interface{}, error)
 	// qrcodeLogin: 二维码登录（main.Client.QRCodeLogin）
-	qrcodeLogin func(session interface{}) (interface{}, error)
+	qrcodeLogin func(session interface{}, name string, cloudID int) (interface{}, error)
 	// qrcodeLoginWithApp: 带 App 的二维码登录（main.Client.QRCodeLoginWithApp）
-	qrcodeLoginWithApp func(session interface{}, app string) (interface{}, error)
+	qrcodeLoginWithApp func(session interface{}, app, name string, cloudID int) (interface{}, error)
 	// getOpenAPIQRCode: 获取 Open API 二维码（main.Client.GetOpenAPIQRCode）
 	getOpenAPIQRCode func() (interface{}, error)
 	// checkOpenAPILoginStatus: 检查 Open API 登录状态（main.Client.CheckOpenAPILoginStatus）
@@ -59,6 +62,12 @@ func NewCloud115Controller(cloud115Service *service.Cloud115Service) *Cloud115Co
 	}
 }
 
+// normalizeCookieSource 规范化 Cookie 来源，并限制为数据库字段可接受的长度。
+func normalizeCookieSource(source string) (string, bool) {
+	source = strings.TrimSpace(source)
+	return source, utf8.RuneCountInString(source) <= 100
+}
+
 // --- 回调注入方法 ---
 
 func (c *Cloud115Controller) SetGetAllCloud115(fn func(sortField, sortOrder string) ([]*Cloud115AccountBrief, error)) {
@@ -69,11 +78,11 @@ func (c *Cloud115Controller) SetGetCloud115ByID(fn func(id int) (*Cloud115Accoun
 	c.getCloud115ByID = fn
 }
 
-func (c *Cloud115Controller) SetCreateCloud115(fn func(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)) {
+func (c *Cloud115Controller) SetCreateCloud115(fn func(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)) {
 	c.createCloud115 = fn
 }
 
-func (c *Cloud115Controller) SetUpdateCloud115(fn func(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)) {
+func (c *Cloud115Controller) SetUpdateCloud115(fn func(id int, name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*Cloud115AccountBrief, error)) {
 	c.updateCloud115 = fn
 }
 
@@ -89,11 +98,11 @@ func (c *Cloud115Controller) SetCheckLoginStatus(fn func(session interface{}) (i
 	c.checkLoginStatus = fn
 }
 
-func (c *Cloud115Controller) SetQRCodeLogin(fn func(session interface{}) (interface{}, error)) {
+func (c *Cloud115Controller) SetQRCodeLogin(fn func(session interface{}, name string, cloudID int) (interface{}, error)) {
 	c.qrcodeLogin = fn
 }
 
-func (c *Cloud115Controller) SetQRCodeLoginWithApp(fn func(session interface{}, app string) (interface{}, error)) {
+func (c *Cloud115Controller) SetQRCodeLoginWithApp(fn func(session interface{}, app, name string, cloudID int) (interface{}, error)) {
 	c.qrcodeLoginWithApp = fn
 }
 
@@ -134,23 +143,39 @@ func (c *Cloud115Controller) SetTestAccountCookie(fn func(cloud115ID int, cookie
 // formatCloud115 格式化 115 账号为 API 响应格式
 // 保持与原 auth.go 内联处理器一致的响应字段
 func formatCloud115(acc *Cloud115AccountBrief, full bool) map[string]interface{} {
+	cookieSource := strings.TrimSpace(acc.CookieSource)
+	cookieSourceInferred := false
+	cookieUID := ""
+	cookieSSOEnt := ""
+	if identity, ok := domain.ParseCloud115CookieIdentity(acc.Cookie); ok {
+		cookieUID = identity.UserID
+		cookieSSOEnt = identity.SSOEnt
+		if cookieSource == "" {
+			cookieSource = identity.Source
+			cookieSourceInferred = true
+		}
+	}
 	result := map[string]interface{}{
-		"id":                  acc.ID,
-		"name":                acc.Name,
-		"cookie":              acc.Cookie,
-		"refresh_token":       acc.RefreshToken,
-		"access_token":        acc.AccessToken,
-		"expires_in":          acc.ExpiresIn,
-		"transfer_account_id": acc.TransferAccountID,
-		"transfer_directory":  acc.TransferDirectory,
-		"account_type":        acc.AccountType,
-		"priority":            acc.Priority,
-		"status":              acc.Status,
-		"transfer_method":     acc.TransferMethod,
-		"alist_url":           acc.AlistUrl,
-		"alist_token":         acc.AlistToken,
-		"create_time":         acc.CreateTime.Format("2006-01-02 15:04:05"),
-		"update_time":         acc.UpdateTime.Format("2006-01-02 15:04:05"),
+		"id":                     acc.ID,
+		"name":                   acc.Name,
+		"cookie":                 acc.Cookie,
+		"cookie_source":          cookieSource,
+		"cookie_source_inferred": cookieSourceInferred,
+		"cookie_uid":             cookieUID,
+		"cookie_ssoent":          cookieSSOEnt,
+		"refresh_token":          acc.RefreshToken,
+		"access_token":           acc.AccessToken,
+		"expires_in":             acc.ExpiresIn,
+		"transfer_account_id":    acc.TransferAccountID,
+		"transfer_directory":     acc.TransferDirectory,
+		"account_type":           acc.AccountType,
+		"priority":               acc.Priority,
+		"status":                 acc.Status,
+		"transfer_method":        acc.TransferMethod,
+		"alist_url":              acc.AlistUrl,
+		"alist_token":            acc.AlistToken,
+		"create_time":            acc.CreateTime.Format("2006-01-02 15:04:05"),
+		"update_time":            acc.UpdateTime.Format("2006-01-02 15:04:05"),
 	}
 	// full=false 时省略部分字段（列表视图不需要）
 	_ = full // 目前列表和详情返回相同字段，保持与原 auth.go 一致
@@ -248,6 +273,7 @@ func (c *Cloud115Controller) Create(ctx *gin.Context) {
 	var createData struct {
 		Name              string `json:"name" binding:"required"`
 		Cookie            string `json:"cookie"`
+		CookieSource      string `json:"cookie_source"`
 		RefreshToken      string `json:"refresh_token"`
 		AccessToken       string `json:"access_token"`
 		ExpiresIn         int    `json:"expires_in"`
@@ -275,6 +301,12 @@ func (c *Cloud115Controller) Create(ctx *gin.Context) {
 	if createData.TransferMethod == "" {
 		createData.TransferMethod = "115driver"
 	}
+	var validCookieSource bool
+	createData.CookieSource, validCookieSource = normalizeCookieSource(createData.CookieSource)
+	if !validCookieSource {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Cookie 来源不能超过 100 个字符"})
+		return
+	}
 
 	if c.createCloud115 == nil {
 		logger.Error("Cloud115Controller[Create] 回调依赖未注入")
@@ -283,7 +315,7 @@ func (c *Cloud115Controller) Create(ctx *gin.Context) {
 	}
 
 	acc, err := c.createCloud115(
-		createData.Name, createData.Cookie, createData.RefreshToken,
+		createData.Name, createData.Cookie, createData.CookieSource, createData.RefreshToken,
 		createData.AccessToken, createData.ExpiresIn, createData.TransferAccountID,
 		createData.TransferDirectory, createData.AccountType, createData.Priority,
 		createData.TransferMethod, createData.AlistUrl, createData.AlistToken,
@@ -312,6 +344,7 @@ func (c *Cloud115Controller) Update(ctx *gin.Context) {
 	var updateData struct {
 		Name              string `json:"name" binding:"required"`
 		Cookie            string `json:"cookie"`
+		CookieSource      string `json:"cookie_source"`
 		RefreshToken      string `json:"refresh_token"`
 		AccessToken       string `json:"access_token"`
 		ExpiresIn         int    `json:"expires_in"`
@@ -343,6 +376,12 @@ func (c *Cloud115Controller) Update(ctx *gin.Context) {
 	if updateData.TransferMethod == "" {
 		updateData.TransferMethod = "115driver"
 	}
+	var validCookieSource bool
+	updateData.CookieSource, validCookieSource = normalizeCookieSource(updateData.CookieSource)
+	if !validCookieSource {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Cookie 来源不能超过 100 个字符"})
+		return
+	}
 
 	if c.updateCloud115 == nil {
 		logger.Error("Cloud115Controller[Update] 回调依赖未注入")
@@ -351,7 +390,7 @@ func (c *Cloud115Controller) Update(ctx *gin.Context) {
 	}
 
 	acc, err := c.updateCloud115(
-		id, updateData.Name, updateData.Cookie, updateData.RefreshToken,
+		id, updateData.Name, updateData.Cookie, updateData.CookieSource, updateData.RefreshToken,
 		updateData.AccessToken, updateData.ExpiresIn, updateData.TransferAccountID,
 		updateData.TransferDirectory, updateData.AccountType, updateData.Priority,
 		updateData.Status, updateData.TransferMethod, updateData.AlistUrl, updateData.AlistToken,

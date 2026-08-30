@@ -569,3 +569,182 @@
 
 - 命令：`npm run build`
 - 结果：通过
+# 2026-08-30 STRM 配置列表与全量清理
+
+- 执行者：Codex。
+- 回归测试（修复前）：`go test . -run '^TestCleanupStrmFiles' -count=1 -v` 失败，确认旧实现会删除目标目录本身，且空路径不会报错。
+- 回归测试（修复后）：同一命令通过，覆盖普通文件、隐藏文件、嵌套目录、空路径、当前目录和磁盘根目录。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4253 modules transformed，构建通过。
+- 差异检查：`git diff --check`，通过。
+- 页面验证说明：本地前后端服务均未运行；为避免启动后端时连接现有数据库并加载定时任务，本次未执行真实页面数据交互，前端以生产构建和列模型静态核对完成验证。
+# 2026-08-30 115 账号列表紧凑布局
+
+- 执行者：Codex。
+- 前端生产构建：`npm run build`，4253 modules transformed，构建通过。
+- 差异检查：`git diff --check`，通过。
+- 本地页面只读验证：访问 `/dashboard/cloud115`，表头为 ID、名称、账号类型、状态、优先级、Cookie、转存账号、转存目录、秒传方式、创建时间、操作，不含更新时间。
+- 几何验证：两行的编辑、扫码更新、测试、删除按钮高度均为 22px；每行四个按钮的 top 坐标分别完全一致，确认处于同一排。
+- 未点击测试、扫码更新、编辑或删除按钮，未产生账号数据变更。
+
+# 2026-08-30 仪表盘账号配额修复
+
+- 执行者：Codex。
+- 专项测试：`go test ./internal/service -run Dashboard -count=1`，通过。
+- 后端全量：`go test ./...`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4253 modules transformed，构建通过。
+- 差异检查：`git diff --check`，通过；仅有工作区既存 LF/CRLF 提示。
+- 覆盖：真实已用/总容量映射、容量比例计算、超过100%时的显示上限、单账号查询失败不影响其他账号。
+- 运行时复验：重启旧后端后，使用已登录本地浏览器只读打开 `/dashboard/home`；115主号显示 `21.5 TB / 63.4 TB`，115小号显示 `1.5 TB / 15.6 TB`，不再出现“容量获取失败”。
+
+# 2026-08-30 账号配额五分钟缓存
+
+- 执行者：Codex。
+- 专项测试：`go test ./internal/dao ./internal/service -run 'AccountQuota|Dashboard' -count=1`，通过。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4253 modules transformed，构建通过。
+- TTL 验证：写入后 TTL 精确为五分钟；miniredis 快进五分钟后读取为未命中。
+- 缓存策略验证：命中时115调用次数为零；未命中或坏缓存时回源并回填；坏 JSON 会主动删除。
+- 真实只读验证：首次及二次加载均显示主号 `21.5 TB / 63.4 TB`、小号 `1.5 TB / 15.6 TB`；第二次请求无新增115驱动调用。
+- 2026-08-30 Telegram 重复通知修复：专项测试最初因本机 Redis 未运行而跳过，随后引入 `miniredis` 消除外部依赖；`go test ./internal/service -run "TestNotificationEventMonitor" -count=1 -v` 的 3 个测试均实际通过，其中包含 8 路并发去重和发送失败释放抢占。`go test ./... -count=1`、`go vet ./...`、`git diff --check` 通过；`go test -race` 因当前 Windows Go 环境未启用 CGO 而无法执行。
+- 2026-08-30 Telegram 115资源操作：语法解析、分享/云下载账号选择、优先级与ID决胜、指定账号、默认/指定目录、分享密码解析、真实Service提交参数和Telegram消息路由专项测试通过；后端 `go test ./... -count=1`、`go vet ./...`、前端 `npm run build`、`git diff --check` 通过。
+
+# 2026-08-30 115自动转存目标目录修复
+
+- 执行者：Codex。
+- 修复前回归：`go test . -run TestBuildReceiveShareFormUsesCID -count=1` 因缺少正确表单构造而失败，确认测试先于实现落地。
+- 协议专项：`go test . -run TestBuildReceiveShareFormUsesCID -count=1`，通过；覆盖 `cid`、`share_code`、`receive_code`、`file_id`，并断言不发送 `save_folder_id`。
+- Service专项：`go test ./internal/service -run 'TestExecuteTransferStopsWhenTargetDirectoryCannotResolve|TestExecuteTransferAutoOrganizeDisabledDoesNotCreateChildTasks' -count=1`，通过。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 差异检查：`git diff --check`，通过；仅输出工作区既存LF/CRLF提示。
+- 未执行真实115写入测试，避免向用户云盘生成或错放测试文件。
+
+# 2026-08-30 Emby 管理工作台
+
+- 专项测试：`go test ./internal/service -run 'TestEmbyManagement|TestEmbyRefreshTask' -count=1`，通过。
+- 后端全量：`go test ./...`，全部通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 覆盖：指定实例 API Key 与用户列表隔离；媒体库刷新提交、后端轮询、100% 进度、步骤和成功结论；无效实例 ID 参数拒绝。
+- 未执行真实 Emby/神医助手/AI 接口成功链路，原因是当前环境没有对应服务地址和密钥；相关 HTTP 调度及异常路径由本地模拟服务验证。
+
+## 补充验证：逐库部分成功、头像与管理员边界
+
+- `go test ./internal/service -run 'TestEmbyManagement|TestEmbyRefresh' -count=1`：通过；新增“一库成功、一库 HTTP 500”场景，断言 `partial_success`、成功/失败计数、逐库失败明细和结论。
+- `go test ./internal/service ./internal/controller -count=1`：在补充修改后首次执行通过。
+- `npm run build`：再次通过，4254 modules transformed；覆盖用户头像读取/上传交互、管理员菜单过滤和任务中心统计调整。
+- `go test ./... -count=1` 与 `go vet ./...`：在本轮早期均通过；管理员边界补充后再次执行时，被工作区同时出现的非 Emby 变更阻断：`watch_service_test.go` 引用了当前不存在的 `collectLocalWatchTree`、`collectCloud115VideoFileSet` 和 `cloud115WatchPageSize`，另有既存媒体源 Controller 默认值断言失败。Emby 代码在这些变化出现前已通过全量测试，之后前端构建及主包编译继续通过；未修改上述不相关模块。
+- 待并行工作区改动稳定后再次执行 `go test ./... -count=1` 和 `go vet ./...`：全部通过，最终无测试阻塞。
+
+# 2026-08-30 神医助手 STRM 扫描与视频封面
+
+- 专项测试：`go test ./internal/service -run 'TestStrmScanCaptureWorkflow|TestEmbyManagement|TestEmbyRefresh' -count=1`，通过。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 模拟链路覆盖：媒体库扫描、STRM 数量回读、Extract MediaInfo 提交、计划任务 50% 真实进度、远端成功终态、执行前后主图覆盖统计以及最终结论。
+- 未执行真实截图：当前环境没有可供写入验证的 Emby/StrmAssistant 实例；没有修改用户插件配置或媒体库图片。
+
+## `<nil>` 误判回归
+
+- 真实任务 `emby-plugin-63171fd4-5643-4f5d-a9f4-392947b3a349` 已完成媒体库扫描并发现 87 个 STRM，但在跟踪截图任务时将缺失的 `ErrorMessage` 字段误转为字符串 `<nil>`。
+- 回归测试先移除模拟响应中的 `ErrorMessage` 字段，修复前稳定失败；空值归一化修复后通过。
+- `go test ./... -count=1` 与 `go vet ./...`：全部通过。
+
+# 2026-08-30 文件工作台自动整理与监控修复
+
+- 修复前专项：`go test ./internal/controller ./internal/service -run 'TestMediaSourceControllerCreateDefaults|TestCollect(Local|Cloud115)' -count=1`，按预期失败；Controller 实际传入 `enabled=false`，Service 缺少递归扫描实现。
+- 修复后专项：同一命令通过；另执行 Watch 相关专项测试通过。
+- 运行态专项：Controller 响应覆盖 `watch_running=false/true`，WatchService 覆盖本地、115 和不存在三种运行态查询。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 差异检查：`git diff --check`，通过；仅有工作区既存 LF/CRLF 提示。
+- 页面只读验证：当前 3 个媒体源真实 `enabled=false`，页面显示“媒体源已停用”，已开启监控统计为 0；115 关联账号显示“115小号”；编辑弹窗三个开关状态依次为 `false/true/true`（媒体源停用、目录监控开启、自动整理开启）。
+- `go test -race` 未执行：当前 Windows Go 环境提示 `-race requires cgo`；常规测试和 `go vet` 均通过。
+- 未执行真实整理：避免启用后移动用户文件或向115发起写操作。
+# 2026-08-30 115 自动整理文件名修复验证
+
+- `go test ./internal/service -run 'TestCollectCloud115VideoFileSetRecursesAndPaginates|TestFindNewCloud115FileIDsReturnsRelativePathsInsteadOfPickCodes|TestWatchServiceCloud115WatchState' -count=1`：通过。
+- `go test ./... -count=1`：通过。
+- `go vet ./...`：通过。
+- `npm run build`：通过，Vite 生产构建完成。
+- `git diff --check`：通过；仅输出工作区既有 LF/CRLF 提示。
+- 本地后端重启后监听 `8082`，115 媒体源 10 初始快照识别到 13 个视频文件，监控启动成功。
+
+# 2026-08-30 内置站点默认代理
+
+- 测试先行：`go test ./... -run "Test(BuildProxyDomains|SettersAndHelpers)" -count=1` 在旧实现上按预期失败，缺少 `buildProxyDomains` 与 `SetHTTPClient`。
+- 专项回归：`go test ./... -run "Test(BuildProxyDomains|ShouldUseProxy|SettersAndHelpers)" -count=1`，通过。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 差异检查：目标文件 `git diff --check` 通过；仅有工作区既存 LF/CRLF 提示。
+- 覆盖：五个内置探测地址、非内置地址、自定义域名追加、未配置代理地址保持直连、TMDB HTTP 客户端注入。
+
+# 2026-08-30 TMDB 网络探测鉴权
+
+- 测试先行：`go test . -run "Test(BuildNetworkProbeRequestURL|RedactNetworkProbeSecret)" -count=1` 在旧实现上按预期编译失败。
+- 专项回归：`go test . -run "Test(BuildNetworkProbeRequestURL|RedactNetworkProbeSecret|BuildProxyDomains|ShouldUseProxy)" -count=1`，通过。
+- 后端全量：`go test ./... -count=1`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 覆盖：TMDB Key 附加、原查询参数保留、其他站点不变、错误信息密钥脱敏。
+
+# 2026-08-30 115 Cookie 来源
+
+- 执行者：Codex。
+- 首轮 `go test ./...`：业务代码完成编译，既有 Cloud115 sqlmock 因查询新增 `cookie_source` 列而失败；同步更新查询断言和行夹具后恢复。
+- 后端全量：`go test ./...`，全部通过。
+- 前端生产构建：`npm run build`，4254 modules transformed，构建通过。
+- 差异检查：`git diff --check` 无空白错误，仅输出工作区既有 LF/CRLF 提示。
+- 覆盖：扫码渠道到中文来源映射、未知渠道回退、来源去空格与 100 字符边界、API 响应字段、手动创建参数传递、扫码更新的 app/name/cloud_id 参数传递、Cloud115 既有查询回归。
+
+## 历史 Cookie UID 自动识别增量验证
+
+- 后端全量：`go test ./...`，全部通过。
+- 后端静态检查：`go vet ./...`，通过。
+- 前端生产构建：`npm run build`，4843 modules transformed，构建通过；仅有既存大分块提示。
+- 覆盖：`UID=<用户ID>_<ssoent>_<时间戳>` 正常解析、字段名大小写、引号值、未知设备码、旧式 UID、非法用户 ID、缺失 UID、A1 歧义文案、人工来源优先、历史空值自动推断及 API UID/设备码字段。
+
+# 2026-08-30 神医助手截图依赖一键配置
+
+- `go test ./internal/service ./internal/controller -count=1`：通过。
+- `go test ./... -count=1`：通过。
+- `npm run build`：通过，Vite 生产构建完成。
+- 新增覆盖：适用视频类型 Image Capture 增量启用、重复执行幂等、完整媒体库设置保留、空 Library Scope 保持全部、非空范围去重合并、插件其他设置保留、配置写入后回读核验、未确认请求拒绝。
+- `go vet ./...` 与目标文件 `git diff --check`：通过；差异检查仅有既存 LF/CRLF 提示。
+- 浏览器只读验证：选定“其他-不可刮削115”后弹窗完整展示三项操作和跨媒体库影响提示；点击取消后未触发任务。
+# 2026-08-30 Emby 观影监控中心
+
+- `go test ./internal/dao ./internal/service ./internal/controller`：通过。
+- `go test ./...`：通过。
+- `npm run build`：通过；ECharts 独立页面 chunk 产生体积提示，不影响构建。
+- `npm run e2e:emby-monitor`：通过，输出 `{"ok":true,"tabs":6,"mobile":true}`。
+- E2E 首轮失败暴露标签延迟挂载问题；修复首次挂载立即加载后通过。
+
+## 历史 Cookie 来源最终回归
+
+- `go test ./...`：通过。
+- `go vet ./...`：通过。
+- `npm run build`：通过，4843 modules transformed；仅有既存大分块提示。
+- 额外边界：历史 UID 推断来源不会在普通编辑时回填并固化，Cookie 发生变化后仍可按新 UID 重新识别。
+
+## 2026-08-30 企业微信应用通知渠道
+
+- 执行者：Codex。
+- 企业微信专项：鉴权查询参数、消息接收字段、Agent ID、Markdown 内容、Token 复用、企业微信业务错误、HTTP 错误、接收范围校验和 2000 字节截断全部通过。
+- 配置专项：Secret 不回传、空 Secret 保留旧值、非法 Agent ID 拒绝、兼容接口配置脱敏通过。
+- 事件专项：首次启用不补发、同渠道终态去重、失败释放抢占、Telegram 与企业微信基线独立通过。
+- `go test ./... -count=1`：通过。
+- `go vet ./...`：通过。
+- `npm run build`：通过；仅有既存 Emby 分块体积提示。
+- `git diff --check`：通过；仅有工作区既存 LF/CRLF 提示。
+- 未执行真实企业微信发送：仓库没有 Corp ID、Agent ID 和应用 Secret，部署后可在设置页发送测试通知。
+- 运行时路由复测：重启前 `/notify/wecom/config` 返回 404；重启后 GET/PUT 配置接口与 POST 测试接口在无 Token 请求下均返回 401，与既有受保护接口一致。
+- API 接收专项：官方算法生成的加密样本完成 GET echostr 校验、POST XML 解密、错误签名拒绝、Agent ID 不匹配拒绝、同 MsgId 两次投递只回复一次；Controller GET 返回明文 echostr、POST 返回 `success`。
+- 回调配置专项：43 位 EncodingAESKey 校验、Token/AESKey 空值保留、读取脱敏以及兼容接口脱敏通过。

@@ -36,7 +36,7 @@ func (s *Cloud115Service) GetAll(sortField, sortOrder string) ([]*domain.Cloud11
 }
 
 // Create 创建115云账号
-func (s *Cloud115Service) Create(name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
+func (s *Cloud115Service) Create(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
 	if name == "" {
 		name = "115账号"
 	}
@@ -45,7 +45,7 @@ func (s *Cloud115Service) Create(name, cookie, refreshToken, accessToken string,
 	if err != nil {
 		return nil, err
 	}
-	cloud115, err := s.cloud115DAO.Create(name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken)
+	cloud115, err := s.cloud115DAO.Create(name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken)
 	if err != nil {
 		logger.Errorf("Cloud115Service[Create] 创建账号失败: %v", err)
 		return nil, fmt.Errorf("创建账号失败: %v", err)
@@ -55,13 +55,13 @@ func (s *Cloud115Service) Create(name, cookie, refreshToken, accessToken string,
 }
 
 // Update 更新115云账号
-func (s *Cloud115Service) Update(id int, name, cookie, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
+func (s *Cloud115Service) Update(id int, name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, status string, transferMethod string, alistUrl string, alistToken string) (*domain.Cloud115, error) {
 	var err error
 	transferDirectory, err = normalizeCloud115DirectoryPath(transferDirectory, "115 转存目录", true)
 	if err != nil {
 		return nil, err
 	}
-	cloud115, err := s.cloud115DAO.Update(id, name, cookie, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken)
+	cloud115, err := s.cloud115DAO.Update(id, name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, status, transferMethod, alistUrl, alistToken)
 	if err != nil {
 		logger.Errorf("Cloud115Service[Update] 更新账号失败: %v", err)
 		return nil, fmt.Errorf("更新账号失败: %v", err)

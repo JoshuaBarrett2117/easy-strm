@@ -1,0 +1,13 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "backend": "Gin + PostgreSQL + Redis，已有 EmbyServerDAO 和 EmbyManagementService",
+  "frontend": "Vue 3 + Naive UI + Vite，新增 ECharts 作为图表依赖",
+  "findings": [
+    "现有代码没有播放历史表或图表依赖",
+    "标准 Emby API 可提供 Sessions 与最近媒体",
+    "Playback Reporting 提供 PlayActivity、UserPlaylist、BreakdownReport 等历史接口",
+    "监控接口可复用现有 /emby 管理员路由组"
+  ],
+  "verification": ["go test ./...", "go vet ./...", "npm run build", "npm run e2e:emby-monitor"]
+}

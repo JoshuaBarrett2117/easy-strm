@@ -26,6 +26,6 @@ type Cloud115Client interface {
 	// ReceiveShare 将分享文件转存到目标账号指定目录
 	// 调用 115 官方接口 POST https://webapi.115.com/share/receive
 	// shareCode: 分享码, receiveCode: 提取码, fileIDs: 逗号分隔的分享文件fid列表,
-	// saveFolderID: 目标目录cid(根目录传"0"), targetCloud115ID: 目标账号ID, targetCookie: 目标账号Cookie
-	ReceiveShare(shareCode, receiveCode, fileIDs, saveFolderID string, targetCloud115ID int, targetCookie string) error
+	// targetCID: 目标目录cid(根目录传"0"), targetCloud115ID: 目标账号ID, targetCookie: 目标账号Cookie
+	ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string, targetCloud115ID int, targetCookie string) error
 }

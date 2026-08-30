@@ -38,11 +38,11 @@ func (s *RenameService) getDefaultTemplate(mediaType string) string {
 func (s *RenameService) normalizeBuiltinTemplate(template, mediaType string) string {
 	switch mediaType {
 	case "tv":
-		if template == legacyDefaultTVTemplate {
+		if template == legacyDefaultTVTemplate || template == previousDefaultTVTemplate {
 			return defaultTVTemplate
 		}
 	default:
-		if template == legacyDefaultMovieTemplate {
+		if template == legacyDefaultMovieTemplate || template == previousDefaultMovieTemplate {
 			return defaultMovieTemplate
 		}
 	}

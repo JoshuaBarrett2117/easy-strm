@@ -118,9 +118,9 @@ func (c *Cloud115Controller) ConfirmLogin(ctx *gin.Context) {
 	var err error
 
 	if loginData.App != "" {
-		cred, err = c.qrcodeLoginWithApp(session, loginData.App)
+		cred, err = c.qrcodeLoginWithApp(session, loginData.App, loginData.Name, loginData.CloudID)
 	} else {
-		cred, err = c.qrcodeLogin(session)
+		cred, err = c.qrcodeLogin(session, loginData.Name, loginData.CloudID)
 	}
 	if err != nil {
 		logger.Errorf("Cloud115Controller[ConfirmLogin] 扫码登录失败: %v", err)

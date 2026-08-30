@@ -96,10 +96,10 @@ func expectFileOperationMediaSourceByID(mock sqlmock.Sqlmock, id int, sourceType
 
 func expectCloud115ByID(mock sqlmock.Sqlmock, id int, cookie string) {
 	now := time.Now()
-	rows := sqlmock.NewRows([]string{"id", "name", "cookie", "refresh_token", "access_token", "expires_in", "transfer_account_id", "transfer_directory", "account_type", "quota_used", "priority", "status", "cooling_start_time", "transfer_method", "alist_url", "alist_token", "create_time", "update_time"}).
-		AddRow(id, "cloud", cookie, "", "", 0, 0, "", "resource", 0, 5, "active", nil, "115driver", "", "", now, now)
+	rows := sqlmock.NewRows([]string{"id", "name", "cookie", "cookie_source", "refresh_token", "access_token", "expires_in", "transfer_account_id", "transfer_directory", "account_type", "quota_used", "priority", "status", "cooling_start_time", "transfer_method", "alist_url", "alist_token", "create_time", "update_time"}).
+		AddRow(id, "cloud", cookie, "网页版", "", "", 0, 0, "", "resource", 0, 5, "active", nil, "115driver", "", "", now, now)
 
-	mock.ExpectQuery("SELECT id, name, cookie, refresh_token").
+	mock.ExpectQuery("SELECT id, name, cookie, COALESCE\\(cookie_source, ''\\), refresh_token").
 		WithArgs(id).
 		WillReturnRows(rows)
 }

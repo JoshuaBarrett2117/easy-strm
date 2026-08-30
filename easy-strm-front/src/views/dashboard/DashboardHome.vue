@@ -236,12 +236,15 @@
             <div v-for="account in storageAccounts" :key="account.name">
               <div class="mb-2 flex items-center justify-between gap-3">
                 <span class="truncate text-sm text-slate-500 dark:text-slate-400">{{ account.name }}</span>
-                <strong class="shrink-0 text-sm tabular-nums text-slate-800 dark:text-white">{{ formatBytes(account.used) }}</strong>
+                <strong v-if="account.available" class="shrink-0 text-sm tabular-nums text-slate-800 dark:text-white">
+                  {{ formatBytes(account.used) }} / {{ formatBytes(account.total) }}
+                </strong>
+                <strong v-else class="shrink-0 text-xs text-amber-500 dark:text-amber-400">容量获取失败</strong>
               </div>
               <div class="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-white/5">
                 <span
                   class="block h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-300"
-                  :style="{ width: `${account.percentage || 12}%` }"
+                  :style="{ width: `${account.available ? account.percentage : 0}%` }"
                 ></span>
               </div>
             </div>

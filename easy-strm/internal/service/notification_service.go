@@ -23,6 +23,8 @@ import (
 type NotificationService struct {
 	notificationConfigDAO *dao.NotificationConfigDAO
 	httpClient            *http.Client
+	weComAPIBaseURL       string
+	weComTokens           *weComTokenCache
 }
 
 // NewNotificationService 创建通知服务实例
@@ -34,6 +36,8 @@ func NewNotificationService(notificationConfigDAO *dao.NotificationConfigDAO, ht
 	return &NotificationService{
 		notificationConfigDAO: notificationConfigDAO,
 		httpClient:            httpClient,
+		weComAPIBaseURL:       defaultWeComAPIBaseURL,
+		weComTokens:           newWeComTokenCache(),
 	}
 }
 
@@ -62,6 +66,8 @@ func (s *NotificationService) SendCard(card NotificationCard) error {
 		var sendErr error
 		if cfg.Channel == "telegram" {
 			sendErr = s.sendTelegramCard(cfg.Config, card)
+		} else if cfg.Channel == "wecom" {
+			sendErr = s.sendWeComCard(cfg.Config, card)
 		} else {
 			sendErr = s.SendToChannel(cfg.Channel, cfg.Config, card.Title, card.PlainText())
 		}
@@ -88,6 +94,18 @@ func (s *NotificationService) SendTelegramCard(card NotificationCard) error {
 	return s.sendTelegramCard(config.Config, card)
 }
 
+// SendCardToChannel 向单个通知渠道发送结构化卡片。
+func (s *NotificationService) SendCardToChannel(channel, configJSON string, card NotificationCard) error {
+	switch channel {
+	case "telegram":
+		return s.sendTelegramCard(configJSON, card)
+	case "wecom":
+		return s.sendWeComCard(configJSON, card)
+	default:
+		return s.SendToChannel(channel, configJSON, card.Title, card.PlainText())
+	}
+}
+
 // SendToChannel 通过指定渠道发送通知
 func (s *NotificationService) SendToChannel(channel, configJSON, title, message string) error {
 	switch channel {
@@ -97,6 +115,8 @@ func (s *NotificationService) SendToChannel(channel, configJSON, title, message 
 		return s.sendServerChan(configJSON, title, message)
 	case "email":
 		return s.sendEmail(configJSON, title, message)
+	case "wecom":
+		return s.sendWeComCard(configJSON, NotificationCard{Title: title, Detail: message})
 	default:
 		return fmt.Errorf("不支持的通知渠道: %s", channel)
 	}

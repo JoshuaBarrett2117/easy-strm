@@ -26,3 +26,24 @@ export const testTelegram = (options = {}) => {
     skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
   })
 }
+
+export const getWeComConfig = (options = {}) => {
+  return request('/notify/wecom/config', {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}
+
+export const updateWeComConfig = (data, options = {}) => {
+  return request('/notify/wecom/config', {
+    method: 'PUT',
+    data,
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}
+
+export const testWeCom = (options = {}) => {
+  return request('/notify/wecom/test', {
+    method: 'POST',
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}

@@ -46,12 +46,14 @@ type EmbySystemInfo struct {
 
 // EmbyVirtualFolderInfo Emby 虚拟文件夹（媒体库）信息
 type EmbyVirtualFolderInfo struct {
-	Name            string  `json:"Name"`
-	ItemID          string  `json:"ItemId"`
-	CollectionType  string  `json:"CollectionType"`
-	Path            string  `json:"Path"`
-	RefreshProgress float64 `json:"RefreshProgress"`
-	RefreshStatus   string  `json:"RefreshStatus"`
+	Name            string                 `json:"Name"`
+	ItemID          string                 `json:"ItemId"`
+	CollectionType  string                 `json:"CollectionType"`
+	Path            string                 `json:"Path"`
+	Locations       []string               `json:"Locations"`
+	LibraryOptions  map[string]interface{} `json:"LibraryOptions"`
+	RefreshProgress float64                `json:"RefreshProgress"`
+	RefreshStatus   string                 `json:"RefreshStatus"`
 }
 
 // EmbyLibraryRefreshResult Emby 库刷新结果
@@ -60,6 +62,7 @@ type EmbyLibraryRefreshResult struct {
 	Message     string `json:"message"`
 	LibraryID   string `json:"library_id,omitempty"`
 	LibraryName string `json:"library_name,omitempty"`
+	TaskID      string `json:"task_id,omitempty"`
 }
 
 // --- 配置读取 ---

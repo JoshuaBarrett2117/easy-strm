@@ -13,12 +13,11 @@ import (
 )
 
 type fakeTelegramConfigReader struct {
-	config TelegramConfig
-	view   TelegramConfigView
+	channels []NotificationEventChannel
 }
 
-func (f *fakeTelegramConfigReader) GetTelegramConfig() (TelegramConfig, TelegramConfigView, error) {
-	return f.config, f.view, nil
+func (f *fakeTelegramConfigReader) GetNotificationEventChannels() ([]NotificationEventChannel, error) {
+	return f.channels, nil
 }
 
 type fakeNotificationSender struct {
@@ -28,7 +27,7 @@ type fakeNotificationSender struct {
 	sendErr error
 }
 
-func (f *fakeNotificationSender) SendTelegramCard(card NotificationCard) error {
+func (f *fakeNotificationSender) SendCardToChannel(channel, configJSON string, card NotificationCard) error {
 	if f.delay > 0 {
 		time.Sleep(f.delay)
 	}
@@ -55,7 +54,7 @@ func (f *fakeNotificationTaskStore) GetUnified() ([]map[string]interface{}, erro
 
 func TestNotificationEventMonitorConcurrentTaskDeduplication(t *testing.T) {
 	client := newNotificationTestRedis(t)
-	config := TelegramConfig{NotifyTaskCompleted: true}
+	config := NotificationEventChannel{Channel: "telegram", NotifyTaskCompleted: true}
 	sender := &fakeNotificationSender{delay: 50 * time.Millisecond}
 	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
 	tasks := []map[string]interface{}{{
@@ -93,7 +92,7 @@ func TestNotificationEventMonitorReleasesClaimAfterSendFailure(t *testing.T) {
 	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
 	tasks := []map[string]interface{}{{"task_id": "retry-task", "status": "completed"}}
 
-	err := monitor.processTasks(context.Background(), TelegramConfig{NotifyTaskCompleted: true}, tasks)
+	err := monitor.processTasks(context.Background(), NotificationEventChannel{Channel: "telegram", NotifyTaskCompleted: true}, tasks)
 	if err == nil {
 		t.Fatal("发送失败应返回错误")
 	}
@@ -114,8 +113,8 @@ func (f *fakeNotificationAccountStore) GetAll(string, string) ([]*domain.Cloud11
 
 func TestNotificationEventMonitorBaselineAndDeduplication(t *testing.T) {
 	client := newNotificationTestRedis(t)
-	config := TelegramConfig{NotifyTaskCompleted: true, NotifyTaskFailed: true, NotifyTaskCancelled: true, NotifyAccountStatus: true}
-	reader := &fakeTelegramConfigReader{config: config, view: TelegramConfigView{Enabled: true}}
+	config := NotificationEventChannel{Channel: "telegram", NotifyTaskCompleted: true, NotifyTaskFailed: true, NotifyTaskCancelled: true, NotifyAccountStatus: true}
+	reader := &fakeTelegramConfigReader{channels: []NotificationEventChannel{config}}
 	sender := &fakeNotificationSender{}
 	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "task_type": "organize", "task_name": "旧任务", "status": "completed"}}}
 	accounts := &fakeNotificationAccountStore{accounts: []*domain.Cloud115{{ID: 1, Name: "主号", Status: domain.AccountStatusActive}}}
@@ -151,6 +150,32 @@ func TestNotificationEventMonitorBaselineAndDeduplication(t *testing.T) {
 	}
 	if len(sender.cards) != 2 || sender.cards[1].Title != "115 账号状态异常" {
 		t.Fatalf("账号状态变化通知异常: %#v", sender.cards)
+	}
+}
+
+func TestNotificationEventMonitorChannelsHaveIndependentBaselines(t *testing.T) {
+	client := newNotificationTestRedis(t)
+	reader := &fakeTelegramConfigReader{channels: []NotificationEventChannel{
+		{Channel: "telegram", NotifyTaskCompleted: true},
+		{Channel: "wecom", NotifyTaskCompleted: true},
+	}}
+	sender := &fakeNotificationSender{}
+	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "status": "completed"}}}
+	accounts := &fakeNotificationAccountStore{}
+	monitor := NewNotificationEventMonitor(reader, sender, tasks, accounts, client)
+
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 0 {
+		t.Fatal("渠道首次启用只应建立各自基线")
+	}
+	tasks.tasks = append(tasks.tasks, map[string]interface{}{"task_id": "new", "task_name": "新任务", "status": "completed"})
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 2 {
+		t.Fatalf("两个渠道应各发送一次，实际 %d", sender.count())
 	}
 }
 

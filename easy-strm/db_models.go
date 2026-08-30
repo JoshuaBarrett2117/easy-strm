@@ -15,6 +15,7 @@ type Cloud115 struct {
 	ID                int        `json:"id"`
 	Name              string     `json:"name"`
 	Cookie            string     `json:"cookie"`
+	CookieSource      string     `json:"cookie_source"`
 	RefreshToken      string     `json:"refresh_token"`
 	AccessToken       string     `json:"access_token"`
 	ExpiresIn         int        `json:"expires_in"`
