@@ -32,6 +32,7 @@ type TelegramBotService struct {
 	tasks         *TaskService
 	cron          *CronService
 	emby          *EmbyService
+	resources     *TelegramResourceService
 	httpClient    *http.Client
 	retryTask     func(taskID string) error
 	runCronTask   func(task *domain.CronTask)
@@ -73,6 +74,11 @@ func (s *TelegramBotService) SetRetryTask(retry func(taskID string) error) {
 // SetRunCronTask 注入定时任务立即执行函数。
 func (s *TelegramBotService) SetRunCronTask(run func(task *domain.CronTask)) {
 	s.runCronTask = run
+}
+
+// SetResourceService 注入 Telegram 发起的115分享转存与云下载服务。
+func (s *TelegramBotService) SetResourceService(resources *TelegramResourceService) {
+	s.resources = resources
 }
 
 // Reload 根据持久化配置停止旧实例并启动新实例。
@@ -213,7 +219,15 @@ func (s *TelegramBotService) handleUpdate(ctx context.Context, instance *telegra
 			return
 		}
 		command := strings.ToLower(strings.Split(fields[0], "@")[0])
-		s.handleCommand(ctx, instance, command)
+		if strings.HasPrefix(command, "/") {
+			s.handleCommand(ctx, instance, command)
+			return
+		}
+		if s.resources != nil {
+			go s.handleResourceMessage(instance, update.Message.Text)
+			return
+		}
+		s.sendHelp(ctx, instance)
 		return
 	}
 	if update.CallbackQuery != nil {
@@ -271,11 +285,26 @@ func (s *TelegramBotService) sendHelp(ctx context.Context, instance *telegram.Bo
 	card := NotificationCard{
 		Title:  "Easy-STRM 运维机器人",
 		Status: "🤖",
-		Detail: "可查看系统状态与任务，并直接取消运行任务、重试自动整理、运行定时任务或刷新 Emby。",
+		Detail: "可查看系统状态与任务，并直接取消运行任务、重试自动整理、运行定时任务或刷新 Emby。\n\n发送115分享链接可自动转存，发送 magnet、ed2k、HTTP、HTTPS 或 FTP 链接可创建115云下载。链接后可追加“账号名称 /目标目录”，也可只追加其中一项。",
 		Actions: [][]NotificationAction{
 			{{Text: "系统状态", Data: "status"}, {Text: "最近任务", Data: "tasks"}},
 			{{Text: "定时任务", Data: "cron"}, {Text: "Emby", Data: "emby"}},
 		},
+	}
+	s.send(ctx, instance, card)
+}
+
+func (s *TelegramBotService) handleResourceMessage(instance *telegram.Bot, text string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	card, handled, err := s.resources.Execute(ctx, text)
+	if !handled {
+		s.sendHelp(ctx, instance)
+		return
+	}
+	if err != nil {
+		s.sendError(ctx, instance, "115资源操作失败", err)
+		return
 	}
 	s.send(ctx, instance, card)
 }

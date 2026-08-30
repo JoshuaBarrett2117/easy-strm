@@ -82,6 +82,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	offlineDownloadDAO := dao.NewOfflineDownloadTaskDAO(dao.DB)
 	offlineDownloadService := service.NewOfflineDownloadService(client, dao.NewTaskRedisDAOWithGlobal(), offlineDownloadDAO, cloud115DAO)
 	offlineDownloadController := controller.NewOfflineDownloadController(offlineDownloadService)
+	telegramBotService.SetResourceService(service.NewTelegramResourceService(shareTransferService, offlineDownloadService, cloud115DAO))
 
 	// --- 初始化 Controller ---
 	mediaSourceController := controller.NewMediaSourceController(mediaSourceService, cloud115Service, watchService, client)

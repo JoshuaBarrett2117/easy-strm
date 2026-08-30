@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -161,12 +162,7 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 
 	// 2. 如果URL中包含 password query参数且未单独提供密码，则从URL提取
 	if password == "" {
-		if idx := strings.Index(url, "password="); idx >= 0 {
-			password = url[idx+9:]
-			if ampIdx := strings.Index(password, "&"); ampIdx >= 0 {
-				password = password[:ampIdx]
-			}
-		}
+		password = extractSharePassword(url)
 	}
 
 	// 3. 循环分页拉取分享文件（根目录 dirID="0"，每页最多 200 条）
@@ -225,6 +221,14 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 		maskedCode, result.TotalFiles, result.TotalSize, time.Since(startTime).String())
 
 	return result, nil
+}
+
+func extractSharePassword(rawURL string) string {
+	parsed, err := neturl.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(parsed.Query().Get("password"))
 }
 
 // mapShareSnapError 将115driver返回的share/snap API错误映射为用户可读错误

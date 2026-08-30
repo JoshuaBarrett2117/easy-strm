@@ -5,7 +5,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"easy-strm/internal/domain"
 	telegram "github.com/go-telegram/bot"
 	telegrammodels "github.com/go-telegram/bot/models"
 )
@@ -69,5 +71,43 @@ func TestTelegramConfigValidate(t *testing.T) {
 				t.Fatalf("Validate() error = %v", err)
 			}
 		})
+	}
+}
+
+func TestTelegramBotRoutesShareMessageToResourceService(t *testing.T) {
+	requests := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if err := request.ParseMultipartForm(1 << 20); err != nil {
+			t.Errorf("解析Telegram请求失败: %v", err)
+		}
+		requests <- request.FormValue("text")
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"ok":true,"result":{"message_id":1,"date":0,"chat":{"id":123,"type":"private"},"text":"ok"}}`))
+	}))
+	defer server.Close()
+	instance, err := telegram.New("1:test", telegram.WithServerURL(server.URL), telegram.WithSkipGetMe())
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := &fakeTelegramShareTransfer{parsed: &domain.ParseShareResponse{
+		ShareCode: "share-code",
+		Files:     []domain.ShareFileInfo{{Fid: "fid-1", Name: "资源目录", IsDir: true}},
+	}}
+	resources := NewTelegramResourceService(share, &fakeTelegramOfflineDownload{}, &fakeTelegramAccountStore{accounts: []*domain.Cloud115{{
+		ID: 1, Name: "资源号", AccountType: domain.AccountTypeResource, Priority: 10, Status: domain.AccountStatusActive, Cookie: "cookie",
+	}}})
+	service := &TelegramBotService{config: TelegramConfig{ChatID: "123"}, resources: resources}
+	service.handleUpdate(context.Background(), instance, &telegrammodels.Update{Message: &telegrammodels.Message{
+		Text: "https://115cdn.com/s/sharecode?password=abcd# /自动转存",
+		Chat: telegrammodels.Chat{ID: 123, Type: telegrammodels.ChatTypePrivate},
+	}})
+
+	select {
+	case text := <-requests:
+		if text == "" || share.request.TargetDirectory != "/自动转存" {
+			t.Fatalf("机器人未正确提交分享转存: text=%q request=%#v", text, share.request)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("等待Telegram提交卡片超时")
 	}
 }
