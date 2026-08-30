@@ -18,6 +18,7 @@ const (
 	notificationTaskEventPrefix  = "easy_strm:notification:telegram:task:"
 	notificationAccountStatusKey = "easy_strm:notification:telegram:accounts"
 	notificationEventTTL         = 24 * time.Hour
+	notificationEventClaimTTL    = time.Minute
 )
 
 // NotificationEventMonitor 统一观察 Redis 任务终态和 115 账号状态变化。
@@ -161,21 +162,25 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, config Tele
 			continue
 		}
 		key := taskEventKey(fmt.Sprint(task["task_id"]), status)
-		delivered, err := m.redis.Exists(ctx, key).Result()
+		claimed, err := m.redis.SetNX(ctx, key, "processing", notificationEventClaimTTL).Result()
 		if err != nil {
 			return err
 		}
-		if delivered > 0 {
+		if !claimed {
 			continue
 		}
 		if !taskEventEnabled(config, status) {
-			_ = m.redis.Set(ctx, key, "disabled", notificationEventTTL).Err()
+			if err := m.redis.Set(ctx, key, "disabled", notificationEventTTL).Err(); err != nil {
+				return err
+			}
 			continue
 		}
 		card := buildTaskCard(task, true)
 		card.Title = "任务通知 · " + card.Title
 		card.Actions = append(card.Actions, []NotificationAction{{Text: "最近任务", Data: "tasks"}})
 		if err := m.notifications.SendTelegramCard(card); err != nil {
+			// 发送失败时释放抢占，允许下一轮重新尝试该事件。
+			_ = m.redis.Del(ctx, key).Err()
 			return err
 		}
 		if err := m.redis.Set(ctx, key, "1", notificationEventTTL).Err(); err != nil {

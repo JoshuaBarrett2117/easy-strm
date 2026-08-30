@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"easy-strm/internal/domain"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 )
 
@@ -17,17 +21,89 @@ func (f *fakeTelegramConfigReader) GetTelegramConfig() (TelegramConfig, Telegram
 	return f.config, f.view, nil
 }
 
-type fakeNotificationSender struct{ cards []NotificationCard }
+type fakeNotificationSender struct {
+	mu      sync.Mutex
+	cards   []NotificationCard
+	delay   time.Duration
+	sendErr error
+}
 
 func (f *fakeNotificationSender) SendTelegramCard(card NotificationCard) error {
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	if f.sendErr != nil {
+		return f.sendErr
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.cards = append(f.cards, card)
 	return nil
+}
+
+func (f *fakeNotificationSender) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.cards)
 }
 
 type fakeNotificationTaskStore struct{ tasks []map[string]interface{} }
 
 func (f *fakeNotificationTaskStore) GetUnified() ([]map[string]interface{}, error) {
 	return f.tasks, nil
+}
+
+func TestNotificationEventMonitorConcurrentTaskDeduplication(t *testing.T) {
+	client := newNotificationTestRedis(t)
+	config := TelegramConfig{NotifyTaskCompleted: true}
+	sender := &fakeNotificationSender{delay: 50 * time.Millisecond}
+	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
+	tasks := []map[string]interface{}{{
+		"task_id": "same-task", "task_type": "strm", "task_name": "并发任务", "status": "completed",
+	}}
+
+	const workers = 8
+	start := make(chan struct{})
+	errorsCh := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errorsCh <- monitor.processTasks(context.Background(), config, tasks)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errorsCh)
+	for err := range errorsCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := sender.count(); got != 1 {
+		t.Fatalf("并发检查同一终态只能发送一次，实际 %d", got)
+	}
+}
+
+func TestNotificationEventMonitorReleasesClaimAfterSendFailure(t *testing.T) {
+	client := newNotificationTestRedis(t)
+	sender := &fakeNotificationSender{sendErr: errors.New("发送失败")}
+	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
+	tasks := []map[string]interface{}{{"task_id": "retry-task", "status": "completed"}}
+
+	err := monitor.processTasks(context.Background(), TelegramConfig{NotifyTaskCompleted: true}, tasks)
+	if err == nil {
+		t.Fatal("发送失败应返回错误")
+	}
+	exists, redisErr := client.Exists(context.Background(), taskEventKey("retry-task", "completed")).Result()
+	if redisErr != nil {
+		t.Fatal(redisErr)
+	}
+	if exists != 0 {
+		t.Fatal("发送失败后应释放事件抢占")
+	}
 }
 
 type fakeNotificationAccountStore struct{ accounts []*domain.Cloud115 }
@@ -80,15 +156,9 @@ func TestNotificationEventMonitorBaselineAndDeduplication(t *testing.T) {
 
 func newNotificationTestRedis(t *testing.T) *redis.Client {
 	t.Helper()
-	client := redis.NewClient(&redis.Options{Addr: "localhost:6379", DB: 15})
-	if err := client.Ping(context.Background()).Err(); err != nil {
-		t.Skipf("本地 Redis 不可用: %v", err)
-	}
-	if err := client.FlushDB(context.Background()).Err(); err != nil {
-		t.Fatal(err)
-	}
+	server := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() {
-		_ = client.FlushDB(context.Background()).Err()
 		_ = client.Close()
 	})
 	return client
