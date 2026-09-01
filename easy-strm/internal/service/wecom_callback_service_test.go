@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/xml"
 	"strings"
 	"testing"
@@ -25,12 +26,24 @@ func (f *fakeWeComCallbackConfigReader) GetWeComConfig() (WeComConfig, WeComConf
 type fakeWeComReplySender struct {
 	messages chan NotificationCard
 	users    chan string
+	configs  chan WeComConfig
 }
 
-func (f *fakeWeComReplySender) SendWeComCardToUser(_ WeComConfig, userID string, card NotificationCard) error {
+func (f *fakeWeComReplySender) SendWeComCardToUser(config WeComConfig, userID string, card NotificationCard) error {
+	if f.configs != nil {
+		f.configs <- config
+	}
 	f.users <- userID
 	f.messages <- card
 	return nil
+}
+
+type fakeWeComResourceExecutor struct {
+	card NotificationCard
+}
+
+func (f *fakeWeComResourceExecutor) Execute(_ context.Context, _ string) (NotificationCard, bool, error) {
+	return f.card, true, nil
 }
 
 func TestWeComCallbackServiceVerifyURL(t *testing.T) {
@@ -106,6 +119,39 @@ func TestWeComCallbackServiceRejectsMismatchedAgent(t *testing.T) {
 	}
 	if err := callback.Receive(encrypted.Signature.Value, timestamp, nonce, body); err == nil || !strings.Contains(err.Error(), "AgentID") {
 		t.Fatalf("不匹配的AgentID应被拒绝: %v", err)
+	}
+}
+
+func TestWeComCallbackServiceRepliesOfflineSubmissionAsText(t *testing.T) {
+	config := testWeComCallbackConfig()
+	config.DetailURL = "https://example.com/task-detail"
+	replies := &fakeWeComReplySender{
+		messages: make(chan NotificationCard, 1),
+		users:    make(chan string, 1),
+		configs:  make(chan WeComConfig, 1),
+	}
+	callback := NewWeComCallbackService(&fakeWeComCallbackConfigReader{config: config}, replies, nil, nil, nil)
+	callback.SetResourceService(&fakeWeComResourceExecutor{card: NotificationCard{
+		Title:  "115 云下载已提交",
+		Status: "☁️",
+		Fields: [][2]string{{"任务 ID", "offline-123"}},
+	}})
+
+	callback.replyToText(config, "alice", "https://example.com/video.mp4")
+
+	replyConfig := <-replies.configs
+	if replyConfig.DetailURL != "" {
+		t.Fatalf("主动命令回复应强制使用纯文本，实际 detail_url=%q", replyConfig.DetailURL)
+	}
+	if userID := <-replies.users; userID != "alice" {
+		t.Fatalf("回复成员异常: %s", userID)
+	}
+	card := <-replies.messages
+	if card.Title != "115 云下载已提交" {
+		t.Fatalf("离线下载创建反馈异常: %#v", card)
+	}
+	if len(card.Fields) != 1 || card.Fields[0][1] != "offline-123" {
+		t.Fatalf("离线下载任务 ID 未包含在反馈中: %#v", card.Fields)
 	}
 }
 

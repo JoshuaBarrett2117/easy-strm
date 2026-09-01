@@ -1,0 +1,15 @@
+{
+  "date": "2026-08-31",
+  "executor": "Codex",
+  "task_id": "project-gap-analysis-20260830",
+  "question": "fresh install、前后端契约和项目文档能否形成可重复验证的发布基线？",
+  "why_needed": "决定需求文档是否能给出清晰接口、部署和本地验收契约。",
+  "cost_note": "这是第 3 次针对性深挖，已达到充分性阈值，停止继续扩大收集范围。",
+  "evidence": [
+    "fresh DB 不创建 t_share_transfer_log，日志 INSERT 又把空字符串写入 timestamp。",
+    "两套 Compose 的默认凭据和数据卷不同，均未挂载媒体/STRM 目录。",
+    "成功响应、错误响应和分页层级不统一，前端出现 data.data.data 兼容。",
+    "23 个 E2E 仅 3 个注册 npm script；旧测试入口路径错误；历史路线图与当前非目标冲突。"
+  ],
+  "answer": "接口、部署、验证和文档契约均已足够明确，可进入需求成稿；后续实施按单项需求再做局部上下文收集。"
+}

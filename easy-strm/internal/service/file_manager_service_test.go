@@ -125,7 +125,7 @@ func (f *fakeFileManagerCloudClient) MoveFile115(fileID, target string, accountI
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeFileManagerCloudClient) RapidTransferFile(pickCode string, _ int, _ string, target string, _ int, _ string, name string) (string, error) {
+func (f *fakeFileManagerCloudClient) RapidTransferFileByMetadata(_ string, pickCode string, _ string, _ int64, _ int, _ string, target string, _ int, _ string, name string) (string, error) {
 	f.mu.Lock()
 	f.rapidTransfers = append(f.rapidTransfers, pickCode+":"+target+":"+name)
 	f.mu.Unlock()
@@ -209,9 +209,9 @@ func TestFileManagerLocalToLocalMoveRunsAsTask(t *testing.T) {
 	}
 }
 
-func TestFileManagerCrossAccountDirectoryCopiesViaDownloadAndUpload(t *testing.T) {
+func TestFileManagerCrossAccountDirectoryCopiesViaRapidTransfer(t *testing.T) {
 	cloud := &fakeFileManagerCloudClient{lists: map[string][]driver.FileInfo{
-		"10": {{FileID: "file-id", Name: "demo.mp4", PickCode: "pick-1"}},
+		"10": {{FileID: "file-id", Name: "demo.mp4", PickCode: "pick-1", Sha1: "ABCDEF", Size: 123}},
 	}}
 	tasks := newFakeFileManagerTasks()
 	service := NewFileManagerService(&fakeFileManagerMediaSources{items: map[int]*domain.MediaSource{}}, &fakeFileManagerAccounts{items: map[int]*domain.Cloud115{
@@ -226,11 +226,11 @@ func TestFileManagerCrossAccountDirectoryCopiesViaDownloadAndUpload(t *testing.T
 	if len(cloud.createdDirs) != 1 || cloud.createdDirs[0] != "20:Folder" {
 		t.Fatalf("unexpected created dirs: %v", cloud.createdDirs)
 	}
-	if len(cloud.downloads) != 1 || cloud.downloads[0] != "pick-1:demo.mp4:1" {
-		t.Fatalf("unexpected downloads: %v", cloud.downloads)
+	if len(cloud.rapidTransfers) != 1 || cloud.rapidTransfers[0] != "pick-1:900:demo.mp4" {
+		t.Fatalf("unexpected rapid transfers: %v", cloud.rapidTransfers)
 	}
-	if len(cloud.uploads) != 1 || cloud.uploads[0] != "demo.mp4:900:demo.mp4" {
-		t.Fatalf("unexpected uploads: %v", cloud.uploads)
+	if len(cloud.downloads) != 0 || len(cloud.uploads) != 0 {
+		t.Fatalf("目录跨账号复制不得下载上传: downloads=%v uploads=%v", cloud.downloads, cloud.uploads)
 	}
 }
 
@@ -350,39 +350,91 @@ func TestFileManagerSameAccountCopyAndMove(t *testing.T) {
 }
 
 func TestFileManagerCrossAccountMoveDeletesOnlyAfterSuccess(t *testing.T) {
-	item := domain.FileManagerTransferItem{ID: "file-1", Name: "demo.mp4"}
+	setCloud115RetryDelayForTest(t, 0)
+	item := domain.FileManagerTransferItem{ID: "file-1", PickCode: "pick-1", SHA1: "ABCDEF", Size: 123, Name: "demo.mp4"}
 	cloud := &fakeFileManagerCloudClient{}
 	service := newFileManagerCloudTestService(cloud)
 	if err := service.transferCloudToCloud(context.Background(), 1, 2, "20", item, true); err != nil {
 		t.Fatal(err)
 	}
-	if len(cloud.downloads) != 1 || len(cloud.uploads) != 1 || len(cloud.deletes) != 1 || cloud.deletes[0] != "file-1:1" {
-		t.Fatalf("unexpected successful move calls: downloads=%v uploads=%v delete=%v", cloud.downloads, cloud.uploads, cloud.deletes)
+	if len(cloud.rapidTransfers) != 1 || cloud.rapidTransfers[0] != "pick-1:20:demo.mp4" || len(cloud.deletes) != 1 || cloud.deletes[0] != "file-1:1" {
+		t.Fatalf("unexpected successful move calls: rapid=%v delete=%v", cloud.rapidTransfers, cloud.deletes)
+	}
+	if len(cloud.downloads) != 0 || len(cloud.uploads) != 0 {
+		t.Fatalf("秒传成功时不得下载上传: downloads=%v uploads=%v", cloud.downloads, cloud.uploads)
 	}
 
-	failedCloud := &fakeFileManagerCloudClient{rapidErr: errors.New("rapid transfer failed"), downloadErr: errors.New("download failed")}
+	failedCloud := &fakeFileManagerCloudClient{rapidErr: errors.New("rapid transfer failed")}
 	failedService := newFileManagerCloudTestService(failedCloud)
-	if err := failedService.transferCloudToCloud(context.Background(), 1, 2, "20", item, true); err == nil {
+	transferErr := failedService.transferCloudToCloud(context.Background(), 1, 2, "20", item, true)
+	if transferErr == nil {
 		t.Fatal("expected rapid transfer error")
+	}
+	if transferErr.Error() != "秒传失败：115暂未接受该文件，请稍后重试" || strings.Contains(transferErr.Error(), "rapid transfer failed") {
+		t.Fatalf("任务错误应为用户可读文案，不得泄露原始报文: %v", transferErr)
 	}
 	if len(failedCloud.deletes) != 0 {
 		t.Fatalf("source must not be deleted after failed transfer: %v", failedCloud.deletes)
 	}
+	if len(failedCloud.rapidTransfers) != cloud115OperationRetryCount+1 {
+		t.Fatalf("首次失败后应重试%d次，实际调用=%d", cloud115OperationRetryCount, len(failedCloud.rapidTransfers))
+	}
+	if len(failedCloud.downloads) != 0 || len(failedCloud.uploads) != 0 {
+		t.Fatalf("秒传失败时不得回退下载上传: downloads=%v uploads=%v", failedCloud.downloads, failedCloud.uploads)
+	}
 }
 
-func TestFileManagerCrossAccountCopiesViaDownloadAndUpload(t *testing.T) {
-	item := domain.FileManagerTransferItem{ID: "file-1", PickCode: "pick-1", Name: "demo.mp4"}
+func TestRetryCloud115OperationSucceedsOnThirdRetry(t *testing.T) {
+	setCloud115RetryDelayForTest(t, 0)
+	attempts := 0
+	err := retryCloud115Operation(context.Background(), "test", func() error {
+		attempts++
+		if attempts <= cloud115OperationRetryCount {
+			return errors.New("temporary failure")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("第三次重试成功不应返回错误: %v", err)
+	}
+	if attempts != cloud115OperationRetryCount+1 {
+		t.Fatalf("总调用次数=%d，期望=%d", attempts, cloud115OperationRetryCount+1)
+	}
+}
+
+func TestCloud115RapidTransferMessage(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "账号失效", err: errors.New("import target credential failed"), want: "秒传失败：115账号登录状态已失效，请重新登录后重试"},
+		{name: "元数据缺失", err: errors.New("source file has no SHA1"), want: "秒传失败：文件缺少秒传所需信息"},
+		{name: "内容校验", err: errors.New("server requires file content verification status=7"), want: "秒传失败：115要求校验文件内容，当前文件暂不支持秒传"},
+		{name: "普通拒绝", err: errors.New("sig invalid: internal detail"), want: "秒传失败：115暂未接受该文件，请稍后重试"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := cloud115RapidTransferMessage(test.err); got != test.want {
+				t.Fatalf("错误文案=%q，期望=%q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestFileManagerCrossAccountCopiesViaRapidTransferOnly(t *testing.T) {
+	item := domain.FileManagerTransferItem{ID: "file-1", PickCode: "pick-1", SHA1: "ABCDEF", Size: 123, Name: "demo.mp4"}
 	cloud := &fakeFileManagerCloudClient{}
 	service := newFileManagerCloudTestService(cloud)
 
 	if err := service.transferCloudToCloud(context.Background(), 1, 2, "20", item, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(cloud.downloads) != 1 || cloud.downloads[0] != "pick-1:demo.mp4:1" {
-		t.Fatalf("unexpected fallback downloads: %v", cloud.downloads)
+	if len(cloud.rapidTransfers) != 1 || cloud.rapidTransfers[0] != "pick-1:20:demo.mp4" {
+		t.Fatalf("unexpected rapid transfers: %v", cloud.rapidTransfers)
 	}
-	if len(cloud.uploads) != 1 || cloud.uploads[0] != "demo.mp4:20:demo.mp4" {
-		t.Fatalf("unexpected fallback uploads: %v", cloud.uploads)
+	if len(cloud.downloads) != 0 || len(cloud.uploads) != 0 {
+		t.Fatalf("跨账号复制不得下载上传: downloads=%v uploads=%v", cloud.downloads, cloud.uploads)
 	}
 }
 
@@ -438,4 +490,11 @@ func waitFileManagerTask(t *testing.T, tasks *fakeFileManagerTasks) {
 	if tasks.status != "completed" {
 		t.Fatalf("task status=%s", tasks.status)
 	}
+}
+
+func setCloud115RetryDelayForTest(t *testing.T, delay time.Duration) {
+	t.Helper()
+	original := cloud115RetryBaseDelay
+	cloud115RetryBaseDelay = delay
+	t.Cleanup(func() { cloud115RetryBaseDelay = original })
 }

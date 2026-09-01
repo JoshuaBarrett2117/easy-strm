@@ -43,7 +43,10 @@ func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, 
 	if err != nil {
 		return "", fmt.Errorf("get source file info failed: %v", err)
 	}
+	return c.rapidTransferFile(sourceFile, sourceCloud115ID, targetDirID, targetCloud115ID, targetCookie, fileName)
+}
 
+func (c *Client) rapidTransferFile(sourceFile *driver.File, sourceCloud115ID int, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (newPickCode string, err error) {
 	if sourceFile.Sha1 == "" {
 		return "", fmt.Errorf("source file has no SHA1, cannot rapid transfer")
 	}
@@ -465,6 +468,67 @@ func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int,
 	return "", fmt.Errorf("all Go115 rapid transfer attempts failed: %v", lastErr)
 }
 
+// RapidTransferFileByMetadata 使用文件列表已有元数据执行115跨账号秒传。
+func (c *Client) RapidTransferFileByMetadata(sourceFileID, sourcePickCode, sourceSHA1 string, sourceSize int64, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (newPickCode string, err error) {
+	if sourceFileID == "" || sourcePickCode == "" || sourceSHA1 == "" || sourceSize <= 0 {
+		return "", fmt.Errorf("源文件秒传元数据不完整")
+	}
+	if fileName == "" {
+		return "", fmt.Errorf("源文件名不能为空")
+	}
+
+	sourceAgent := elevengo.New()
+	if err := sourceAgent.CredentialImport(parseCookieToCredential(sourceCookie)); err != nil {
+		return "", fmt.Errorf("import source credential failed: %v", err)
+	}
+	targetAgent := elevengo.New()
+	if err := targetAgent.CredentialImport(parseCookieToCredential(targetCookie)); err != nil {
+		return "", fmt.Errorf("import target credential failed: %v", err)
+	}
+	if targetDirID == "" {
+		targetDirID = "0"
+	}
+
+	ticket := &elevengo.ImportTicket{
+		FileName: fileName,
+		FileSize: sourceSize,
+		FileSha1: strings.ToUpper(sourceSHA1),
+	}
+	signPickCode, err := sourceAgent.ImportCreateTicket(sourceFileID, ticket)
+	if err != nil {
+		return "", fmt.Errorf("创建源文件票据失败: %v", err)
+	}
+	if signPickCode == "" {
+		signPickCode = sourcePickCode
+	}
+
+	if err = targetAgent.Import(targetDirID, ticket); err != nil {
+		if needCheck, ok := err.(*elevengo.ErrImportNeedCheck); ok {
+			signValue, signErr := sourceAgent.ImportCalculateSignValue(signPickCode, needCheck.SignRange)
+			if signErr != nil {
+				return "", fmt.Errorf("计算秒传签名失败: %v", signErr)
+			}
+			ticket.SignKey, ticket.SignValue = needCheck.SignKey, signValue
+			if err = targetAgent.Import(targetDirID, ticket); err != nil {
+				return "", fmt.Errorf("秒传签名校验失败: %v", err)
+			}
+		} else {
+			return "", fmt.Errorf("秒传失败: %v", err)
+		}
+	}
+
+	it, err := targetAgent.FileIterate(targetDirID)
+	if err != nil {
+		return signPickCode, nil
+	}
+	for _, file := range it.Items() {
+		if file.Name == fileName && strings.EqualFold(file.Sha1, sourceSHA1) {
+			return file.PickCode, nil
+		}
+	}
+	return signPickCode, nil
+}
+
 // rapidTransferAlist 使用elevengo方式执行跨账号秒传
 // 完全按照demo的逻辑实现：先路径遍历查找文件，失败后再使用搜索
 
@@ -553,78 +617,10 @@ func (c *Client) rapidTransferAlist(sourcePickCode string, sourceFilePath string
 		return "", fmt.Errorf("未找到文件: %s", sourceFilePath)
 	}
 
-	Info("文件信息:")
-	Info("  - 文件名: %s", targetFile.Name)
-	Info("  - 大小: %d", targetFile.Size)
-	Info("  - SHA1: %s", targetFile.Sha1)
-
-	if targetFile.Sha1 == "" {
-		return "", fmt.Errorf("该文件缺少SHA1，无法执行跨账号秒传")
-	}
-
 	if fileName == "" {
 		fileName = targetFile.Name
 	}
-
-	Info("初始化目标账号...")
-	Info("目标账号初始化成功")
-
-	targetDir := targetDirID
-	if targetDir == "" {
-		targetDir = "0"
-	}
-	Info("目标目录ID: %s", targetDir)
-
-	Info("正在创建秒传票据...")
-
-	ticket := &elevengo.ImportTicket{
-		FileName: fileName,
-		FileSize: targetFile.Size,
-		FileSha1: strings.ToUpper(targetFile.Sha1),
-	}
-
-	pickcode, err := sourceAgent.ImportCreateTicket(targetFile.FileId, ticket)
-	if err != nil {
-		return "", fmt.Errorf("创建源文件票据失败: %v", err)
-	}
-	Info("获取到 pickcode: %s", pickcode)
-
-	Info("正在执行秒传...")
-	if err = targetAgent.Import(targetDir, ticket); err != nil {
-		if ie, ok := err.(*elevengo.ErrImportNeedCheck); ok {
-			Info("需要进行签名校验...")
-			signValue, err := sourceAgent.ImportCalculateSignValue(pickcode, ie.SignRange)
-			if err != nil {
-				return "", fmt.Errorf("计算签名失败: %v", err)
-			}
-			ticket.SignKey, ticket.SignValue = ie.SignKey, signValue
-			if err = targetAgent.Import(targetDir, ticket); err != nil {
-				return "", fmt.Errorf("秒传失败: %v", err)
-			}
-		} else {
-			return "", fmt.Errorf("秒传失败: %v", err)
-		}
-	}
-
-	Info("秒传成功！文件已存入目标账号！")
-
-	// 在目标账号中查找刚上传的文件，获取新的 pickcode
-	Info("在目标账号中查找秒传后的文件: %s", fileName)
-	it, err := targetAgent.FileIterate(targetDir)
-	if err != nil {
-		Warn("无法遍历目标目录获取新 pickcode: %v, 使用源文件 pickcode", err)
-		return pickcode, nil
-	}
-
-	for _, f := range it.Items() {
-		if f.Name == fileName && strings.ToUpper(f.Sha1) == strings.ToUpper(targetFile.Sha1) {
-			Info("找到目标账号中的文件，新 pickcode: %s", f.PickCode)
-			return f.PickCode, nil
-		}
-	}
-
-	Warn("未在目标账号中找到秒传后的文件，使用源文件 pickcode: %s", pickcode)
-	return pickcode, nil
+	return c.RapidTransferFileByMetadata(targetFile.FileId, targetFile.PickCode, targetFile.Sha1, targetFile.Size, sourceCloud115ID, sourceCookie, targetDirID, targetCloud115ID, targetCookie, fileName)
 }
 
 // parseCookieToCredential 将115 cookie字符串解析为elevengo.Credential

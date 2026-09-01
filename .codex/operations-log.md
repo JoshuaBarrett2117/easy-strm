@@ -595,3 +595,87 @@
 - 验证：企业微信专项测试、后端全量测试、Go Vet、前端生产构建和差异检查通过。
 - 运行时修复：用户保存时企业微信接口返回 404；确认 8082 后端启动时间早于企业微信路由源码修改时间，而 Telegram 路由正常存在。仅重启监听 8082 的 `easy-strm` 进程后，企业微信 GET/PUT/POST 路由均进入 JWT 中间件并返回未授权 401，证明新路由已生效。
 - API 接收消息：引入企业微信官方示例 `wxbizmsgcrypt`，新增公开 GET/POST 回调、Token/AESKey 脱敏配置、签名与 Corp/Agent 校验、消息解密、Redis 去重和异步应用回复。文本支持帮助、状态、任务及115资源操作；前端新增回调 URL、随机 Token/AESKey 和接收开关。
+
+# 2026-08-30 文件工作台概览板块清理
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`；使用计划工具、`rg`、PowerShell 和 `apply_patch` 完成上下文分析、规划与实现。
+- 上下文扫描：确认截图红框对应 `MediaManager.vue` 中位于 `MediaSourceList` 前的工作台头部、当前上下文、概览指标、快捷动作和本轮选择。
+- 依赖分析：保留文件浏览与批量操作仍依赖的 `currentSource`、`selectedFiles`、`getFileType`；删除仅服务于概览区的派生状态、导入和父子组件暴露接口。
+- 实现：页面现在直接从“媒体源管理”开始，后续文件浏览、识别、重命名、整理和刮削对话框链路保持不变。
+
+# 2026-08-30 企业微信云下载创建反馈修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`；使用计划工具、`rg`、PowerShell、`apply_patch` 和本地 Go 测试完成。
+- 根因：云下载任务已成功创建并生成反馈卡片，但主动命令回复复用了普通通知的 `detail_url` 策略，因而发送为消息转发代理兼容性不稳定的 `textcard`。
+- 修复：仅对用户主动命令回复使用配置副本并清空 `DetailURL`，强制发送精简文本；不修改持久化配置，也不影响后台任务和账号事件通知。
+- 可观测性：回复成功后记录成员和反馈标题；失败仍保留警告日志。
+- 回归：新增测试验证配置了 `detail_url` 时依然以文本回复，并保留“115 云下载已提交”和任务 ID。
+
+# 2026-08-30 通知渠道多行115任务提交
+
+- 执行者：Codex。
+- 上下文：企业微信与 Telegram 共用 `TelegramResourceService`；原实现使用 `strings.Fields` 解析整条消息，只能识别第一个 URL，并会把第二行错误拼入目录。
+- 实现：先按 CRLF/LF 的非空行拆分，再对每行独立解析、选择账号并调用既有分享转存或云下载提交链路；单行行为保持原样。
+- 容错：多行中的参数错误、无效链接、账号不可用或提交失败会记录为该行失败，不中断后续行。
+- 反馈：批量卡片包含总数、已创建、失败，以及基于 magnet `dn`/哈希生成的行标签、任务 ID 或错误原因；成功时提供“查看最近任务”操作。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`；使用计划工具、`rg`、PowerShell、`apply_patch` 和本地测试完成。
+- 分享转存补充验证：两条115分享链接分别完成解析与提交，各自应用密码、账号和目录；纯分享批次使用“115 分享转存批量提交完成”标题。
+
+# 2026-09-01 任务触发与终态双阶段通知
+
+- 执行者：Codex。
+- 需求解释：将“所有任务”和“通知渠道”映射到统一任务中心中的全部任务，以及已启用的 Telegram、企业微信、Server 酱和 SMTP 渠道。
+- 实现：任务监控为每个任务新增 `started` 事件，创建/发现任务时先发送“任务已触发”；终态仍按完成、失败、取消发送第二次通知。两类事件使用独立 Redis 键并分别抢占，发送失败可重试。
+- 配置：Telegram 和企业微信新增 `notify_task_started` 字段与设置页开关，历史配置默认启用；Server 酱和 SMTP 没有独立事件开关，已启用时默认订阅全部任务事件。
+- 升级边界：事件基线从 `v1` 升级到 `v2`，避免已有 Redis 历史任务在升级后补发触发通知；首次启用仍只建立基线。
+
+# 2026-08-30 云下载记录名称列宽度约束
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`；使用计划工具、`rg`、PowerShell 和 `apply_patch` 完成。
+- 根因：名称 / 链接列仅声明 `minWidth`，超长磁力链和 ED2K 链接可能继续撑开首列，挤出后续列。
+- 实现：名称 / 链接列改为固定 `420px`，继续复用现有两行 `NEllipsis` 展示名称和链接，不改变数据与交互逻辑。
+- 用户回归：仅设置 `width: 420` 后仍被长链接撑开。检查 Naive UI 2.41 源码确认默认 `tableLayout` 为 `auto`，且单独 `width` 只派生同值 `minWidth`，不会派生 `maxWidth`。
+- 修正：增加 `maxWidth: 420`、`table-layout="fixed"` 和 `scroll-x="1140"`，并限制单元格容器溢出；宽屏显示全部列，窄屏按声明总宽度横向滚动。
+
+# 2026-08-30 115 离线下载 UA 回归修复
+
+- 执行者：Codex。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`、`exa`；使用显式根因分析、计划工具、`rg`、PowerShell、GitHub API 只读检索和本地测试替代。
+- `git status`、`git diff`：确认工作区已有多项未提交修改，目标文件 `115client.go` 和 `115client_test.go` 属于现有超时/缓存改动，后续只做增量补丁。
+- `rg`、`Get-Content`：追踪前端 JSON 请求、Controller、Service、`115_offline.go` 与 115driver v1.3.5 的离线加密响应解析链路；前端传参无误。
+- GitHub API：核对 115driver issue #56，同样的 `invalid character 'd'` 对应上游响应 `decode fail!`，维护者明确要求使用 `UA115Browser`。
+- 根因：当前构造顺序为 `driver.New(UA115Browser).SetHttpClient(...)`；`SetHttpClient` 重建 Resty 客户端并清空先前 User-Agent，导致离线接口解密失败。
+- 充分性检查：接口契约、技术选型、风险和验证方式均已明确；进入回归测试与实现阶段。
+- `apply_patch`：先在既有 `115client_test.go` 增加 UA 断言；首次定向测试按预期失败，实际 UA 为空字符串。
+- `apply_patch`、`gofmt`：改用 115driver 自带 `WithClient(...)` 与 `UA(...)` Option，确保先注入代理感知超时客户端、后写入 `UA115Browser`；未新增依赖或自研离线协议。
+- 定向验证：驱动构造、离线下载 Service、离线下载 Controller 测试全部通过。
+- 全量验证：`go test ./... -count=1`、`go vet ./...`、`npm run build` 与目标差异检查通过；Vite 仅保留既存 Emby 大分块提示。
+- 边界决策：未向真实115账号提交用户磁力链接，避免验证过程额外创建云端任务；本地测试已覆盖导致 `decode fail!` 的请求头根因。
+- 运行时更新：确认 8082 仍由源码修改前启动的本项目 `go run .` 提供服务；只重启该后端，新的 `easy-strm` 进程于 23:45:47 正常监听。
+- 运行时冒烟：未携带 Token 请求 `/v1/resource/115-offline/tasks` 返回预期 401，证明新进程已完成路由和鉴权初始化。
+
+# 2026-08-30 项目功能缺口分析与完善需求文档
+
+- 执行者：Codex。
+- 请求：全仓库分析现有功能、缺失能力和未完善链路，输出可执行的完善需求文档。
+- 工具降级：当前会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`、`exa`；本任务不需要外部事实搜索，使用计划工具、并行源码审查、`rg`、PowerShell、`apply_patch` 和本地验证替代。
+- 工作区保护：开始时发现前后端与既有 `.codex` 留痕存在未提交修改；本任务不改业务代码，只新增独立命名的分析上下文和需求文档，并以追加方式维护留痕。
+- 初步证据：后端注册了完整媒体、资源、任务、通知与 Emby 路由；同时发现 STRM 增量生成固定返回 501、115 Open API 登录为占位、115 云刮削明确跳过写入，进入针对性深挖。
+
+# 2026-08-31 项目功能缺口分析与完善需求文档（完成）
+
+- 执行者：Codex。
+- 任务 ID：`project-gap-analysis-20260830`。
+- 范围：审计 Go 后端、Vue 前端、PostgreSQL/Redis、Docker 部署、测试与长期文档；仅编写需求和审计留痕，未修改业务代码。
+- 工作区保护：审计开始前已有大量未提交前后端修改；本任务未覆盖、回滚或整理这些改动，只新增独立命名的 `.codex/context-*-project-gap-*` 文件和 `docs/项目功能完善需求.md`，并追加共享留痕。
+- 上下文收集：完成结构化请求、全仓快速扫描、三轮高优先级深挖和充分性检查；接口契约、技术选型、主要风险与验证方式均已明确。
+- 并行审计：分别完成后端、前端、部署/文档审计，再交叉核对路由、Controller、Service、DAO、迁移、前端 API 和页面调用。
+- 产出：登记 29 个有源码证据的缺口，形成 16 个需求包、P0-P3 优先级、M0-M3 里程碑、统一任务/API/capability 契约、成功指标、依赖、风险和非目标。
+- 核心判断：暂停扩展 PT、资源搜索、订阅、下载器和插件市场，优先交付 RQ-01 路径与范围保护、RQ-02 STRM 安全生成、RQ-03 版本化迁移、RQ-04 Cron 运行态一致性、RQ-05 Docker 新装闭环。
+- 红队复核：修正 M0/M1 对 RQ-06/RQ-13/RQ-15 的优先级倒挂，将条件终态、最小 capability、Compose live/ready 明确为前置切片；区分活跃态、待处理态和不可改写终态，并将取消终态竞态 G-07 调整为 P0。
+- 红队增量证据：本地执行 `docker compose -f docker-compose.yml config --images` 复现默认镜像展开为无效的 `/easy-strm:latest`，已纳入 G-06/RQ-05 P0。
+- 工具降级：当前会话未提供项目手册指定的 `sequential-thinking`、`code-index`、`shrimp-task-manager` 和 `exa`；使用计划工具、`rg`、PowerShell、并行代理、源码阅读和本地自动验证替代，并在需求文档中声明。
+- 外部写入边界：未执行真实 115、Emby、通知或用户媒体目录写入 E2E，避免审计过程产生外部副作用。

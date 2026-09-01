@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -14,20 +15,28 @@ import (
 
 var driverCache = struct {
 	sync.RWMutex
-	drivers map[int]*driver.Pan115Client
+	drivers map[int]cached115Driver
 }{
-	drivers: make(map[int]*driver.Pan115Client),
+	drivers: make(map[int]cached115Driver),
+}
+
+const cloud115APITimeout = 2 * time.Minute
+
+type cached115Driver struct {
+	driver     *driver.Pan115Client
+	cookieHash [sha256.Size]byte
 }
 
 // getOrCreateDriver 获取或创建指定账号的driver实例
 // 使用缓存机制避免每次调用都创建新实例
 func getOrCreateDriver(cloud115ID int, cookie string) (*driver.Pan115Client, error) {
+	cookieHash := sha256.Sum256([]byte(cookie))
 	// 先尝试读锁获取缓存
 	driverCache.RLock()
-	if d, ok := driverCache.drivers[cloud115ID]; ok {
+	if cached, ok := driverCache.drivers[cloud115ID]; ok && cached.cookieHash == cookieHash {
 		driverCache.RUnlock()
 		Debug("Using cached driver for cloud115_id: %d", cloud115ID)
-		return d, nil
+		return cached.driver, nil
 	}
 	driverCache.RUnlock()
 
@@ -36,18 +45,25 @@ func getOrCreateDriver(cloud115ID int, cookie string) (*driver.Pan115Client, err
 	defer driverCache.Unlock()
 
 	// 双重检查，防止并发创建
-	if d, ok := driverCache.drivers[cloud115ID]; ok {
+	if cached, ok := driverCache.drivers[cloud115ID]; ok && cached.cookieHash == cookieHash {
 		Debug("Using cached driver for cloud115_id: %d (double check)", cloud115ID)
-		return d, nil
+		return cached.driver, nil
 	}
 
-	// 创建新的driver实例，默认设置 UA 为 115 浏览器，以匹配上传接口
+	// 先注入项目统一的代理感知客户端，再设置115浏览器UA。
+	// 115driver 的 SetHttpClient 会重建 Resty 客户端；若先设置UA，离线加密接口会因UA丢失返回 decode fail。
 	cred := &driver.Credential{}
 	if err := cred.FromCookie(cookie); err != nil {
 		return nil, fmt.Errorf("parse cookie failed: %v", err)
 	}
-	d := driver.New(driver.UA(driver.UA115Browser)).ImportCredential(cred)
-	driverCache.drivers[cloud115ID] = d
+	// 115 Driver 默认使用无超时的 resty 客户端；网络异常时会让文件传输任务永久停留在 running。
+	// 注入项目统一的代理感知客户端，确保移动、复制等 API 请求最终能够返回错误。
+	d := driver.New(
+		driver.WithClient(NewProxyAwareHTTPClient(cloud115APITimeout)),
+		driver.UA(driver.UA115Browser),
+	).
+		ImportCredential(cred)
+	driverCache.drivers[cloud115ID] = cached115Driver{driver: d, cookieHash: cookieHash}
 	Debug("Created and cached new driver for cloud115_id: %d", cloud115ID)
 	return d, nil
 }

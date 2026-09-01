@@ -43,7 +43,7 @@ func TestParseTelegramConfigDefaultsOnlyMissingFields(t *testing.T) {
 	if config.NotifyTaskFailed {
 		t.Fatal("显式关闭的失败通知不应被默认值覆盖")
 	}
-	if !config.NotifyTaskCompleted || !config.NotifyTaskCancelled || !config.NotifyAccountStatus {
+	if !config.NotifyTaskStarted || !config.NotifyTaskCompleted || !config.NotifyTaskCancelled || !config.NotifyAccountStatus {
 		t.Fatalf("缺失字段未应用默认值: %#v", config)
 	}
 }

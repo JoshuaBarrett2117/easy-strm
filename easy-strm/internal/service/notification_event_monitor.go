@@ -19,7 +19,7 @@ const (
 	notificationEventClaimTTL = time.Minute
 )
 
-// NotificationEventMonitor 统一观察 Redis 任务终态和 115 账号状态变化。
+// NotificationEventMonitor 统一观察 Redis 任务触发、终态和 115 账号状态变化。
 type NotificationEventMonitor struct {
 	configService notificationEventConfigReader
 	notifications notificationCardSender
@@ -143,11 +143,16 @@ func (m *NotificationEventMonitor) runOnce(ctx context.Context) error {
 func (m *NotificationEventMonitor) initializeBaseline(ctx context.Context, channel string, tasks []map[string]interface{}, accounts []*domain.Cloud115) error {
 	pipe := m.redis.TxPipeline()
 	for _, task := range tasks {
+		taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+		if taskID == "" {
+			continue
+		}
+		pipe.Set(ctx, taskEventKeyForChannel(channel, taskID, "started"), "1", notificationEventTTL)
 		status := normalizeTerminalStatus(fmt.Sprint(task["status"]))
 		if status == "" {
 			continue
 		}
-		pipe.Set(ctx, taskEventKeyForChannel(channel, fmt.Sprint(task["task_id"]), status), "1", notificationEventTTL)
+		pipe.Set(ctx, taskEventKeyForChannel(channel, taskID, status), "1", notificationEventTTL)
 	}
 	for _, account := range accounts {
 		pipe.HSet(ctx, notificationAccountStatusKey(channel), strconv.Itoa(account.ID), account.Status)
@@ -163,37 +168,77 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, channel Not
 		return err
 	}
 	for _, task := range tasks {
-		status := normalizeTerminalStatus(fmt.Sprint(task["status"]))
-		if status == "" {
+		taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+		if taskID == "" {
 			continue
 		}
-		key := taskEventKeyForChannel(channel.Channel, fmt.Sprint(task["task_id"]), status)
-		claimed, err := m.redis.SetNX(ctx, key, "processing", notificationEventClaimTTL).Result()
-		if err != nil {
+		if err := m.processTaskEvent(ctx, channel, task, "started"); err != nil {
 			return err
 		}
-		if !claimed {
-			continue
-		}
-		if !taskEventEnabled(channel, status) {
-			if err := m.redis.Set(ctx, key, "disabled", notificationEventTTL).Err(); err != nil {
+		if status := normalizeTerminalStatus(fmt.Sprint(task["status"])); status != "" {
+			if err := m.processTaskEvent(ctx, channel, task, status); err != nil {
 				return err
 			}
-			continue
-		}
-		card := buildTaskCard(task, true)
-		card.Title = "任务通知 · " + card.Title
-		card.Actions = append(card.Actions, []NotificationAction{{Text: "最近任务", Data: "tasks"}})
-		if err := m.notifications.SendCardToChannel(channel.Channel, channel.ConfigJSON, card); err != nil {
-			// 发送失败时释放抢占，允许下一轮重新尝试该事件。
-			_ = m.redis.Del(ctx, key).Err()
-			return err
-		}
-		if err := m.redis.Set(ctx, key, "1", notificationEventTTL).Err(); err != nil {
-			return err
 		}
 	}
 	return nil
+}
+
+func (m *NotificationEventMonitor) processTaskEvent(ctx context.Context, channel NotificationEventChannel, task map[string]interface{}, event string) error {
+	taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+	key := taskEventKeyForChannel(channel.Channel, taskID, event)
+	claimed, err := m.redis.SetNX(ctx, key, "processing", notificationEventClaimTTL).Result()
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return nil
+	}
+	if !taskEventEnabled(channel, event) {
+		if err := m.redis.Set(ctx, key, "disabled", notificationEventTTL).Err(); err != nil {
+			return err
+		}
+		return nil
+	}
+	card := buildTaskEventCard(task, event)
+	card.Actions = append(card.Actions, []NotificationAction{{Text: "最近任务", Data: "tasks"}})
+	if err := m.notifications.SendCardToChannel(channel.Channel, channel.ConfigJSON, card); err != nil {
+		// 发送失败时释放抢占，允许下一轮重新尝试该事件。
+		_ = m.redis.Del(ctx, key).Err()
+		return err
+	}
+	if err := m.redis.Set(ctx, key, "1", notificationEventTTL).Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildTaskEventCard(task map[string]interface{}, event string) NotificationCard {
+	if event == "started" {
+		taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+		taskName := strings.TrimSpace(fmt.Sprint(task["task_name"]))
+		if taskName == "" || taskName == "<nil>" {
+			taskName = notificationTaskTypeName(fmt.Sprint(task["task_type"]))
+		}
+		fields := [][2]string{
+			{"类型", notificationTaskTypeName(fmt.Sprint(task["task_type"]))},
+			{"状态", "已触发"},
+			{"任务 ID", taskID},
+		}
+		if createdAt := strings.TrimSpace(fmt.Sprint(task["create_time"])); createdAt != "" && createdAt != "<nil>" {
+			fields = append(fields, [2]string{"触发时间", createdAt})
+		}
+		actions := [][]NotificationAction{{{Text: "详情", Data: "task:detail:" + taskID}}}
+		status := strings.ToLower(strings.TrimSpace(fmt.Sprint(task["status"])))
+		if (status == "pending" || status == "running" || status == "processing") && len("task:cancel:"+taskID) <= 64 {
+			actions = append(actions, []NotificationAction{{Text: "取消任务", Data: "task:cancel:" + taskID}})
+		}
+		return NotificationCard{Title: "任务已触发 · " + taskName, Status: "▶️", Fields: fields, Actions: actions}
+	}
+	card := buildTaskCard(task, true)
+	titlePrefix := map[string]string{"completed": "任务已完成 · ", "failed": "任务已失败 · ", "cancelled": "任务已取消 · "}[event]
+	card.Title = titlePrefix + card.Title
+	return card
 }
 
 func (m *NotificationEventMonitor) processAccounts(ctx context.Context, channel NotificationEventChannel, accounts []*domain.Cloud115) error {
@@ -246,6 +291,8 @@ func normalizeTerminalStatus(status string) string {
 
 func taskEventEnabled(config NotificationEventChannel, status string) bool {
 	switch status {
+	case "started":
+		return config.NotifyTaskStarted
 	case "completed":
 		return config.NotifyTaskCompleted
 	case "failed":
@@ -258,7 +305,7 @@ func taskEventEnabled(config NotificationEventChannel, status string) bool {
 }
 
 func notificationBaselineKey(channel string) string {
-	return notificationNamespace + channel + ":baseline:v1"
+	return notificationNamespace + channel + ":baseline:v2"
 }
 
 func notificationAccountStatusKey(channel string) string {

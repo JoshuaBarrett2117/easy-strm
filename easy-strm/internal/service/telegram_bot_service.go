@@ -40,6 +40,7 @@ type TelegramBotService struct {
 	mu     sync.RWMutex
 	bot    *telegram.Bot
 	cancel context.CancelFunc
+	done   chan struct{}
 	config TelegramConfig
 	status TelegramBotStatus
 }
@@ -121,6 +122,7 @@ func (s *TelegramBotService) Reload() error {
 		return fmt.Errorf("启动Telegram机器人失败: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	me, err := instance.GetMe(ctx)
 	if err != nil {
 		cancel()
@@ -138,12 +140,14 @@ func (s *TelegramBotService) Reload() error {
 	s.mu.Lock()
 	s.bot = instance
 	s.cancel = cancel
+	s.done = done
 	s.status.Running = true
 	s.status.BotUsername = me.Username
 	s.status.LastError = ""
 	s.status.LastUpdateTime = time.Now().Format(time.RFC3339)
 	s.mu.Unlock()
 	go func(current *telegram.Bot) {
+		defer close(done)
 		current.Start(ctx)
 		s.mu.Lock()
 		if s.bot == current {
@@ -163,14 +167,23 @@ func (s *TelegramBotService) Stop() {
 
 func (s *TelegramBotService) stop() {
 	s.mu.Lock()
+	done := s.done
 	if s.cancel != nil {
 		s.cancel()
 	}
 	s.cancel = nil
+	s.done = nil
 	s.bot = nil
 	s.status.Running = false
 	s.status.LastUpdateTime = time.Now().Format(time.RFC3339)
 	s.mu.Unlock()
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			logger.Warn("[TelegramBotService] 旧长轮询未在超时时间内退出")
+		}
+	}
 }
 
 // Status 返回机器人状态快照。

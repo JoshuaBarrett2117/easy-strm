@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,17 @@ func TestWeComConfigValidateRequiresRecipient(t *testing.T) {
 	config := WeComConfig{CorpID: "corp", AgentID: 1000002, Secret: "secret"}
 	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "至少填写一项") {
 		t.Fatalf("缺少接收范围应校验失败: %v", err)
+	}
+}
+
+func TestWeComConfigValidateAPIBaseURL(t *testing.T) {
+	config := WeComConfig{CorpID: "corp", AgentID: 1000002, Secret: "secret", ToUser: "@all", APIBaseURL: "http://wxchat.local:8080"}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("有效消息转发代理地址不应失败: %v", err)
+	}
+	config.APIBaseURL = "socks5://wxchat.local:1080"
+	if err := config.Validate(); err == nil || !strings.Contains(err.Error(), "转发代理地址") {
+		t.Fatalf("非 HTTP 消息转发地址应被拒绝: %v", err)
 	}
 }
 
@@ -44,23 +56,29 @@ func TestNotificationServiceSendWeComCardAndReuseToken(t *testing.T) {
 				t.Errorf("access_token 异常: %s", request.URL.RawQuery)
 			}
 			var payload struct {
-				ToUser   string `json:"touser"`
-				ToParty  string `json:"toparty"`
-				ToTag    string `json:"totag"`
-				Message  string `json:"msgtype"`
-				AgentID  int64  `json:"agentid"`
-				Markdown struct {
+				ToUser  string `json:"touser"`
+				ToParty string `json:"toparty"`
+				ToTag   string `json:"totag"`
+				Message string `json:"msgtype"`
+				AgentID int64  `json:"agentid"`
+				Text    struct {
 					Content string `json:"content"`
-				} `json:"markdown"`
+				} `json:"text"`
+				TextCard struct {
+					Title       string `json:"title"`
+					Description string `json:"description"`
+					URL         string `json:"url"`
+					Button      string `json:"btntxt"`
+				} `json:"textcard"`
 			}
 			if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
 				t.Fatalf("解析发送请求失败: %v", err)
 			}
-			if payload.ToUser != "alice|bob" || payload.ToParty != "2" || payload.ToTag != "3" || payload.Message != "markdown" || payload.AgentID != 1000002 {
+			if payload.ToUser != "alice|bob" || payload.ToParty != "2" || payload.ToTag != "3" || payload.Message != "textcard" || payload.AgentID != 1000002 {
 				t.Errorf("发送字段异常: %#v", payload)
 			}
-			if !strings.Contains(payload.Markdown.Content, "测试任务") {
-				t.Errorf("消息内容异常: %s", payload.Markdown.Content)
+			if !strings.Contains(payload.TextCard.Title, "测试任务") || !strings.Contains(payload.TextCard.Description, "STRM") || payload.TextCard.Button != "查看详情" {
+				t.Errorf("卡片内容异常: %#v", payload.TextCard)
 			}
 			_, _ = response.Write([]byte(`{"errcode":0,"errmsg":"ok"}`))
 		default:
@@ -71,7 +89,7 @@ func TestNotificationServiceSendWeComCardAndReuseToken(t *testing.T) {
 
 	notifications := NewNotificationService(nil, server.Client())
 	notifications.weComAPIBaseURL = server.URL
-	config := `{"corp_id":"corp-id","agent_id":1000002,"secret":"app-secret","to_user":"alice|bob","to_party":"2","to_tag":"3"}`
+	config := fmt.Sprintf(`{"corp_id":"corp-id","agent_id":1000002,"secret":"app-secret","to_user":"alice|bob","to_party":"2","to_tag":"3","detail_url":%q}`, server.URL+"/tasks")
 	card := NotificationCard{Title: "测试任务", Status: "成功", Fields: [][2]string{{"类型", "STRM"}}, Detail: "发送正常"}
 	for index := 0; index < 2; index++ {
 		if err := notifications.sendWeComCard(config, card); err != nil {
@@ -116,10 +134,10 @@ func TestNotificationServiceReportsWeComHTTPError(t *testing.T) {
 	}
 }
 
-func TestBuildWeComMarkdownRespectsByteLimit(t *testing.T) {
-	content := buildWeComMarkdown(NotificationCard{Title: strings.Repeat("通知", 1500), Detail: strings.Repeat("详情", 1500)})
+func TestBuildWeComTextRespectsByteLimit(t *testing.T) {
+	content := buildWeComText(NotificationCard{Title: strings.Repeat("通知", 1500), Detail: strings.Repeat("详情", 1500)})
 	if len(content) > 2000 {
-		t.Fatalf("企业微信Markdown超过字节限制: %d", len(content))
+		t.Fatalf("企业微信纯文本超过字节限制: %d", len(content))
 	}
 	if !strings.HasSuffix(content, "…") {
 		t.Fatalf("截断内容应包含省略号: %q", content[len(content)-16:])

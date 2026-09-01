@@ -4,117 +4,7 @@
 -->
 <template>
   <div class="space-y-4">
-    <!-- 工作台头部 -->
-    <section class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-white/5 dark:bg-ink-900 lg:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] lg:p-6">
-      <div>
-        <n-tag type="success" size="small" round>媒体工作台</n-tag>
-        <h1 class="mt-3 text-xl font-bold text-slate-800 dark:text-white lg:text-2xl">
-          围绕媒体源完成浏览、识别、整理与刮削
-        </h1>
-        <p class="mt-2 max-w-2xl text-sm leading-relaxed text-slate-400 dark:text-slate-500">
-          先选择媒体源，再进入文件浏览器完成识别、批量整理或刮削。核心后端能力均通过原有接口执行。
-        </p>
-        <div class="mt-5 flex flex-wrap items-center gap-2">
-          <n-button type="primary" @click="sourceListRef?.handleAdd?.()">
-            <template #icon>
-              <n-icon :component="AddOutline" />
-            </template>
-            新增媒体源
-          </n-button>
-          <n-button :disabled="!currentSource" @click="openCurrentSourceBrowser">
-            <template #icon>
-              <n-icon :component="FolderOpenOutline" />
-            </template>
-            打开当前媒体源
-          </n-button>
-          <n-button type="success" ghost :disabled="selectedFiles.length === 0" @click="handleOpenOrganize">
-            <template #icon>
-              <n-icon :component="FileTrayFullOutline" />
-            </template>
-            批量整理
-          </n-button>
-        </div>
-      </div>
-
-      <!-- 当前工作上下文 -->
-      <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-ink-800/60">
-        <div class="mb-3 flex items-center justify-between gap-3">
-          <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">当前工作上下文</span>
-          <n-tag :type="currentSource ? 'success' : 'default'" size="small" round>
-            {{ currentSource ? '已锁定媒体源' : '待选择媒体源' }}
-          </n-tag>
-        </div>
-        <div class="space-y-2">
-          <div
-            v-for="ctx in contextItems"
-            :key="ctx.label"
-            class="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm dark:bg-ink-900/70"
-          >
-            <span class="shrink-0 text-slate-400 dark:text-slate-500">{{ ctx.label }}</span>
-            <strong class="truncate font-semibold text-slate-700 dark:text-slate-200">{{ ctx.value }}</strong>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- 概览指标 -->
-    <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-      <StatCard
-        v-for="card in mediaSummaryCards"
-        :key="card.label"
-        :label="card.label"
-        :value="card.value"
-        :hint="card.hint"
-        :icon="card.icon"
-        :tone="card.tone"
-      />
-    </section>
-
-    <!-- 快捷动作 + 本轮选择 -->
-    <section class="grid gap-4 lg:grid-cols-2">
-      <PageCard title="快捷动作" subtitle="围绕当前选择直接进入关键流程">
-        <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <button
-            v-for="action in quickActions"
-            :key="action.label"
-            type="button"
-            class="flex flex-col gap-1 rounded-xl border border-slate-200 px-4 py-3 text-left transition-colors enabled:hover:border-cyan-400/60 enabled:hover:bg-cyan-500/5 disabled:cursor-not-allowed disabled:opacity-45 dark:border-white/10"
-            :disabled="action.disabled"
-            @click="action.handler"
-          >
-            <span class="text-sm font-semibold text-slate-700 dark:text-slate-200">{{ action.label }}</span>
-            <small class="text-xs text-slate-400 dark:text-slate-500">{{ action.hint }}</small>
-          </button>
-        </div>
-      </PageCard>
-
-      <PageCard title="本轮选择" :subtitle="selectedFiles.length ? '已准备好执行批量操作' : '还没有选择文件'">
-        <div v-if="selectedFiles.length" class="space-y-2">
-          <div
-            v-for="item in selectionPreview"
-            :key="item.id || item.path || item.name"
-            class="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-ink-800/60"
-          >
-            <strong class="truncate font-medium text-slate-700 dark:text-slate-200">
-              {{ item.name || item.file_name || '未命名文件' }}
-            </strong>
-            <n-tag size="small" :bordered="false">
-              {{ item.is_dir ? '目录' : getFileType(item.name || item.file_name) }}
-            </n-tag>
-          </div>
-          <p v-if="selectedFiles.length > selectionPreview.length" class="text-xs text-slate-400 dark:text-slate-500">
-            等共 {{ selectedFiles.length }} 项…
-          </p>
-        </div>
-        <EmptyState
-          v-else
-          title="暂无选中文件"
-          description="进入文件浏览后选择文件，即可在这里看到本轮操作对象。"
-        />
-      </PageCard>
-    </section>
-
-    <MediaSourceList ref="sourceListRef" @browse="handleBrowseFiles" />
+    <MediaSourceList @browse="handleBrowseFiles" />
 
     <FileBrowser
       ref="fileBrowserRef"
@@ -213,20 +103,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { NButton, NTag, NIcon, NModal, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
-import {
-  AddOutline,
-  FolderOpenOutline,
-  FileTrayFullOutline,
-  ServerOutline,
-  LocateOutline,
-  CheckboxOutline,
-  OptionsOutline
-} from '@vicons/ionicons5'
-
-import PageCard from '../components/common/PageCard.vue'
-import StatCard from '../components/common/StatCard.vue'
-import EmptyState from '../components/common/EmptyState.vue'
+import { NButton, NModal, NForm, NFormItem, NInput, useMessage } from 'naive-ui'
 import MediaSourceList from '../components/media/MediaSourceList.vue'
 import FileBrowser from '../components/media/FileBrowser.vue'
 import TmdbCandidatesDialog from '../components/media/TmdbCandidatesDialog.vue'
@@ -252,7 +129,6 @@ import {
 
 const message = useMessage()
 
-const sourceListRef = ref(null)
 const fileBrowserRef = ref(null)
 const tmdbDialogRef = ref(null)
 const organizeDialogRef = ref(null)
@@ -264,88 +140,6 @@ const isCloud115Source = computed(() => {
 })
 
 const selectedFiles = ref([])
-
-const mediaSources = computed(() => {
-  const items = sourceListRef.value?.mediaSources
-  return Array.isArray(items) ? items : []
-})
-
-const currentWorkbenchPath = computed(() => {
-  if (!currentSource.value) return '请先选择媒体源'
-  return fileBrowserRef.value?.getCurrentDisplayPath?.() || currentSource.value.path || '/'
-})
-
-const contextItems = computed(() => [
-  { label: '媒体源', value: currentSource.value?.name || '未选择' },
-  { label: '源类型', value: currentSource.value ? (isCloud115Source.value ? '115 云盘' : '本地存储') : '未选择' },
-  { label: '当前路径', value: currentWorkbenchPath.value },
-  { label: '选中文件', value: `${selectedFiles.value.length} 项` }
-])
-
-const mediaSummaryCards = computed(() => {
-  const items = mediaSources.value
-  const localCount = items.filter(item => item.source_type === 'local').length
-  const cloudCount = items.filter(item => item.source_type === 'cloud115').length
-  return [
-    {
-      label: '媒体源总数',
-      value: items.length,
-      hint: `${localCount} 个本地源，${cloudCount} 个 115 云源`,
-      icon: ServerOutline,
-      tone: 'cyan'
-    },
-    {
-      label: '当前已选',
-      value: currentSource.value?.name || '未选择',
-      hint: currentSource.value ? `当前路径 ${currentWorkbenchPath.value}` : '从下方列表进入文件浏览',
-      icon: LocateOutline,
-      tone: 'violet'
-    },
-    {
-      label: '待处理文件',
-      value: selectedFiles.value.length,
-      hint: selectedFiles.value.length ? '可直接发起识别、重命名或整理' : '进入浏览器后勾选文件',
-      icon: CheckboxOutline,
-      tone: 'amber'
-    },
-    {
-      label: '整理模式',
-      value: isCloud115Source.value ? '云盘整理' : '本地整理',
-      hint: currentSource.value ? (isCloud115Source.value ? '115 云盘限制已自动适配' : '支持重命名、刮削与目录整理') : '将在选择媒体源后确定',
-      icon: OptionsOutline,
-      tone: 'green'
-    }
-  ]
-})
-
-const selectionPreview = computed(() => selectedFiles.value.slice(0, 5))
-
-const quickActions = computed(() => [
-  {
-    label: '浏览文件',
-    hint: '进入当前媒体源目录',
-    disabled: !currentSource.value,
-    handler: openCurrentSourceBrowser
-  },
-  {
-    label: '批量识别',
-    hint: '调用 TMDB 批量识别',
-    disabled: selectedFiles.value.length === 0,
-    handler: handleBatchIdentify
-  },
-  {
-    label: '批量重命名',
-    hint: '生成重命名预览并执行',
-    disabled: selectedFiles.value.length === 0 || isCloud115Source.value,
-    handler: handleBatchRename
-  },
-  {
-    label: '批量刮削',
-    hint: '为视频文件生成 NFO',
-    disabled: selectedFiles.value.length === 0 || isCloud115Source.value,
-    handler: handleBatchScrape
-  }
-])
 
 const tmdbDialogVisible = ref(false)
 const tmdbSelectMode = ref('cache')
@@ -393,14 +187,6 @@ const organizeIdentifyForm = ref({
 const handleBrowseFiles = (source) => {
   currentSource.value = source
   fileBrowserRef.value?.open(source)
-}
-
-function openCurrentSourceBrowser() {
-  if (!currentSource.value) {
-    message.warning('请先从下方媒体源列表选择一个媒体源')
-    return
-  }
-  fileBrowserRef.value?.open(currentSource.value)
 }
 
 const handleSelectionChange = (selection) => {

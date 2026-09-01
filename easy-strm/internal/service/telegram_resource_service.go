@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,7 +51,14 @@ func NewTelegramResourceService(shares telegramShareTransfer, offline telegramOf
 
 // Execute 解析并提交机器人文本；handled=false 表示文本不是支持的资源链接。
 func (s *TelegramResourceService) Execute(ctx context.Context, text string) (card NotificationCard, handled bool, err error) {
-	request, handled, err := parseTelegramResourceRequest(text)
+	lines := splitTelegramResourceLines(text)
+	if len(lines) == 0 {
+		return NotificationCard{}, false, nil
+	}
+	if len(lines) > 1 {
+		return s.executeBatch(ctx, lines)
+	}
+	request, handled, err := parseTelegramResourceRequest(lines[0])
 	if err != nil || !handled {
 		return NotificationCard{}, handled, err
 	}
@@ -61,6 +69,10 @@ func (s *TelegramResourceService) Execute(ctx context.Context, text string) (car
 	if err != nil {
 		return NotificationCard{}, true, fmt.Errorf("读取115账号失败: %v", err)
 	}
+	return s.executeRequest(ctx, request, accounts)
+}
+
+func (s *TelegramResourceService) executeRequest(ctx context.Context, request TelegramResourceRequest, accounts []*domain.Cloud115) (NotificationCard, bool, error) {
 	account, err := selectTelegramResourceAccount(accounts, request.AccountName, request.Kind)
 	if err != nil {
 		return NotificationCard{}, true, err
@@ -74,6 +86,136 @@ func (s *TelegramResourceService) Execute(ctx context.Context, text string) (car
 	default:
 		return NotificationCard{}, false, nil
 	}
+}
+
+func (s *TelegramResourceService) executeBatch(ctx context.Context, lines []string) (NotificationCard, bool, error) {
+	type parsedLine struct {
+		request TelegramResourceRequest
+		handled bool
+		err     error
+	}
+	parsed := make([]parsedLine, 0, len(lines))
+	hasResource := false
+	for _, line := range lines {
+		request, handled, err := parseTelegramResourceRequest(line)
+		parsed = append(parsed, parsedLine{request: request, handled: handled, err: err})
+		if handled {
+			hasResource = true
+		}
+	}
+	if !hasResource {
+		return NotificationCard{}, false, nil
+	}
+	if s == nil || s.accounts == nil {
+		return NotificationCard{}, true, fmt.Errorf("115资源操作服务未初始化")
+	}
+	accounts, err := s.accounts.GetAll("", "")
+	if err != nil {
+		return NotificationCard{}, true, fmt.Errorf("读取115账号失败: %v", err)
+	}
+
+	successCount := 0
+	allOffline := true
+	allShare := true
+	details := make([]string, 0, len(lines))
+	for index, item := range parsed {
+		label := fmt.Sprintf("第%d行", index+1)
+		if item.handled && item.err == nil {
+			label = telegramResourceRequestLabel(item.request, index+1)
+			if item.request.Kind != telegramResourceOffline {
+				allOffline = false
+			}
+			if item.request.Kind != telegramResourceShare {
+				allShare = false
+			}
+		}
+		if item.err != nil {
+			details = append(details, fmt.Sprintf("%s：失败（%s）", label, item.err.Error()))
+			continue
+		}
+		if !item.handled {
+			details = append(details, fmt.Sprintf("%s：失败（不支持的资源链接）", label))
+			continue
+		}
+		resultCard, _, executeErr := s.executeRequest(ctx, item.request, accounts)
+		if executeErr != nil {
+			details = append(details, fmt.Sprintf("%s：失败（%s）", label, executeErr.Error()))
+			continue
+		}
+		successCount++
+		taskID := notificationCardField(resultCard, "任务 ID")
+		if taskID == "" {
+			details = append(details, fmt.Sprintf("%s：已创建", label))
+		} else {
+			details = append(details, fmt.Sprintf("%s：已创建，任务 ID %s", label, taskID))
+		}
+	}
+
+	failureCount := len(lines) - successCount
+	title := "115 资源批量提交完成"
+	if allOffline {
+		title = "115 云下载批量提交完成"
+	} else if allShare {
+		title = "115 分享转存批量提交完成"
+	}
+	status := "☁️"
+	if failureCount > 0 && successCount > 0 {
+		title = strings.TrimSuffix(title, "完成") + "部分完成"
+		status = "⚠️"
+	} else if successCount == 0 {
+		title = strings.TrimSuffix(title, "完成") + "失败"
+		status = "❌"
+	}
+	card := NotificationCard{
+		Title:  title,
+		Status: status,
+		Fields: [][2]string{
+			{"总数", strconv.Itoa(len(lines))},
+			{"已创建", strconv.Itoa(successCount)},
+			{"失败", strconv.Itoa(failureCount)},
+		},
+		Detail: strings.Join(details, "\n"),
+	}
+	if successCount > 0 {
+		card.Actions = [][]NotificationAction{{{Text: "查看最近任务", Data: "tasks"}}}
+	}
+	return card, true, nil
+}
+
+func splitTelegramResourceLines(text string) []string {
+	normalized := strings.ReplaceAll(text, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	rawLines := strings.Split(normalized, "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return lines
+}
+
+func telegramResourceRequestLabel(request TelegramResourceRequest, lineNumber int) string {
+	if request.Kind == telegramResourceOffline {
+		if parsed, err := url.Parse(request.URL); err == nil && strings.EqualFold(parsed.Scheme, "magnet") {
+			if name := strings.TrimSpace(parsed.Query().Get("dn")); name != "" {
+				return fmt.Sprintf("第%d行 %s", lineNumber, truncateRunes(name, 36))
+			}
+			if hash := strings.TrimPrefix(parsed.Query().Get("xt"), "urn:btih:"); hash != "" {
+				return fmt.Sprintf("第%d行 %s", lineNumber, truncateRunes(hash, 16))
+			}
+		}
+	}
+	return fmt.Sprintf("第%d行 %s", lineNumber, truncateRunes(request.URL, 36))
+}
+
+func notificationCardField(card NotificationCard, name string) string {
+	for _, field := range card.Fields {
+		if field[0] == name {
+			return strings.TrimSpace(field[1])
+		}
+	}
+	return ""
 }
 
 func (s *TelegramResourceService) submitShare(ctx context.Context, request TelegramResourceRequest, account *domain.Cloud115) (NotificationCard, bool, error) {

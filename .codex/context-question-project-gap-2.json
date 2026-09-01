@@ -1,0 +1,14 @@
+{
+  "date": "2026-08-31",
+  "executor": "Codex",
+  "task_id": "project-gap-analysis-20260830",
+  "question": "无人值守任务在取消、进程重启、外部超时和恢复操作后是否仍可信？",
+  "why_needed": "任务中心是 STRM、整理、文件传输和115资源链路的共同基础，状态错误会使所有自动化不可验证。",
+  "evidence": [
+    "任务主记录仅在 Redis 保存 24 小时，运行中 goroutine 不会在重启后重建。",
+    "通用 Resume 只把状态改成 pending，只有 watch_auto_organize 有真实重试执行器。",
+    "STRM 取消可返回 nil，调用方随后覆盖为 completed。",
+    "115 云下载跟踪 6 小时超时后写 completed，内存队列和 tracker 不可恢复。"
+  ],
+  "answer": "需要 PG 主记录、显式状态机、task type handler registry、启动对账和终态条件更新；仅对真实可恢复类型展示恢复动作。"
+}

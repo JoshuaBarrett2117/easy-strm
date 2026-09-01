@@ -882,12 +882,4 @@ onUnmounted(() => {
   }
 })
 
-/**
- * 暴露刷新方法和列表状态供父组件构建工作台摘要
- */
-defineExpose({
-  fetchMediaSources,
-  mediaSources,
-  handleAdd
-})
 </script>

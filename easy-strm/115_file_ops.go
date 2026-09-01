@@ -50,12 +50,33 @@ func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*d
 		return nil, err
 	}
 
-	// 使用GetFile方法获取文件信息（包括正确的SHA1）
-	Info("Getting file info using GetFile API for pickcode: %s", pickCode)
-	fileInfo, err := d.GetFile(pickCode)
-	if err != nil {
+	// Driver.GetFile 接收的是 file_id，不能传 pick_code，否则115返回990002参数错误。
+	// 115搜索响应中的offset可能是字符串，不能直接使用Driver中固定为int的SearchResult。
+	Info("Getting file info using Search API for pickcode: %s", pickCode)
+	searchResult := struct {
+		driver.BasicResp
+		Files  []driver.FileInfo `json:"data"`
+		Offset driver.IntString  `json:"offset"`
+	}{}
+	req := d.NewRequest().
+		SetQueryParams(map[string]string{
+			"aid": "7", "cid": "0", "offset": "0", "limit": "1",
+			"pick_code": pickCode, "type": "0", "count_folders": "1",
+		}).
+		SetResult(&searchResult).
+		ForceContentType("application/json;charset=UTF-8")
+	resp, requestErr := req.Get(driver.ApiFileSearch)
+	if err := driver.CheckErr(requestErr, &searchResult, resp); err != nil {
 		Error("Failed to get file info for %s: %v", pickCode, err)
 		return nil, fmt.Errorf("get file info failed: %v", err)
+	}
+	files := make([]driver.File, 0, len(searchResult.Files))
+	for index := range searchResult.Files {
+		files = append(files, *(&driver.File{}).From(&searchResult.Files[index]))
+	}
+	fileInfo := findFileByPickCode(files, pickCode)
+	if fileInfo == nil {
+		return nil, fmt.Errorf("get file info failed: pickcode不存在或文件已删除")
 	}
 
 	// 确保SHA1为大写（115官方要求）
@@ -65,6 +86,15 @@ func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*d
 
 	Info("Got file info: name=%s, sha1=%s, pickcode=%s, size=%d", fileInfo.Name, fileInfo.Sha1, fileInfo.PickCode, fileInfo.Size)
 	return fileInfo, nil
+}
+
+func findFileByPickCode(files []driver.File, pickCode string) *driver.File {
+	for index := range files {
+		if files[index].PickCode == pickCode {
+			return &files[index]
+		}
+	}
+	return nil
 }
 
 func (c *Client) GetCIDByPath(path string, cloud115ID int, cookie string) (string, error) {

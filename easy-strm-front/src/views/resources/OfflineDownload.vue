@@ -99,7 +99,9 @@
         :data="records"
         :loading="loadingRecords"
         :row-key="rowKey"
+        :scroll-x="1140"
         :bordered="false"
+        table-layout="fixed"
         size="small"
       />
 
@@ -209,7 +211,8 @@ const columns = [
   {
     title: '名称 / 链接',
     key: 'name',
-    minWidth: 220,
+    width: 420,
+    maxWidth: 420,
     render(row) {
       return h('div', { class: 'cell-name' }, [
         h(NEllipsis, { class: 'cell-name-title' }, { default: () => row.name || '(未命名)' }),
@@ -560,6 +563,8 @@ onMounted(() => {
   flex-direction: column;
   gap: 2px;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 :deep(.cell-name-title) {

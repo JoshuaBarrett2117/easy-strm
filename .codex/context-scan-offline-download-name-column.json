@@ -1,0 +1,25 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "request": "固定资源聚合 / 115 云下载 / 云下载记录中名称与链接列的宽度，避免长链接挤出后续列。",
+  "location": "easy-strm-front/src/views/resources/OfflineDownload.vue",
+  "current_implementation": "初始实现仅配置 minWidth: 220；首次调整为 width: 420 后仍会被长链接撑开。Naive UI 2.41 默认 tableLayout 为 auto，且普通 width 只派生同值 minWidth，不会派生 maxWidth。",
+  "similar_patterns": [
+    "Cloud115.vue 的数据表格为稳定字段声明固定 width",
+    "StrmConfig.vue 的路径列使用 ellipsis tooltip 约束长文本",
+    "FileManagerPane.vue 使用 ellipsis tooltip 展示长文件名"
+  ],
+  "decision": "名称 / 链接列同时声明 width 和 maxWidth 为 420px，DataTable 使用 fixed 布局并声明 scrollX 1140px，单元格容器隐藏溢出，保留现有两行 NEllipsis。",
+  "risks": [
+    "窄屏仍可能需要表格自身的横向布局，但不会再由任意长度链接无限撑宽首列。",
+    "完整名称与链接依赖 NEllipsis 的悬停提示查看。"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice_understood": true,
+    "risks_identified": true,
+    "verification_known": true
+  },
+  "verification": "前端生产构建、列配置结构断言、目标差异检查。",
+  "tool_fallback": "当前会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用计划工具、rg、PowerShell 和 apply_patch 等价完成。"
+}

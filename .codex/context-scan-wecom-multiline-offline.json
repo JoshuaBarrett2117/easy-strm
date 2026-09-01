@@ -1,0 +1,29 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "location": [
+    "easy-strm/internal/service/telegram_resource_service.go",
+    "easy-strm/internal/service/telegram_resource_service_test.go",
+    "easy-strm/internal/service/wecom_callback_service.go"
+  ],
+  "existing_patterns": [
+    "Telegram 和企业微信回调共用 TelegramResourceService",
+    "单行解析支持链接、可选账号和115绝对目录",
+    "OfflineDownloadService 的 Submit 接口支持 URL 数组，但原机器人适配固定传入一个 URL",
+    "NotificationCard 同时负责 Telegram HTML 与企业微信纯文本输出"
+  ],
+  "interface_contract": "Execute 仍返回单个 NotificationCard；单行沿用旧卡片，多行内部逐行调用原提交链路并返回批量汇总卡片。",
+  "risks": [
+    "换行不能被 strings.Fields 吞并为目录内容",
+    "一行失败不能提前返回并中断后续任务",
+    "显式账号和目录必须逐行解析而不是跨行共享",
+    "批量反馈必须适用于 Telegram 与企业微信文本"
+  ],
+  "sufficiency": {
+    "interface_defined": true,
+    "technology_choice_understood": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用 update_plan、rg、PowerShell、apply_patch 和本地测试替代。"
+}

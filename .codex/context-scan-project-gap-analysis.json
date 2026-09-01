@@ -1,0 +1,74 @@
+{
+  "date": "2026-08-31",
+  "executor": "Codex",
+  "task_id": "project-gap-analysis-20260830",
+  "locations": {
+    "backend": "easy-strm/ 与 easy-strm/internal/",
+    "frontend": "easy-strm-front/src/ 与 easy-strm-front/scripts/",
+    "deployment": "deploy/、docker/、docker-compose.yml、Dockerfile",
+    "documentation": "README.md、docs/、AGENTS.md",
+    "evidence": ".codex/、debug/、verification.md"
+  },
+  "current_implementation": {
+    "core_flow": "媒体源接入 -> 文件浏览 -> TMDB 识别 -> 重命名/整理 -> 刮削 -> STRM -> Emby -> 任务追踪",
+    "resource_flow": "115 分享转存与 115 云下载，并支持通知渠道提交资源任务",
+    "operations": "Dashboard、任务、Cron、日志、网络、缓存、通知、Emby 管理与监控",
+    "known_limits": [
+      "旧本地文件操作与绝对路径刮削没有统一媒体源根目录边界校验",
+      "整理候选为空时可能退化为整目录扫描与执行",
+      "STRM 全量生成会删除输出目录中的全部内容，包括未受管文件",
+      "STRM 增量生成路由存在但固定返回 501",
+      "Cron Service 未注入运行中的 scheduler，修改通常需重启才生效",
+      "115 Open API 登录路由存在但实现为等待开发者账号的占位",
+      "115 云盘刮削适配器明确跳过 NFO 与图片写入",
+      "单文件操作与统一文件管理对跨账号 115 能力描述不一致"
+    ]
+  },
+  "similar_patterns": [
+    "Controller -> Service -> DAO 的后端业务分层",
+    "页面容器 -> components -> utils/api 的前端分层",
+    "TaskService 与任务中心承接异步业务状态",
+    "本地与 115 通过类型分支或适配器处理差异"
+  ],
+  "stack": {
+    "backend": "Go、Gin、PostgreSQL、Redis、115driver",
+    "frontend": "Vue 3、Vite、Naive UI、Tailwind CSS、Axios、ECharts",
+    "deployment": "Docker Compose、Nginx",
+    "tests": "go test/go vet、Vite build、Node/Playwright E2E"
+  },
+  "observations": [
+    "项目能力面较完整，缺口主要集中在跨链路一致性、恢复性、引导性和可验证性。",
+    "仓库已有大量功能设计与模拟用户研究，但需要以当前源码重新判定哪些建议已经实现、哪些仍缺失。",
+    "工作区包含用户未提交改动，本任务只新增分析文档并追加审计留痕。",
+    "当前会话未提供 sequential-thinking、code-index、shrimp-task-manager，已降级为计划工具、rg、PowerShell、源码阅读与本地测试。"
+  ],
+  "questions": [
+    {
+      "priority": "high",
+      "question": "哪些公开入口实际返回占位、降级或不支持，且前端仍向用户暴露？",
+      "reason": "决定 P0/P1 范围与是否应先隐藏入口还是补齐能力。"
+    },
+    {
+      "priority": "high",
+      "question": "异步任务在进程重启、外部依赖失败和部分成功时能否恢复并给出可操作反馈？",
+      "reason": "决定无人值守主链路是否真正闭环。"
+    },
+    {
+      "priority": "high",
+      "question": "前后端接口、产品文档和测试入口是否一致？",
+      "reason": "决定交付基线是否可验证。"
+    },
+    {
+      "priority": "medium",
+      "question": "已有用户研究建议中哪些已落地，哪些仍有源码证据支持？",
+      "reason": "避免把历史建议或推演重复包装为新需求。"
+    }
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice_understood": true,
+    "risks_identified": true,
+    "verification_known": true,
+    "next_action": "充分性检查全部通过，进入需求文档审查与本地验证。"
+  }
+}

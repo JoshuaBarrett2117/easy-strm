@@ -51,6 +51,8 @@ type FileManagerTransferItem struct {
 	Path        string `json:"path"`
 	IsDirectory bool   `json:"is_directory"`
 	PickCode    string `json:"pick_code"`
+	SHA1        string `json:"sha1"`
+	Size        int64  `json:"size"`
 }
 
 // FileManagerTransferRequest 表示复制或剪切粘贴请求。

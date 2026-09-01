@@ -16,6 +16,7 @@ const telegramMessageLimit = 4096
 type TelegramConfig struct {
 	BotToken            string `json:"bot_token"`
 	ChatID              string `json:"chat_id"`
+	NotifyTaskStarted   bool   `json:"notify_task_started"`
 	NotifyTaskCompleted bool   `json:"notify_task_completed"`
 	NotifyTaskFailed    bool   `json:"notify_task_failed"`
 	NotifyTaskCancelled bool   `json:"notify_task_cancelled"`
@@ -37,6 +38,9 @@ func ParseTelegramConfig(configJSON string) (TelegramConfig, error) {
 	}
 	if _, exists := fields["notify_task_completed"]; !exists {
 		config.NotifyTaskCompleted = true
+	}
+	if _, exists := fields["notify_task_started"]; !exists {
+		config.NotifyTaskStarted = true
 	}
 	if _, exists := fields["notify_task_failed"]; !exists {
 		config.NotifyTaskFailed = true

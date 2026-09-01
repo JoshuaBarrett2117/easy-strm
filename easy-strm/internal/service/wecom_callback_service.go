@@ -118,6 +118,8 @@ func (s *WeComCallbackService) Receive(signature, timestamp, nonce string, body 
 	}
 	if strings.EqualFold(message.MsgType, "text") {
 		go s.replyToText(config, message.FromUserName, message.Content)
+	} else if strings.EqualFold(message.MsgType, "event") && strings.EqualFold(message.Event, "click") {
+		go s.replyToText(config, message.FromUserName, message.EventKey)
 	}
 	return nil
 }
@@ -170,9 +172,15 @@ func (s *WeComCallbackService) replyToText(config WeComConfig, userID, content s
 	if err != nil {
 		card = NotificationCard{Title: "操作失败", Status: "❌", Detail: err.Error()}
 	}
-	if err := s.replies.SendWeComCardToUser(config, userID, card); err != nil {
+	// 用户主动发起命令后的即时反馈固定使用文本消息，避免 textcard 在消息转发代理中不展示。
+	// 后台任务和账号事件通知仍可按全局配置使用 textcard。
+	replyConfig := config
+	replyConfig.DetailURL = ""
+	if err := s.replies.SendWeComCardToUser(replyConfig, userID, card); err != nil {
 		logger.Warnf("[WeComCallbackService] 回复成员 %s 失败: %v", userID, err)
+		return
 	}
+	logger.Infof("[WeComCallbackService] 已回复成员 %s: %s", userID, card.Title)
 }
 
 func (s *WeComCallbackService) buildReply(ctx context.Context, content string) (NotificationCard, error) {

@@ -1,0 +1,82 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "修复手动添加115离线下载磁力任务时的 JSON 解析错误",
+  "input_example": "magnet:?xt=urn:btih:A4FF9B32DD3F75FA76F0381848BBB8EE9CE40187",
+  "tool_fallback": {
+    "unavailable": [
+      "sequential-thinking",
+      "shrimp-task-manager",
+      "code-index",
+      "exa"
+    ],
+    "replacement": [
+      "显式根因分析",
+      "update_plan",
+      "rg",
+      "PowerShell",
+      "GitHub API 只读检索"
+    ]
+  },
+  "location": {
+    "frontend": [
+      "easy-strm-front/src/views/resources/OfflineDownload.vue",
+      "easy-strm-front/src/utils/api/offline.js"
+    ],
+    "backend": [
+      "easy-strm/internal/controller/offline_download_controller.go",
+      "easy-strm/internal/service/offline_download_service.go",
+      "easy-strm/115_offline.go",
+      "easy-strm/115client.go"
+    ],
+    "tests": [
+      "easy-strm/internal/controller/offline_download_controller_test.go",
+      "easy-strm/internal/service/offline_download_service_test.go",
+      "easy-strm/115client_test.go"
+    ]
+  },
+  "current_behavior": {
+    "frontend_contract": "前端将磁力链接原样放入 JSON urls 数组，字段和 Content-Type 与后端契约一致。",
+    "backend_chain": "Controller 绑定 JSON 后由 Service 调用 Client.AddOfflineTasks，最终进入 115driver v1.3.5 AddOfflineTaskURIs。",
+    "failure": "getOrCreateDriver 先应用 UA115Browser，随后 SetHttpClient 重建 resty.Client 并丢失 User-Agent；115 加密离线接口返回 decode fail!，驱动将首字母 d 开头的内容当 JSON 解析，产生 invalid character 'd'。"
+  },
+  "similar_implementations": [
+    "115driver v1.3.5 的 UA Option 与 WithClient Option 按调用顺序配置客户端",
+    "项目 115 文件上传和下载调用统一要求 UA115Browser",
+    "elevengo v0.7.8 的离线接口同样为115加密接口，并固定浏览器类 User-Agent"
+  ],
+  "key_questions": [
+    {
+      "priority": "high",
+      "question": "磁力链接是否在前端被错误编码？",
+      "answer": "否，输入仅 trim、去重后由 Axios JSON 序列化，链接原文不变。"
+    },
+    {
+      "priority": "high",
+      "question": "为什么 JSON 错误的首字符固定为 d？",
+      "answer": "上游已知失败响应是 decode fail!；115driver 解密后直接 json.Unmarshal，因此首字符 d 原样进入错误。"
+    },
+    {
+      "priority": "high",
+      "question": "本次未提交的超时配置是否改变了请求头？",
+      "answer": "是，SetHttpClient 创建新的 resty.Client，之前设置的 UA 被清空。"
+    },
+    {
+      "priority": "low",
+      "question": "是否需要替换依赖或修改前端？",
+      "answer": "不需要；调整现有官方依赖的 Option 顺序即可保留超时和 UA。"
+    }
+  ],
+  "sufficiency_check": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "main_risks": true,
+    "verification_method": true,
+    "conclusion": "信息充分，可以先补 UA 回归测试，再调整驱动构造顺序并执行全量本地验证。"
+  },
+  "references": [
+    "https://github.com/SheltonZhu/115driver/issues/56",
+    "C:/Users/a3875/go/pkg/mod/github.com/!shelton!zhu/115driver@v1.3.5/pkg/driver/client.go",
+    "C:/Users/a3875/go/pkg/mod/github.com/!shelton!zhu/115driver@v1.3.5/pkg/driver/offline.go"
+  ]
+}

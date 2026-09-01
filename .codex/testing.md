@@ -748,3 +748,74 @@
 - 运行时路由复测：重启前 `/notify/wecom/config` 返回 404；重启后 GET/PUT 配置接口与 POST 测试接口在无 Token 请求下均返回 401，与既有受保护接口一致。
 - API 接收专项：官方算法生成的加密样本完成 GET echostr 校验、POST XML 解密、错误签名拒绝、Agent ID 不匹配拒绝、同 MsgId 两次投递只回复一次；Controller GET 返回明文 echostr、POST 返回 `success`。
 - 回调配置专项：43 位 EncodingAESKey 校验、Token/AESKey 空值保留、读取脱敏以及兼容接口脱敏通过。
+
+## 2026-08-30 文件工作台概览板块清理
+
+- 执行者：Codex。
+- 生产构建：在 `easy-strm-front` 执行 `npm run build`，Vite 成功转换 4844 个模块并完成产物生成；仅有既存 Emby 分块大于 500 kB 的提示。
+- 功能结构测试：PowerShell 断言红框文案、摘要派生状态、`sourceListRef` 和 `defineExpose` 均已移除，并确认 `MediaSourceList` 仍位于 `FileBrowser` 之前；结果通过。
+- 冒烟检查：`git diff --check` 对两个目标文件通过，仅输出既存 LF/CRLF 转换提示。
+- 浏览器复核：内置浏览器访问 `http://localhost:8082/media-manager` 被本机客户端策略拦截，未取得运行态截图；构建与结构测试已覆盖本次纯展示层删除的主要风险。
+
+## 2026-08-30 云下载记录名称列宽度约束
+
+- 执行者：Codex。
+- 生产构建：在 `easy-strm-front` 执行 `npm run build`，Vite 成功转换 4844 个模块并生成产物；仅有既存 Emby 分块体积提示。
+- 功能结构测试：断言“名称 / 链接”列使用固定 `width: 420`、不再包含 `minWidth`，并保留两个 `NEllipsis` 分别展示名称和链接；结果通过。
+- 差异检查：`git diff --check -- easy-strm-front/src/views/resources/OfflineDownload.vue` 通过，仅输出既存 LF/CRLF 转换提示。
+- 用户回归后补充验证：确认 Naive UI 2.41 默认使用自动表格布局，普通 `width` 只生成同值 `minWidth`，因此首次修改不足以限制长链接。
+- 修正后生产构建：`npm run build` 通过，成功转换 4844 个模块。
+- Naive UI 实际样式测试：`createCustomWidthStyle({ width: 420, maxWidth: 420 })` 返回 `width/minWidth/maxWidth` 均为 `420px`。
+- 构建产物测试：确认资源聚合产物包含 `scroll-x=1140`、`table-layout=fixed`、`width=420` 和 `maxWidth=420`；结果通过。首次断言按驼峰属性匹配编译产物失败，检查实际 Vue 编译形式后修正断言并通过，未修改业务实现。
+
+## 2026-08-30 企业微信云下载创建反馈修复
+
+- 执行者：Codex。
+- 定向测试：`go test ./internal/service -run 'TestWeComCallbackService' -count=1`，通过。
+- 全量后端测试：`go test ./...`，通过；service、controller、dao、domain 及主包均无失败。
+- 覆盖场景：全局配置存在 `detail_url`、用户主动提交云下载、回复目标成员正确、发送配置强制纯文本、成功反馈保留任务 ID。
+
+## 2026-08-30 通知渠道多行115任务提交
+
+- 执行者：Codex。
+- 专项：`go test ./internal/service -run 'Test(ParseTelegramResourceRequest|SelectTelegramResourceAccount|TelegramResourceService)' -count=1`，通过。
+- 渠道反馈专项：`go test ./internal/service -run 'TestTelegramResourceService' -count=1`，通过；断言企业微信纯文本和 Telegram HTML 均包含汇总及两个任务 ID。
+- 全量：`go test ./...`，通过。
+- 静态检查：`go vet ./...`，通过。
+- 覆盖：用户提供的两条 magnet 多行消息、相同逐行目录、每行单 URL/独立任务、全成功汇总、首行失败后继续、部分失败汇总、单行兼容。
+- 分享转存专项：两条115分享链接产生两次解析和两次提交，逐行密码与目录正确，企业微信纯文本和 Telegram HTML 均包含两个转存任务 ID；通过。
+
+## 2026-09-01 任务触发与终态双阶段通知
+
+- 执行者：Codex。
+- 监控专项：首次启用历史任务不补发；新 pending 任务发送一次“任务已触发”，状态变为 completed 后再发送一次“任务已完成”，重复轮询不重复。
+- 配置专项：Telegram/企业微信历史配置缺少 `notify_task_started` 时默认开启；设置页可关闭；Server 酱/SMTP 已启用时默认订阅任务触发与四类任务结果。
+- 验证命令：`go test ./...`、`go vet ./...`、`npm run build`。
+
+## 2026-08-30 115 离线下载 UA 回归修复
+
+- 执行者：Codex。
+- 失败复现：`go test . -run TestGetOrCreateDriverConfiguresTimeoutAndRefreshesChangedCookie -count=1` 首次失败；输出 `115 Driver User-Agent=""`，证明超时客户端替换后 UA 丢失。
+- 修复后定向测试：同一命令通过，同时覆盖两分钟 HTTP 超时、`UA115Browser`、同 Cookie 客户端复用及 Cookie 变化后重建。
+- Service 功能测试：`go test ./internal/service -run 'Offline' -count=1` 通过。
+- Controller 冒烟/接口测试：`go test ./internal/controller -run 'Offline' -count=1` 通过。
+- 后端全量：`go test ./... -count=1` 通过，主包、controller、dao、domain、service 均无失败。
+- 静态检查：`go vet ./...` 通过。
+- 前端生产构建：`npm run build` 通过，Vite 转换 4844 个模块；仅有既存 `EmbyMonitor` 分块超过 500 kB 的提示。
+- 差异检查：`git diff --check` 通过，仅输出工作区既存 LF/CRLF 转换提示。
+- 未执行真实115提交：该操作会在用户账号创建实际离线任务；本地回归已直接验证同一故障所缺失的请求头，不需要以外部写操作作为自动测试前提。
+- 运行时冒烟：重启本地后端后，8082 由新 `easy-strm` 进程监听；GET `/v1/resource/115-offline/tasks` 无 Token 返回 401 `Authorization header is required`，路由与鉴权初始化正常。
+
+## 2026-08-31 项目功能缺口分析与完善需求文档
+
+- 执行者：Codex。
+- 后端功能/冒烟回归：在 `easy-strm` 执行 `go test ./... -count=1`，通过。
+- 后端静态检查：在 `easy-strm` 执行 `go vet ./...`，通过。
+- 覆盖基线：`go test ./... -cover -count=1` 通过；约 main 4.1%、controller 11.8%、dao 13.2%、domain 83.7%、service 42.8%、logger 0%。
+- 跳过项检查：详细输出有 20 个 skip，其中 17 个 TaskService 测试因 localhost Redis 不可用而跳过；已作为 RQ-16 的测试治理输入，未把“命令通过”等同为风险闭环。
+- 前端生产构建：在 `easy-strm-front` 执行 `npm run build`，通过；Vite 转换 4844 个模块，仅 `EmbyMonitor` 约 591.36 kB 的既存分块警告。
+- 前端轻量单测：`node --test src/components/resource/targetFolderTree.test.mjs`，3/3 通过。
+- E2E 静态冒烟：23 个 `e2e-*.mjs` 全部通过 `node --check`。
+- 审计产物检查：新增 JSON 全部可解析；文档引用的仓库文件均存在；需求文档包含 16 个 RQ、29 个登记缺口和 4 个里程碑；无个人绝对路径、无尾随空格。
+- Compose 诊断：`docker compose -f docker-compose.yml config --images` 返回 `/easy-strm:latest`、`postgres:16-alpine`、`redis:7-alpine`；命令成功解析，但首个镜像引用无效，已作为 P0 缺陷而不是通过项记录。
+- 未执行 live 115/Emby/通知 E2E：这些测试会写入外部账号或用户媒体目录，不属于本次只读审计授权；风险已在主需求文档注明。

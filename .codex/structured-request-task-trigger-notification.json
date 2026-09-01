@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-01",
+  "executor": "Codex",
+  "goal": "所有已启用通知渠道在任务触发和任务终态各推送一次",
+  "scope": ["统一任务中心任务", "Telegram", "企业微信", "Server酱", "SMTP"],
+  "contract": {
+    "started": "任务首次被事件监控发现时推送一次",
+    "terminal": "任务进入 completed/failed/cancelled 时推送一次",
+    "deduplication": "started 与终态各使用独立 Redis key；并发与重复轮询只发送一次",
+    "baseline": "首次启用或升级基线只建立快照，不补发历史"
+  },
+  "configuration": "Telegram/企业微信增加 notify_task_started，历史配置默认 true；Server酱/SMTP 任务事件默认启用",
+  "verification": ["go test ./...", "go vet ./...", "npm run build"]
+}

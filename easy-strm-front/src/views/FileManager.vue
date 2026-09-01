@@ -85,7 +85,7 @@ const pasteTo = async target => {
       source: { type: clipboard.value.source.type, id: clipboard.value.source.id },
       target: { type: target.location.type, id: target.location.id },
       target_path: target.path,
-      items: clipboard.value.items.map(item => ({ id: item.id, name: item.name, path: item.path, is_directory: item.is_directory, pick_code: item.pick_code || '' }))
+      items: clipboard.value.items.map(item => ({ id: item.id, name: item.name, path: item.path, is_directory: item.is_directory, pick_code: item.pick_code || '', sha1: item.sha1 || '', size: item.size || 0 }))
     })
     const task = response.data?.data || {}
     if (!task.task_id) throw new Error('文件传输任务未返回任务ID')

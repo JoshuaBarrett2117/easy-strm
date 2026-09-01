@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -109,6 +110,17 @@ func (c *NotificationController) UpdateWeComConfig(ctx *gin.Context) {
 	if err != nil {
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
+	}
+	if request.Enabled {
+		config, _, configErr := c.configs.GetWeComConfig()
+		if configErr == nil {
+			menuCtx, cancel := context.WithTimeout(ctx.Request.Context(), 15*time.Second)
+			menuErr := c.notifications.SyncWeComMenu(menuCtx, config)
+			cancel()
+			if menuErr != nil {
+				logger.Warnf("NotificationController[UpdateWeComConfig] 企业微信菜单同步失败: %v", menuErr)
+			}
+		}
 	}
 	SuccessResp(ctx, view)
 }

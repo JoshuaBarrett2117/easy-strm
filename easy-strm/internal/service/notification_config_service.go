@@ -15,6 +15,7 @@ type TelegramConfigView struct {
 	Enabled             bool   `json:"enabled"`
 	ChatID              string `json:"chat_id"`
 	HasBotToken         bool   `json:"has_bot_token"`
+	NotifyTaskStarted   bool   `json:"notify_task_started"`
 	NotifyTaskCompleted bool   `json:"notify_task_completed"`
 	NotifyTaskFailed    bool   `json:"notify_task_failed"`
 	NotifyTaskCancelled bool   `json:"notify_task_cancelled"`
@@ -26,6 +27,7 @@ type TelegramConfigUpdate struct {
 	Enabled             bool   `json:"enabled"`
 	BotToken            string `json:"bot_token"`
 	ChatID              string `json:"chat_id"`
+	NotifyTaskStarted   bool   `json:"notify_task_started"`
 	NotifyTaskCompleted bool   `json:"notify_task_completed"`
 	NotifyTaskFailed    bool   `json:"notify_task_failed"`
 	NotifyTaskCancelled bool   `json:"notify_task_cancelled"`
@@ -38,12 +40,15 @@ type WeComConfigView struct {
 	CorpID              string `json:"corp_id"`
 	AgentID             string `json:"agent_id"`
 	HasSecret           bool   `json:"has_secret"`
+	APIBaseURL          string `json:"api_base_url"`
+	DetailURL           string `json:"detail_url"`
 	ReceiveEnabled      bool   `json:"receive_enabled"`
 	HasCallbackToken    bool   `json:"has_callback_token"`
 	HasEncodingAESKey   bool   `json:"has_encoding_aes_key"`
 	ToUser              string `json:"to_user"`
 	ToParty             string `json:"to_party"`
 	ToTag               string `json:"to_tag"`
+	NotifyTaskStarted   bool   `json:"notify_task_started"`
 	NotifyTaskCompleted bool   `json:"notify_task_completed"`
 	NotifyTaskFailed    bool   `json:"notify_task_failed"`
 	NotifyTaskCancelled bool   `json:"notify_task_cancelled"`
@@ -56,12 +61,15 @@ type WeComConfigUpdate struct {
 	CorpID              string `json:"corp_id"`
 	AgentID             string `json:"agent_id"`
 	Secret              string `json:"secret"`
+	APIBaseURL          string `json:"api_base_url"`
+	DetailURL           string `json:"detail_url"`
 	ReceiveEnabled      bool   `json:"receive_enabled"`
 	CallbackToken       string `json:"callback_token"`
 	EncodingAESKey      string `json:"encoding_aes_key"`
 	ToUser              string `json:"to_user"`
 	ToParty             string `json:"to_party"`
 	ToTag               string `json:"to_tag"`
+	NotifyTaskStarted   bool   `json:"notify_task_started"`
 	NotifyTaskCompleted bool   `json:"notify_task_completed"`
 	NotifyTaskFailed    bool   `json:"notify_task_failed"`
 	NotifyTaskCancelled bool   `json:"notify_task_cancelled"`
@@ -77,6 +85,7 @@ type NotificationConfigService struct {
 type NotificationEventChannel struct {
 	Channel             string
 	ConfigJSON          string
+	NotifyTaskStarted   bool
 	NotifyTaskCompleted bool
 	NotifyTaskFailed    bool
 	NotifyTaskCancelled bool
@@ -140,6 +149,7 @@ func (s *NotificationConfigService) UpdateTelegramConfig(update TelegramConfigUp
 	config := TelegramConfig{
 		BotToken:            token,
 		ChatID:              strings.TrimSpace(update.ChatID),
+		NotifyTaskStarted:   update.NotifyTaskStarted,
 		NotifyTaskCompleted: update.NotifyTaskCompleted,
 		NotifyTaskFailed:    update.NotifyTaskFailed,
 		NotifyTaskCancelled: update.NotifyTaskCancelled,
@@ -178,6 +188,7 @@ func buildTelegramConfigView(config TelegramConfig, enabled bool) TelegramConfig
 		Enabled:             enabled,
 		ChatID:              config.ChatID,
 		HasBotToken:         strings.TrimSpace(config.BotToken) != "",
+		NotifyTaskStarted:   config.NotifyTaskStarted,
 		NotifyTaskCompleted: config.NotifyTaskCompleted,
 		NotifyTaskFailed:    config.NotifyTaskFailed,
 		NotifyTaskCancelled: config.NotifyTaskCancelled,
@@ -233,12 +244,15 @@ func (s *NotificationConfigService) UpdateWeComConfig(update WeComConfigUpdate) 
 		CorpID:              strings.TrimSpace(update.CorpID),
 		AgentID:             agentID,
 		Secret:              secret,
+		APIBaseURL:          strings.TrimRight(strings.TrimSpace(update.APIBaseURL), "/"),
+		DetailURL:           strings.TrimSpace(update.DetailURL),
 		ReceiveEnabled:      update.ReceiveEnabled,
 		CallbackToken:       callbackToken,
 		EncodingAESKey:      encodingAESKey,
 		ToUser:              strings.TrimSpace(update.ToUser),
 		ToParty:             strings.TrimSpace(update.ToParty),
 		ToTag:               strings.TrimSpace(update.ToTag),
+		NotifyTaskStarted:   update.NotifyTaskStarted,
 		NotifyTaskCompleted: update.NotifyTaskCompleted,
 		NotifyTaskFailed:    update.NotifyTaskFailed,
 		NotifyTaskCancelled: update.NotifyTaskCancelled,
@@ -277,12 +291,15 @@ func buildWeComConfigView(config WeComConfig, enabled bool) WeComConfigView {
 		CorpID:              config.CorpID,
 		AgentID:             agentID,
 		HasSecret:           strings.TrimSpace(config.Secret) != "",
+		APIBaseURL:          config.APIBaseURL,
+		DetailURL:           config.DetailURL,
 		ReceiveEnabled:      config.ReceiveEnabled,
 		HasCallbackToken:    strings.TrimSpace(config.CallbackToken) != "",
 		HasEncodingAESKey:   strings.TrimSpace(config.EncodingAESKey) != "",
 		ToUser:              config.ToUser,
 		ToParty:             config.ToParty,
 		ToTag:               config.ToTag,
+		NotifyTaskStarted:   config.NotifyTaskStarted,
 		NotifyTaskCompleted: config.NotifyTaskCompleted,
 		NotifyTaskFailed:    config.NotifyTaskFailed,
 		NotifyTaskCancelled: config.NotifyTaskCancelled,
@@ -292,7 +309,7 @@ func buildWeComConfigView(config WeComConfig, enabled bool) WeComConfigView {
 
 // GetNotificationEventChannels 返回启用且支持事件通知的渠道。
 func (s *NotificationConfigService) GetNotificationEventChannels() ([]NotificationEventChannel, error) {
-	channels := make([]NotificationEventChannel, 0, 2)
+	channels := make([]NotificationEventChannel, 0, 4)
 	telegramConfig, telegramView, err := s.GetTelegramConfig()
 	if err != nil {
 		return nil, err
@@ -301,6 +318,7 @@ func (s *NotificationConfigService) GetNotificationEventChannels() ([]Notificati
 		encoded, _ := json.Marshal(telegramConfig)
 		channels = append(channels, NotificationEventChannel{
 			Channel: "telegram", ConfigJSON: string(encoded),
+			NotifyTaskStarted:   telegramConfig.NotifyTaskStarted,
 			NotifyTaskCompleted: telegramConfig.NotifyTaskCompleted, NotifyTaskFailed: telegramConfig.NotifyTaskFailed,
 			NotifyTaskCancelled: telegramConfig.NotifyTaskCancelled, NotifyAccountStatus: telegramConfig.NotifyAccountStatus,
 		})
@@ -313,8 +331,26 @@ func (s *NotificationConfigService) GetNotificationEventChannels() ([]Notificati
 		encoded, _ := json.Marshal(weComConfig)
 		channels = append(channels, NotificationEventChannel{
 			Channel: "wecom", ConfigJSON: string(encoded),
+			NotifyTaskStarted:   weComConfig.NotifyTaskStarted,
 			NotifyTaskCompleted: weComConfig.NotifyTaskCompleted, NotifyTaskFailed: weComConfig.NotifyTaskFailed,
 			NotifyTaskCancelled: weComConfig.NotifyTaskCancelled, NotifyAccountStatus: weComConfig.NotifyAccountStatus,
+		})
+	}
+	legacyConfigs, err := s.dao.GetAllEnabled()
+	if err != nil {
+		return nil, err
+	}
+	for _, config := range legacyConfigs {
+		if config == nil || config.Channel == "telegram" || config.Channel == "wecom" {
+			continue
+		}
+		if config.Channel != "serverchan" && config.Channel != "email" {
+			continue
+		}
+		channels = append(channels, NotificationEventChannel{
+			Channel: config.Channel, ConfigJSON: config.Config,
+			NotifyTaskStarted: true, NotifyTaskCompleted: true,
+			NotifyTaskFailed: true, NotifyTaskCancelled: true,
 		})
 	}
 	return channels, nil

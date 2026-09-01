@@ -120,8 +120,8 @@
           </n-form>
         </n-tab-pane>
 
-        <!-- Emby -->
-        <n-tab-pane name="emby" tab="Emby">
+        <!-- Emby 实例已迁移至 Emby 管理页面 -->
+        <!--
           <n-form :model="embyForm" label-placement="top" class="max-w-2xl">
             <n-form-item label="启用 Emby 集成">
               <div class="w-full">
@@ -193,6 +193,36 @@
             </div>
           </n-form>
         </n-tab-pane>
+        -->
+
+        <!-- 全局 API 配置 -->
+        <n-tab-pane name="api" tab="API 配置">
+          <n-form :model="globalApiForm" label-placement="top" class="max-w-2xl">
+            <h2 class="mb-4 text-base font-bold text-slate-800 dark:text-white">第三方 API</h2>
+            <n-form-item label="启用全局 API Key">
+              <n-switch v-model:value="globalApiForm.enabled">
+                <template #checked>启用</template>
+                <template #unchecked>关闭</template>
+              </n-switch>
+            </n-form-item>
+            <n-form-item label="外部 API 地址">
+              <div class="w-full">
+                <n-input v-model:value="globalApiForm.base_url" placeholder="例如 https://example.com/api" clearable />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">用于生成外部访问地址，留空时使用当前服务地址。</p>
+              </div>
+            </n-form-item>
+            <n-form-item label="API Key">
+              <div class="w-full">
+                <n-input v-model:value="globalApiForm.api_key" type="password" show-password-on="click" :placeholder="globalApiForm.has_api_key ? '已配置，留空保持不变' : '保存时自动生成'" clearable />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">第三方请求请使用 X-API-Key 请求头访问现有 API。</p>
+              </div>
+            </n-form-item>
+            <n-button type="primary" :loading="globalApiLoading" @click="saveGlobalApi">
+              <template #icon><n-icon :component="CheckmarkOutline" /></template>
+              保存 API 配置
+            </n-button>
+          </n-form>
+        </n-tab-pane>
 
         <!-- 通知渠道 -->
         <n-tab-pane name="notification" tab="通知">
@@ -257,6 +287,10 @@
             <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">通知事件</h3>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务触发</span>
+                <n-switch v-model:value="telegramForm.notify_task_started" class="float-right" />
+              </div>
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
                 <span class="text-sm text-slate-700 dark:text-slate-200">任务成功</span>
                 <n-switch v-model:value="telegramForm.notify_task_completed" class="float-right" />
               </div>
@@ -289,18 +323,6 @@
               </n-button>
             </div>
 
-            <h3 class="mb-3 mt-8 text-sm font-bold text-slate-800 dark:text-white">第三方 API</h3>
-            <n-form-item label="启用全局 API Key">
-              <n-switch v-model:value="globalApiForm.enabled" />
-            </n-form-item>
-            <n-form-item label="外部 API 地址">
-              <n-input v-model:value="globalApiForm.base_url" placeholder="例如 https://example.com/api" clearable />
-            </n-form-item>
-            <n-form-item label="API Key">
-              <n-input v-model:value="globalApiForm.api_key" type="password" show-password-on="click" :placeholder="globalApiForm.has_api_key ? '已配置，留空保持不变' : '保存时自动生成'" />
-              <p class="mt-1 text-xs text-slate-400">第三方请求请使用 X-API-Key 请求头访问现有 API。</p>
-            </n-form-item>
-            <n-button type="primary" :loading="globalApiLoading" @click="saveGlobalApi">保存 API 配置</n-button>
           </n-form>
 
           <n-divider class="my-8" />
@@ -336,6 +358,32 @@
                 />
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
                   Secret 不会通过配置读取接口返回；保存时留空会保留原值。
+                </p>
+              </div>
+            </n-form-item>
+
+            <n-form-item label="企业微信消息转发代理地址">
+              <div class="w-full">
+                <n-input
+                  v-model:value="weComForm.api_base_url"
+                  placeholder="例如：http://192.168.1.10:8080"
+                  clearable
+                />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  用于 ddsderek/wxchat 等企业微信 API 转发服务；留空则直连 https://qyapi.weixin.qq.com。
+                </p>
+              </div>
+            </n-form-item>
+
+            <n-form-item label="通知详情跳转地址">
+              <div class="w-full">
+                <n-input
+                  v-model:value="weComForm.detail_url"
+                  placeholder="例如：https://example.com/dashboard/tasks"
+                  clearable
+                />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                  配置后使用微信兼容的文本卡片并显示“查看详情”；留空时发送纯文本。
                 </p>
               </div>
             </n-form-item>
@@ -409,6 +457,10 @@
 
             <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">通知事件</h3>
             <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
+                <span class="text-sm text-slate-700 dark:text-slate-200">任务触发</span>
+                <n-switch v-model:value="weComForm.notify_task_started" class="float-right" />
+              </div>
               <div class="rounded-xl bg-slate-50 px-4 py-3 dark:bg-white/5">
                 <span class="text-sm text-slate-700 dark:text-slate-200">任务成功</span>
                 <n-switch v-model:value="weComForm.notify_task_completed" class="float-right" />
@@ -572,17 +624,15 @@ import {
   NSelect,
   NSwitch,
   NButton,
-  NTag,
   NAlert,
   NIcon,
   useMessage
 } from 'naive-ui'
-import { CheckmarkOutline, RefreshOutline, LinkOutline, PaperPlaneOutline } from '@vicons/ionicons5'
+import { CheckmarkOutline, RefreshOutline, PaperPlaneOutline } from '@vicons/ionicons5'
 import PageCard from '../components/common/PageCard.vue'
 import { getSettings, updateSettings } from '../utils/api/setting'
 import { getGlobalApiConfig, updateGlobalApiConfig } from '../utils/api/systemApi'
 import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media'
-import { getEmbyStatus } from '../utils/api/emby'
 import {
   getTelegramConfig,
   updateTelegramConfig,
@@ -640,20 +690,6 @@ const movieTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ year }}', '{{ tm
 const tvTemplateTags = ['{{ title }}', '{{ en_title }}', '{{ season }}', '{{ episode }}', '{{ year }}', '{{ tmdbid }}', '{{ videoFormat }}', '{{ source }}', '{{ codec }}', '{{ fileExt }}']
 
 // --- Emby 配置 ---
-const embyForm = ref({
-  enabled: false,
-  emby_url: '',
-  emby_api_key: ''
-})
-const initialEmbyForm = ref({
-  enabled: false,
-  emby_url: '',
-  emby_api_key: ''
-})
-const embyLoading = ref(false)
-const embyTesting = ref(false)
-const embyConnectionStatus = ref(null)
-const embyServerInfo = ref(null)
 
 // --- Telegram 配置 ---
 const telegramForm = ref({
@@ -661,6 +697,7 @@ const telegramForm = ref({
   bot_token: '',
   chat_id: '',
   has_bot_token: false,
+  notify_task_started: true,
   notify_task_completed: true,
   notify_task_failed: true,
   notify_task_cancelled: true,
@@ -685,6 +722,8 @@ const weComForm = ref({
   agent_id: '',
   secret: '',
   has_secret: false,
+  api_base_url: '',
+  detail_url: '',
   receive_enabled: false,
   callback_token: '',
   has_callback_token: false,
@@ -693,6 +732,7 @@ const weComForm = ref({
   to_user: '',
   to_party: '',
   to_tag: '',
+  notify_task_started: true,
   notify_task_completed: true,
   notify_task_failed: true,
   notify_task_cancelled: true,
@@ -723,6 +763,8 @@ const fetchWeComConfig = async () => {
       agent_id: data.agent_id || '',
       secret: '',
       has_secret: data.has_secret || false,
+      api_base_url: data.api_base_url || '',
+      detail_url: data.detail_url || '',
       receive_enabled: data.receive_enabled || false,
       callback_token: '',
       has_callback_token: data.has_callback_token || false,
@@ -731,6 +773,7 @@ const fetchWeComConfig = async () => {
       to_user: data.to_user || '',
       to_party: data.to_party || '',
       to_tag: data.to_tag || '',
+      notify_task_started: data.notify_task_started !== false,
       notify_task_completed: data.notify_task_completed !== false,
       notify_task_failed: data.notify_task_failed !== false,
       notify_task_cancelled: data.notify_task_cancelled !== false,
@@ -750,6 +793,7 @@ const fetchTelegramConfig = async () => {
       bot_token: '',
       chat_id: data.chat_id || '',
       has_bot_token: data.has_bot_token || false,
+      notify_task_started: data.notify_task_started !== false,
       notify_task_completed: data.notify_task_completed !== false,
       notify_task_failed: data.notify_task_failed !== false,
       notify_task_cancelled: data.notify_task_cancelled !== false,
@@ -801,13 +845,6 @@ const fetchSettings = async () => {
     }
     initialForm.value = { ...form.value }
 
-    // 加载 Emby 配置
-    embyForm.value = {
-      enabled: data.emby_enabled === 'true' || data.emby_enabled === '1',
-      emby_url: data.emby_url || '',
-      emby_api_key: data.emby_api_key || ''
-    }
-    initialEmbyForm.value = { ...embyForm.value }
   } catch (error) {
     console.error('获取系统配置失败:', error)
     if (error.response?.status === 404) {
@@ -860,9 +897,6 @@ const handleSubmit = async () => {
       scrape_write_thumb: form.value.scrape_write_thumb ? 'true' : 'false',
       movie_naming_template: form.value.movie_naming_template,
       tv_naming_template: form.value.tv_naming_template,
-      emby_enabled: embyForm.value.enabled ? 'true' : 'false',
-      emby_url: embyForm.value.emby_url,
-      emby_api_key: embyForm.value.emby_api_key
     }
     await updateSettings(settings, { skipGlobalErrorMessage: true })
     message.success('配置保存成功')
@@ -918,62 +952,6 @@ const handleTmdbReset = () => {
   tmdbForm.value = { ...initialTmdbForm.value }
 }
 
-// --- Emby 方法 ---
-const testEmbyConnection = async () => {
-  embyTesting.value = true
-  embyConnectionStatus.value = null
-  embyServerInfo.value = null
-  try {
-    // 先保存 Emby 配置,再测试连接
-    const settings = {
-      emby_enabled: embyForm.value.enabled ? 'true' : 'false',
-      emby_url: embyForm.value.emby_url,
-      emby_api_key: embyForm.value.emby_api_key
-    }
-    await updateSettings(settings, { skipGlobalErrorMessage: true })
-
-    const response = await getEmbyStatus({ skipGlobalErrorMessage: true })
-    const data = response.data.data || {}
-    embyConnectionStatus.value = data.connected || false
-    embyServerInfo.value = data.info || null
-    if (data.connected) {
-      message.success('Emby 连接成功')
-    } else {
-      message.error(`Emby 连接失败: ${data.error || '未知错误'}`)
-    }
-  } catch (error) {
-    embyConnectionStatus.value = false
-    message.error('Emby 连接测试失败')
-  } finally {
-    embyTesting.value = false
-  }
-}
-
-const handleEmbySubmit = async () => {
-  embyLoading.value = true
-  try {
-    const settings = {
-      emby_enabled: embyForm.value.enabled ? 'true' : 'false',
-      emby_url: embyForm.value.emby_url,
-      emby_api_key: embyForm.value.emby_api_key
-    }
-    await updateSettings(settings, { skipGlobalErrorMessage: true })
-    message.success('Emby 配置保存成功')
-    initialEmbyForm.value = { ...embyForm.value }
-  } catch (error) {
-    console.error('保存 Emby 配置失败:', error)
-    message.error('保存 Emby 配置失败')
-  } finally {
-    embyLoading.value = false
-  }
-}
-
-const handleEmbyReset = () => {
-  embyForm.value = { ...initialEmbyForm.value }
-  embyConnectionStatus.value = null
-  embyServerInfo.value = null
-}
-
 const handleTelegramSubmit = async () => {
   if (telegramForm.value.enabled) {
     if (!telegramForm.value.bot_token.trim() && !telegramForm.value.has_bot_token) {
@@ -992,6 +970,7 @@ const handleTelegramSubmit = async () => {
         enabled: telegramForm.value.enabled,
         bot_token: telegramForm.value.bot_token.trim(),
         chat_id: telegramForm.value.chat_id.trim(),
+        notify_task_started: telegramForm.value.notify_task_started,
         notify_task_completed: telegramForm.value.notify_task_completed,
         notify_task_failed: telegramForm.value.notify_task_failed,
         notify_task_cancelled: telegramForm.value.notify_task_cancelled,
@@ -1063,12 +1042,15 @@ const handleWeComSubmit = async () => {
         corp_id: weComForm.value.corp_id.trim(),
         agent_id: weComForm.value.agent_id.trim(),
         secret: weComForm.value.secret.trim(),
+        api_base_url: weComForm.value.api_base_url.trim(),
+        detail_url: weComForm.value.detail_url.trim(),
         receive_enabled: weComForm.value.receive_enabled,
         callback_token: weComForm.value.callback_token.trim(),
         encoding_aes_key: weComForm.value.encoding_aes_key.trim(),
         to_user: weComForm.value.to_user.trim(),
         to_party: weComForm.value.to_party.trim(),
         to_tag: weComForm.value.to_tag.trim(),
+        notify_task_started: weComForm.value.notify_task_started,
         notify_task_completed: weComForm.value.notify_task_completed,
         notify_task_failed: weComForm.value.notify_task_failed,
         notify_task_cancelled: weComForm.value.notify_task_cancelled,

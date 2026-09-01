@@ -1,0 +1,35 @@
+{
+  "date": "2026-09-01",
+  "executor": "Codex",
+  "locations": [
+    "easy-strm/internal/service/notification_event_monitor.go",
+    "easy-strm/internal/service/notification_config_service.go",
+    "easy-strm/internal/service/notification_types.go",
+    "easy-strm/internal/service/wecom_notification.go",
+    "easy-strm-front/src/views/Settings.vue"
+  ],
+  "findings": [
+    "事件监控原先仅处理 completed/failed/cancelled，Redis key 以 task_id 和终态组成",
+    "首次启用通过 baseline key 建立历史任务快照，不补发历史",
+    "NotificationService 已能向 Telegram、企业微信、Server酱和 email 发送卡片/文本",
+    "配置事件开关原先仅 Telegram/企业微信，传统渠道无事件字段"
+  ],
+  "decisions": [
+    "增加 started 事件与独立卡片",
+    "baseline 升级 v2 防止升级补发历史触发通知",
+    "传统渠道纳入事件渠道并默认订阅任务事件",
+    "保留 Telegram/企业微信事件开关并增加前端任务触发开关"
+  ],
+  "risks": [
+    "监控周期为5秒，触发通知不是任务创建函数内同步发送",
+    "同一 task_id 的重试执行仍沿用历史事件键语义",
+    "短生命周期且在首次轮询前删除的任务可能无法被观察"
+  ],
+  "sufficiency": {
+    "interface_defined": true,
+    "technology_choice_understood": true,
+    "main_risks_identified": true,
+    "verification_known": true
+  },
+  "tool_fallback": "当前会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用 update_plan、rg、PowerShell、apply_patch 和本地测试替代。"
+}

@@ -1,0 +1,24 @@
+{
+  "date": "2026-08-30",
+  "executor": "Codex",
+  "task": "修复企业微信发起115云下载后没有创建反馈",
+  "location": [
+    "easy-strm/internal/service/wecom_callback_service.go",
+    "easy-strm/internal/service/telegram_resource_service.go",
+    "easy-strm/internal/service/wecom_notification.go"
+  ],
+  "current_behavior": "资源执行器已生成标题为‘115 云下载已提交’且包含任务 ID 的 NotificationCard；回调服务随后复用普通通知配置发送。配置 detail_url 时该回复被转换为 textcard。",
+  "root_cause": "主动命令反馈与后台事件通知共用 textcard 选择策略，而微信消息转发代理对该类型的展示不稳定，任务成功创建但客户端看不到回复。",
+  "contract": "用户主动发送命令后的回复固定使用企业微信 text；后台事件通知继续按全局 detail_url 配置选择 textcard 或 text。",
+  "risks": [
+    "不能清除持久化配置中的 detail_url",
+    "不能改变后台任务终态通知的消息类型",
+    "反馈必须保留任务 ID 等卡片字段"
+  ],
+  "verification": [
+    "回归测试验证发送配置中的 DetailURL 被清空",
+    "回归测试验证反馈标题和任务 ID",
+    "执行 go test ./..."
+  ],
+  "tool_fallback": "当前会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用 update_plan、rg、PowerShell、apply_patch 和本地 Go 测试替代。"
+}

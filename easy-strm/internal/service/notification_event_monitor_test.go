@@ -179,6 +179,45 @@ func TestNotificationEventMonitorChannelsHaveIndependentBaselines(t *testing.T) 
 	}
 }
 
+func TestNotificationEventMonitorSendsStartedAndTerminalOnce(t *testing.T) {
+	client := newNotificationTestRedis(t)
+	config := NotificationEventChannel{Channel: "telegram", NotifyTaskStarted: true, NotifyTaskCompleted: true}
+	sender := &fakeNotificationSender{}
+	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "task_name": "旧任务", "status": "completed"}}}
+	monitor := NewNotificationEventMonitor(&fakeTelegramConfigReader{channels: []NotificationEventChannel{config}}, sender, tasks, &fakeNotificationAccountStore{}, client)
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 0 {
+		t.Fatal("首次启用不应补发历史任务的触发或终态通知")
+	}
+	newTask := map[string]interface{}{
+		"task_id": "new", "task_name": "新任务", "task_type": "offline_download", "status": "pending",
+		"create_time": "2026-09-01 10:00:00", "update_time": "2026-09-01 10:00:00",
+	}
+	tasks.tasks = append(tasks.tasks, newTask)
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 1 || sender.cards[0].Title != "任务已触发 · 新任务" {
+		t.Fatalf("任务创建时应只发送一次触发通知: %#v", sender.cards)
+	}
+	newTask["status"] = "completed"
+	newTask["update_time"] = "2026-09-01 10:00:03"
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 2 || sender.cards[1].Title != "任务已完成 · 新任务" {
+		t.Fatalf("触发/终态通知顺序或标题异常: %#v", sender.cards)
+	}
+	if err := monitor.runOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if sender.count() != 2 {
+		t.Fatal("同一任务的触发和终态均不应重复发送")
+	}
+}
+
 func newNotificationTestRedis(t *testing.T) *redis.Client {
 	t.Helper()
 	server := miniredis.RunT(t)

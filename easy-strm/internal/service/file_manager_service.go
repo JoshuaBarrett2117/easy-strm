@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	driver "github.com/SheltonZhu/115driver/pkg/driver"
 	"github.com/google/uuid"
@@ -19,6 +20,10 @@ import (
 )
 
 const fileManagerTaskType = "file_transfer"
+
+const cloud115OperationRetryCount = 3
+
+var cloud115RetryBaseDelay = time.Second
 
 type fileManagerMediaSourceRepository interface {
 	GetAll(sortField, sortOrder string) ([]*domain.MediaSource, error)
@@ -46,7 +51,7 @@ type FileManagerCloudClient interface {
 	GetFileList(cid int, showDir int, offset int, limit int, cloud115ID int, cookie string) (*driver.FileListResp, error)
 	CopyFile(fileID, targetDirID string, cloud115ID int, cookie string) error
 	MoveFile115(fileID, targetDirID string, cloud115ID int, cookie string) error
-	RapidTransferFile(sourcePickCode string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (string, error)
+	RapidTransferFileByMetadata(sourceFileID, sourcePickCode, sourceSHA1 string, sourceSize int64, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (string, error)
 	CreateDirectory115(parentID, name string, cloud115ID int, cookie string) (string, error)
 	DeleteFiles115(fileIDs []string, cloud115ID int, cookie string) error
 	UploadLocalFile115(filePath, targetDirID, fileName string, cloud115ID int, cookie string) error
@@ -394,15 +399,21 @@ func (s *FileManagerService) transferCloudToCloud(ctx context.Context, sourceID,
 	targetCID := normalizeCID(targetPath)
 	if sourceID == targetID {
 		if move {
-			return s.cloudClient.MoveFile115(item.ID, targetCID, source.ID, source.Cookie)
+			return retryCloud115Operation(ctx, "同账号移动", func() error {
+				return s.cloudClient.MoveFile115(item.ID, targetCID, source.ID, source.Cookie)
+			})
 		}
-		return s.cloudClient.CopyFile(item.ID, targetCID, source.ID, source.Cookie)
+		return retryCloud115Operation(ctx, "同账号复制", func() error {
+			return s.cloudClient.CopyFile(item.ID, targetCID, source.ID, source.Cookie)
+		})
 	}
 	if err := s.copyCloudEntryAcrossAccounts(ctx, item, targetCID, source, target); err != nil {
 		return err
 	}
 	if move {
-		return s.cloudClient.DeleteFiles115([]string{item.ID}, source.ID, source.Cookie)
+		return retryCloud115Operation(ctx, "跨账号剪切删除源文件", func() error {
+			return s.cloudClient.DeleteFiles115([]string{item.ID}, source.ID, source.Cookie)
+		})
 	}
 	return nil
 }
@@ -412,23 +423,20 @@ func (s *FileManagerService) copyCloudEntryAcrossAccounts(ctx context.Context, i
 		return err
 	}
 	if !item.IsDirectory {
-		// 115 私有秒传签名会随服务端版本变化。文件管理使用稳定的下载上传链路，
-		// 避免跨账号目录中的每个文件都经历多轮无效秒传重试。
-		tempDir, err := os.MkdirTemp("", ".easy-strm-cross-account-*")
-		if err != nil {
-			return err
-		}
-		defer os.RemoveAll(tempDir)
-		tempPath := filepath.Join(tempDir, item.Name)
-		pickCode := item.PickCode
+		pickCode := strings.TrimSpace(item.PickCode)
 		if pickCode == "" {
-			pickCode = item.ID
+			return errors.New("秒传失败：文件缺少秒传所需信息")
 		}
-		if err := s.cloudClient.DownloadFile115(pickCode, tempPath, source.ID, source.Cookie); err != nil {
-			return fmt.Errorf("跨账号复制下载失败: %w", err)
+		if strings.TrimSpace(item.SHA1) == "" || item.Size <= 0 {
+			return errors.New("秒传失败：文件缺少秒传所需信息")
 		}
-		if err := s.cloudClient.UploadLocalFile115(tempPath, targetCID, item.Name, target.ID, target.Cookie); err != nil {
-			return fmt.Errorf("跨账号复制上传失败: %w", err)
+		err := retryCloud115Operation(ctx, "跨账号秒传", func() error {
+			_, transferErr := s.cloudClient.RapidTransferFileByMetadata(item.ID, pickCode, item.SHA1, item.Size, source.ID, source.Cookie, targetCID, target.ID, target.Cookie, item.Name)
+			return transferErr
+		})
+		if err != nil {
+			logger.Errorf("FileManagerService[RapidTransfer] source=%d target=%d file=%s raw_error=%v", source.ID, target.ID, item.Name, err)
+			return errors.New(cloud115RapidTransferMessage(err))
 		}
 		return nil
 	}
@@ -446,6 +454,61 @@ func (s *FileManagerService) copyCloudEntryAcrossAccounts(ctx context.Context, i
 		}
 	}
 	return nil
+}
+
+func retryCloud115Operation(ctx context.Context, operationName string, operation func() error) error {
+	var lastErr error
+	for attempt := 0; attempt <= cloud115OperationRetryCount; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := operation(); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt == cloud115OperationRetryCount {
+			break
+		}
+		delay := time.Duration(attempt+1) * cloud115RetryBaseDelay
+		logger.Warnf("FileManagerService[Retry] operation=%s attempt=%d/%d error=%v", operationName, attempt+1, cloud115OperationRetryCount, lastErr)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
+func cloud115RapidTransferMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "cookie"),
+		strings.Contains(message, "credential"),
+		strings.Contains(message, "unauthorized"),
+		strings.Contains(message, "登录"),
+		strings.Contains(message, "账号失效"):
+		return "秒传失败：115账号登录状态已失效，请重新登录后重试"
+	case strings.Contains(message, "sha1"),
+		strings.Contains(message, "filesize"),
+		strings.Contains(message, "file_id"),
+		strings.Contains(message, "pickcode"),
+		strings.Contains(message, "元数据"):
+		return "秒传失败：文件缺少秒传所需信息"
+	case strings.Contains(message, "need check"),
+		strings.Contains(message, "content verification"),
+		strings.Contains(message, "status=7"),
+		strings.Contains(message, "签名校验"):
+		return "秒传失败：115要求校验文件内容，当前文件暂不支持秒传"
+	default:
+		return "秒传失败：115暂未接受该文件，请稍后重试"
+	}
 }
 
 // Delete 删除指定位置中的文件或目录。
@@ -558,7 +621,7 @@ func cloudTransferItems(files []driver.FileInfo) []domain.FileManagerTransferIte
 		if isDir {
 			id = string(file.CategoryID)
 		}
-		items = append(items, domain.FileManagerTransferItem{ID: id, Name: file.Name, Path: id, IsDirectory: isDir, PickCode: file.PickCode})
+		items = append(items, domain.FileManagerTransferItem{ID: id, Name: file.Name, Path: id, IsDirectory: isDir, PickCode: file.PickCode, SHA1: file.Sha1, Size: int64(file.Size)})
 	}
 	return items
 }

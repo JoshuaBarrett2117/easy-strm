@@ -1,0 +1,14 @@
+{
+  "date": "2026-08-31",
+  "executor": "Codex",
+  "task_id": "project-gap-analysis-20260830",
+  "question": "哪些公开或可点击入口实际是占位、降级或与执行结果不一致？",
+  "why_needed": "用于区分已实现能力、半成品和应隐藏能力，决定 P0/P1 范围。",
+  "evidence": [
+    "STRM 增量路由存在但 Controller 固定返回 501，底层算法已被 Cron 使用。",
+    "115 Open API 三个方法固定返回不可用，前端仍展示开放平台登录标签。",
+    "115 云刮削对全部文件返回 Success=false、error=nil，并由上层按 completed 处理。",
+    "多个 STRM 扩展字段可保存，但生产执行链没有消费。"
+  ],
+  "answer": "必须先接通真实执行器或由 capability 隐藏入口；skipped、partial_success 和 unavailable 不能继续包装为完整成功。"
+}

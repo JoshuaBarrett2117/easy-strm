@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"easy-strm/internal/domain"
@@ -10,28 +12,40 @@ import (
 type fakeTelegramShareTransfer struct {
 	parsed      *domain.ParseShareResponse
 	request     domain.TransferRequest
+	requests    []domain.TransferRequest
 	parseURL    string
+	parseURLs   []string
 	parseSecret string
 }
 
 func (f *fakeTelegramShareTransfer) ParseShareLink(_ context.Context, rawURL, password string) (*domain.ParseShareResponse, error) {
 	f.parseURL = rawURL
+	f.parseURLs = append(f.parseURLs, rawURL)
 	f.parseSecret = password
 	return f.parsed, nil
 }
 
 func (f *fakeTelegramShareTransfer) SubmitTransfer(_ context.Context, request domain.TransferRequest) (*domain.TransferResponse, error) {
 	f.request = request
-	return &domain.TransferResponse{TaskId: "share-task", TotalFiles: len(request.Files)}, nil
+	f.requests = append(f.requests, request)
+	return &domain.TransferResponse{TaskId: fmt.Sprintf("share-task-%d", len(f.requests)), TotalFiles: len(request.Files)}, nil
 }
 
 type fakeTelegramOfflineDownload struct {
-	request domain.OfflineDownloadSubmitRequest
+	request      domain.OfflineDownloadSubmitRequest
+	requests     []domain.OfflineDownloadSubmitRequest
+	failURLParts []string
 }
 
 func (f *fakeTelegramOfflineDownload) Submit(_ context.Context, request domain.OfflineDownloadSubmitRequest) (*domain.OfflineDownloadSubmitResponse, error) {
 	f.request = request
-	return &domain.OfflineDownloadSubmitResponse{TaskId: "offline-task", Total: len(request.Urls), Accepted: len(request.Urls)}, nil
+	f.requests = append(f.requests, request)
+	for _, part := range f.failURLParts {
+		if len(request.Urls) > 0 && strings.Contains(request.Urls[0], part) {
+			return nil, fmt.Errorf("模拟提交失败: %s", part)
+		}
+	}
+	return &domain.OfflineDownloadSubmitResponse{TaskId: fmt.Sprintf("offline-task-%d", len(f.requests)), Total: len(request.Urls), Accepted: len(request.Urls)}, nil
 }
 
 type fakeTelegramAccountStore struct {
@@ -129,5 +143,109 @@ func TestTelegramResourceServiceSubmitsShareAndOffline(t *testing.T) {
 	}
 	if offlineCard.Title != "115 云下载已提交" {
 		t.Fatalf("云下载提交卡片异常: %#v", offlineCard)
+	}
+}
+
+func TestTelegramResourceServiceSubmitsMultipleOfflineLines(t *testing.T) {
+	offline := &fakeTelegramOfflineDownload{}
+	accounts := &fakeTelegramAccountStore{accounts: []*domain.Cloud115{{
+		ID: 9, Name: "VIP号", AccountType: domain.AccountTypeVIP, Priority: 1,
+		Status: domain.AccountStatusActive, Cookie: "cookie",
+	}}}
+	service := NewTelegramResourceService(nil, offline, accounts)
+	message := "magnet:?xt=urn:btih:72e1f80ca69fd018dbc91bdc7a1acde4334b0fb2&dn=PRED-812-C /其他/可刮削\n" +
+		"magnet:?xt=urn:btih:9019A9D2050522EC2E8C4D62C9110DFF4007C61C /其他/可刮削"
+
+	card, handled, err := service.Execute(context.Background(), message)
+	if err != nil || !handled {
+		t.Fatalf("多行云下载提交失败: handled=%v err=%v", handled, err)
+	}
+	if len(offline.requests) != 2 {
+		t.Fatalf("每行应创建独立任务，实际请求数=%d", len(offline.requests))
+	}
+	for index, request := range offline.requests {
+		if request.Cloud115ID != 9 || request.Directory != "/其他/可刮削" || len(request.Urls) != 1 {
+			t.Fatalf("第%d个云下载请求异常: %#v", index+1, request)
+		}
+	}
+	if card.Title != "115 云下载批量提交完成" || notificationCardField(card, "总数") != "2" || notificationCardField(card, "已创建") != "2" || notificationCardField(card, "失败") != "0" {
+		t.Fatalf("批量提交汇总异常: %#v", card)
+	}
+	if !strings.Contains(card.Detail, "PRED-812-C") || !strings.Contains(card.Detail, "offline-task-1") || !strings.Contains(card.Detail, "offline-task-2") {
+		t.Fatalf("批量提交明细缺少名称或任务ID: %s", card.Detail)
+	}
+	weComText := buildWeComText(card)
+	if !strings.Contains(weComText, "已创建: 2") || !strings.Contains(weComText, "offline-task-1") || !strings.Contains(weComText, "offline-task-2") {
+		t.Fatalf("企业微信批量反馈缺少汇总或任务ID: %s", weComText)
+	}
+	telegramText := card.TelegramText()
+	if !strings.Contains(telegramText, "已创建") || !strings.Contains(telegramText, "offline-task-1") || !strings.Contains(telegramText, "offline-task-2") {
+		t.Fatalf("Telegram批量反馈缺少汇总或任务ID: %s", telegramText)
+	}
+}
+
+func TestTelegramResourceServiceContinuesAfterBatchFailure(t *testing.T) {
+	offline := &fakeTelegramOfflineDownload{failURLParts: []string{"failed-hash"}}
+	accounts := &fakeTelegramAccountStore{accounts: []*domain.Cloud115{{
+		ID: 9, Name: "VIP号", AccountType: domain.AccountTypeVIP, Priority: 1,
+		Status: domain.AccountStatusActive, Cookie: "cookie",
+	}}}
+	service := NewTelegramResourceService(nil, offline, accounts)
+	message := "magnet:?xt=urn:btih:failed-hash /下载一\n" +
+		"magnet:?xt=urn:btih:success-hash /下载二"
+
+	card, handled, err := service.Execute(context.Background(), message)
+	if err != nil || !handled {
+		t.Fatalf("部分失败不应中断批量提交: handled=%v err=%v", handled, err)
+	}
+	if len(offline.requests) != 2 {
+		t.Fatalf("失败后应继续处理后续行，实际请求数=%d", len(offline.requests))
+	}
+	if card.Title != "115 云下载批量提交部分完成" || notificationCardField(card, "已创建") != "1" || notificationCardField(card, "失败") != "1" {
+		t.Fatalf("部分失败汇总异常: %#v", card)
+	}
+	if !strings.Contains(card.Detail, "模拟提交失败") || !strings.Contains(card.Detail, "offline-task-2") {
+		t.Fatalf("部分失败明细异常: %s", card.Detail)
+	}
+}
+
+func TestTelegramResourceServiceSubmitsMultipleShareLines(t *testing.T) {
+	share := &fakeTelegramShareTransfer{parsed: &domain.ParseShareResponse{
+		ShareCode: "parsed-share-code",
+		Files:     []domain.ShareFileInfo{{Fid: "fid-1", Name: "分享目录", IsDir: true}},
+	}}
+	accounts := &fakeTelegramAccountStore{accounts: []*domain.Cloud115{{
+		ID: 8, Name: "资源号", AccountType: domain.AccountTypeResource, Priority: 8,
+		Status: domain.AccountStatusActive, Cookie: "cookie", TransferDirectory: "/默认转存",
+	}}}
+	service := NewTelegramResourceService(share, nil, accounts)
+	message := "https://115cdn.com/s/sharecode1?password=pass1# /转存目录一\n" +
+		"https://115cdn.com/s/sharecode2?password=pass2# 资源号 /转存目录二"
+
+	card, handled, err := service.Execute(context.Background(), message)
+	if err != nil || !handled {
+		t.Fatalf("多行分享转存提交失败: handled=%v err=%v", handled, err)
+	}
+	if len(share.parseURLs) != 2 || len(share.requests) != 2 {
+		t.Fatalf("每条分享链接应创建独立任务: parse=%d submit=%d", len(share.parseURLs), len(share.requests))
+	}
+	wantDirectories := []string{"/转存目录一", "/转存目录二"}
+	wantPasswords := []string{"pass1", "pass2"}
+	for index, request := range share.requests {
+		if request.TargetCloud115Id != 8 || request.TargetDirectory != wantDirectories[index] || request.Password != wantPasswords[index] {
+			t.Fatalf("第%d个分享转存请求异常: %#v", index+1, request)
+		}
+	}
+	if card.Title != "115 分享转存批量提交完成" || notificationCardField(card, "已创建") != "2" || notificationCardField(card, "失败") != "0" {
+		t.Fatalf("分享批量提交汇总异常: %#v", card)
+	}
+	if !strings.Contains(card.Detail, "share-task-1") || !strings.Contains(card.Detail, "share-task-2") {
+		t.Fatalf("分享批量提交明细缺少任务ID: %s", card.Detail)
+	}
+	if weComText := buildWeComText(card); !strings.Contains(weComText, "share-task-1") || !strings.Contains(weComText, "share-task-2") {
+		t.Fatalf("企业微信分享批量反馈缺少任务ID: %s", weComText)
+	}
+	if telegramText := card.TelegramText(); !strings.Contains(telegramText, "share-task-1") || !strings.Contains(telegramText, "share-task-2") {
+		t.Fatalf("Telegram分享批量反馈缺少任务ID: %s", telegramText)
 	}
 }
