@@ -73,6 +73,8 @@
       <h3 class="section-title">选择要转存的文件</h3>
       <FileSelector
         :files="parsedData.files || []"
+        :share-code="parsedData.share_code || ''"
+        :password="sharePassword"
         @selection-change="onSelectionChange"
       />
     </div>
@@ -180,6 +182,7 @@ const router = useRouter()
 
 // ===== 核心状态 =====
 const parsedData = ref(null) // ParseShareResponse
+const sharePassword = ref('')
 const selectedFiles = ref([]) // ShareTransferFileItem[]
 const targetCloud115Id = ref(0)
 const targetDirectory = ref('')
@@ -239,8 +242,9 @@ const formatSize = (bytes) => {
 }
 
 /** 解析完成回调 */
-const onParsed = (data) => {
+const onParsed = (data, password = '') => {
   parsedData.value = data
+  sharePassword.value = password
   selectedFiles.value = []
   transferTaskId.value = ''
   transferResult.value = null
@@ -249,6 +253,7 @@ const onParsed = (data) => {
 /** 重置 */
 const onReset = () => {
   parsedData.value = null
+  sharePassword.value = ''
   selectedFiles.value = []
   transferTaskId.value = ''
   transferResult.value = null
@@ -283,7 +288,7 @@ const handleSubmit = async () => {
   try {
     const reqData = {
       share_code: parsedData.value.share_code,
-      password: '',
+      password: sharePassword.value,
       target_cloud115_id: targetCloud115Id.value,
       target_directory: targetDirectory.value,
       files: selectedFiles.value,

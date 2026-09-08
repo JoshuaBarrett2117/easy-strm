@@ -27,6 +27,11 @@ func (s *TmdbService) getImageURL(path string) string {
 //   - map[string]interface{}: 电影详情
 //   - error: 错误信息
 func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error) {
+	if s.MetaTubeEnabled() {
+		if ref, ok := s.metatubeRefs.Load(tmdbID); ok {
+			return s.metaTubeDetail(ref.(metaTubeRef))
+		}
+	}
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}

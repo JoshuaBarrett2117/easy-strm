@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-4">
+  <div class="system-logs-panel space-y-4">
     <!-- 工具栏 -->
     <PageCard title="系统日志中心" subtitle="Logs">
       <div class="flex flex-wrap items-center gap-3">
@@ -36,10 +36,11 @@
 
     <!-- 日志内容 -->
     <PageCard>
-      <n-spin :show="logLoading">
+	  <div class="mb-2 text-xs text-slate-500">显示所选文件最近 500 行，最新日志在上方；DEBUG 日志请切换 debug 文件查看。</div>
+      <n-spin :show="logLoading" class="system-logs-content">
         <pre
           v-if="logContent"
-          class="min-h-[60vh] whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-300 overflow-auto"
+          class="system-logs-text whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-300 overflow-auto"
         >{{ logContent }}</pre>
         <EmptyState v-else title="暂无日志内容" />
       </n-spin>

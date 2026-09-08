@@ -47,6 +47,13 @@ func applyDetailMetadata(result *domain.TmdbIdentifyResult, detail map[string]in
 	if result == nil || detail == nil {
 		return
 	}
+	if poster, ok := detail["poster_path"].(string); ok && poster != "" {
+		if len(poster) > 0 && poster[0] == '/' {
+			result.PosterPath = "https://image.tmdb.org/t/p/w500" + poster
+		} else {
+			result.PosterPath = poster
+		}
+	}
 
 	genreIDs := extractGenreIDsFromDetail(detail)
 	countries := extractCountriesFromDetail(detail, mediaType)

@@ -37,6 +37,7 @@
       v-model:visible="tmdbDialogVisible"
       :select-mode="tmdbSelectMode"
       :current-file="currentIdentifyFile"
+      :metadata-source="currentSource?.metadata_source || 'auto'"
       @select="handleTmdbSelect"
     />
 
@@ -181,6 +182,9 @@ const organizeIdentifyForm = ref({
   year: 0,
   season: 0,
   episode: 0,
+  metadata_source: '',
+  metadata_id: '',
+  metadata_provider: '',
   override_key: ''
 })
 
@@ -206,7 +210,7 @@ const handleIdentify = async (row) => {
   candidatesList.value = []
 
   try {
-    const response = await autoIdentifyFile({ filename })
+    const response = await autoIdentifyFile({ filename, metadata_source: currentSource.value?.metadata_source || 'auto' })
     const result = response.data.data || response.data
 
     if (!result.success) {
@@ -253,7 +257,10 @@ const handleSelectCandidate = async (candidate) => {
       tmdb_type: candidate.media_type || candidatesMediaType.value,
       title: candidate.title,
       year: candidate.year,
-      poster_url: candidate.poster_path
+      poster_url: candidate.poster_path,
+      metadata_source: candidate.metadata_source || currentSource.value?.metadata_source || 'auto',
+      metadata_id: candidate.metadata_id || '',
+      metadata_provider: candidate.metadata_provider || ''
     })
     message.success('识别成功')
     candidatesDialogVisible.value = false
@@ -273,7 +280,7 @@ const handleManualSearchFromCandidates = () => {
   openTmdbIdentifyDialog(currentIdentifyFile.value)
 }
 
-const handleTmdbSelect = async ({ item, mode, searchType }) => {
+const handleTmdbSelect = async ({ item, mode, searchType, metadataSource }) => {
   if (mode === 'organize') {
     organizeIdentifyForm.value = {
       ...organizeIdentifyForm.value,
@@ -281,7 +288,10 @@ const handleTmdbSelect = async ({ item, mode, searchType }) => {
       tmdb_id: item.tmdb_id || item.id || 0,
       title: item.title || item.name || '',
       original_title: item.original_title || '',
-      year: item.year || 0
+      year: item.year || 0,
+      metadata_source: metadataSource || item.metadata_source || '',
+      metadata_id: item.metadata_id || '',
+      metadata_provider: item.metadata_provider || ''
     }
     tmdbDialogVisible.value = false
     if (!organizeIdentifyDialogVisible.value) {
@@ -299,7 +309,10 @@ const handleTmdbSelect = async ({ item, mode, searchType }) => {
       tmdb_type: searchType,
       title: item.title || item.name,
       year: item.year,
-      poster_url: item.poster_path
+      poster_url: item.poster_path,
+      metadata_source: item.metadata_source || metadataSource || currentSource.value?.metadata_source || 'auto',
+      metadata_id: item.metadata_id || '',
+      metadata_provider: item.metadata_provider || ''
     })
     message.success('识别成功')
     tmdbDialogVisible.value = false
@@ -506,6 +519,9 @@ const handleOrganizePreviewIdentify = (row) => {
     year: existing?.year || row.year || 0,
     season: existing?.season || row.season || 0,
     episode: existing?.episode || row.episode || 0,
+    metadata_source: existing?.metadata_source || row.metadata_source || '',
+    metadata_id: existing?.metadata_id || row.metadata_id || '',
+    metadata_provider: existing?.metadata_provider || row.metadata_provider || '',
     override_key: key
   }
   organizeIdentifyDialogVisible.value = true

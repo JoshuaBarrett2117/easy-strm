@@ -1,0 +1,33 @@
+{
+  "date": "2026-09-06",
+  "author": "Codex",
+  "request": "分享管理主子表 1:n、表格 CRUD、多文件识别与导入",
+  "existing": [
+    "share_record DAO/service/controller",
+    "TmdbIdentifyDialog 与媒体 API",
+    "playback_record DAO sqlmock 测试"
+  ],
+  "questions": [
+    {
+      "q": "旧数据迁移",
+      "answer": "保留父 ID，把原单文件和结果搬到子表，迁移事务且可重复执行"
+    },
+    {
+      "q": "编辑与识别并发",
+      "answer": "父记录版本保护编辑，子条目版本保护识别回写"
+    },
+    {
+      "q": "批量与失败重试",
+      "answer": "逐文件请求以呈现进度，失败过滤在后端；复用现有元数据服务"
+    }
+  ],
+  "plan": [
+    "模型和迁移",
+    "DAO 事务 CRUD、分页、子表版本",
+    "服务规则、控制器、API",
+    "分享表格、编辑弹窗、展开媒体、导入和识别",
+    "本地测试构建与文档"
+  ],
+  "sufficiency": true,
+  "tools": "指定分析工具不可用，采用 rg/PowerShell 和本地推理"
+}

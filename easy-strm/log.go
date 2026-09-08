@@ -1,6 +1,7 @@
 package main
 
 import (
+	pkglogger "easy-strm/internal/pkg/logger"
 	"fmt"
 	"io"
 	"log"
@@ -121,6 +122,10 @@ func InitLogger(config *Config) {
 		infoFile:    infoFile,
 		debugFile:   debugFile,
 	}
+
+	// 服务层与主程序共用输出文件和级别，避免系统日志页面遗漏识别等业务日志。
+	pkglogger.SetOutputs(debugOutput, infoOutput, warnOutput, errorOutput)
+	pkglogger.SetLevel(pkglogger.Level(currentLevel))
 
 	// 清理旧日志
 	go cleanOldLogs(logDir, keepDays)

@@ -14,12 +14,12 @@ import (
 	"easy-strm/internal/domain"
 )
 
-const testMediaSourceColumns = "id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time"
+const testMediaSourceColumns = "id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time"
 
 func newMediaSourceRows() *sqlmock.Rows {
 	return sqlmock.NewRows([]string{
 		"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled",
-		"organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id",
+		"organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id",
 		"create_time", "update_time",
 	})
 }
@@ -357,7 +357,7 @@ func TestPreviewRename_锟斤拷锟斤拷锟侥硷拷_锟斤拷锟斤拷锟斤�
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenamePreviewRequest{
@@ -401,7 +401,7 @@ func TestPreviewRename_锟斤拷模锟斤拷时使锟斤拷系统锟斤拷锟斤
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
 		AddRow(1, "movie_naming_template", "{{ title }} - {{ year }}", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
@@ -446,7 +446,7 @@ func TestPreviewRename_InferTVTemplateWhenMediaTypeMissing(t *testing.T) {
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
 		AddRow(2, "tv_naming_template", `{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`, now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
@@ -493,7 +493,7 @@ func TestPreviewRenamePrefersProvidedIdentifyMetadata(t *testing.T) {
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	configRows := sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
 		AddRow(2, "tv_naming_template", `{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`, now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
@@ -549,7 +549,7 @@ func TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟缴癸拷(t *testing.T)
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -597,7 +597,7 @@ func TestExecuteRename_锟斤拷锟斤拷锟侥硷拷_锟皆讹拷锟斤拷锟�
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -643,7 +643,7 @@ func TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷锟�
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -681,7 +681,7 @@ func TestExecuteRename_目锟斤拷锟窖达拷锟斤拷_锟斤拷锟斤拷(t *t
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -721,7 +721,7 @@ func TestExecuteRename_115锟斤拷锟斤拷_锟斤拷支锟斤拷(t *testing.T)
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "cloud", domain.SourceTypeCloud115, "0", "0", &cloud115ID, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "cloud", domain.SourceTypeCloud115, "0", "0", &cloud115ID, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -752,7 +752,7 @@ func TestExecuteRename_源锟侥硷拷锟斤拷锟斤拷锟斤拷(t *testing.T) 
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{
@@ -813,7 +813,7 @@ func TestPreviewRename_LocalSourceStripsTemplateDirectories(t *testing.T) {
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenamePreviewRequest{
@@ -853,7 +853,7 @@ func TestExecuteRename_LocalSourceIgnoresDirectorySegmentsInNewName(t *testing.T
 
 	now := time.Now()
 	sourceRows := newMediaSourceRows().
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 0, "", now, now)
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now)
 	expectMediaSourceByID(mock, 1, sourceRows)
 
 	req := &domain.RenameExecuteRequest{

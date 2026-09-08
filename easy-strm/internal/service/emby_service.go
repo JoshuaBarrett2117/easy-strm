@@ -46,14 +46,17 @@ type EmbySystemInfo struct {
 
 // EmbyVirtualFolderInfo Emby 虚拟文件夹（媒体库）信息
 type EmbyVirtualFolderInfo struct {
-	Name            string                 `json:"Name"`
-	ItemID          string                 `json:"ItemId"`
+	Name   string `json:"Name"`
+	ItemID string `json:"ItemId"`
+	// ID 兼容部分 Emby 版本返回的 Id 字段，供权限选择回显媒体库名称。
+	ID              string                 `json:"Id"`
 	CollectionType  string                 `json:"CollectionType"`
 	Path            string                 `json:"Path"`
 	Locations       []string               `json:"Locations"`
 	LibraryOptions  map[string]interface{} `json:"LibraryOptions"`
 	RefreshProgress float64                `json:"RefreshProgress"`
 	RefreshStatus   string                 `json:"RefreshStatus"`
+	MediaFileCount  int                    `json:"MediaFileCount"`
 }
 
 // EmbyLibraryRefreshResult Emby 库刷新结果

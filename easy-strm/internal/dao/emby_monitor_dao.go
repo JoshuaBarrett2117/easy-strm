@@ -173,9 +173,10 @@ func (d *EmbyMonitorDAO) Summary(serverID int, today, week, month time.Time) (do
 
 // Trend 查询每小时活跃用户及观看时长。
 func (d *EmbyMonitorDAO) Trend(serverID int, start, end time.Time) ([]domain.EmbyMonitorTrendPoint, error) {
-	rows, err := d.db.Query(`SELECT date_trunc('hour',started_at),COUNT(DISTINCT user_id),COALESCE(SUM(watched_seconds),0)
+	trendHour := `date_trunc('hour',started_at)`
+	rows, err := d.db.Query(fmt.Sprintf(`SELECT %s,COUNT(DISTINCT user_id),COALESCE(SUM(watched_seconds),0)
 		FROM t_emby_playback_event WHERE server_id=$1 AND started_at >= $2 AND started_at < $3
-		GROUP BY 1 ORDER BY 1`, serverID, start, end)
+		GROUP BY %s ORDER BY %s`, trendHour, trendHour, trendHour), serverID, start, end)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +211,13 @@ func (d *EmbyMonitorDAO) Rankings(serverID int, dimension, mediaType string, sta
 			query += ` AND item_type='Episode'`
 		}
 	}
-	query += fmt.Sprintf(` GROUP BY %s,%s,%s ORDER BY SUM(watched_seconds) DESC`, id, label, subtitle)
+	// 用户和客户端维度的 subtitle 是展示用空字符串常量，不能参与 GROUP BY；
+	// PostgreSQL 会将其解析为非整数位置常量并返回「non-integer constant」错误。
+	groupBy := []string{id, label}
+	if dimension == "media" {
+		groupBy = append(groupBy, subtitle)
+	}
+	query += fmt.Sprintf(` GROUP BY %s ORDER BY SUM(watched_seconds) DESC`, strings.Join(groupBy, ","))
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, err
@@ -236,7 +243,9 @@ func (d *EmbyMonitorDAO) Heatmap(serverID int, userID string, start, end time.Ti
 		query += ` AND user_id=$4`
 		args = append(args, userID)
 	}
-	query += ` GROUP BY user_id,user_name,3,4 ORDER BY user_name,3,4`
+	dateExpr := `to_char(started_at AT TIME ZONE CURRENT_SETTING('TIMEZONE'),'YYYY-MM-DD')`
+	hourExpr := `EXTRACT(HOUR FROM started_at AT TIME ZONE CURRENT_SETTING('TIMEZONE'))::int`
+	query += fmt.Sprintf(` GROUP BY user_id,user_name,%s,%s ORDER BY user_name,%s,%s`, dateExpr, hourExpr, dateExpr, hourExpr)
 	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, err

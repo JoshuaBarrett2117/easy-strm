@@ -75,7 +75,7 @@ func (s *ScrapeService) ScrapeFile(sourceID int, filePath string) (string, strin
 		return "", "", nil, fmt.Errorf("only local media sources support scraping")
 	}
 
-	mediaType, rawData, season, episode, err := s.resolveTmdbData(sourceID, filePath)
+	mediaType, rawData, season, episode, err := s.resolveTmdbData(sourceID, filePath, source.MetadataSource)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -103,7 +103,7 @@ func (s *ScrapeService) ScrapeAbsoluteFile(sourceID int, filePath string) (strin
 		}
 	}
 
-	mediaType, rawData, season, episode, err := s.resolveTmdbData(sourceID, relativePath)
+	mediaType, rawData, season, episode, err := s.resolveTmdbData(sourceID, relativePath, source.MetadataSource)
 	if err != nil {
 		return "", "", nil, err
 	}
@@ -181,14 +181,14 @@ func (s *ScrapeService) ScrapeFiles(sourceID int, filePaths []string) ([]ScrapeR
 }
 
 // resolveTmdbData 解析文件的TMDB数据，优先使用文件缓存
-func (s *ScrapeService) resolveTmdbData(sourceID int, filePath string) (mediaType string, rawData json.RawMessage, season, episode int, err error) {
+func (s *ScrapeService) resolveTmdbData(sourceID int, filePath, metadataSource string) (mediaType string, rawData json.RawMessage, season, episode int, err error) {
 	fileCache, _ := s.mediaFileCacheDAO.GetByPath(sourceID, filePath)
-	if fileCache != nil && len(fileCache.TmdbData) > 0 {
+	if fileCache != nil && len(fileCache.TmdbData) > 0 && metadataPayloadMatchesPolicy(fileCache.TmdbData, metadataSource) {
 		return fileCache.MediaType, fileCache.TmdbData, fileCache.SeasonNumber, fileCache.EpisodeNumber, nil
 	}
 
 	filename := filepath.Base(filePath)
-	identifyResult, identifyErr := s.tmdbService.IdentifyFileWithPath(filePath)
+	identifyResult, identifyErr := s.tmdbService.IdentifyFileWithPathBySource(filePath, metadataSource)
 	if identifyErr != nil {
 		return "", nil, 0, 0, fmt.Errorf("文件未识别且自动识别失败: %v", identifyErr)
 	}
@@ -196,7 +196,7 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath string) (mediaTyp
 		return "", nil, 0, 0, fmt.Errorf("文件未识别: %s", identifyResult.Message)
 	}
 
-	cacheKey := s.tmdbService.buildCacheKey(filename, identifyResult.MediaType)
+	cacheKey := s.tmdbService.buildCacheKeyForSource(filename, identifyResult.MediaType, metadataSource)
 	cache, cacheErr := s.tmdbCacheDAO.GetByQueryKey(cacheKey, identifyResult.MediaType)
 	if cacheErr == nil && cache != nil && len(cache.RawData) > 0 {
 		return identifyResult.MediaType, cache.RawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
@@ -208,6 +208,21 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath string) (mediaTyp
 	}
 
 	return identifyResult.MediaType, fallbackRawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
+}
+
+func metadataPayloadMatchesPolicy(rawData json.RawMessage, metadataSource string) bool {
+	policy := normalizeMetadataSourcePolicy(metadataSource)
+	if policy == domain.MetadataSourceAuto {
+		return true
+	}
+	var metadata struct {
+		Source string `json:"metadata_source"`
+	}
+	_ = json.Unmarshal(rawData, &metadata)
+	if policy == domain.MetadataSourceMetaTube {
+		return metadata.Source == domain.MetadataSourceMetaTube
+	}
+	return metadata.Source != domain.MetadataSourceMetaTube
 }
 
 func buildFallbackRawData(result *domain.TmdbIdentifyResult) (json.RawMessage, error) {
@@ -280,6 +295,15 @@ func (s *ScrapeService) GenerateMovieNFO(rawData json.RawMessage, mediaRoot, med
 		TmdbID:        fmt.Sprintf("%d", detail.ID),
 		Rating:        fmt.Sprintf("%.1f", detail.VoteAverage),
 		UniqueID:      &nfoUniqueID{Type: "tmdb", Default: "true", Value: fmt.Sprintf("%d", detail.ID)},
+	}
+	var metadata struct {
+		Source   string `json:"metadata_source"`
+		ID       string `json:"metadata_id"`
+		Provider string `json:"metadata_provider"`
+	}
+	if json.Unmarshal(rawData, &metadata) == nil && metadata.Source == "metatube" && metadata.ID != "" {
+		movie.UniqueID = &nfoUniqueID{Type: "metatube", Default: "true", Value: metadata.ID}
+		movie.TmdbID = ""
 	}
 
 	if detail.ReleaseDate != "" && len(detail.ReleaseDate) >= 4 {
@@ -523,6 +547,24 @@ func (s *ScrapeService) getBoolConfig(key string, defaultValue bool) bool {
 func (s *ScrapeService) enrichMovieDetail(rawData json.RawMessage, detail *tmdbMovieDetail) error {
 	if detail == nil {
 		return nil
+	}
+	if s.tmdbService != nil && s.tmdbService.MetaTubeEnabled() {
+		var metadata struct {
+			Source   string `json:"metadata_source"`
+			ID       string `json:"metadata_id"`
+			Provider string `json:"metadata_provider"`
+		}
+		if json.Unmarshal(rawData, &metadata) == nil && metadata.Source == "metatube" && metadata.ID != "" {
+			fullDetail, err := s.tmdbService.metaTubeDetail(metaTubeRef{Provider: metadata.Provider, ID: metadata.ID})
+			if err != nil {
+				return err
+			}
+			refreshed, err := json.Marshal(fullDetail)
+			if err != nil {
+				return err
+			}
+			return json.Unmarshal(refreshed, detail)
+		}
 	}
 	tmdbID := detail.ID
 	if tmdbID <= 0 {

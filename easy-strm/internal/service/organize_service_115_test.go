@@ -131,10 +131,10 @@ func expectCloud115MediaSourceByID(t *testing.T, mock sqlmock.Sqlmock, sourceID 
 	t.Helper()
 
 	now := time.Now()
-	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
-		AddRow(sourceID, "cloud", domain.SourceTypeCloud115, root, root, &cloud115ID, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
+	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(sourceID, "cloud", domain.SourceTypeCloud115, root, root, &cloud115ID, 10, true, "", "all", "auto", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(sourceID).
 		WillReturnRows(rows)
@@ -482,7 +482,7 @@ func TestOrganizeService_GetCachedIdentifyResultPrefersManualCloudIDCache(t *tes
 		ID:   "movie.mp4",
 		CID:  "2979491657162553316",
 		Name: "movie.mp4",
-	})
+	}, domain.MetadataSourceAuto)
 	if result == nil {
 		t.Fatal("expected cached identify result")
 	}
@@ -601,7 +601,7 @@ func TestOrganizeService_GetPreferredIdentifyResultPrefersManualOverride(t *test
 		Year:      2005,
 		Season:    1,
 		Episode:   2,
-	}, 1)
+	}, &domain.MediaSource{ID: 1, MetadataSource: domain.MetadataSourceAuto})
 	if err != nil {
 		t.Fatalf("expected manual override to succeed: %v", err)
 	}

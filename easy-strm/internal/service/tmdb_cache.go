@@ -32,6 +32,20 @@ func (s *TmdbService) buildCacheKey(filename, mediaType string) string {
 	return strings.ToLower(filename)
 }
 
+func (s *TmdbService) buildCacheKeyForSource(filename, mediaType, metadataSource string) string {
+	base := s.buildCacheKey(filename, mediaType)
+	policy := normalizeMetadataSourcePolicy(metadataSource)
+	if policy == domain.MetadataSourceAuto {
+		return base
+	}
+	return policy + ":" + base
+}
+
+// CacheKeyForSource 返回指定元数据来源的缓存键。
+func (s *TmdbService) CacheKeyForSource(filename, mediaType, metadataSource string) string {
+	return s.buildCacheKeyForSource(filename, mediaType, metadataSource)
+}
+
 // cacheResult 缓存搜索结果
 // 参数:
 //   - queryKey: 查询键
@@ -40,6 +54,9 @@ func (s *TmdbService) buildCacheKey(filename, mediaType string) string {
 //   - season: 季数
 //   - episode: 集数
 func (s *TmdbService) cacheResult(queryKey, mediaType string, result domain.TmdbSearchResult, season, episode int) {
+	if s.cacheDAO == nil {
+		return
+	}
 	// 序列化原始数据
 	rawData, _ := json.Marshal(result)
 
@@ -74,6 +91,7 @@ func (s *TmdbService) enrichCachedIdentifyMetadata(result *domain.TmdbIdentifyRe
 	if cache == nil || result == nil {
 		return
 	}
+	result.PosterPath = cache.PosterPath
 	// 从 RawData 中解析额外字段补充到结果
 	if len(cache.RawData) == 0 {
 		return
@@ -81,6 +99,9 @@ func (s *TmdbService) enrichCachedIdentifyMetadata(result *domain.TmdbIdentifyRe
 	var raw map[string]interface{}
 	if err := json.Unmarshal(cache.RawData, &raw); err != nil {
 		return
+	}
+	if poster, ok := raw["poster_path"].(string); ok && poster != "" {
+		result.PosterPath = poster
 	}
 	// 提取 genre_ids
 	if genreIDs := extractGenreIDsFromDetail(raw); len(genreIDs) > 0 {
@@ -93,6 +114,12 @@ func (s *TmdbService) enrichCachedIdentifyMetadata(result *domain.TmdbIdentifyRe
 	// 提取 original_language
 	if lang, ok := raw["original_language"].(string); ok {
 		result.Language = lang
+	}
+	result.MetadataSource, _ = raw["metadata_source"].(string)
+	result.MetadataID, _ = raw["metadata_id"].(string)
+	result.MetadataProvider, _ = raw["metadata_provider"].(string)
+	if result.MetadataSource == "metatube" && result.MetadataID != "" {
+		s.metatubeRefs.Store(result.TmdbID, metaTubeRef{Provider: result.MetadataProvider, ID: result.MetadataID})
 	}
 }
 
@@ -108,6 +135,9 @@ func applyCachedMetadata(result *domain.TmdbIdentifyResult, rawData json.RawMess
 	if err := json.Unmarshal(rawData, &raw); err != nil {
 		return
 	}
+	if poster, ok := raw["poster_path"].(string); ok && poster != "" {
+		result.PosterPath = poster
+	}
 	if genreIDs := extractGenreIDsFromDetail(raw); len(genreIDs) > 0 {
 		result.GenreIDs = genreIDs
 	}
@@ -117,6 +147,9 @@ func applyCachedMetadata(result *domain.TmdbIdentifyResult, rawData json.RawMess
 	if lang, ok := raw["original_language"].(string); ok {
 		result.Language = lang
 	}
+	result.MetadataSource, _ = raw["metadata_source"].(string)
+	result.MetadataID, _ = raw["metadata_id"].(string)
+	result.MetadataProvider, _ = raw["metadata_provider"].(string)
 }
 
 func (s *TmdbService) loadSearchCache(mediaType, query string, year int) ([]domain.TmdbSearchResult, bool) {

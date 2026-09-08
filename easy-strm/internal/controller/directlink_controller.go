@@ -14,6 +14,7 @@ import (
 // DirectLinkController 直链提取控制器
 // 处理 /direct-link 路由，用于 STRM 播放，不需要认证
 type DirectLinkController struct {
+	recordPlayback func(string, string, int, string, string, string)
 	// --- 回调依赖：main 包全局函数通过依赖注入解耦 ---
 
 	// getCloud115ByID: 根据 ID 获取 115 账号（main.GetCloud115ByID）
@@ -34,6 +35,11 @@ type DirectLinkController struct {
 	redisSet func(key string, value string, expirationSec int) error
 	// getDefaultUA: 获取默认 User-Agent
 	getDefaultUA func() string
+}
+
+// SetRecordPlayback 注入成功直链调用的记录能力。
+func (c *DirectLinkController) SetRecordPlayback(fn func(string, string, int, string, string, string)) {
+	c.recordPlayback = fn
 }
 
 func NewDirectLinkController() *DirectLinkController {
@@ -157,6 +163,11 @@ func (c *DirectLinkController) GetDirectLink(ctx *gin.Context) {
 	}
 
 	// 获取客户端 User-Agent
+	defer func() {
+		if c.recordPlayback != nil && ctx.Writer.Status() == http.StatusFound {
+			c.recordPlayback(decodedPath, pickcode, cloud115Id, ctx.Writer.Header().Get("Location"), ctx.ClientIP(), ctx.Request.Method)
+		}
+	}()
 	clientUA := ctx.GetHeader("User-Agent")
 	if clientUA == "" && c.getDefaultUA != nil {
 		clientUA = c.getDefaultUA()

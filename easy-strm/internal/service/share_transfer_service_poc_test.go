@@ -26,6 +26,8 @@ type fakeShareCloud115Client struct {
 	gotShareCode   string
 	gotReceiveCode string
 	gotDirID       string
+	gotDirIDs      []string
+	shareSnapByDir map[string]*driver.ShareSnapResp
 	// ReceiveShare 调用参数记录
 	gotReceiveShareFileIDs  string
 	gotReceiveShareFolderID string
@@ -74,6 +76,17 @@ func (f *fakeShareCloud115Client) GetShareSnap(shareCode, receiveCode, dirID str
 	f.gotShareCode = shareCode
 	f.gotReceiveCode = receiveCode
 	f.gotDirID = dirID
+	f.gotDirIDs = append(f.gotDirIDs, dirID)
+	if f.shareSnapByDir != nil {
+		if response := f.shareSnapByDir[dirID]; response != nil {
+			return response, f.shareSnapErr
+		}
+		return &driver.ShareSnapResp{}, f.shareSnapErr
+	}
+	// 未配置目录响应时，根目录之外按空目录处理，避免递归测试桩重复返回根目录。
+	if dirID != "0" {
+		return &driver.ShareSnapResp{}, f.shareSnapErr
+	}
 	f.snapCallCount++
 	// 模拟分页：第一页返回完整列表，后续页返回空列表（触发分页终止条件）
 	if f.snapCallCount > 1 {
@@ -99,6 +112,42 @@ func mustUnmarshalShareSnap(t *testing.T, rawJSON string) *driver.ShareSnapResp 
 		t.Fatalf("driver.ShareSnapResp 反序列化失败 — 与 115 真实 API 契约不匹配: %v", err)
 	}
 	return &snapResp
+}
+
+// TestFetchShareTree_MarksMediaBeforeAppend 验证剧集目录会以 media 类型返回，
+// 并且遍历止于季目录，不会继续请求季内文件。
+func TestFetchShareTree_MarksMediaBeforeAppend(t *testing.T) {
+	root := mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":1,"list":[{"cid":"category-1","n":"动漫 已经刮削整理 394部","fc":0}],"shareinfo":{"share_title":"动漫合集"}}}`)
+	category := mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":2,"list":[{"cid":"show-1","n":"剧集甲 (2020)","fc":0},{"cid":"show-2","n":"剧集乙 (2021)","fc":0}]}}`)
+	show1 := mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":1,"list":[{"cid":"season-1","n":"Season 1","fc":0}]}}`)
+	show2 := mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":1,"list":[{"fid":"video-1","n":"剧集乙.S01E01.mkv","fc":1,"s":"1024"}]}}`)
+	fake := &fakeShareCloud115Client{shareSnapByDir: map[string]*driver.ShareSnapResp{
+		"0":          root,
+		"category-1": category,
+		"show-1":     show1,
+		"show-2":     show2,
+	}}
+	service := &ShareTransferService{client: fake}
+
+	files, _, err := service.fetchAllShareFiles(context.Background(), "share-code", "pass")
+	if err != nil {
+		t.Fatalf("解析分享目录失败: %v", err)
+	}
+
+	media := map[string]bool{}
+	for _, file := range files {
+		if file.Type == "media" {
+			media[file.Name] = true
+		}
+	}
+	if !media["剧集甲 (2020)"] || !media["剧集乙 (2021)"] {
+		t.Fatalf("剧集目录未正确标记为 media: %#v", media)
+	}
+	for _, dirID := range fake.gotDirIDs {
+		if dirID == "season-1" {
+			t.Fatal("不应继续读取 Season 1 目录内容")
+		}
+	}
 }
 
 // 真实 115 share/snap 接口的响应样例（字段与线上抓包一致）
@@ -272,26 +321,26 @@ func TestParseShareLink_POC_ResponseJSON(t *testing.T) {
 }
 
 // TestParseShareLink_POC_FileTypeMapping 验证文件名后缀 → 领域类型映射
-// 新实现不再依赖 file_type 数字，而是根据扩展名判断：.mkv/.mp4→video,
-// .mp3/.flac→audio, .jpg/.png→image, 其他→other；目录项(cid非零)→folder
+// 根据 fc 判断文件/目录，再根据文件扩展名判断具体文件类型。
 func TestParseShareLink_POC_FileTypeMapping(t *testing.T) {
 	mappings := []struct {
 		name     string
 		fileName string
 		cid      string
+		isFile   int
 		expected string
 	}{
-		{"mkv视频", "movie.mkv", "0", "video"},
-		{"mp4视频", "movie.mp4", "0", "video"},
-		{"大写扩展名视频", "MOVIE.MKV", "0", "video"},
-		{"mp3音频", "song.mp3", "0", "audio"},
-		{"flac音频", "song.flac", "0", "audio"},
-		{"jpg图片", "photo.jpg", "0", "image"},
-		{"png图片", "photo.png", "0", "image"},
-		{"压缩包", "archive.zip", "0", "other"},
-		{"无扩展名", "README", "0", "other"},
-		{"文档", "notes.txt", "0", "other"},
-		{"目录", "纪录片合集", "987654", "folder"},
+		{"mkv视频", "movie.mkv", "0", 1, "video"},
+		{"mp4视频", "movie.mp4", "0", 1, "video"},
+		{"大写扩展名视频", "MOVIE.MKV", "0", 1, "video"},
+		{"mp3音频", "song.mp3", "0", 1, "audio"},
+		{"flac音频", "song.flac", "0", 1, "audio"},
+		{"jpg图片", "photo.jpg", "0", 1, "image"},
+		{"png图片", "photo.png", "0", 1, "image"},
+		{"压缩包", "archive.zip", "0", 1, "other"},
+		{"无扩展名", "README", "0", 1, "other"},
+		{"文档", "notes.txt", "0", 1, "other"},
+		{"目录", "纪录片合集", "987654", 0, "folder"},
 	}
 
 	for _, m := range mappings {
@@ -299,6 +348,7 @@ func TestParseShareLink_POC_FileTypeMapping(t *testing.T) {
 			f := driver.ShareFile{
 				FileName:   m.fileName,
 				CategoryID: driver.IntString(m.cid),
+				IsFile:     m.isFile,
 			}
 			result := convertToShareFileInfo(f)
 			if result.Type != m.expected {
@@ -310,7 +360,7 @@ func TestParseShareLink_POC_FileTypeMapping(t *testing.T) {
 }
 
 // TestParseShareLink_POC_ConvertFields 验证 convertToShareFileInfo 的字段转换规则
-// share/snap 接口不返回 pick_code 与路径：Path="" PickCode=""，IsDir 根据 CategoryID
+// share/snap 接口不返回 pick_code 与路径：Path="" PickCode=""，IsDir 根据 fc 判断。
 func TestParseShareLink_POC_ConvertFields(t *testing.T) {
 	snapResp := mustUnmarshalShareSnap(t, pocShareSnapJSON)
 
@@ -345,6 +395,42 @@ func TestParseShareLink_POC_ConvertFields(t *testing.T) {
 	}
 	if di.Type != "folder" {
 		t.Errorf("目录项 Type: 期望 folder, 实际 %s", di.Type)
+	}
+	if di.DirID != "987654" || di.Fid != "987654" {
+		t.Errorf("目录ID映射异常: DirID=%q Fid=%q", di.DirID, di.Fid)
+	}
+}
+
+// TestGetShareFilesLoadsDirectory 验证传入 dir_id 时直接请求该目录，而不是读取根目录缓存。
+func TestGetShareFilesLoadsDirectory(t *testing.T) {
+	childResp := mustUnmarshalShareSnap(t, `{
+		"state": true,
+		"data": {
+			"shareinfo": {"share_title": "测试分享"},
+			"count": 1,
+			"list": [{
+				"fid": "5566", "cid": 987654, "n": "movie.mkv",
+				"ico": "mkv", "s": 1024, "sha": "sha1", "fc": 1
+			}]
+		}
+	}`)
+	fakeClient := &fakeShareCloud115Client{
+		shareSnapByDir: map[string]*driver.ShareSnapResp{"987654": childResp},
+	}
+	svc := &ShareTransferService{client: fakeClient}
+
+	result, err := svc.GetShareFiles(context.Background(), "share-code", "pass-code", "987654", 1, 50, "", "")
+	if err != nil {
+		t.Fatalf("展开分享目录失败: %v", err)
+	}
+	if len(fakeClient.gotDirIDs) != 1 || fakeClient.gotDirIDs[0] != "987654" {
+		t.Fatalf("目录ID未传给115接口: %#v", fakeClient.gotDirIDs)
+	}
+	if fakeClient.gotReceiveCode != "pass-code" {
+		t.Fatalf("分享密码未透传: %q", fakeClient.gotReceiveCode)
+	}
+	if result.TotalFiles != 1 || len(result.Files) != 1 || result.Files[0].Name != "movie.mkv" {
+		t.Fatalf("目录子项返回异常: %#v", result)
 	}
 }
 
@@ -406,6 +492,15 @@ func TestParseShareLink_POC_ErrorResponses(t *testing.T) {
 	}
 }
 
+func TestIsRetryableShareSnapError(t *testing.T) {
+	if !isRetryableShareSnapError(fmt.Errorf("wsarecv: An existing connection was forcibly closed by the remote host")) {
+		t.Fatal("连接被重置应判定为可重试网络错误")
+	}
+	if isRetryableShareSnapError(fmt.Errorf("unexpected error: errno=990011 提取码错误")) {
+		t.Fatal("访问码错误不应重试")
+	}
+}
+
 // TestParseShareLink_POC_EndToEnd 验证 ParseShareLink 完整流程：
 // URL解析 → 调用 GetShareSnap(shareCode, password, "0") → 领域模型组装
 func TestParseShareLink_POC_EndToEnd(t *testing.T) {
@@ -428,8 +523,8 @@ func TestParseShareLink_POC_EndToEnd(t *testing.T) {
 	if fakeClient.gotReceiveCode != "demo1" {
 		t.Errorf("receiveCode: 期望 'demo1'（从URL提取）, 实际 '%s'", fakeClient.gotReceiveCode)
 	}
-	if fakeClient.gotDirID != "0" {
-		t.Errorf("dirID: 期望 '0'（根目录）, 实际 '%s'", fakeClient.gotDirID)
+	if len(fakeClient.gotDirIDs) == 0 || fakeClient.gotDirIDs[0] != "0" {
+		t.Errorf("dirID: 首次请求应为 '0'（根目录）, 实际 %#v", fakeClient.gotDirIDs)
 	}
 
 	// 验证领域模型

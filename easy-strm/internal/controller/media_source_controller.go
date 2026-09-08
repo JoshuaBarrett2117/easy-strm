@@ -93,6 +93,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 		Enabled            *bool  `json:"enabled"`
 		OrganizeTargetPath string `json:"organize_target_path"`
 		MediaType          string `json:"media_type"`
+		MetadataSource     string `json:"metadata_source"`
 		ConflictPolicy     string `json:"conflict_policy"`
 		OperationMode      string `json:"operation_mode"`
 		AutoOrganize       bool   `json:"auto_organize"`
@@ -141,6 +142,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 		enabled,
 		req.OrganizeTargetPath,
 		req.MediaType,
+		req.MetadataSource,
 		req.ConflictPolicy,
 		req.OperationMode,
 		req.AutoOrganize,
@@ -185,6 +187,7 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		Enabled            *bool   `json:"enabled"`
 		OrganizeTargetPath *string `json:"organize_target_path"`
 		MediaType          *string `json:"media_type"`
+		MetadataSource     *string `json:"metadata_source"`
 		ConflictPolicy     *string `json:"conflict_policy"`
 		OperationMode      *string `json:"operation_mode"`
 		AutoOrganize       *bool   `json:"auto_organize"`
@@ -252,6 +255,10 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 	if req.MediaType != nil {
 		mediaType = *req.MediaType
 	}
+	metadataSource := existingSource.MetadataSource
+	if req.MetadataSource != nil {
+		metadataSource = *req.MetadataSource
+	}
 
 	conflictPolicy := existingSource.ConflictPolicy
 	if req.ConflictPolicy != nil {
@@ -309,6 +316,7 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		enabled,
 		organizeTargetPath,
 		mediaType,
+		metadataSource,
 		conflictPolicy,
 		operationMode,
 		autoOrganize,

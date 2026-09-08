@@ -20,9 +20,11 @@ const (
 
 // OfflineDownloadSubmitRequest 115云下载提交请求
 type OfflineDownloadSubmitRequest struct {
-	Cloud115ID int      `json:"cloud115_id"` // 目标115账号ID
-	Directory  string   `json:"directory"`   // 保存目录路径（缺省为 /云下载，不存在时自动创建）
-	Urls       []string `json:"urls"`        // ed2k/magnet/http/https/ftp 链接列表
+	Cloud115ID int `json:"cloud115_id"` // 目标115账号ID
+	// DownloadCloud115ID 可选的实际云下载账号；未提供且目标账号无云下载权限时自动选择VIP/兼顾账号。
+	DownloadCloud115ID int      `json:"download_cloud115_id,omitempty"`
+	Directory          string   `json:"directory"` // 保存目录路径（缺省为 /云下载，不存在时自动创建）
+	Urls               []string `json:"urls"`      // ed2k/magnet/http/https/ftp 链接列表
 }
 
 // OfflineDownloadUrlResult 单个链接的提交结果

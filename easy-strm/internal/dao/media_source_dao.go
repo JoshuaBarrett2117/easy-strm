@@ -13,7 +13,7 @@ func NewMediaSourceDAO() *MediaSourceDAO {
 	return &MediaSourceDAO{}
 }
 
-const mediaSourceColumns = `id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time`
+const mediaSourceColumns = `id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time`
 
 func scanMediaSource(scanner interface{ Scan(...interface{}) error }) (*domain.MediaSource, error) {
 	source := &domain.MediaSource{}
@@ -21,7 +21,7 @@ func scanMediaSource(scanner interface{ Scan(...interface{}) error }) (*domain.M
 		&source.ID, &source.Name, &source.SourceType, &source.Path, &source.WatchPath,
 		&source.Cloud115ID, &source.Priority, &source.Enabled,
 		&source.OrganizeTargetPath,
-		&source.MediaType, &source.ConflictPolicy, &source.OperationMode,
+		&source.MediaType, &source.MetadataSource, &source.ConflictPolicy, &source.OperationMode,
 		&source.AutoOrganize, &source.WatchEnabled, &source.WatchInterval,
 		&source.EmbyLibraryID,
 		&source.CreateTime, &source.UpdateTime,
@@ -112,12 +112,12 @@ func (d *MediaSourceDAO) GetEnabled() ([]*domain.MediaSource, error) {
 	return list, nil
 }
 
-func (d *MediaSourceDAO) Create(name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
+func (d *MediaSourceDAO) Create(name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, metadataSource, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
 	source, err := scanMediaSource(DB.QueryRow(
-		`INSERT INTO t_media_source (name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		`INSERT INTO t_media_source (name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING `+mediaSourceColumns,
-		name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
+		name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, metadataSource, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
 	))
 	if err != nil {
 		return nil, fmt.Errorf("MediaSourceDAO[Create] 创建失败: %v", err)
@@ -125,12 +125,12 @@ func (d *MediaSourceDAO) Create(name, sourceType, path, watchPath string, cloud1
 	return source, nil
 }
 
-func (d *MediaSourceDAO) Update(id int, name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
+func (d *MediaSourceDAO) Update(id int, name, sourceType, path, watchPath string, cloud115ID *int, priority int, enabled bool, organizeTargetPath, mediaType, metadataSource, conflictPolicy, operationMode string, autoOrganize, watchEnabled bool, watchInterval int, embyLibraryID string) (*domain.MediaSource, error) {
 	source, err := scanMediaSource(DB.QueryRow(
-		`UPDATE t_media_source SET name=$2, source_type=$3, path=$4, watch_path=$5, cloud115_id=$6, priority=$7, enabled=$8, organize_target_path=$9, media_type=$10, conflict_policy=$11, operation_mode=$12, auto_organize=$13, watch_enabled=$14, watch_interval=$15, emby_library_id=$16
+		`UPDATE t_media_source SET name=$2, source_type=$3, path=$4, watch_path=$5, cloud115_id=$6, priority=$7, enabled=$8, organize_target_path=$9, media_type=$10, metadata_source=$11, conflict_policy=$12, operation_mode=$13, auto_organize=$14, watch_enabled=$15, watch_interval=$16, emby_library_id=$17
 		WHERE id=$1
 		RETURNING `+mediaSourceColumns,
-		id, name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
+		id, name, sourceType, path, watchPath, cloud115ID, priority, enabled, organizeTargetPath, mediaType, metadataSource, conflictPolicy, operationMode, autoOrganize, watchEnabled, watchInterval, embyLibraryID,
 	))
 	if err != nil {
 		if err == sql.ErrNoRows {

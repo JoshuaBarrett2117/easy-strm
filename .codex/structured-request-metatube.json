@@ -1,0 +1,8 @@
+{
+  "task_id": "metatube-source-20260902",
+  "date": "2026-09-02",
+  "executor": "Codex",
+  "goal": "在系统设置中配置本地 MetaTube，并让电影识别与刮削使用 MetaTube 数据。",
+  "scope": ["系统设置 UI", "配置持久化与热更新", "MetaTube 电影搜索与详情适配", "现有识别、缓存和 NFO 刮削复用", "本地自动测试"],
+  "acceptance": ["启用后电影搜索调用 /v1/movies/search", "详情调用 /v1/movies/{provider}/{id}", "MetaTube 数据可生成现有电影 NFO", "剧集继续使用 TMDB", "令牌不通过通用设置接口回显"]
+}

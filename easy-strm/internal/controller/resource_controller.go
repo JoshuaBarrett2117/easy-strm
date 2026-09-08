@@ -57,10 +57,11 @@ func (c *ResourceController) Parse(ctx *gin.Context) {
 }
 
 // GetFiles 获取分享文件列表（支持分页、筛选、搜索）
-// GET /v1/resource/115-share/files?share_code=xxx&password=xxx&page=1&page_size=50&type=video&keyword=xxx
+// GET /v1/resource/115-share/files?share_code=xxx&password=xxx&dir_id=xxx&page=1&page_size=50&type=video&keyword=xxx
 func (c *ResourceController) GetFiles(ctx *gin.Context) {
 	shareCode := ctx.Query("share_code")
 	password := ctx.Query("password")
+	dirID := ctx.DefaultQuery("dir_id", "0")
 
 	if shareCode == "" {
 		ErrorResp(ctx, http.StatusBadRequest, "请提供分享码")
@@ -73,7 +74,7 @@ func (c *ResourceController) GetFiles(ctx *gin.Context) {
 	keyword := ctx.Query("keyword")
 
 	result, err := c.shareTransferService.GetShareFiles(
-		ctx.Request.Context(), shareCode, password, page, pageSize, typeFilter, keyword,
+		ctx.Request.Context(), shareCode, password, dirID, page, pageSize, typeFilter, keyword,
 	)
 	if err != nil {
 		logger.Errorf("ResourceController[GetFiles] 获取文件列表失败: %v", err)
@@ -87,7 +88,9 @@ func (c *ResourceController) GetFiles(ctx *gin.Context) {
 // SubmitTransfer 提交转存任务
 // POST /v1/resource/115-share/transfer
 // 请求体: { share_code, password, target_cloud115_id, target_directory, files, conflict_strategy,
-//          auto_organize, auto_scrape, organize_source_id, organize_target_path }
+//
+//	auto_organize, auto_scrape, organize_source_id, organize_target_path }
+//
 // 说明：auto_organize/auto_scrape 由 ShouldBindJSON 自动接收；业务逻辑在 service 层处理（仅多写元数据字段，
 // 默认（false）时终态后不触发额外整理/刮削，行为与原版一致）。
 func (c *ResourceController) SubmitTransfer(ctx *gin.Context) {

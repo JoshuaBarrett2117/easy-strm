@@ -26,7 +26,7 @@ func (s *SystemConfigService) GetAll() ([]*domain.SystemConfig, error) {
 	}
 	filtered := make([]*domain.SystemConfig, 0, len(configs))
 	for _, config := range configs {
-		if config != nil && !isRemovedSystemConfigKey(config.ConfigKey) {
+		if config != nil && !isRemovedSystemConfigKey(config.ConfigKey) && config.ConfigKey != "metatube_token" {
 			filtered = append(filtered, config)
 		}
 	}
@@ -35,7 +35,7 @@ func (s *SystemConfigService) GetAll() ([]*domain.SystemConfig, error) {
 
 // GetByKey 按 Key 获取系统配置。
 func (s *SystemConfigService) GetByKey(key string) (*domain.SystemConfig, error) {
-	if isRemovedSystemConfigKey(key) {
+	if isRemovedSystemConfigKey(key) || key == "metatube_token" {
 		return nil, nil
 	}
 	return s.systemConfigDAO.GetByKey(key)
@@ -56,7 +56,7 @@ func (s *SystemConfigService) BatchUpsert(configs map[string]string) map[string]
 		if isRemovedSystemConfigKey(key) {
 			continue
 		}
-		if err := s.systemConfigDAO.Upsert(key, value); err == nil {
+		if err := s.systemConfigDAO.Upsert(key, value); err == nil && key != "metatube_token" {
 			updated[key] = value
 		}
 	}

@@ -25,6 +25,7 @@ export const deleteEmbyServer = serverId => api.delete(`/emby/servers/${serverId
 export const testEmbyServer = serverId => api.post(`/emby/servers/${serverId}/test`)
 
 export const getEmbyUsers = serverId => api.get(`/emby/servers/${serverId}/users`)
+export const getEmbyUserLibraries = serverId => api.get(`/emby/servers/${serverId}/user-libraries`)
 export const createEmbyUser = (serverId, data) => api.post(`/emby/servers/${serverId}/users`, data)
 export const updateEmbyUser = (serverId, userId, data) => api.put(`/emby/servers/${serverId}/users/${userId}`, data)
 export const setEmbyUserPassword = (serverId, userId, data) => api.put(`/emby/servers/${serverId}/users/${userId}/password`, data)
@@ -37,6 +38,7 @@ export const uploadEmbyUserAvatar = (serverId, userId, file) => {
 }
 
 export const getManagedEmbyLibraries = serverId => api.get(`/emby/servers/${serverId}/libraries`)
+export const getEmbyLibraryCover = (serverId, libraryId) => api.get(`/emby/servers/${serverId}/libraries/${libraryId}/cover`, { responseType: 'blob', skipGlobalErrorMessage: true })
 export const createEmbyLibrary = (serverId, data) => api.post(`/emby/servers/${serverId}/libraries`, data)
 export const updateEmbyLibrary = (serverId, libraryId, data) => api.put(`/emby/servers/${serverId}/libraries/${libraryId}`, data)
 export const deleteEmbyLibrary = (serverId, libraryId, name) => api.delete(`/emby/servers/${serverId}/libraries/${libraryId}`, { params: { name } })

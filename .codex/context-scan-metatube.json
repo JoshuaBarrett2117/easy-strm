@@ -1,0 +1,15 @@
+{
+  "task_id": "metatube-source-20260902",
+  "date": "2026-09-02",
+  "executor": "Codex",
+  "location": {
+    "frontend": "easy-strm-front/src/views/Settings.vue",
+    "recognition": "easy-strm/internal/service/tmdb_service.go",
+    "scrape": "easy-strm/internal/service/scrape_service.go",
+    "assembly": "easy-strm/auth.go"
+  },
+  "existing_patterns": ["TMDB Service 统一承载搜索与详情", "ScrapeService 从识别缓存生成 NFO 和图片", "系统设置使用 t_system_config 通用键值存储"],
+  "external_contract": ["GET /v1/movies/search?q={query}&fallback=true", "GET /v1/movies/{provider}/{id}?lazy=true"],
+  "sufficiency": {"interface_contract": true, "technical_choice": true, "risks": true, "verification": true},
+  "risks": ["MetaTube 使用字符串 ID，现有链路使用整数 TMDB ID；通过稳定合成 ID 兼容并额外透传 source/provider/id", "MetaTube 官方服务仅提供电影元数据，剧集保留 TMDB"]
+}

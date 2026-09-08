@@ -178,7 +178,7 @@ const handleParse = async () => {
     }
     state.value = 'parsed'
     parseProgress.value = 100
-    emit('parsed', parsedData.value)
+    emit('parsed', parsedData.value, password.value)
   } catch (err) {
     stopProgressAnimation()
     clearTimeout(parseTimeout)

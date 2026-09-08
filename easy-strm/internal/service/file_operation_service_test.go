@@ -85,10 +85,10 @@ func expectFileOperationMediaSourceByID(mock sqlmock.Sqlmock, id int, sourceType
 	if cloud115ID != nil {
 		cloud115Value = *cloud115ID
 	}
-	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
-		AddRow(id, fmt.Sprintf("source-%d", id), sourceType, path, path, cloud115Value, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
+	rows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(id, fmt.Sprintf("source-%d", id), sourceType, path, path, cloud115Value, 10, true, "", "all", "auto", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(id).
 		WillReturnRows(rows)
@@ -116,10 +116,10 @@ func TestFileOperationServiceRenameLocalPreservesExtension(t *testing.T) {
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	fileSvc := NewFileOperationService(mediaSvc, nil)
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
+	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(1).
 		WillReturnRows(sourceRows)
@@ -152,10 +152,10 @@ func TestFileOperationServiceDeleteLocal(t *testing.T) {
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	fileSvc := NewFileOperationService(mediaSvc, nil)
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
-		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
+	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(1, "movies", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(1).
 		WillReturnRows(sourceRows)
@@ -192,10 +192,10 @@ func TestFileOperationServiceDeleteLocalDirectory(t *testing.T) {
 	mediaSvc := NewMediaSourceService(dao.NewMediaSourceDAO(), nil)
 	fileSvc := NewFileOperationService(mediaSvc, nil)
 	now := time.Now()
-	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
-		AddRow(1, "shows", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "skip", "move", false, false, 60, "", now, now)
+	sourceRows := sqlmock.NewRows([]string{"id", "name", "source_type", "path", "watch_path", "cloud115_id", "priority", "enabled", "organize_target_path", "media_type", "metadata_source", "conflict_policy", "operation_mode", "auto_organize", "watch_enabled", "watch_interval", "emby_library_id", "create_time", "update_time"}).
+		AddRow(1, "shows", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 60, "", now, now)
 
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, name, source_type, path, watch_path, cloud115_id, priority, enabled, organize_target_path, media_type, metadata_source, conflict_policy, operation_mode, auto_organize, watch_enabled, watch_interval, emby_library_id, create_time, update_time
 		FROM t_media_source WHERE id = $1`)).
 		WithArgs(1).
 		WillReturnRows(sourceRows)

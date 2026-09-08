@@ -539,7 +539,7 @@ func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domai
 		fileName := filepath.Base(fileID)
 
 		// TMDB 识别
-		identifyResult, err := s.tmdbService.IdentifyFileWithPath(fileID)
+		identifyResult, err := s.tmdbService.IdentifyFileWithPathBySource(fileID, source.MetadataSource)
 		if err != nil {
 			logger.Warnf("OrganizeService[BatchIdentify] 识别失败: %s, error: %v", fileName, err)
 			results = append(results, domain.TmdbIdentifyResult{

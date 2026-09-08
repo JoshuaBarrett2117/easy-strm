@@ -263,3 +263,63 @@
 - `docker compose -f docker-compose.yml config --images` 复现 `/easy-strm:latest` 无效默认镜像引用；已作为 RQ-05 P0 验收输入记录，不代表现状修复。
 - 未执行会向真实 115、Emby、通知渠道或用户媒体目录写入的 live E2E；本轮只读审计不应产生这些外部副作用。
 - 审查综合评分 97/100，结论：通过，可进入实施拆分。
+
+# 2026-09-05 日志优化
+正常文件浏览轮询与内部路径解析不再污染默认 INFO 日志，失败和业务结果日志保留。
+
+## 2026-09-07 Emby 用户媒体库权限（Codex）
+- 根因：用户权限选项复用 VirtualFolders.ItemId；官方 SelectableMediaFolders 同时返回 Id 和 Guid，EnabledFolders 应使用权限 Guid。
+- 实施：新增 user-libraries 控制器/API/领域返回结构；用户弹窗显示名称并选择 Guid；后端规范化旧数字 ID、保留未编辑的 Policy 字段、写入后回读；恢复全部媒体库开关的明确语义。
+- 工具与过程：functions.exec/rg/Get-Content 检索 Service、Controller、API、Vue 和现有测试；Invoke-WebRequest 读取官方文档；apply_patch 小步修改；go test 先复现原样传数字 ID、遗漏策略字段、未回读造成假成功，再验证修复；Playwright 验证页面交互。
+- 工具降级：sequential-thinking、shrimp-task-manager、code-index、exa 不在工具目录中，使用本地分析、rg 和官方文档 HTTP 请求。
+- 初次浏览器测试失败：3001 未提供可连接前端；启动独立 3017 Vite。后续发现通配 API 拦截误匹配 src/utils/api 模块，限制为 /api/ 根路径后通过。
+- 验证：go test ./... 通过；新增 Service 权限往返 6 场景、选项查询 3 场景、Controller 3 场景通过；浏览器 7 场景通过；npm run build 通过（已有大块警告）。
+- 浏览器场景：名称回显、Guid 提交、保存后重开、全部媒体库、空范围、旧数字 ID、保存失败保留弹窗。截图：debug/emby-user-access/names-after-save.png。
+- 限制：Go 测试使用 httptest/sqlmock/miniredis；浏览器使用可回读模拟接口，未联调或修改真实 Emby 用户。需要部署更新的前后端才能使用新接口。
+
+## 2026-09-07 23:20 Emby 真实实例权限闭环（Codex）
+- 直接读取当前实例 users/accesstab.js：原生选项使用 folder.Guid || folder.Id，并通过 EnabledFolders.includes(folderId) 判断勾选。
+- 真实只读诊断：115tv 仍存储 [127953,127954,127956,127955]；BlockedMediaFolders=null、ExcludedSubFolders=[]，故本次不是排除字段冲突。
+- 真实映射：127953=电视剧STRM、127954=电影STRM、127956=动漫电影STRM、127955=动漫STRM。
+- 新增显式环境变量触发的 TestEmbyUserAccessLiveRepair，默认全量测试跳过真实写入。使用真实服务器凭据（仅内存）、现有 Service 和模拟任务存储修复原有四项 ID，不扩大范围。首次测试夹具误用了 test-key 导致 401（写入前失败），改为真实连接凭据后通过。
+- 真实验证：Service UpdateUser 保存回读通过；刷新 Emby 原生页面，4 个 chkFolder.checked 均为 true。
+- 再次通过真实 localhost:3001 easy-strm 页面打开 115tv，四项显示媒体库名称；点击保存后弹窗关闭；刷新真实 Emby 页面仍勾选相同四项。证明当前运行中的前后端链路已生效。
+- go test ./... 通过；本轮未改前端生产代码，未重复构建。
+- 结论修正：之前仅修复代码未迁移 Emby 已保存的错误数字 ID，不能将模拟测试通过宣称为真实用户问题已解决。本次已完成真实数据修复与 UI 验证。
+- 工具：rg/Get-Content 检索；Invoke-WebRequest 读取部署版本公开 JS；Go 读取已配置实例及目标权限；cua_repl 读取原生 checkbox data-id、刷新并核对 checked 状态，以及真实 easy-strm 保存操作。
+
+## 分享脱敏目录统计（2026-09-08，Codex）
+- 名称含连续半角或全角星号的目录不下探、不识别；解析结果通过 masked_directories 单独携带统计目录。
+- 复用分享媒体记录保存脱敏路径；同名路径按出现次数补齐，重复扫描不累加。列表服务归一化历史脱敏项为 masked，并返回 masked_count。
+- 总数包含脱敏项；脱敏项不计入已识别、失败、待识别。全脱敏分享任务正常完成。
+- 本地验证：go test ./... 通过；npm run build 通过（存在大于 500 kB 的构建分块提示）。回归覆盖扫描跳过、同名计数、重复扫描、历史状态归一化、数据库错误、全脱敏任务完成。
+- 测试过程：先复现解析结果缺失脱敏统计；新增任务测试适配已有 Redis 全局初始化以及工作区新增 media_type 字段后通过。
+- 工具：functions.exec / exec_command 用于 rg、读取、gofmt、测试和构建；apply_patch 用于代码与测试修改。指定 sequential-thinking、shrimp-task-manager、code-index 不可用，采用本地分析与 rg。
+- 原始输出：.codex/share-masked-go-test.log、.codex/share-masked-build.log。未进行线上分享调用和浏览器端到端验证。
+
+## 批量导入分享按钮修复（2026-09-08，Codex）
+- 根因：ShareRecords.vue 缺失 batchImportShow 对应弹窗；原拆行正则错误匹配字面量反斜杠。
+- 实现：补全输入、取消与提交弹窗，修复换行拆分、连续链接名称误用；提交期间禁止重复操作，部分失败保留未完成项供重试，成功后刷新列表。
+- 验证：node scripts/e2e-share-batch-import.mjs 通过，覆盖打开/取消、无链接、CRLF/LF、名称、列表刷新、失败恢复和窄屏；使用模拟 API，无真实数据写入。npm run build 通过（4848 modules，既有大分块提示）。仅前端修改，未运行后端测试。
+- 复现：先修正测试夹具误拦截 src/utils/api 模块的问题，再确认修改前点击后等待弹窗超时；修复后全场景通过。
+- 审查：通过；技术/需求/综合评分 94/96/95。复用 Naive UI 与既有 API，无新增依赖。真实后端导入未验证；名称支持链接上一行，访问码需与链接同一行，已在输入提示注明。
+- 工具记录：functions.exec/exec_command 执行 git status、rg、Get-Content、Vite、Playwright、npm run build、git diff --check；apply_patch 写入上下文、回归和弹窗；Python 定点替换原单行函数及追加记录。sequential-thinking、shrimp-task-manager、code-index 不可用，使用本地分析与 rg。
+- git diff --check 发现既有 .codex/testing.md:829 尾随空格，本次未改动该历史内容。保留工作区其他改动。
+
+## 混合分享解析及预览导入（2026-09-08，Codex）
+- 已完成：domain响应、Service纯解析、控制器与路由、API封装、独立ShareImportDialog、单元/控制器/浏览器测试及长期文档。
+- 关键决策：按当前文本分享编号去重；URL移除密码查询并独立保存访问码，避免预览修改密码后被URL旧值覆盖；歧义与冲突默认不选，已成功项锁定。
+- 验证：go test ./... 全部通过（easy-strm、controller、dao、domain、logger、service）；Playwright全部通过；npm run build通过（4850模块，既有大分块提示）。构建完整输出见 .codex/share-import-build.log。
+- 失败及修复：浏览器初次断言使用原生disabled判定Naive UI checkbox，改为其实际disabled类后通过；后端新增块边界回归先复现结束标记后标题被吞，修复只消费到访问码/复制结束行后通过。
+- 审查：通过；技术94、需求96、综合95。前后名称冲突保留候选；导入失败保留状态；解析与导入保持分层，无新依赖和数据库变更。API夹具验证未调用真实网盘；未部署。
+- 工具留痕：functions.exec / exec_command 执行 Get-Content、rg、gofmt、go test、node Playwright、npm run build、git diff --check；apply_patch 创建和更新代码/测试/结构化需求；Python 定点替换页面旧弹窗/函数及追加文档。指定思考/规划/索引MCP不可用，使用本地分析及rg。保留所有已有工作区变更。
+
+## GitHub main 提交验证（2026-09-08，Codex）
+- 请求：提交当前全部代码及配套文档变更并推送 origin/main，用户已明确授权。
+- 上下文：当前分支 main；git fetch origin 成功，HEAD 与 origin/main 提交前一致。范围为分享管理与批量导入、Emby 用户权限与媒体库、播放记录、MetaTube 元数据、日志及对应测试文档。
+- 工具降级：sequential-thinking、shrimp-task-manager、code-index 当前不可用；采用本地分析、Git 与 rg。计划为检查范围、运行本地验证、提交全部变更、正常推送并核对远程。
+- 验证：go test ./... 全包通过；npm run build 通过，仅既有大分块提示。完整输出：.codex/github-main-go-test.log、.codex/github-main-build.log。
+- 浏览器：node scripts/e2e-share-batch-import.mjs 与 node scripts/e2e-emby-user-access.mjs 均通过，使用本地页面及模拟 API，未验证真实外部服务。
+- 修正：修复 testing.md 中断裂的 npm 命令及尾随空白。
+- 工具留痕：functions.exec 调用 exec_command 执行 Git 状态/分支/远程/fetch/diff/log、rg、Get-Content、Go 测试、前端构建及两项 Playwright；write_stdin 获取测试结果；apply_patch 修正文档。后续执行 git add/commit/push 与远程哈希核对。
+- 审查：提交范围与请求一致，本地基线及两项相关回归通过；本次为提交前验证，未重新逐行审计全部历史功能。

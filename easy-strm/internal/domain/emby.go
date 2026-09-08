@@ -41,6 +41,13 @@ type EmbyUser struct {
 	Policy                EmbyUserPolicy `json:"Policy"`
 }
 
+// EmbyUserLibrary 表示用户权限可选媒体库，权限使用 Guid，媒体操作使用 ItemID。
+type EmbyUserLibrary struct {
+	ID     string `json:"id"`
+	ItemID string `json:"item_id"`
+	Name   string `json:"name"`
+}
+
 // EmbyMediaPath 表示 Emby 媒体库中的一个媒体目录。
 type EmbyMediaPath struct {
 	Path string `json:"Path"`

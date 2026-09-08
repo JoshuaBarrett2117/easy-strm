@@ -201,6 +201,40 @@ a {
   backdrop-filter: blur(20px);
 }
 
+.system-logs-modal {
+  width: min(1100px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+}
+
+.system-logs-modal .n-card__content {
+  overflow: hidden;
+}
+
+.system-logs-panel {
+  height: calc(100vh - 112px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.system-logs-panel > .surface-card:last-child {
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.system-logs-content {
+  height: 100%;
+  display: block;
+}
+
+.system-logs-text {
+  height: calc(100vh - 300px);
+  max-height: calc(100vh - 300px);
+  min-height: 0;
+  overflow-y: scroll;
+}
+
 .n-data-table {
   overflow: hidden;
   border: 1px solid var(--line);

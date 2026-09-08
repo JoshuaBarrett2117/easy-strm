@@ -120,6 +120,28 @@ func (s *TaskService) GetUnified() ([]map[string]interface{}, error) {
 	return tasks, nil
 }
 
+// RecoverInterruptedTasks 将服务重启后没有执行协程承接的任务标记为失败，避免任务永久停留在待执行/执行中。
+func (s *TaskService) RecoverInterruptedTasks() {
+	tasks, err := s.taskRedisDAO.GetUnified()
+	if err != nil {
+		logger.Warnf("TaskService[RecoverInterruptedTasks] 读取任务失败: %v", err)
+		return
+	}
+	for _, task := range tasks {
+		status, _ := task["status"].(string)
+		if status != "pending" && status != "running" {
+			continue
+		}
+		taskID, _ := task["task_id"].(string)
+		if taskID == "" {
+			continue
+		}
+		if err := s.SetError(taskID, "服务重启导致任务中断，请重新执行"); err != nil {
+			logger.Warnf("TaskService[RecoverInterruptedTasks] task=%s 更新失败: %v", taskID, err)
+		}
+	}
+}
+
 // Cancel 取消任务（设置Redis取消标记 + 调用context cancel + 更新状态）
 func (s *TaskService) Cancel(taskID string) error {
 	// 先调用 context cancel 中断实际运行的 goroutine

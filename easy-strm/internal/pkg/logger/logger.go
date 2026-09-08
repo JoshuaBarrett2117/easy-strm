@@ -2,6 +2,7 @@ package logger
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"runtime"
 	"time"
@@ -25,13 +26,26 @@ var levelNames = map[Level]string{
 
 var currentLevel = INFO
 
+var debugLogger = log.Default()
+var infoLogger = log.Default()
+var warnLogger = log.Default()
+var errorLogger = log.Default()
+
+// SetOutputs 在应用启动时接入现有日志文件与控制台输出，使服务日志可在系统日志页面查看。
+func SetOutputs(debugOutput, infoOutput, warnOutput, errorOutput io.Writer) {
+	debugLogger = log.New(debugOutput, "", 0)
+	infoLogger = log.New(infoOutput, "", 0)
+	warnLogger = log.New(warnOutput, "", 0)
+	errorLogger = log.New(errorOutput, "", 0)
+}
+
 func SetLevel(level Level) {
 	currentLevel = level
 }
 
 func Debug(format string, v ...interface{}) {
 	if currentLevel <= DEBUG {
-		log.Printf("[%s] [DEBUG] %s %s", time.Now().Format("2006-01-02 15:04:05"), formatCaller(), fmt.Sprintf(format, v...))
+		debugLogger.Printf("[DEBUG] %s %s %s", time.Now().Format("2006-01-02 15:04:05"), formatCaller(), fmt.Sprintf(format, v...))
 	}
 }
 
@@ -41,7 +55,7 @@ func Debugf(format string, v ...interface{}) {
 
 func Info(format string, v ...interface{}) {
 	if currentLevel <= INFO {
-		log.Printf("[%s] [INFO] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
+		infoLogger.Printf("[INFO] %s %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
 	}
 }
 
@@ -51,7 +65,7 @@ func Infof(format string, v ...interface{}) {
 
 func Warn(format string, v ...interface{}) {
 	if currentLevel <= WARN {
-		log.Printf("[%s] [WARN] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
+		warnLogger.Printf("[WARN] %s %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
 	}
 }
 
@@ -61,7 +75,7 @@ func Warnf(format string, v ...interface{}) {
 
 func Error(format string, v ...interface{}) {
 	if currentLevel <= ERROR {
-		log.Printf("[%s] [ERROR] %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
+		errorLogger.Printf("[ERROR] %s %s", time.Now().Format("2006-01-02 15:04:05"), fmt.Sprintf(format, v...))
 	}
 }
 

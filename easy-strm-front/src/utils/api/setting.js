@@ -28,6 +28,12 @@ export const updateSettings = (settings, options = {}) => {
   })
 }
 
+export const testMdcConnection = (url, options = {}) => request('/settings/mdc/test', {
+  method: 'POST',
+  data: { url },
+  skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+})
+
 export const testNetworkConnectivity = (options = {}) => {
   return request('/network/test', {
     data: options,

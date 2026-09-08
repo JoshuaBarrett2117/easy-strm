@@ -19,12 +19,17 @@ import (
 // TmdbService TMDB 服务
 // 负责与 TMDB API 交互，提供媒体信息识别功能
 type TmdbService struct {
-	apiKey       string
-	baseURL      string
-	imageBaseURL string
-	language     string
-	cacheDAO     *dao.TmdbCacheDAO
-	httpClient   *http.Client
+	apiKey                 string
+	baseURL                string
+	imageBaseURL           string
+	language               string
+	cacheDAO               *dao.TmdbCacheDAO
+	httpClient             *http.Client
+	metatubeURL            string
+	metatubeToken          string
+	metatubeDefaultEnabled bool
+	adultContentEnabled    bool
+	metatubeRefs           sync.Map
 
 	filenameRuleMu        sync.RWMutex
 	filenameRuleStore     FilenameRecognitionRuleStore
@@ -59,6 +64,32 @@ func NewTmdbService(apiKey string, cacheDAO *dao.TmdbCacheDAO) *TmdbService {
 func (s *TmdbService) SetAPIKey(apiKey string) {
 	s.apiKey = strings.TrimSpace(apiKey)
 }
+
+// SetMetaTubeConfig 设置本地 MetaTube 服务地址及可选访问令牌。
+func (s *TmdbService) SetMetaTubeConfig(baseURL, token string) {
+	s.metatubeURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	s.metatubeToken = strings.TrimSpace(token)
+}
+
+// MetaTubeEnabled 返回是否已配置本地 MetaTube 地址。
+func (s *TmdbService) MetaTubeEnabled() bool { return s.metatubeURL != "" }
+
+// SetMetaTubeDefaultEnabled 设置自动策略是否默认选择 MetaTube。
+func (s *TmdbService) SetMetaTubeDefaultEnabled(enabled bool) { s.metatubeDefaultEnabled = enabled }
+
+// SetAdultContentEnabled 设置是否允许成人内容识别及 MetaTube 数据源。
+func (s *TmdbService) SetAdultContentEnabled(enabled bool) {
+	s.adultContentEnabled = enabled
+	if !enabled {
+		s.metatubeDefaultEnabled = false
+	}
+}
+
+// AdultContentEnabled 返回成人内容能力是否已显式启用。
+func (s *TmdbService) AdultContentEnabled() bool { return s.adultContentEnabled }
+
+// GetMetaTubeConfig 返回当前进程中的 MetaTube 配置，供设置热更新保留未填写的令牌。
+func (s *TmdbService) GetMetaTubeConfig() (string, string) { return s.metatubeURL, s.metatubeToken }
 
 // SetLanguage 设置语言
 // 参数:
@@ -103,6 +134,43 @@ func (s *TmdbService) GetLanguage() string {
 //   - []domain.TmdbSearchResult: 搜索结果列表
 //   - error: 错误信息
 func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchResult, error) {
+	return s.SearchMovieBySource(query, year, domain.MetadataSourceAuto)
+}
+
+// SearchMovieBySource 按指定元数据来源搜索电影。
+func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource string) ([]domain.TmdbSearchResult, error) {
+	metadataSource = normalizeMetadataSourcePolicy(metadataSource)
+	if metadataSource == domain.MetadataSourceMetaTube || (metadataSource == domain.MetadataSourceAuto && s.metatubeDefaultEnabled && s.MetaTubeEnabled()) {
+		if !s.adultContentEnabled {
+			return nil, fmt.Errorf("成人内容识别未启用，请先在系统设置中二次确认开启")
+		}
+		if !s.MetaTubeEnabled() {
+			return nil, fmt.Errorf("MetaTube 未启用或服务地址未配置")
+		}
+		return s.searchMetaTube(query, year, "movie")
+	}
+	return s.searchMovieTMDB(query, year)
+}
+
+// GetMovieDetailBySource 按识别结果携带的来源获取电影详情。
+// MetaTube 使用 provider/id 作为稳定标识；缺少原始标识时回退到搜索阶段缓存的合成 ID 映射。
+func (s *TmdbService) GetMovieDetailBySource(tmdbID int, metadataSource, metadataID, metadataProvider string) (map[string]interface{}, error) {
+	if normalizeMetadataSourcePolicy(metadataSource) == domain.MetadataSourceMetaTube || metadataID != "" || metadataProvider != "" {
+		if metadataID == "" || metadataProvider == "" {
+			if value, ok := s.metatubeRefs.Load(tmdbID); ok {
+				ref := value.(metaTubeRef)
+				metadataProvider, metadataID = ref.Provider, ref.ID
+			}
+		}
+		if metadataID == "" || metadataProvider == "" {
+			return nil, fmt.Errorf("MetaTube 识别结果缺少 provider 或 id")
+		}
+		return s.metaTubeDetail(metaTubeRef{Provider: metadataProvider, ID: metadataID})
+	}
+	return s.GetMovieDetail(tmdbID)
+}
+
+func (s *TmdbService) searchMovieTMDB(query string, year int) ([]domain.TmdbSearchResult, error) {
 	if !s.HasUsableAPIKey() {
 		return nil, fmt.Errorf("TMDB API Key 未配置或已失效，请重新填写真实的 API Key")
 	}
@@ -166,17 +234,18 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 			year, _ = strconv.Atoi(movie.ReleaseDate[:4])
 		}
 		results = append(results, domain.TmdbSearchResult{
-			TmdbID:        movie.ID,
-			Title:         movie.Title,
-			OriginalTitle: movie.OriginalTitle,
-			Year:          year,
-			PosterPath:    s.getImageURL(movie.PosterPath),
-			Overview:      movie.Overview,
-			VoteAverage:   movie.VoteAverage,
-			MediaType:     "movie",
-			ReleaseDate:   movie.ReleaseDate,
-			GenreIDs:      movie.GenreIDs,
-			Language:      movie.OriginalLanguage,
+			TmdbID:         movie.ID,
+			Title:          movie.Title,
+			OriginalTitle:  movie.OriginalTitle,
+			Year:           year,
+			PosterPath:     s.getImageURL(movie.PosterPath),
+			Overview:       movie.Overview,
+			VoteAverage:    movie.VoteAverage,
+			MediaType:      "movie",
+			ReleaseDate:    movie.ReleaseDate,
+			GenreIDs:       movie.GenreIDs,
+			Language:       movie.OriginalLanguage,
+			MetadataSource: domain.MetadataSourceTMDB,
 		})
 	}
 
@@ -258,18 +327,19 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 			year, _ = strconv.Atoi(tv.FirstAirDate[:4])
 		}
 		results = append(results, domain.TmdbSearchResult{
-			TmdbID:        tv.ID,
-			Title:         tv.Name,
-			OriginalTitle: tv.OriginalName,
-			Year:          year,
-			PosterPath:    s.getImageURL(tv.PosterPath),
-			Overview:      tv.Overview,
-			VoteAverage:   tv.VoteAverage,
-			MediaType:     "tv",
-			FirstAirDate:  tv.FirstAirDate,
-			GenreIDs:      tv.GenreIDs,
-			Countries:     tv.OriginCountry,
-			Language:      tv.OriginalLanguage,
+			TmdbID:         tv.ID,
+			Title:          tv.Name,
+			OriginalTitle:  tv.OriginalName,
+			Year:           year,
+			PosterPath:     s.getImageURL(tv.PosterPath),
+			Overview:       tv.Overview,
+			VoteAverage:    tv.VoteAverage,
+			MediaType:      "tv",
+			FirstAirDate:   tv.FirstAirDate,
+			GenreIDs:       tv.GenreIDs,
+			Countries:      tv.OriginCountry,
+			Language:       tv.OriginalLanguage,
+			MetadataSource: domain.MetadataSourceTMDB,
 		})
 	}
 
@@ -288,6 +358,10 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 //   - *domain.TmdbIdentifyResult: 识别结果（含 Candidates）
 //   - error: 错误信息
 func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult, error) {
+	return s.getCandidates(filename, domain.MetadataSourceAuto)
+}
+
+func (s *TmdbService) getCandidates(filename, metadataSource string) (*domain.TmdbIdentifyResult, error) {
 	logger.Infof("TmdbService[GetCandidates] 开始获取候选: %s", filename)
 
 	parsed := s.parseFilename(filename)
@@ -309,7 +383,7 @@ func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult
 	}
 
 	// 始终搜索 TMDB，不读缓存，确保返回最新候选
-	candidates, err := s.searchCandidatesWithFallback(parsed)
+	candidates, err := s.searchCandidatesWithFallback(parsed, metadataSource)
 
 	if err != nil {
 		result.Success = false
@@ -330,7 +404,11 @@ func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult
 	result.Title = best.Title
 	result.OriginalTitle = best.OriginalTitle
 	result.Year = best.Year
+	result.PosterPath = best.PosterPath
 	result.Candidates = candidates
+	result.MetadataSource = best.MetadataSource
+	result.MetadataID = best.MetadataID
+	result.MetadataProvider = best.MetadataProvider
 
 	logger.Infof("TmdbService[GetCandidates] 获取候选成功: title=%s, candidates=%d, type=%s",
 		result.Title, len(candidates), result.MediaType)
@@ -343,6 +421,11 @@ func (s *TmdbService) GetCandidatesWithPath(filePath string) (*domain.TmdbIdenti
 	return s.GetCandidates(filePath)
 }
 
+// GetCandidatesWithPathBySource 按元数据来源获取候选结果。
+func (s *TmdbService) GetCandidatesWithPathBySource(filePath, metadataSource string) (*domain.TmdbIdentifyResult, error) {
+	return s.getCandidates(filePath, metadataSource)
+}
+
 // IdentifyFile 识别文件，自动判断是电影还是剧集
 // 参数:
 //   - filename: 文件名
@@ -351,10 +434,18 @@ func (s *TmdbService) GetCandidatesWithPath(filePath string) (*domain.TmdbIdenti
 //   - *domain.TmdbIdentifyResult: 识别结果
 //   - error: 错误信息
 func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult, error) {
+	return s.identifyFile(filename, domain.MetadataSourceAuto)
+}
+
+func (s *TmdbService) identifyFile(filename, metadataSource string, mediaTypes ...string) (*domain.TmdbIdentifyResult, error) {
 	logger.Infof("TmdbService[IdentifyFile] 开始识别文件: %s", filename)
+	metadataSource = normalizeMetadataSourcePolicy(metadataSource)
 
 	// 解析文件名
 	parsed := s.parseFilename(filename)
+	if len(mediaTypes) > 0 && (mediaTypes[0] == "movie" || mediaTypes[0] == "tv") {
+		parsed.MediaType = mediaTypes[0]
+	}
 
 	result := &domain.TmdbIdentifyResult{
 		Filename:      filename,
@@ -374,25 +465,29 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 	}
 
 	// 检查缓存
-	cacheKey := s.buildCacheKey(filename, parsed.MediaType)
-	if cache, err := s.cacheDAO.GetByQueryKey(cacheKey, parsed.MediaType); err == nil && cache != nil {
-		result.Success = true
-		result.TmdbID = cache.TmdbID
-		result.Title = cache.Title
-		result.OriginalTitle = cache.OriginalTitle
-		result.Year = cache.Year
-		if cache.SeasonNumber > 0 {
-			result.SeasonNumber = cache.SeasonNumber
+	cacheKey := s.buildCacheKeyForSource(filename, parsed.MediaType, metadataSource)
+	if s.cacheDAO != nil {
+		if cache, err := s.cacheDAO.GetByQueryKey(cacheKey, parsed.MediaType); err == nil && cache != nil {
+			result.Success = true
+			result.TmdbID = cache.TmdbID
+			result.Title = cache.Title
+			result.OriginalTitle = cache.OriginalTitle
+			result.Year = cache.Year
+			result.PosterPath = cache.PosterPath
+			if cache.SeasonNumber > 0 {
+				result.SeasonNumber = cache.SeasonNumber
+			}
+			if cache.EpisodeNumber > 0 {
+				result.EpisodeNumber = cache.EpisodeNumber
+			}
+			s.enrichCachedIdentifyMetadata(result, cache)
+			logger.Infof("TmdbService[IdentifyFile] 使用缓存: title=%s, tmdb_id=%d", result.Title, result.TmdbID)
+			return result, nil
 		}
-		if cache.EpisodeNumber > 0 {
-			result.EpisodeNumber = cache.EpisodeNumber
-		}
-		logger.Infof("TmdbService[IdentifyFile] 使用缓存: title=%s, tmdb_id=%d", result.Title, result.TmdbID)
-		return result, nil
 	}
 
 	// 搜索 TMDB
-	candidates, err := s.searchCandidatesWithFallback(parsed)
+	candidates, err := s.searchCandidatesWithFallback(parsed, metadataSource)
 
 	if err != nil {
 		result.Success = false
@@ -413,7 +508,11 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 	result.Title = best.Title
 	result.OriginalTitle = best.OriginalTitle
 	result.Year = best.Year
+	result.PosterPath = best.PosterPath
 	result.Candidates = candidates
+	result.MetadataSource = best.MetadataSource
+	result.MetadataID = best.MetadataID
+	result.MetadataProvider = best.MetadataProvider
 
 	// 缓存结果
 	s.cacheResult(cacheKey, parsed.MediaType, best, parsed.Season, parsed.Episode)
@@ -429,8 +528,13 @@ func (s *TmdbService) IdentifyFileWithPath(filePath string) (*domain.TmdbIdentif
 	return s.IdentifyFile(filePath)
 }
 
+// IdentifyFileWithPathBySource 按媒体源策略识别文件。
+func (s *TmdbService) IdentifyFileWithPathBySource(filePath, metadataSource string) (*domain.TmdbIdentifyResult, error) {
+	return s.identifyFile(filePath, metadataSource)
+}
+
 // searchCandidatesWithFallback 按多个标题变体搜索 TMDB，提升中文标题和标点差异的命中率。
-func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename) ([]domain.TmdbSearchResult, error) {
+func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename, metadataSource string) ([]domain.TmdbSearchResult, error) {
 	if parsed == nil || parsed.Title == "" {
 		return nil, nil
 	}
@@ -469,7 +573,7 @@ func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename) ([]do
 		if parsed.MediaType == "tv" {
 			candidates, err = s.SearchTV(query, parsed.Year)
 		} else {
-			candidates, err = s.SearchMovie(query, parsed.Year)
+			candidates, err = s.SearchMovieBySource(query, parsed.Year, metadataSource)
 		}
 		if err != nil {
 			return nil, err
@@ -480,4 +584,15 @@ func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename) ([]do
 	}
 
 	return nil, nil
+}
+
+func normalizeMetadataSourcePolicy(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case domain.MetadataSourceTMDB:
+		return domain.MetadataSourceTMDB
+	case domain.MetadataSourceMetaTube:
+		return domain.MetadataSourceMetaTube
+	default:
+		return domain.MetadataSourceAuto
+	}
 }

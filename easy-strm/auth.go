@@ -46,12 +46,31 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	}
 	tmdbService := service.NewTmdbService(tmdbAPIKey, tmdbCacheDAO)
 	tmdbService.SetHTTPClient(NewProxyAwareHTTPClient(10 * time.Second))
+	metatubeURL, metatubeToken := "", ""
+	if cfg, err := GetSystemConfigByKey("metatube_url"); err == nil && cfg != nil {
+		metatubeURL = cfg.ConfigVal
+	}
+	if cfg, err := GetSystemConfigByKey("metatube_token"); err == nil && cfg != nil {
+		metatubeToken = cfg.ConfigVal
+	}
+	adultContentEnabled := false
+	if cfg, err := GetSystemConfigByKey("adult_content_enabled"); err == nil && cfg != nil {
+		adultContentEnabled = cfg.ConfigVal == "true" || cfg.ConfigVal == "1"
+	}
+	tmdbService.SetAdultContentEnabled(adultContentEnabled)
+	if adultContentEnabled {
+		tmdbService.SetMetaTubeConfig(metatubeURL, metatubeToken)
+	}
+	if cfg, err := GetSystemConfigByKey("metatube_enabled"); err == nil && cfg != nil {
+		tmdbService.SetMetaTubeDefaultEnabled(cfg.ConfigVal == "true" || cfg.ConfigVal == "1")
+	}
 	renameService := service.NewRenameService(mediaSourceService, tmdbService, renamePresetDAO, systemConfigDAO)
 	scrapeService := service.NewScrapeService(tmdbCacheDAO, mediaFileCacheDAO, mediaSourceDAO, systemConfigDAO, tmdbService)
 	organizeService := service.NewOrganizeService(mediaSourceService, tmdbService, renameService, fileOperationService, mediaCategoryDAO, cloud115DAO, systemConfigDAO, scrapeService, client, dao.GetGlobalRedisClient())
 	strmService := service.NewStrmService(strmConfigDAO, strmFileDAO, cronTaskDAO)
 	cronService := service.NewCronService(cronTaskDAO)
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
+	taskService.RecoverInterruptedTasks()
 	fileManagerService := service.NewFileManagerService(mediaSourceDAO, cloud115DAO, client, taskService)
 	dashboardService := service.NewDashboardService(
 		cloud115DAO,
@@ -107,11 +126,13 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	organizeController := controller.NewOrganizeController(organizeService)
 	organizeController.SetTaskService(taskService)
 	tmdbController := controller.NewTmdbController(tmdbService)
+	shareRecordController := controller.NewShareRecordController(service.NewShareRecordService(dao.NewShareRecordDAO(dao.DB), tmdbService, taskService, shareTransferService))
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)
 	scrapeController := controller.NewScrapeController(scrapeService, organizeService)
 	strmController := controller.NewStrmController(strmService)
 	cloud115Controller := controller.NewCloud115Controller(cloud115Service)
 	settingsController := controller.NewSettingsController(systemConfigService)
+	settingsController.SetTmdbService(tmdbService)
 	globalAPIController := controller.NewGlobalAPIController(globalAPIService)
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
 	logController := controller.NewLogController(systemConfigService)
@@ -671,6 +692,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/settings/:key", settingsController.GetByKey)
 		auth.PUT("/settings/:key", settingsController.UpdateByKey)
 		auth.PUT("/settings", settingsController.BatchUpdate)
+		auth.POST("/settings/mdc/test", settingsController.TestMDCConnection)
 
 		// ========== 网络测试 ==========
 		auth.GET("/network/test", networkController.NetworkTest)
@@ -871,6 +893,17 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.PUT("/media/tmdb/filename-rules", tmdbController.UpdateFilenameRecognitionRules)
 		auth.POST("/media/tmdb/filename-rules/reset", tmdbController.ResetFilenameRecognitionRules)
 		auth.POST("/media/tmdb/batch-identify", tmdbController.BatchIdentify)
+		auth.GET("/media/share-records", shareRecordController.List)
+		auth.POST("/media/share-records", shareRecordController.Create)
+		auth.POST("/media/share-records/parse", shareRecordController.ParseImport)
+		auth.PUT("/media/share-records/:id", shareRecordController.Update)
+		auth.DELETE("/media/share-records/:id", shareRecordController.Delete)
+		auth.POST("/media/share-records/:id/media", shareRecordController.AddMedia)
+		auth.POST("/media/share-records/:id/identify", shareRecordController.IdentifyRecord)
+		auth.DELETE("/media/share-records/:id/media/:mediaId", shareRecordController.DeleteMedia)
+		auth.POST("/media/share-records/media/:mediaId/identify", shareRecordController.Identify)
+		auth.POST("/media/share-records/media/:mediaId/manual-identify", shareRecordController.ManualIdentify)
+		auth.POST("/media/share-records/batch-identify", shareRecordController.Batch)
 		auth.GET("/media/tmdb/movie/:id", tmdbController.GetMovieDetail)
 		auth.GET("/media/tmdb/tv/:id", tmdbController.GetTVDetail)
 		auth.GET("/media/tmdb/config", tmdbController.GetConfig)
@@ -931,6 +964,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		embyAdmin.DELETE("/servers/:server_id", embyManagementController.DeleteServer)
 		embyAdmin.POST("/servers/:server_id/test", embyManagementController.CheckServer)
 		embyAdmin.GET("/servers/:server_id/users", embyManagementController.ListUsers)
+		embyAdmin.GET("/servers/:server_id/user-libraries", embyManagementController.ListUserLibraries)
 		embyAdmin.POST("/servers/:server_id/users", embyManagementController.CreateUser)
 		embyAdmin.PUT("/servers/:server_id/users/:user_id", embyManagementController.UpdateUser)
 		embyAdmin.PUT("/servers/:server_id/users/:user_id/password", embyManagementController.SetUserPassword)
@@ -938,6 +972,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		embyAdmin.POST("/servers/:server_id/users/:user_id/avatar", embyManagementController.UploadUserAvatar)
 		embyAdmin.DELETE("/servers/:server_id/users/:user_id", embyManagementController.DeleteUser)
 		embyAdmin.GET("/servers/:server_id/libraries", embyManagementController.ListLibraries)
+		embyAdmin.GET("/servers/:server_id/libraries/:library_id/cover", embyManagementController.GetLibraryCover)
 		embyAdmin.POST("/servers/:server_id/libraries", embyManagementController.CreateLibrary)
 		embyAdmin.PUT("/servers/:server_id/libraries/:library_id", embyManagementController.UpdateLibrary)
 		embyAdmin.DELETE("/servers/:server_id/libraries/:library_id", embyManagementController.DeleteLibrary)
@@ -960,6 +995,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== 日志查看 ==========
 		auth.GET("/logs", logController.GetFileList)
+		auth.GET("/playback-records", controller.NewPlaybackRecordController(service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))).List)
 		auth.GET("/logs/:filename", logController.GetFileContent)
 		auth.GET("/logs/config", logController.GetConfig)
 		auth.PUT("/logs/config", logController.UpdateConfig)
@@ -980,7 +1016,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// 启动文件监控服务（异步，不阻塞主流程）
 	go func() {
-		Info("Starting WatchService...")
+		Debug("Starting WatchService")
 		watchService.StartAll()
 	}()
 

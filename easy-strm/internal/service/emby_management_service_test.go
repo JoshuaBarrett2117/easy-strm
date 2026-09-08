@@ -73,6 +73,74 @@ func TestEmbyManagementListUsersUsesSelectedServer(t *testing.T) {
 	}
 }
 
+func TestEmbyManagementListLibrarySummariesIncludesMediaCounts(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/emby/Library/VirtualFolders":
+			_ = json.NewEncoder(w).Encode([]map[string]interface{}{
+				{"Name": "电影", "ItemId": "lib-1", "CollectionType": "movies"},
+				{"Name": "剧集", "ItemId": "lib-2", "CollectionType": "tvshows"},
+			})
+		case "/emby/Items":
+			if r.URL.Query().Get("Recursive") != "true" || r.URL.Query().Get("IsFolder") != "false" || r.URL.Query().Get("Limit") != "1" {
+				t.Errorf("媒体统计查询参数不完整: %s", r.URL.RawQuery)
+			}
+			count := 12
+			if r.URL.Query().Get("ParentId") == "lib-2" {
+				count = 34
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"TotalRecordCount": count, "Items": []interface{}{}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer remote.Close()
+	management, mock, _, cleanup := newEmbyManagementTestService(t, func(w http.ResponseWriter, r *http.Request) {})
+	defer cleanup()
+	management.httpClient = remote.Client()
+	expectEmbyServer(t, mock, remote.URL)
+
+	libraries, err := management.ListLibrarySummaries(1)
+	if err != nil {
+		t.Fatalf("查询媒体库摘要失败: %v", err)
+	}
+	if len(libraries) != 2 || libraries[0].MediaFileCount != 12 || libraries[1].MediaFileCount != 34 {
+		t.Fatalf("媒体文件数量不符合预期: %#v", libraries)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEmbyManagementGetLibraryCoverProxiesPrimaryImage(t *testing.T) {
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/emby/Items/lib-1/Images/Primary" {
+			t.Errorf("封面请求路径错误: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("maxWidth") != "480" {
+			t.Errorf("封面尺寸参数错误: %s", r.URL.RawQuery)
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte("jpeg-data"))
+	}))
+	defer remote.Close()
+	management, mock, _, cleanup := newEmbyManagementTestService(t, func(w http.ResponseWriter, r *http.Request) {})
+	defer cleanup()
+	management.httpClient = remote.Client()
+	expectEmbyServer(t, mock, remote.URL)
+
+	data, contentType, err := management.GetLibraryCover(1, "lib-1")
+	if err != nil {
+		t.Fatalf("读取媒体库封面失败: %v", err)
+	}
+	if string(data) != "jpeg-data" || contentType != "image/jpeg" {
+		t.Fatalf("封面代理响应不符合预期: %q, %s", data, contentType)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEmbyRefreshTaskTracksProgressAndConclusion(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

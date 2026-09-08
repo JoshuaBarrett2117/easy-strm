@@ -57,7 +57,7 @@
       <!-- loaded / filtered -->
       <div v-else class="file-tree-wrapper" :class="{ 'virtual-scroll': displayFiles.length > 50 }">
         <div
-          v-for="node in treeData"
+          v-for="node in visibleTreeNodes"
           :key="node.key"
           class="tree-node"
         >
@@ -67,11 +67,9 @@
             class="folder-node"
             :style="{ paddingLeft: (node.level * 16) + 'px' }"
           >
-            <div
-              class="folder-header"
-              @click="toggleFolder(node.key)"
-            >
-              <n-icon size="14" :component="node.expanded ? ChevronDownOutline : ChevronForwardOutline" />
+            <div class="folder-header" @click="toggleFolder(node)">
+              <n-spin v-if="node.loading" :size="14" />
+              <n-icon v-else size="14" :component="node.expanded ? ChevronDownOutline : ChevronForwardOutline" />
               <n-icon size="16" :component="FolderOutline" color="#f59e0b" />
               <n-checkbox
                 :checked="node.checked"
@@ -80,25 +78,9 @@
                 @update:checked="(val) => toggleNodeCheck(node, val)"
               />
               <span class="folder-name">{{ node.name }}</span>
-              <span class="folder-count">({{ node.children?.length || 0 }})</span>
+              <span v-if="node.error" class="folder-error" :title="node.error">加载失败，点击重试</span>
+              <span v-else-if="node.loaded" class="folder-count">({{ node.children.length }})</span>
             </div>
-            <!-- 展开子文件 -->
-            <template v-if="node.expanded">
-              <div
-                v-for="child in node.children"
-                :key="child.key"
-                class="file-node"
-                :style="{ paddingLeft: ((node.level + 1) * 16) + 'px' }"
-              >
-                <n-icon size="14" :component="getFileIcon(child.type)" :color="getFileIconColor(child.type)" />
-                <n-checkbox
-                  :checked="child.checked"
-                  @update:checked="(val) => toggleNodeCheck(child, val)"
-                />
-                <span class="file-name">{{ child.name }}</span>
-                <span class="file-size">{{ formatSize(child.size) }}</span>
-              </div>
-            </template>
           </div>
 
           <!-- 顶层文件节点（非目录） -->
@@ -153,11 +135,20 @@ import {
   DocumentOutline,
   FolderOpenOutline
 } from '@vicons/ionicons5'
+import { getShareFiles } from '../../utils/api/resource'
 
 const props = defineProps({
   files: {
     type: Array,
     default: () => []
+  },
+  shareCode: {
+    type: String,
+    default: ''
+  },
+  password: {
+    type: String,
+    default: ''
   }
 })
 
@@ -215,10 +206,24 @@ const displayFiles = computed(() => {
   return result
 })
 
+/** 按展开状态生成可见节点，支持任意层级目录。 */
+const visibleTreeNodes = computed(() => {
+  const visible = []
+  const appendVisible = (nodes) => {
+    for (const node of nodes) {
+      visible.push(node)
+      if (node.isDir && node.expanded) appendVisible(node.children)
+    }
+  }
+  appendVisible(treeData.value)
+  return visible
+})
+
 /** 构建树形数据 */
 const buildTreeData = (files, level = 0, parentKey = '') => {
   return files.map((f, i) => {
-    const key = parentKey ? `${parentKey}/${f.name}` : f.name
+    const identity = f.dir_id || f.fid || `${f.name}-${i}`
+    const key = parentKey ? `${parentKey}/${identity}` : identity
     const node = {
       key,
       name: f.name,
@@ -230,8 +235,12 @@ const buildTreeData = (files, level = 0, parentKey = '') => {
       expanded: expandedFolders.value.has(key),
       indeterminate: false,
       children: [],
+      loaded: Array.isArray(f.children),
+      loading: false,
+      error: '',
       pickCode: f.pick_code || '',
       fid: f.fid || '',
+      dirId: f.dir_id || '',
       sha1: f.sha1 || ''
     }
     if (f.is_dir && f.children) {
@@ -266,6 +275,15 @@ const updateFolderCheckState = (node) => {
   }
 }
 
+/** 从根节点向下刷新所有目录的勾选状态。 */
+const refreshFolderCheckStates = () => {
+  for (const node of treeData.value) {
+    if (node.isDir && node.children && node.children.length > 0) {
+      updateFolderCheckState(node)
+    }
+  }
+}
+
 /** 全选状态 */
 const isAllSelected = computed(() => {
   const leaves = getLeafNodes(treeData.value)
@@ -286,9 +304,9 @@ const isAllDeselected = computed(() => {
 const getLeafNodes = (nodes) => {
   const leaves = []
   for (const node of nodes) {
-    if (node.isDir && node.children) {
+    if (node.isDir && node.children && node.children.length > 0) {
       leaves.push(...getLeafNodes(node.children))
-    } else if (!node.isDir) {
+    } else {
       leaves.push(node)
     }
   }
@@ -348,25 +366,52 @@ const getFileIconColor = (type) => {
   }
 }
 
-/** 展开/折叠文件夹 */
-const toggleFolder = (key) => {
-  if (expandedFolders.value.has(key)) {
-    expandedFolders.value.delete(key)
-  } else {
-    expandedFolders.value.add(key)
+/** 展开/折叠文件夹；首次展开时按目录ID懒加载直接子项。 */
+const toggleFolder = async (node) => {
+  if (node.loading) return
+  if (node.expanded) {
+    expandedFolders.value.delete(node.key)
+    node.expanded = false
+    expandedFolders.value = new Set(expandedFolders.value)
+    return
   }
-  // 触发响应式更新
+
+  if (!node.loaded || node.error) {
+    node.loading = true
+    node.error = ''
+    try {
+      const response = await getShareFiles({
+        share_code: props.shareCode,
+        password: props.password,
+        dir_id: node.dirId || node.fid,
+        page: 1,
+        page_size: 200
+      })
+      const data = response.data?.data || response.data
+      node.children = buildTreeData(data?.files || [], node.level + 1, node.key)
+      node.loaded = true
+      updateFolderCheckState(node)
+    } catch (error) {
+      node.error = error?.response?.data?.error || error?.message || '目录加载失败'
+      return
+    } finally {
+      node.loading = false
+    }
+  }
+
+  expandedFolders.value.add(node.key)
+  node.expanded = true
   expandedFolders.value = new Set(expandedFolders.value)
 }
 
 /** 切换节点选中 */
 const toggleNodeCheck = (node, checked) => {
-  if (node.isDir && node.children) {
+  if (node.isDir && node.children && node.children.length > 0) {
     // 递归设置所有子节点
     const setChildren = (n, val) => {
-      if (n.isDir && n.children) {
+      if (n.isDir && n.children && n.children.length > 0) {
         for (const child of n.children) setChildren(child, val)
-      } else if (!n.isDir) {
+      } else {
         if (val) {
           checkedFiles.value.add(n.key)
         } else {
@@ -376,7 +421,7 @@ const toggleNodeCheck = (node, checked) => {
       }
     }
     setChildren(node, checked)
-  } else if (!node.isDir) {
+  } else {
     if (checked) {
       checkedFiles.value.add(node.key)
     } else {
@@ -385,6 +430,7 @@ const toggleNodeCheck = (node, checked) => {
     node.checked = checked
   }
   checkedFiles.value = new Set(checkedFiles.value)
+  refreshFolderCheckStates()
   syncSelection()
 }
 
@@ -562,6 +608,15 @@ onMounted(() => {
 .folder-count {
   font-size: 11px;
   color: var(--text-tertiary, #9ca3af);
+}
+
+.folder-error {
+  max-width: 160px;
+  overflow: hidden;
+  color: #ef4444;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-node {

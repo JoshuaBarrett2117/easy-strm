@@ -76,24 +76,40 @@
             <n-button :loading="librariesLoading" @click="loadLibraries">重新读取</n-button>
           </template>
           <div v-if="libraries.length" class="grid gap-4 lg:grid-cols-2">
-            <div v-for="library in libraries" :key="library.ItemId" class="rounded-2xl border border-slate-200 p-4 dark:border-white/10">
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="truncate font-bold text-slate-800 dark:text-white">{{ library.Name }}</div>
-                  <div class="mt-1 text-xs text-slate-500">{{ library.CollectionType || 'mixed' }} · {{ library.Path || library.Locations?.join('、') || '未返回路径' }}</div>
-                  <div class="mt-2 flex items-center gap-2">
-                    <n-tag size="small" :type="library.RefreshStatus && library.RefreshStatus !== 'Idle' ? 'warning' : 'success'">{{ library.RefreshStatus || 'Idle' }}</n-tag>
-                    <span v-if="library.RefreshProgress" class="text-xs text-slate-500">{{ Math.round(library.RefreshProgress) }}%</span>
+            <article v-for="library in libraries" :key="libraryId(library)" class="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg dark:border-white/10 dark:bg-slate-900/60">
+              <div class="grid min-h-44 grid-cols-[9rem_1fr] sm:grid-cols-[11rem_1fr]">
+                <div class="relative overflow-hidden bg-gradient-to-br from-indigo-500 via-violet-500 to-cyan-500">
+                  <img v-if="libraryCoverURLs[libraryId(library)]" :src="libraryCoverURLs[libraryId(library)]" :alt="`${library.Name} 封面`" class="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-105" />
+                  <div v-else class="absolute inset-0 flex items-center justify-center p-4 text-center text-lg font-bold text-white/90">
+                    {{ library.Name?.slice(0, 6) || 'Emby' }}
+                  </div>
+                  <div class="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/35 to-transparent" />
+                </div>
+                <div class="flex min-w-0 flex-col p-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <h3 class="truncate text-base font-bold text-slate-800 dark:text-white">{{ library.Name }}</h3>
+                      <n-tag class="mt-2" size="small" :type="libraryTypeMeta(library.CollectionType).type" round>
+                        {{ libraryTypeMeta(library.CollectionType).label }}
+                      </n-tag>
+                    </div>
+                    <div class="shrink-0 text-right">
+                      <div class="text-xl font-extrabold tabular-nums text-slate-800 dark:text-white">{{ formatMediaCount(library.MediaFileCount) }}</div>
+                      <div class="text-xs text-slate-400">媒体文件</div>
+                    </div>
+                  </div>
+                  <div v-if="library.RefreshProgress > 0" class="mt-3 text-xs text-cyan-600 dark:text-cyan-300">
+                    正在刷新 · {{ Math.round(library.RefreshProgress) }}%
+                  </div>
+                  <div class="mt-auto flex flex-wrap justify-end gap-2 pt-4">
+                    <n-button size="small" @click="runLibraryRefresh(library)">刷新</n-button>
+                    <n-button size="small" @click="openCoverDialog(library)">封面</n-button>
+                    <n-button size="small" @click="openLibraryDialog(library)">编辑</n-button>
+                    <n-button size="small" type="error" secondary @click="removeLibrary(library)">删除</n-button>
                   </div>
                 </div>
-                <div class="flex flex-wrap justify-end gap-2">
-                  <n-button size="small" @click="runLibraryRefresh(library)">刷新</n-button>
-                  <n-button size="small" @click="openCoverDialog(library)">封面</n-button>
-                  <n-button size="small" @click="openLibraryDialog(library)">编辑</n-button>
-                  <n-button size="small" type="error" secondary @click="removeLibrary(library)">删除</n-button>
-                </div>
               </div>
-            </div>
+            </article>
           </div>
           <EmptyState v-else title="暂无媒体库" />
         </PageCard>
@@ -180,7 +196,7 @@
             <n-checkbox v-model:checked="userForm.policy.EnableRemoteControlOfOtherUsers">设备控制</n-checkbox>
             <n-checkbox v-model:checked="userForm.policy.EnableAllFolders">全部媒体库</n-checkbox>
           </div>
-          <n-form-item v-if="!userForm.policy.EnableAllFolders" class="mt-4" label="允许访问的媒体库"><n-select v-model:value="userForm.policy.EnabledFolders" multiple :options="libraryOptions" /></n-form-item>
+          <n-form-item v-if="!userForm.policy.EnableAllFolders" class="mt-4" label="允许访问的媒体库"><n-select v-model:value="userForm.policy.EnabledFolders" multiple :options="userLibraryOptions" /></n-form-item>
         </template>
       </n-form>
       <template #footer><div class="flex justify-end gap-2"><n-button @click="userDialog=false">取消</n-button><n-button type="primary" :loading="saving" @click="saveUser">保存</n-button></div></template>
@@ -230,7 +246,7 @@ import {
   applyEmbyLibraryCover, createEmbyLibrary, createEmbyServer, createEmbyUser, deleteEmbyLibrary,
   bindEmbyMediaSource,
   deleteEmbyServer, deleteEmbyUser, generateEmbyLibraryCover, getEmbyCoverAIConfig, getEmbyCoverPreview,
-  getEmbyServers, getEmbyUserAvatar, getEmbyUsers, getManagedEmbyLibraries, getStrmAssistantStatus, refreshAllManagedEmbyLibraries,
+  getEmbyLibraryCover, getEmbyServers, getEmbyUserAvatar, getEmbyUsers, getEmbyUserLibraries, getManagedEmbyLibraries, getStrmAssistantStatus, refreshAllManagedEmbyLibraries,
   refreshManagedEmbyLibrary, runStrmAssistantTask, setEmbyUserPassword, testEmbyServer, updateEmbyCoverAIConfig,
   updateEmbyLibrary, updateEmbyServer, updateEmbyUser, uploadEmbyLibraryCover, uploadEmbyUserAvatar
 } from '../utils/api/emby'
@@ -240,6 +256,7 @@ const router = useRouter()
 const servers = ref([]); const selectedServerId = ref(null); const activeTab = ref('users')
 const users = ref([]); const libraries = ref([]); const recentTasks = ref([]); const pluginStatus = ref({})
 const userAvatarURLs = ref({}); const userAvatarFile = ref(null); const userAvatarPreviewURL = ref('')
+const libraryCoverURLs = ref({})
 const mediaSources = ref([])
 const testing = ref(false); const saving = ref(false); const usersLoading = ref(false); const librariesLoading = ref(false); const pluginLoading = ref(false)
 const connectionText = ref(''); const connectionOK = ref(false)
@@ -251,6 +268,10 @@ let coverPollTimer = null
 const serverForm = reactive({ id: null, name: '', base_url: '', api_key: '', api_key_mask: '', enabled: true, is_default: false })
 const emptyPolicy = () => ({ IsAdministrator: false, IsDisabled: false, EnableRemoteAccess: true, EnableMediaPlayback: true, EnableVideoPlaybackTranscoding: true, EnableAudioPlaybackTranscoding: true, EnableContentDownloading: false, EnableSubtitleDownloading: true, EnableSubtitleManagement: false, EnableRemoteControlOfOtherUsers: false, EnableAllFolders: true, EnabledFolders: [] })
 const userForm = reactive({ id: '', name: '', password: '', policy: emptyPolicy() })
+const userLibraries = ref([])
+// 用户权限使用专用接口的 Guid，不能复用刷新和封面的 ItemId。
+const userLibraryOptions = computed(() => userLibraries.value.map(item => ({ label: item.name, value: item.id })))
+let userDialogRequest = 0
 const passwordForm = reactive({ id: '', password: '', reset: false })
 const libraryForm = reactive({ id: '', original_name: '', name: '', collection_type: 'movies', pathsText: '', metadata_language: 'zh-CN', metadata_country: 'CN', enable_realtime_monitor: true })
 const pluginLibrary = reactive({ strm_scan_capture: null, media_info: null, subtitle_scan: null, metadata_refresh: null })
@@ -259,7 +280,25 @@ const bindingForm = reactive({ sourceId: null, libraryId: null })
 
 const activeServer = computed(() => servers.value.find(item => item.id === selectedServerId.value) || null)
 const serverOptions = computed(() => servers.value.map(item => ({ label: `${item.name}${item.is_default ? '（默认）' : ''}`, value: item.id })))
-const libraryOptions = computed(() => libraries.value.map(item => ({ label: item.Name, value: item.ItemId })))
+// Emby 不同版本对虚拟文件夹标识字段存在差异；选项值始终使用 ID，展示文本始终优先使用媒体库名称。
+const libraryId = library => String(library?.ItemId || library?.Id || library?.id || '')
+const libraryOptions = computed(() => libraries.value
+  .map(item => {
+    const value = libraryId(item)
+    const label = item.Name || item.name || item.LibraryOptions?.Name || item.LibraryOptions?.name || value
+    return value ? { label, value } : null
+  })
+  .filter(Boolean))
+const libraryTypeMeta = type => ({
+  movies: { label: '电影', type: 'info' },
+  tvshows: { label: '电视剧', type: 'success' },
+  music: { label: '音乐', type: 'warning' },
+  musicvideos: { label: '音乐视频', type: 'warning' },
+  books: { label: '图书', type: 'default' },
+  photos: { label: '照片', type: 'error' },
+  mixed: { label: '混合内容', type: 'default' }
+})[String(type || 'mixed').toLowerCase()] || { label: type || '混合内容', type: 'default' }
+const formatMediaCount = count => Number.isInteger(count) && count >= 0 ? count.toLocaleString('zh-CN') : '—'
 const mediaSourceOptions = computed(() => mediaSources.value.map(item => ({ label: item.name, value: item.id })))
 const collectionOptions = [{ label: '电影', value: 'movies' }, { label: '电视剧', value: 'tvshows' }, { label: '音乐', value: 'music' }, { label: '混合内容', value: 'mixed' }]
 const aiProviderOptions = [{ label: 'OpenAI 官方', value: 'openai' }, { label: 'OpenAI 兼容接口', value: 'compatible' }]
@@ -283,13 +322,35 @@ const loadUserAvatars = async list => {
   userAvatarURLs.value = Object.fromEntries(entries.filter(Boolean))
 }
 const loadUsers = async () => { if (!selectedServerId.value) return; usersLoading.value = true; try { const list = listPayload(await getEmbyUsers(selectedServerId.value)); users.value = list; await loadUserAvatars(list) } finally { usersLoading.value = false } }
-const loadLibraries = async () => { if (!selectedServerId.value) return; librariesLoading.value = true; try { libraries.value = listPayload(await getManagedEmbyLibraries(selectedServerId.value)) } finally { librariesLoading.value = false } }
+const revokeLibraryCoverURLs = () => { Object.values(libraryCoverURLs.value).forEach(url => URL.revokeObjectURL(url)); libraryCoverURLs.value = {} }
+const loadLibraryCovers = async (list, serverId) => {
+  revokeLibraryCoverURLs()
+  const entries = await Promise.all(list.map(async library => {
+    const id = libraryId(library)
+    if (!id) return null
+    try {
+      const response = await getEmbyLibraryCover(serverId, id)
+      return [id, URL.createObjectURL(response.data)]
+    } catch { return null }
+  }))
+  if (selectedServerId.value !== serverId) {
+    entries.filter(Boolean).forEach(([, url]) => URL.revokeObjectURL(url))
+    return
+  }
+  libraryCoverURLs.value = Object.fromEntries(entries.filter(Boolean))
+}
+const loadLibraries = async () => { if (!selectedServerId.value) return; const serverId = selectedServerId.value; librariesLoading.value = true; try { const list = listPayload(await getManagedEmbyLibraries(serverId)); libraries.value = list; await loadLibraryCovers(list, serverId) } finally { librariesLoading.value = false } }
 const loadPluginStatus = async () => { if (!selectedServerId.value) return; pluginLoading.value = true; try { pluginStatus.value = payload(await getStrmAssistantStatus(selectedServerId.value)) } catch { pluginStatus.value = { installed: false, message: '神医助手状态检测失败' } } finally { pluginLoading.value = false } }
 const loadRecentTasks = async () => { const tasks = listPayload(await getUnifiedTaskList()); recentTasks.value = tasks.filter(task => Number(task.metadata?.server_id) === Number(selectedServerId.value) && String(task.task_type).startsWith('emby_')).slice(0, 10) }
 const loadMediaSources = async () => { mediaSources.value = listPayload(await getMediaSources()) }
 
 const reloadServerData = async () => { connectionText.value = ''; await Promise.all([loadUsers(), loadLibraries(), loadPluginStatus(), loadRecentTasks()]) }
-watch(selectedServerId, reloadServerData)
+watch(selectedServerId, () => {
+  userDialogRequest++
+  userDialog.value = false
+  userLibraries.value = []
+  reloadServerData()
+})
 
 const openServerDialog = server => { Object.assign(serverForm, server ? { ...server, api_key: '' } : { id: null, name: '', base_url: '', api_key: '', api_key_mask: '', enabled: true, is_default: servers.value.length === 0 }); serverDialog.value = true }
 const saveServer = async () => { saving.value = true; try { if (serverForm.id) await updateEmbyServer(serverForm.id, serverForm); else await createEmbyServer(serverForm); serverDialog.value = false; await loadServers(); message.success('Emby 实例已保存') } finally { saving.value = false } }
@@ -297,9 +358,43 @@ const removeServer = async () => { try { await showConfirmDialog(`只删除 easy
 const testConnection = async () => { testing.value = true; try { const data = payload(await testEmbyServer(selectedServerId.value)); connectionOK.value = !!data.connected; connectionText.value = data.connected ? `连接成功：${data.info?.ServerName || ''} v${data.info?.Version || ''}` : `连接失败：${data.error || '未知错误'}` } finally { testing.value = false } }
 
 const revokeUserAvatarPreview = () => { if (userAvatarPreviewURL.value) URL.revokeObjectURL(userAvatarPreviewURL.value); userAvatarPreviewURL.value = '' }
-const openUserDialog = user => { revokeUserAvatarPreview(); userAvatarFile.value = null; Object.assign(userForm, user ? { id: user.Id, name: user.Name, password: '', policy: { ...emptyPolicy(), ...(user.Policy || {}), EnabledFolders: [...(user.Policy?.EnabledFolders || [])] } } : { id: '', name: '', password: '', policy: emptyPolicy() }); userDialog.value = true }
+const openUserDialog = async user => {
+  const requestId = ++userDialogRequest
+  const serverId = selectedServerId.value
+  if (!serverId) return
+  revokeUserAvatarPreview()
+  userAvatarFile.value = null
+  // 先获取权限名称及 Guid，接口失败时不打开缺少选项的编辑弹窗。
+  const folders = listPayload(await getEmbyUserLibraries(serverId))
+  if (selectedServerId.value !== serverId || requestId !== userDialogRequest) return
+  userLibraries.value = folders
+  const selectedFolderIds = (user?.Policy?.EnabledFolders || []).map(folderId => {
+    const id = String(folderId)
+    return folders.find(folder => folder.id === id || folder.item_id === id)?.id || id
+  })
+  Object.assign(userForm, user ? { id: user.Id, name: user.Name, password: '', policy: { ...emptyPolicy(), ...(user.Policy || {}), EnabledFolders: selectedFolderIds } } : { id: '', name: '', password: '', policy: emptyPolicy() })
+  userDialog.value = true
+}
 const selectUserAvatar = event => { const file = event.target.files?.[0]; if (!file) return; userAvatarFile.value = file; revokeUserAvatarPreview(); userAvatarPreviewURL.value = URL.createObjectURL(file); event.target.value = '' }
-const saveUser = async () => { saving.value = true; try { let userId = userForm.id; if (userId) await updateEmbyUser(selectedServerId.value, userId, { name: userForm.name, policy: userForm.policy }); else { const data = payload(await createEmbyUser(selectedServerId.value, { name: userForm.name, password: userForm.password })); userId = data.user?.Id || data.user?.id || '' } if (userAvatarFile.value && userId) await uploadEmbyUserAvatar(selectedServerId.value, userId, userAvatarFile.value); userDialog.value = false; userAvatarFile.value = null; revokeUserAvatarPreview(); await Promise.all([loadUsers(), loadRecentTasks()]); message.success('用户操作已完成并写入任务中心') } finally { saving.value = false } }
+const saveUser = async () => {
+  saving.value = true
+  try {
+    let userId = userForm.id
+    // 尊重全库开关；切换为全部媒体库时清空隐藏的历史选择。
+    const enabledFolders = [...new Set((userForm.policy.EnabledFolders || []).map(folderId => String(folderId).trim()).filter(Boolean))]
+    const policy = { ...userForm.policy, EnabledFolders: userForm.policy.EnableAllFolders ? [] : enabledFolders }
+    if (userId) await updateEmbyUser(selectedServerId.value, userId, { name: userForm.name, policy })
+    else {
+      const data = payload(await createEmbyUser(selectedServerId.value, { name: userForm.name, password: userForm.password }))
+      userId = data.user?.Id || data.user?.id || ''
+      // 新建用户也必须单独写入权限，创建接口只负责账号和密码。
+      if (userId) await updateEmbyUser(selectedServerId.value, userId, { name: userForm.name, policy })
+    }
+    if (userAvatarFile.value && userId) await uploadEmbyUserAvatar(selectedServerId.value, userId, userAvatarFile.value)
+    userDialog.value = false; userAvatarFile.value = null; revokeUserAvatarPreview()
+    await Promise.all([loadUsers(), loadRecentTasks()]); message.success('用户操作已完成并写入任务中心')
+  } finally { saving.value = false }
+}
 const openPasswordDialog = user => { Object.assign(passwordForm, { id: user.Id, password: '', reset: false }); passwordDialog.value = true }
 const savePassword = async () => { saving.value = true; try { await setEmbyUserPassword(selectedServerId.value, passwordForm.id, { password: passwordForm.password, reset: passwordForm.reset }); passwordDialog.value = false; await loadRecentTasks(); message.success('密码操作已完成') } finally { saving.value = false } }
 const removeUser = async user => { try { await showConfirmDialog(`确认删除 Emby 用户“${user.Name}”？`, '删除用户'); await deleteEmbyUser(selectedServerId.value, user.Id); await Promise.all([loadUsers(), loadRecentTasks()]); message.success('用户已删除') } catch {} }
@@ -334,7 +429,7 @@ const openCoverDialog = async library => { activeCoverLibrary.value = library; c
 const selectManualCover = event => { const file = event.target.files?.[0]; if (!file) return; manualCoverFile.value = file; coverTaskId.value = ''; revokePreview(); coverPreviewURL.value = URL.createObjectURL(file); event.target.value = '' }
 const generateCover = async mode => { coverLoading.value = true; manualCoverFile.value = null; revokePreview(); try { const data = payload(await generateEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, { mode, library_name: activeCoverLibrary.value.Name, description: coverDescription.value })); coverTaskId.value = data.task_id; pollCoverTask() } catch { coverLoading.value = false } }
 const pollCoverTask = async () => { clearTimeout(coverPollTimer); if (!coverTaskId.value) return; try { const task = payload(await getTaskDetail(coverTaskId.value)); if (task.metadata?.awaiting_confirmation) { const response = await getEmbyCoverPreview(coverTaskId.value); revokePreview(); coverPreviewURL.value = URL.createObjectURL(response.data); coverLoading.value = false; return } if (task.status === 'failed') { coverLoading.value = false; message.error(task.error_message || '封面生成失败'); return } } catch { coverLoading.value = false; return } coverPollTimer = setTimeout(pollCoverTask, 1500) }
-const applyCover = async () => { coverLoading.value = true; try { if (manualCoverFile.value) await uploadEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, manualCoverFile.value); else await applyEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, coverTaskId.value); message.success('封面已应用到 Emby'); manualCoverFile.value = null; revokePreview(); coverDialog.value = false; await loadRecentTasks() } finally { coverLoading.value = false } }
+const applyCover = async () => { coverLoading.value = true; try { if (manualCoverFile.value) await uploadEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, manualCoverFile.value); else await applyEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, coverTaskId.value); message.success('封面已应用到 Emby'); manualCoverFile.value = null; revokePreview(); coverDialog.value = false; await Promise.all([loadLibraries(), loadRecentTasks()]) } finally { coverLoading.value = false } }
 const saveAIConfig = async () => { await updateEmbyCoverAIConfig(aiForm); const config = payload(await getEmbyCoverAIConfig()); Object.assign(aiForm, { ...config, api_key: '' }); message.success('AI 图片接口配置已保存') }
 
 const taskStatusText = status => ({ pending: '待执行/待确认', running: '执行中', success: '成功', partial_success: '部分成功', failed: '失败', cancelled: '已取消', unknown: '结果未知', completed: '已完成' })[status] || status
@@ -343,5 +438,5 @@ const goTask = taskId => router.push({ path: '/dashboard/tasks', query: { task_i
 const goTaskCenter = () => router.push({ path: '/dashboard/tasks', query: { emby_server_id: selectedServerId.value } })
 
 onMounted(async () => { await Promise.all([loadServers(), loadMediaSources()]); if (selectedServerId.value) await reloadServerData() })
-onBeforeUnmount(() => { clearTimeout(coverPollTimer); revokePreview(); revokeUserAvatarPreview(); revokeUserAvatarURLs() })
+onBeforeUnmount(() => { clearTimeout(coverPollTimer); revokePreview(); revokeUserAvatarPreview(); revokeUserAvatarURLs(); revokeLibraryCoverURLs() })
 </script>

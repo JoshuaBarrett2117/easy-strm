@@ -10,7 +10,7 @@
           <n-select
             v-model:value="cloud115Id"
             :options="accountOptions"
-            placeholder="选择执行云下载的账号"
+            placeholder="选择接收文件的115账号"
             style="width:100%"
             @update:value="directory = ''"
           />
@@ -429,7 +429,7 @@ const loadAccounts = async () => {
     const accounts = response.data?.data || response.data || []
     if (Array.isArray(accounts)) {
       accountOptions.value = accounts.map(a => ({
-        label: `${a.name} (ID: ${a.id})`,
+        label: `${a.name} (ID: ${a.id})${a.account_type === 'resource' ? ' · 自动代下载' : ''}`,
         value: a.id
       }))
       if (!cloud115Id.value && accountOptions.value.length > 0) {

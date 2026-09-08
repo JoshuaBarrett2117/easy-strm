@@ -12,7 +12,7 @@ import (
 )
 
 func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.MediaFile, targetPath, template string, categories []*domain.MediaCategory, overrideMap map[string]domain.OrganizeManualOverride) (*OrganizePreview, error) {
-	identifyResult, err := s.getPreferredIdentifyResult(file, s.matchOrganizeManualOverride(file, overrideMap), source.ID)
+	identifyResult, err := s.getPreferredIdentifyResult(file, s.matchOrganizeManualOverride(file, overrideMap), source)
 	if err != nil {
 		return nil, err
 	}
@@ -80,24 +80,28 @@ func (s *OrganizeService) previewFile(source *domain.MediaSource, file domain.Me
 	}, nil
 }
 
-func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manualOverride *domain.OrganizeManualOverride, sourceID int) (*domain.TmdbIdentifyResult, error) {
+func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manualOverride *domain.OrganizeManualOverride, source *domain.MediaSource) (*domain.TmdbIdentifyResult, error) {
+	sourceID, metadataSource := 0, domain.MetadataSourceAuto
+	if source != nil {
+		sourceID, metadataSource = source.ID, source.MetadataSource
+	}
 	if manualOverride != nil {
 		result := s.buildManualIdentifyResult(file, *manualOverride)
 		if s.tmdbService != nil {
 			s.tmdbService.EnsureIdentifyMetadata(result)
 		}
-		s.saveIdentifyResultToCache(file, result, sourceID, true)
+		s.saveIdentifyResultToCache(file, result, sourceID, metadataSource, true)
 		return result, nil
 	}
 
-	if cached := s.getCachedIdentifyResult(file); cached != nil {
+	if cached := s.getCachedIdentifyResult(file, metadataSource); cached != nil {
 		if s.tmdbService != nil {
 			s.tmdbService.EnsureIdentifyMetadata(cached)
 		}
 		return cached, nil
 	}
 
-	identifyResult, err := s.tmdbService.IdentifyFileWithPath(s.identifyInputForFile(file))
+	identifyResult, err := s.tmdbService.IdentifyFileWithPathBySource(s.identifyInputForFile(file), metadataSource)
 	if err != nil {
 		return nil, fmt.Errorf("TMDB 识别失败: %v", err)
 	}
@@ -108,7 +112,7 @@ func (s *OrganizeService) getPreferredIdentifyResult(file domain.MediaFile, manu
 	if s.tmdbService != nil {
 		s.tmdbService.EnsureIdentifyMetadata(identifyResult)
 	}
-	s.saveIdentifyResultToCache(file, identifyResult, sourceID, false)
+	s.saveIdentifyResultToCache(file, identifyResult, sourceID, metadataSource, false)
 
 	return identifyResult, nil
 }
@@ -165,32 +169,35 @@ func (s *OrganizeService) buildManualIdentifyResult(file domain.MediaFile, item 
 	}
 
 	return &domain.TmdbIdentifyResult{
-		Success:       true,
-		Message:       "使用手动修改的识别结果",
-		Filename:      file.Name,
-		MediaType:     mediaType,
-		TmdbID:        item.TmdbID,
-		Title:         strings.TrimSpace(item.Title),
-		OriginalTitle: strings.TrimSpace(item.OriginalTitle),
-		Year:          item.Year,
-		SeasonNumber:  item.Season,
-		EpisodeNumber: item.Episode,
+		Success:          true,
+		Message:          "使用手动修改的识别结果",
+		Filename:         file.Name,
+		MediaType:        mediaType,
+		TmdbID:           item.TmdbID,
+		Title:            strings.TrimSpace(item.Title),
+		OriginalTitle:    strings.TrimSpace(item.OriginalTitle),
+		Year:             item.Year,
+		SeasonNumber:     item.Season,
+		EpisodeNumber:    item.Episode,
+		MetadataSource:   item.MetadataSource,
+		MetadataID:       item.MetadataID,
+		MetadataProvider: item.MetadataProvider,
 	}
 }
 
-func (s *OrganizeService) getCachedIdentifyResult(file domain.MediaFile) *domain.TmdbIdentifyResult {
+func (s *OrganizeService) getCachedIdentifyResult(file domain.MediaFile, metadataSource string) *domain.TmdbIdentifyResult {
 	if s.identifyCacheDAO == nil && (s.tmdbCacheDAO == nil || s.tmdbService == nil) {
 		return nil
 	}
 
-	fileHash := dao.FileHash(file.Name)
+	fileHash := identifyCacheHash(file.Name, metadataSource)
 
-	if cached := s.getIdentifyCacheFromRedis(fileHash); cached != nil {
+	if cached := s.getIdentifyCacheFromRedis(fileHash); cached != nil && identifyResultMatchesPolicy(cached, metadataSource) {
 		logger.Debugf("OrganizeService[getCachedIdentifyResult] Redis命中: %s", file.Name)
 		return cached
 	}
 
-	if cached := s.getIdentifyCacheFromDB(fileHash); cached != nil {
+	if cached := s.getIdentifyCacheFromDB(fileHash); cached != nil && identifyResultMatchesPolicy(cached, metadataSource) {
 		s.saveIdentifyCacheToRedis(fileHash, cached)
 		logger.Debugf("OrganizeService[getCachedIdentifyResult] 数据库命中: %s", file.Name)
 		return cached
@@ -217,7 +224,8 @@ func (s *OrganizeService) getCachedIdentifyResult(file domain.MediaFile) *domain
 
 		for _, key := range keys {
 			for _, mediaType := range []string{"movie", "tv"} {
-				cache, err := s.tmdbCacheDAO.GetByQueryKey(key, mediaType)
+				cacheKey := s.tmdbService.buildCacheKeyForSource(key, mediaType, metadataSource)
+				cache, err := s.tmdbCacheDAO.GetByQueryKey(cacheKey, mediaType)
 				if err != nil || cache == nil {
 					continue
 				}
@@ -255,31 +263,37 @@ func (s *OrganizeService) getIdentifyCacheFromRedis(fileHash string) *domain.Tmd
 		return nil
 	}
 	var cache struct {
-		MediaType     string `json:"media_type"`
-		TmdbID        int    `json:"tmdb_id"`
-		Title         string `json:"title"`
-		OriginalTitle string `json:"original_title"`
-		Year          int    `json:"year"`
-		SeasonNumber  int    `json:"season_number"`
-		EpisodeNumber int    `json:"episode_number"`
-		PosterURL     string `json:"poster_path"`
-		IsManual      bool   `json:"is_manual"`
+		MediaType        string `json:"media_type"`
+		TmdbID           int    `json:"tmdb_id"`
+		Title            string `json:"title"`
+		OriginalTitle    string `json:"original_title"`
+		Year             int    `json:"year"`
+		SeasonNumber     int    `json:"season_number"`
+		EpisodeNumber    int    `json:"episode_number"`
+		PosterURL        string `json:"poster_path"`
+		IsManual         bool   `json:"is_manual"`
+		MetadataSource   string `json:"metadata_source"`
+		MetadataID       string `json:"metadata_id"`
+		MetadataProvider string `json:"metadata_provider"`
 	}
 	if err := json.Unmarshal([]byte(value), &cache); err != nil {
 		logger.Warnf("OrganizeService[getIdentifyCacheFromRedis] JSON解析失败: %v", err)
 		return nil
 	}
 	return &domain.TmdbIdentifyResult{
-		Success:       true,
-		Message:       "使用已有识别结果",
-		Filename:      "",
-		MediaType:     cache.MediaType,
-		TmdbID:        cache.TmdbID,
-		Title:         cache.Title,
-		OriginalTitle: cache.OriginalTitle,
-		Year:          cache.Year,
-		SeasonNumber:  cache.SeasonNumber,
-		EpisodeNumber: cache.EpisodeNumber,
+		Success:          true,
+		Message:          "使用已有识别结果",
+		Filename:         "",
+		MediaType:        cache.MediaType,
+		TmdbID:           cache.TmdbID,
+		Title:            cache.Title,
+		OriginalTitle:    cache.OriginalTitle,
+		Year:             cache.Year,
+		SeasonNumber:     cache.SeasonNumber,
+		EpisodeNumber:    cache.EpisodeNumber,
+		MetadataSource:   cache.MetadataSource,
+		MetadataID:       cache.MetadataID,
+		MetadataProvider: cache.MetadataProvider,
 	}
 }
 
@@ -308,13 +322,16 @@ func (s *OrganizeService) saveIdentifyCacheToRedis(fileHash string, result *doma
 	}
 	key := fmt.Sprintf("identify:cache:%s", fileHash)
 	data := map[string]interface{}{
-		"media_type":     result.MediaType,
-		"tmdb_id":        result.TmdbID,
-		"title":          result.Title,
-		"original_title": result.OriginalTitle,
-		"year":           result.Year,
-		"season_number":  result.SeasonNumber,
-		"episode_number": result.EpisodeNumber,
+		"media_type":        result.MediaType,
+		"tmdb_id":           result.TmdbID,
+		"title":             result.Title,
+		"original_title":    result.OriginalTitle,
+		"year":              result.Year,
+		"season_number":     result.SeasonNumber,
+		"episode_number":    result.EpisodeNumber,
+		"metadata_source":   result.MetadataSource,
+		"metadata_id":       result.MetadataID,
+		"metadata_provider": result.MetadataProvider,
 	}
 	jsonData, err := json.Marshal(data)
 	if err != nil {
@@ -346,11 +363,33 @@ func (s *OrganizeService) saveIdentifyCacheToDB(fileHash, fileName string, resul
 	}
 }
 
-func (s *OrganizeService) saveIdentifyResultToCache(file domain.MediaFile, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) {
+func (s *OrganizeService) saveIdentifyResultToCache(file domain.MediaFile, result *domain.TmdbIdentifyResult, sourceID int, metadataSource string, isManual bool) {
 	if s.identifyCacheDAO == nil {
 		return
 	}
-	fileHash := dao.FileHash(file.Name)
+	fileHash := identifyCacheHash(file.Name, metadataSource)
 	s.saveIdentifyCacheToRedis(fileHash, result)
 	s.saveIdentifyCacheToDB(fileHash, file.Name, result, sourceID, isManual)
+}
+
+func identifyCacheHash(fileName, metadataSource string) string {
+	policy := normalizeMetadataSourcePolicy(metadataSource)
+	if policy == domain.MetadataSourceAuto {
+		return dao.FileHash(fileName)
+	}
+	return dao.FileHash(policy + ":" + fileName)
+}
+
+func identifyResultMatchesPolicy(result *domain.TmdbIdentifyResult, metadataSource string) bool {
+	if result == nil {
+		return false
+	}
+	policy := normalizeMetadataSourcePolicy(metadataSource)
+	if policy == domain.MetadataSourceAuto {
+		return true
+	}
+	if policy == domain.MetadataSourceMetaTube {
+		return result.MetadataSource == domain.MetadataSourceMetaTube
+	}
+	return result.MetadataSource != domain.MetadataSourceMetaTube
 }

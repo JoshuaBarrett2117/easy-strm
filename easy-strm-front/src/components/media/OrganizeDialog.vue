@@ -689,7 +689,10 @@ const applyManualOverride = async (overrideForm) => {
       original_title: (overrideForm.original_title || '').trim(),
       year: Number(overrideForm.year || 0),
       season: Number(overrideForm.season || 0),
-      episode: Number(overrideForm.episode || 0)
+      episode: Number(overrideForm.episode || 0),
+      metadata_source: overrideForm.metadata_source || '',
+      metadata_id: overrideForm.metadata_id || '',
+      metadata_provider: overrideForm.metadata_provider || ''
     }
   }
   try {

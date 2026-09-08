@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"easy-strm/internal/dao"
@@ -210,18 +211,26 @@ func (s *EmbyManagementService) UpdateUser(serverID int, userID, name string, po
 		return "", err
 	}
 	return s.runShortTask(domain.TaskTypeEmbyUser, "修改 Emby 用户", taskMetadata(server, "update_user", userID), func() error {
-		if strings.TrimSpace(name) != "" {
-			var user map[string]interface{}
-			if requestErr := s.requestJSON(server, http.MethodGet, "/emby/Users/"+url.PathEscape(userID), nil, nil, &user); requestErr != nil {
-				return requestErr
+		var normalized domain.EmbyUserPolicy
+		if policy != nil {
+			var policyErr error
+			normalized, policyErr = s.normalizeUserPolicy(server, *policy)
+			if policyErr != nil {
+				return policyErr
 			}
+		}
+		var user map[string]interface{}
+		if requestErr := s.requestJSON(server, http.MethodGet, "/emby/Users/"+url.PathEscape(userID), nil, nil, &user); requestErr != nil {
+			return requestErr
+		}
+		if strings.TrimSpace(name) != "" {
 			user["Name"] = strings.TrimSpace(name)
 			if requestErr := s.requestJSON(server, http.MethodPost, "/emby/Users/"+url.PathEscape(userID), nil, user, nil); requestErr != nil {
 				return requestErr
 			}
 		}
 		if policy != nil {
-			return s.requestJSON(server, http.MethodPost, "/emby/Users/"+url.PathEscape(userID)+"/Policy", nil, policy, nil)
+			return s.saveUserPolicy(server, userID, user, normalized)
 		}
 		return nil
 	})
@@ -298,11 +307,89 @@ func (s *EmbyManagementService) ListLibraries(serverID int) ([]EmbyVirtualFolder
 	if err != nil {
 		return nil, err
 	}
+	return s.listLibraries(server)
+}
+
+func (s *EmbyManagementService) listLibraries(server *domain.EmbyServer) ([]EmbyVirtualFolderInfo, error) {
 	libraries := make([]EmbyVirtualFolderInfo, 0)
-	if err = s.requestJSON(server, http.MethodGet, "/emby/Library/VirtualFolders", nil, nil, &libraries); err != nil {
+	if err := s.requestJSON(server, http.MethodGet, "/emby/Library/VirtualFolders", nil, nil, &libraries); err != nil {
 		return nil, err
 	}
 	return libraries, nil
+}
+
+// ListLibrarySummaries 获取媒体库卡片所需摘要，并发补充各库媒体文件数量。
+func (s *EmbyManagementService) ListLibrarySummaries(serverID int) ([]EmbyVirtualFolderInfo, error) {
+	server, err := s.requireServer(serverID)
+	if err != nil {
+		return nil, err
+	}
+	libraries, err := s.listLibraries(server)
+	if err != nil {
+		return nil, err
+	}
+
+	var waitGroup sync.WaitGroup
+	requestSlots := make(chan struct{}, 4)
+	for index := range libraries {
+		libraries[index].MediaFileCount = -1
+		if strings.TrimSpace(libraries[index].ItemID) == "" {
+			continue
+		}
+		waitGroup.Add(1)
+		go func(libraryIndex int) {
+			defer waitGroup.Done()
+			requestSlots <- struct{}{}
+			defer func() { <-requestSlots }()
+			count, countErr := s.getLibraryMediaFileCount(server, libraries[libraryIndex].ItemID)
+			if countErr == nil {
+				libraries[libraryIndex].MediaFileCount = count
+			}
+		}(index)
+	}
+	waitGroup.Wait()
+	return libraries, nil
+}
+
+func (s *EmbyManagementService) getLibraryMediaFileCount(server *domain.EmbyServer, libraryID string) (int, error) {
+	query := url.Values{
+		"ParentId":  {libraryID},
+		"Recursive": {"true"},
+		"IsFolder":  {"false"},
+		"Limit":     {"1"},
+	}
+	var result struct {
+		TotalRecordCount int `json:"TotalRecordCount"`
+	}
+	if err := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &result); err != nil {
+		return 0, err
+	}
+	return result.TotalRecordCount, nil
+}
+
+// GetLibraryCover 读取媒体库主封面，避免前端直接访问 Emby 或接触 API Key。
+func (s *EmbyManagementService) GetLibraryCover(serverID int, libraryID string) ([]byte, string, error) {
+	server, err := s.requireServer(serverID)
+	if err != nil {
+		return nil, "", err
+	}
+	if strings.TrimSpace(libraryID) == "" {
+		return nil, "", fmt.Errorf("媒体库 ID 不能为空")
+	}
+	resp, err := s.doServerRequest(server, http.MethodGet, "/emby/Items/"+url.PathEscape(libraryID)+"/Images/Primary", url.Values{"maxWidth": {"480"}}, nil, "")
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+	if err != nil {
+		return nil, "", err
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = http.DetectContentType(data)
+	}
+	return data, contentType, nil
 }
 
 // CreateLibrary 新增媒体库。

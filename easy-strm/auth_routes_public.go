@@ -68,6 +68,8 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// --- 初始化 DirectLinkController ---
 	directLinkController := controller.NewDirectLinkController()
+	playbackService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
+	directLinkController.SetRecordPlayback(playbackService.Record)
 	directLinkController.SetGetCloud115ByID(func(id int) (*controller.Cloud115AccountBrief, error) {
 		cloud115, err := GetCloud115ByID(id)
 		if err != nil {

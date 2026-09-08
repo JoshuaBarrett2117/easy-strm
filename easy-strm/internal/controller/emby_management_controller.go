@@ -242,18 +242,46 @@ func (c *EmbyManagementController) GetUserAvatar(ctx *gin.Context) {
 	ctx.Data(http.StatusOK, contentType, data)
 }
 
+// ListUserLibraries 返回权限 Guid 和媒体库名称，供用户访问范围选择。
+func (c *EmbyManagementController) ListUserLibraries(ctx *gin.Context) {
+	id, ok := c.serverID(ctx)
+	if !ok {
+		return
+	}
+	libraries, err := c.service.ListUserLibraries(id)
+	if err != nil {
+		ErrorResp(ctx, 502, err.Error())
+		return
+	}
+	SuccessResp(ctx, gin.H{"data": libraries, "total": len(libraries)})
+}
+
 // ListLibraries 查询媒体库。
 func (c *EmbyManagementController) ListLibraries(ctx *gin.Context) {
 	id, ok := c.serverID(ctx)
 	if !ok {
 		return
 	}
-	libraries, err := c.service.ListLibraries(id)
+	libraries, err := c.service.ListLibrarySummaries(id)
 	if err != nil {
 		ErrorResp(ctx, 502, err.Error())
 		return
 	}
 	SuccessResp(ctx, gin.H{"data": libraries, "total": len(libraries)})
+}
+
+// GetLibraryCover 代理读取媒体库封面，不向浏览器暴露 Emby API Key。
+func (c *EmbyManagementController) GetLibraryCover(ctx *gin.Context) {
+	id, ok := c.serverID(ctx)
+	if !ok {
+		return
+	}
+	data, contentType, err := c.service.GetLibraryCover(id, ctx.Param("library_id"))
+	if err != nil {
+		ErrorResp(ctx, http.StatusBadGateway, err.Error())
+		return
+	}
+	ctx.Data(http.StatusOK, contentType, data)
 }
 
 // CreateLibrary 新增媒体库。

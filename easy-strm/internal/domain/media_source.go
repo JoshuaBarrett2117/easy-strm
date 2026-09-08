@@ -15,6 +15,7 @@ type MediaSource struct {
 	Enabled            bool      `json:"enabled"`              // 是否启用
 	OrganizeTargetPath string    `json:"organize_target_path"` // 整理目标目录
 	MediaType          string    `json:"media_type"`           // all | movie | tv
+	MetadataSource     string    `json:"metadata_source"`      // auto | tmdb | metatube
 	ConflictPolicy     string    `json:"conflict_policy"`      // skip | overwrite | suffix
 	OperationMode      string    `json:"operation_mode"`       // move | copy | hardlink | symlink
 	AutoOrganize       bool      `json:"auto_organize"`        // 是否自动整理
@@ -30,6 +31,13 @@ type MediaSource struct {
 const (
 	SourceTypeLocal    = "local"    // 本地存储
 	SourceTypeCloud115 = "cloud115" // 115云盘
+)
+
+// 元数据来源策略常量。
+const (
+	MetadataSourceAuto     = "auto"
+	MetadataSourceTMDB     = "tmdb"
+	MetadataSourceMetaTube = "metatube"
 )
 
 // 文件操作类型常量
@@ -170,40 +178,47 @@ type PathItem struct {
 
 // TmdbSearchResult TMDB 搜索结果
 type TmdbSearchResult struct {
-	TmdbID        int      `json:"tmdb_id"`
-	Title         string   `json:"title"`
-	OriginalTitle string   `json:"original_title"`
-	Year          int      `json:"year"`
-	PosterPath    string   `json:"poster_path"`
-	Overview      string   `json:"overview"`
-	VoteAverage   float64  `json:"vote_average"`
-	MediaType     string   `json:"media_type"` // movie | tv
-	ReleaseDate   string   `json:"release_date"`
-	FirstAirDate  string   `json:"first_air_date"`
-	GenreIDs      []int    `json:"genre_ids"`
-	Countries     []string `json:"countries"`
-	Language      string   `json:"language"`
+	TmdbID           int      `json:"tmdb_id"`
+	Title            string   `json:"title"`
+	OriginalTitle    string   `json:"original_title"`
+	Year             int      `json:"year"`
+	PosterPath       string   `json:"poster_path"`
+	Overview         string   `json:"overview"`
+	VoteAverage      float64  `json:"vote_average"`
+	MediaType        string   `json:"media_type"` // movie | tv
+	ReleaseDate      string   `json:"release_date"`
+	FirstAirDate     string   `json:"first_air_date"`
+	GenreIDs         []int    `json:"genre_ids"`
+	Countries        []string `json:"countries"`
+	Language         string   `json:"language"`
+	MetadataSource   string   `json:"metadata_source,omitempty"`
+	MetadataID       string   `json:"metadata_id,omitempty"`
+	MetadataProvider string   `json:"metadata_provider,omitempty"`
 }
 
 // TmdbIdentifyResult TMDB 识别结果
 type TmdbIdentifyResult struct {
-	Success       bool               `json:"success"`
-	Message       string             `json:"message"`
-	Filename      string             `json:"filename"`
-	MediaType     string             `json:"media_type"` // movie | tv | unknown
-	TmdbID        int                `json:"tmdb_id"`
-	Title         string             `json:"title"`
-	OriginalTitle string             `json:"original_title"`
-	Year          int                `json:"year"`
-	SeasonNumber  int                `json:"season_number"`
-	EpisodeNumber int                `json:"episode_number"`
-	Quality       string             `json:"quality"`
-	Source        string             `json:"source"`
-	Codec         string             `json:"codec"`
-	GenreIDs      []int              `json:"genre_ids"`
-	Countries     []string           `json:"countries"`
-	Language      string             `json:"language"`
-	Candidates    []TmdbSearchResult `json:"candidates"` // Top 3 候选
+	Success          bool               `json:"success"`
+	Message          string             `json:"message"`
+	Filename         string             `json:"filename"`
+	MediaType        string             `json:"media_type"` // movie | tv | unknown
+	TmdbID           int                `json:"tmdb_id"`
+	Title            string             `json:"title"`
+	OriginalTitle    string             `json:"original_title"`
+	Year             int                `json:"year"`
+	PosterPath       string             `json:"poster_path"`
+	SeasonNumber     int                `json:"season_number"`
+	EpisodeNumber    int                `json:"episode_number"`
+	Quality          string             `json:"quality"`
+	Source           string             `json:"source"`
+	Codec            string             `json:"codec"`
+	GenreIDs         []int              `json:"genre_ids"`
+	Countries        []string           `json:"countries"`
+	Language         string             `json:"language"`
+	Candidates       []TmdbSearchResult `json:"candidates"` // Top 3 候选
+	MetadataSource   string             `json:"metadata_source,omitempty"`
+	MetadataID       string             `json:"metadata_id,omitempty"`
+	MetadataProvider string             `json:"metadata_provider,omitempty"`
 }
 
 // TmdbSearchRequest TMDB 搜索请求
@@ -215,12 +230,15 @@ type TmdbSearchRequest struct {
 
 // TmdbIdentifyRequest TMDB 识别请求
 type TmdbIdentifyRequest struct {
-	FileID    string `json:"file_id" binding:"required"`   // 文件ID
-	TmdbID    int    `json:"tmdb_id" binding:"required"`   // TMDB ID
-	TmdbType  string `json:"tmdb_type" binding:"required"` // movie | tv
-	Title     string `json:"title"`                        // 标题
-	Year      int    `json:"year"`                         // 年份
-	PosterURL string `json:"poster_url"`                   // 海报URL
+	FileID           string `json:"file_id" binding:"required"`   // 文件ID
+	TmdbID           int    `json:"tmdb_id" binding:"required"`   // TMDB ID
+	TmdbType         string `json:"tmdb_type" binding:"required"` // movie | tv
+	Title            string `json:"title"`                        // 标题
+	Year             int    `json:"year"`                         // 年份
+	PosterURL        string `json:"poster_url"`                   // 海报URL
+	MetadataSource   string `json:"metadata_source,omitempty"`
+	MetadataID       string `json:"metadata_id,omitempty"`
+	MetadataProvider string `json:"metadata_provider,omitempty"`
 }
 
 // TmdbCacheRepository TMDB 缓存仓库接口
@@ -290,15 +308,18 @@ type RenamePreset struct {
 
 // OrganizeManualOverride 整理预览中的手动识别覆盖项
 type OrganizeManualOverride struct {
-	FileID        string `json:"file_id"`
-	CloudID       string `json:"cloud_id"`
-	MediaType     string `json:"media_type"`
-	TmdbID        int    `json:"tmdb_id"`
-	Title         string `json:"title"`
-	OriginalTitle string `json:"original_title"`
-	Year          int    `json:"year"`
-	Season        int    `json:"season"`
-	Episode       int    `json:"episode"`
+	FileID           string `json:"file_id"`
+	CloudID          string `json:"cloud_id"`
+	MediaType        string `json:"media_type"`
+	TmdbID           int    `json:"tmdb_id"`
+	Title            string `json:"title"`
+	OriginalTitle    string `json:"original_title"`
+	Year             int    `json:"year"`
+	Season           int    `json:"season"`
+	Episode          int    `json:"episode"`
+	MetadataSource   string `json:"metadata_source,omitempty"`
+	MetadataID       string `json:"metadata_id,omitempty"`
+	MetadataProvider string `json:"metadata_provider,omitempty"`
 }
 
 // OrganizeRenameOverride 整理执行中的文件名覆盖项

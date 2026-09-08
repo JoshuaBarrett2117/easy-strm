@@ -131,6 +131,17 @@
         {{ progressFormat(task.progress || 0) }}
       </n-progress>
 
+      <!-- 跨账号云下载分步骤进度 -->
+      <div v-if="crossAccountSteps.length > 0" class="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/40 p-3 dark:border-indigo-400/20 dark:bg-indigo-400/5">
+        <div class="mb-2 text-xs font-bold text-slate-600 dark:text-slate-300">执行步骤</div>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-stretch">
+          <div v-for="(step, index) in crossAccountSteps" :key="step.name" class="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-white/80 px-2.5 py-2 dark:bg-white/5">
+            <n-tag size="small" round :type="stepTagType(step.status)">{{ stepStatusText(step.status) }}</n-tag>
+            <div class="min-w-0"><div class="truncate text-xs font-semibold text-slate-700 dark:text-slate-200">{{ index + 1 }}. {{ step.name }}</div><div v-if="step.message" class="truncate text-[11px] text-slate-400">{{ step.message }}</div></div>
+          </div>
+        </div>
+      </div>
+
       <!-- 文件统计 -->
       <div v-if="showFileStats" class="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         <div class="rounded-xl bg-slate-50 p-3 text-center dark:bg-white/5">
@@ -582,6 +593,14 @@ const taskSummaryItems = computed(() => {
 
   return items
 })
+
+const crossAccountSteps = computed(() => {
+  const t = task.value
+  if (!t || t.task_type !== 'offline_download' || !t.metadata?.cross_account) return []
+  return Array.isArray(t.metadata.steps) ? t.metadata.steps : []
+})
+const stepStatusText = status => ({ pending: '待执行', running: '执行中', success: '成功', failed: '失败', skipped: '跳过' })[status] || '未知'
+const stepTagType = status => ({ running: 'info', success: 'success', failed: 'error', skipped: 'default' })[status] || 'warning'
 
 const pendingCount = computed(() => {
   const t = task.value

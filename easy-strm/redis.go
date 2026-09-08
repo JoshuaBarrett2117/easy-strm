@@ -27,7 +27,7 @@ func InitRedis(config *Config) error {
 		return err
 	}
 
-	Info("Redis connected successfully")
+	Debug("Redis connected successfully")
 	return nil
 }
 

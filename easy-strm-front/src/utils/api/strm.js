@@ -1,5 +1,7 @@
 import { api } from './request'
 
+export const getPlaybackRecords = (params, signal) => api.get('/playback-records', { params, signal, skipGlobalErrorMessage: true })
+
 export const getStrmConfigList = (params) => {
   return api.get('/strm/config', { params })
 }

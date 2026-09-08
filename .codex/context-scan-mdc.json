@@ -1,0 +1,31 @@
+{
+  "date": "2026-09-05",
+  "author": "Codex",
+  "task": "评估 MDC-NG 作为成人刮削工具接入的可行性",
+  "observations": [
+    "目标服务可达，首页 HTTP 307 跳转 /login，登录页标题 Login - MDC-NG。",
+    "openapi.json、api/openapi.json、docs 和 api 均跳转登录，尚未验证业务接口。",
+    "现有 metatube.go 将搜索和详情转换为项目识别与 NFO 数据结构。",
+    "MediaSourceList.vue 支持 auto、tmdb、metatube；可扩展独立 mdc 数据源。",
+    "scrape_service.go 存在 MetaTube 专用缓存判断与 NFO uniqueid 分支，新增来源需要同步修改。",
+    "工作区存在大量未提交变更，本次未修改业务代码。"
+  ],
+  "open_questions": [
+    {"priority": "high", "question": "MDC-NG 的认证方式与搜索、详情或任务接口契约是什么？"},
+    {"priority": "high", "question": "是否支持仅获取元数据？若只支持文件刮削，需要确认共享目录和路径映射。"}
+  ],
+  "decision": "架构上可接入，实际协议仍待登录后验证；优先复用识别与 NFO 流程。",
+  "tool_log": [
+    "functions.exec 查询工具目录：sequential-thinking、shrimp-task-manager、code-index 不可用，改用本地分析和 rg 检索。",
+    "exec_command：git status、AGENTS.md、rg 与 Get-Content，只读检查项目现状。",
+    "exec_command：curl GET 首页、登录页与常见文档路径，确认服务身份和登录要求。"
+  ],
+  "authenticated_findings": {
+    "version": "MDC-NG v1.36.0",
+    "login": "已使用用户提供账号登录成功",
+    "ui_routes": ["/manual-jobs", "/tasks", "/filemanager", "/providers", "/settings/common"],
+    "observed_api_from_public_issue_logs": ["GET /api/config", "PUT /api/config", "GET /api/file_tree?root=/", "GET /ws"],
+    "integration_status": "登录成功，但当前版本没有公开 API 文档；不能在不创建任务的情况下安全确认刮削提交接口。"
+  },
+  "verification": "只读登录和页面检查，未创建任务、未修改配置、未变更业务代码，未运行构建或测试。"
+}

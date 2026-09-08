@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -47,6 +48,15 @@ type OfflineAccountStore interface {
 	GetByID(id int) (*domain.Cloud115, error)
 }
 
+type offlineAccountLister interface {
+	GetAll(sortField, sortOrder string) ([]*domain.Cloud115, error)
+}
+
+type offlineRapidTransferClient interface {
+	GetFileList(cid, showDir, offset, limit, cloud115ID int, cookie string) (*driver.FileListResp, error)
+	RapidTransferFileByMetadata(sourceFileID, sourcePickCode, sourceSHA1 string, sourceSize int64, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (string, error)
+}
+
 // OfflineDownloadService 115云下载（离线下载）服务
 // 负责提交下载链接、记录持久化、轮询跟踪115任务状态并同步任务中心进度
 type OfflineDownloadService struct {
@@ -69,6 +79,7 @@ type offlineDownloadJob struct {
 	directory   string
 	urls        []string
 	invalidURLs []string
+	targetID    int
 }
 
 // NewOfflineDownloadService 创建云下载服务实例
@@ -104,12 +115,40 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		return nil, fmt.Errorf("没有有效的下载链接，仅支持 ed2k/magnet/http/https/ftp 格式")
 	}
 
-	account, err := s.cloud115DAO.GetByID(req.Cloud115ID)
+	targetID := req.Cloud115ID
+	executorID := req.DownloadCloud115ID
+	if executorID <= 0 {
+		executorID = targetID
+	}
+	account, err := s.cloud115DAO.GetByID(executorID)
 	if err != nil || account == nil {
 		return nil, fmt.Errorf("115账号不存在")
 	}
 	if strings.TrimSpace(account.Cookie) == "" {
 		return nil, fmt.Errorf("115账号未登录或Cookie已失效")
+	}
+	if req.DownloadCloud115ID <= 0 && account.AccountType == domain.AccountTypeResource {
+		lister, ok := s.cloud115DAO.(offlineAccountLister)
+		if !ok {
+			return nil, fmt.Errorf("当前账号无云下载权限，无法选择代下载账号")
+		}
+		accounts, listErr := lister.GetAll("priority", "desc")
+		if listErr != nil {
+			return nil, fmt.Errorf("选择代下载账号失败: %v", listErr)
+		}
+		found := false
+		for _, candidate := range accounts {
+			if candidate == nil || candidate.Status != domain.AccountStatusActive || strings.TrimSpace(candidate.Cookie) == "" {
+				continue
+			}
+			if candidate.AccountType == domain.AccountTypeVIP || candidate.AccountType == domain.AccountTypeBoth {
+				account, executorID, found = candidate, candidate.ID, true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("当前账号无云下载权限，未找到可用的VIP代下载账号")
+		}
 	}
 
 	directory := strings.TrimSpace(req.Directory)
@@ -117,14 +156,14 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		directory = offlineDefaultDir
 	}
 	if len(urls)+len(invalidUrls) > offlineBatchSize {
-		return s.enqueueLargeSubmission(req.Cloud115ID, account, directory, urls, invalidUrls)
+		return s.enqueueLargeSubmission(executorID, targetID, account, directory, urls, invalidUrls)
 	}
-	saveDirID, err := s.client.MkdirAll115(directory, req.Cloud115ID, account.Cookie)
+	saveDirID, err := s.client.MkdirAll115(directory, executorID, account.Cookie)
 	if err != nil || strings.TrimSpace(saveDirID) == "" {
 		return nil, fmt.Errorf("创建保存目录失败: %v", err)
 	}
 
-	hashes, err := s.client.AddOfflineTasks(urls, saveDirID, req.Cloud115ID, account.Cookie)
+	hashes, err := s.client.AddOfflineTasks(urls, saveDirID, executorID, account.Cookie)
 
 	taskId := offlineTaskIDPrefix + uuid.New().String()
 	results := make([]domain.OfflineDownloadUrlResult, 0, len(urls)+len(invalidUrls))
@@ -133,11 +172,11 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 
 	switch {
 	case err == nil:
-		accepted = collectBatchResults(urls, hashes, taskId, req.Cloud115ID, saveDirID, &results, &records)
+		accepted = collectBatchResults(urls, hashes, taskId, executorID, saveDirID, &results, &records)
 	case isOfflineDuplicateErr(err), isOfflineInvalidLinkErr(err):
 		// 批量接口在存在重复/无效链接时整体失败，降级为逐链接提交以识别每个链接的受理结果
 		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=submit | batchRejected=%v | fallback=perUrl", taskId, err)
-		accepted = s.submitUrlsOneByOne(urls, saveDirID, req.Cloud115ID, account.Cookie, taskId, &results, &records)
+		accepted = s.submitUrlsOneByOne(urls, saveDirID, executorID, account.Cookie, taskId, &results, &records)
 	default:
 		return nil, normalizeOfflineErr(err)
 	}
@@ -149,7 +188,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		})
 		records = append(records, domain.OfflineDownloadTask{
 			TaskId:       taskId,
-			Cloud115ID:   req.Cloud115ID,
+			Cloud115ID:   executorID,
 			Url:          u,
 			Status:       domain.OfflineStatusFailed,
 			ErrorMessage: "链接格式无效",
@@ -171,9 +210,20 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		return nil, fmt.Errorf("创建任务失败: %v", err)
 	}
 	s.taskDAO.UpdateMetadata(taskId, map[string]interface{}{
-		"cloud115_id":  req.Cloud115ID,
-		"account_name": account.Name,
-		"directory":    directory,
+		"cloud115_id":        executorID,
+		"target_cloud115_id": targetID,
+		"account_name":       account.Name,
+		"directory":          directory,
+		"cross_account":      targetID != executorID,
+		"steps": []map[string]interface{}{
+			{"name": "115云下载", "status": "running"},
+			{"name": "跨账号秒传", "status": func() string {
+				if targetID != executorID {
+					return "pending"
+				}
+				return "skipped"
+			}()},
+		},
 	})
 	s.taskDAO.UpdateProgress(taskId, accepted, 0, 0, 0)
 	s.taskDAO.UpdateStatus(taskId, domain.TaskStatusRunning)
@@ -183,7 +233,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=submit | recordInsertErr=%v", taskId, err)
 	}
 
-	go s.trackBatch(context.Background(), taskId, req.Cloud115ID, account.Cookie)
+	go s.trackBatch(context.Background(), taskId, executorID, account.Cookie, targetID)
 
 	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=submit | result=OK | accepted=%d | rejected=%d | dir=%s",
 		taskId, accepted, len(urls)+len(invalidUrls)-accepted, directory)
@@ -199,17 +249,18 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 
 // enqueueLargeSubmission 为超过115单批上限的请求创建任务并放入后台队列。
 // 入队响应只表示 easy-strm 已接收任务，不把尚未发送到115的链接误报为已受理。
-func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID int, account *domain.Cloud115, directory string, urls, invalidURLs []string) (*domain.OfflineDownloadSubmitResponse, error) {
+func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID, targetID int, account *domain.Cloud115, directory string, urls, invalidURLs []string) (*domain.OfflineDownloadSubmitResponse, error) {
 	taskID := offlineTaskIDPrefix + uuid.New().String()
 	total := len(urls) + len(invalidURLs)
 	if err := s.taskDAO.Create(taskID, string(domain.TaskTypeOfflineDownload), fmt.Sprintf("115云下载 - %d个任务", total)); err != nil {
 		return nil, fmt.Errorf("创建任务失败: %v", err)
 	}
 	s.taskDAO.UpdateMetadata(taskID, map[string]interface{}{
-		"cloud115_id":  cloud115ID,
-		"account_name": account.Name,
-		"directory":    directory,
-		"queue_status": "queued",
+		"cloud115_id":        cloud115ID,
+		"target_cloud115_id": targetID,
+		"account_name":       account.Name,
+		"directory":          directory,
+		"queue_status":       "queued",
 	})
 	s.taskDAO.UpdateProgress(taskID, total, 0, 0, 0)
 	s.taskDAO.UpdateStatus(taskID, domain.TaskStatusRunning)
@@ -222,6 +273,7 @@ func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID int, account 
 		directory:   directory,
 		urls:        append([]string(nil), urls...),
 		invalidURLs: append([]string(nil), invalidURLs...),
+		targetID:    targetID,
 	}
 	select {
 	case s.queue <- job:
@@ -309,7 +361,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 		return
 	}
 	s.taskDAO.UpdateProgress(job.taskID, accepted, 0, 0, 0)
-	go s.trackBatch(context.Background(), job.taskID, job.cloud115ID, job.cookie)
+	go s.trackBatch(context.Background(), job.taskID, job.cloud115ID, job.cookie, job.targetID)
 	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueSubmitted | accepted=%d | rejected=%d", job.taskID, accepted, rejected+len(job.invalidURLs))
 }
 
@@ -554,7 +606,7 @@ func firstOfflineRejectReason(results []domain.OfflineDownloadUrlResult) string 
 
 // trackBatch 在goroutine中跟踪一个提交批次的115离线下载进度
 // 终态条件：批次内全部任务到达终态、任务被取消、ctx结束或超过最长跟踪时长。
-func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, cloud115ID int, cookie string) {
+func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, cloud115ID int, cookie string, targetID int) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=track | panic=%v", taskId, r)
@@ -565,7 +617,7 @@ func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, 
 	startTime := time.Now()
 	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | start | cloud115Id=%d", taskId, cloud115ID)
 
-	if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie); done {
+	if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie, targetID); done {
 		return
 	}
 
@@ -586,7 +638,7 @@ func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, 
 			return
 		}
 
-		if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie); done {
+		if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie, targetID); done {
 			logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | done | duration=%s", taskId, time.Since(startTime).String())
 			return
 		}
@@ -602,7 +654,7 @@ func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, 
 
 // refreshBatchProgress 同步账号离线状态并汇总本批次进度到任务中心
 // 返回 true 表示批次内全部任务已到达终态（任务中心状态已置为终态）。
-func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskId string, cloud115ID int, cookie string) bool {
+func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskId string, cloud115ID int, cookie string, targetID int) bool {
 	if _, err := s.SyncAccountOfflineTasks(ctx, cloud115ID, cookie, true); err != nil {
 		logger.Warnf("[INFO] OfflineDownload | taskId=%s | action=track | syncErr=%v", taskId, err)
 	}
@@ -624,6 +676,17 @@ func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskI
 		case domain.OfflineStatusCompleted:
 			done++
 			success++
+			// 目标账号与下载账号不同且下载完成时，自动执行跨账号秒传。
+			if targetID > 0 && targetID != cloud115ID {
+				s.updateOfflineSteps(taskId, "115云下载", "success", "下载完成，准备跨账号秒传")
+				s.updateOfflineSteps(taskId, "跨账号秒传", "running", "正在创建并执行文件移动任务")
+				if err := s.transferCompletedRecord(ctx, rec, cloud115ID, targetID); err != nil {
+					logger.Warnf("[INFO] OfflineDownload | taskId=%s | recordId=%d | rapidTransferErr=%v", taskId, rec.ID, err)
+					s.updateOfflineSteps(taskId, "跨账号秒传", "failed", err.Error())
+				} else {
+					s.updateOfflineSteps(taskId, "跨账号秒传", "success", "文件已秒传到目标账号")
+				}
+			}
 		case domain.OfflineStatusFailed, domain.OfflineStatusRemoved, domain.OfflineStatusCancelled:
 			done++
 			failed++
@@ -643,6 +706,112 @@ func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskI
 	}
 	s.taskDAO.UpdateStatus(taskId, finalStatus)
 	return true
+}
+
+func (s *OfflineDownloadService) updateOfflineSteps(taskID, name, status, message string) {
+	task, err := s.taskDAO.Get(taskID)
+	if err != nil || task == nil {
+		return
+	}
+	metadata, _ := task["metadata"].(map[string]interface{})
+	if metadata == nil {
+		metadata = map[string]interface{}{}
+	}
+	steps, _ := metadata["steps"].([]interface{})
+	if steps == nil {
+		if typed, ok := metadata["steps"].([]map[string]interface{}); ok {
+			steps = make([]interface{}, len(typed))
+			for i := range typed {
+				steps[i] = typed[i]
+			}
+		}
+	}
+	for _, raw := range steps {
+		if step, ok := raw.(map[string]interface{}); ok && step["name"] == name {
+			step["status"], step["message"] = status, message
+		}
+	}
+	metadata["steps"] = steps
+	_ = s.taskDAO.UpdateMetadata(taskID, metadata)
+}
+
+func (s *OfflineDownloadService) targetAccountID(taskID string) int {
+	t, _ := s.taskDAO.Get(taskID)
+	if t == nil {
+		return 0
+	}
+	m, _ := t["metadata"].(map[string]interface{})
+	if v, ok := m["target_cloud115_id"].(float64); ok {
+		return int(v)
+	}
+	if v, ok := m["target_cloud115_id"].(int); ok {
+		return v
+	}
+	return 0
+}
+
+func (s *OfflineDownloadService) transferCompletedRecord(ctx context.Context, rec domain.OfflineDownloadTask, sourceID, targetID int) error {
+	client, ok := s.client.(offlineRapidTransferClient)
+	if !ok || rec.SaveDirID == "" {
+		return nil
+	}
+	source, err := s.cloud115DAO.GetByID(sourceID)
+	if err != nil || source == nil {
+		return err
+	}
+	target, err := s.cloud115DAO.GetByID(targetID)
+	if err != nil || target == nil {
+		return err
+	}
+	cid, err := strconv.Atoi(rec.SaveDirID)
+	if err != nil {
+		return err
+	}
+	listing, err := client.GetFileList(cid, 0, 0, 1000, sourceID, source.Cookie)
+	if err != nil {
+		return err
+	}
+	var file *driver.FileInfo
+	for i := range listing.Files {
+		if strings.TrimSpace(rec.Name) != "" && listing.Files[i].Name == rec.Name {
+			file = &listing.Files[i]
+			break
+		}
+	}
+	// 115 离线任务有时不返回文件名；目录中只有一个新文件时可安全回退匹配。
+	if file == nil && len(listing.Files) == 1 {
+		file = &listing.Files[0]
+	}
+	if file == nil {
+		return fmt.Errorf("下载完成文件尚未出现在目录中")
+	}
+	targetPath := offlineDefaultDir
+	if task, _ := s.taskDAO.Get(rec.TaskId); task != nil {
+		if metadata, ok := task["metadata"].(map[string]interface{}); ok {
+			if configured, ok := metadata["directory"].(string); ok && strings.TrimSpace(configured) != "" {
+				targetPath = configured
+			}
+		}
+	}
+	targetDir, err := s.client.MkdirAll115(targetPath, targetID, target.Cookie)
+	if err != nil {
+		return err
+	}
+	transferTaskID := "transfer-" + uuid.New().String()
+	if err := s.taskDAO.Create(transferTaskID, string(domain.TaskTypeFileTransfer), "115跨账号秒传 - "+file.Name); err != nil {
+		return err
+	}
+	s.taskDAO.UpdateMetadata(transferTaskID, map[string]interface{}{"source_cloud115_id": sourceID, "target_cloud115_id": targetID, "file_name": file.Name})
+	s.taskDAO.UpdateStatus(transferTaskID, domain.TaskStatusRunning)
+	_, err = client.RapidTransferFileByMetadata(file.FileID, file.PickCode, file.Sha1, int64(file.Size), sourceID, source.Cookie, targetDir, targetID, target.Cookie, file.Name)
+	if err != nil {
+		s.taskDAO.SetError(transferTaskID, err.Error())
+	} else {
+		s.taskDAO.UpdateProgress(transferTaskID, 1, 1, 1, 0)
+		s.taskDAO.UpdateStatus(transferTaskID, domain.TaskStatusCompleted)
+	}
+	_ = ctx
+	return err
 }
 
 // noteTrackingTimeout 在任务元数据中记录跟踪超时说明（不改变任务终态）

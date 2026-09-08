@@ -138,6 +138,7 @@ const (
 	TaskTypeEmbyPlugin      TaskType = "emby_plugin"
 	TaskTypeOfflineDownload TaskType = "offline_download"
 	TaskTypeFileTransfer    TaskType = "file_transfer"
+	TaskTypeShareIdentify   TaskType = "share_identify"
 )
 
 // TaskTypeNames 任务类型中文名称映射
@@ -158,6 +159,7 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeEmbyPlugin:      "神医助手任务",
 	TaskTypeOfflineDownload: "115云下载",
 	TaskTypeFileTransfer:    "文件传输",
+	TaskTypeShareIdentify:   "分享媒体识别",
 }
 
 // TaskStatus 任务运行状态
@@ -240,10 +242,11 @@ type FileItem struct {
 type ShareFileInfo struct {
 	Name     string          `json:"name"`      // 文件名
 	Size     int64           `json:"size"`      // 文件大小（字节）
-	Type     string          `json:"type"`      // 文件类型：video/audio/image/folder/other
+	Type     string          `json:"type"`      // 文件类型：video/audio/image/folder/media/other；media表示可识别的剧集或电影目录
 	Path     string          `json:"path"`      // 文件在分享中的路径
 	PickCode string          `json:"pick_code"` // 文件pickcode（分享场景通常为空）
 	Fid      string          `json:"fid"`       // 分享文件ID（115 file_id，转存时使用）
+	DirID    string          `json:"dir_id"`    // 目录ID（展开目录时作为 share/snap 的 cid 参数）
 	Sha1     string          `json:"sha1"`      // 文件SHA1
 	IsDir    bool            `json:"is_dir"`    // 是否为目录
 	Children []ShareFileInfo `json:"children"`  // 子文件/子目录列表
@@ -257,11 +260,12 @@ type ParseShareRequest struct {
 
 // ParseShareResponse 解析分享链接响应
 type ParseShareResponse struct {
-	ShareCode  string          `json:"share_code"`  // 分享码
-	FolderName string          `json:"folder_name"` // 分享文件夹名称
-	Files      []ShareFileInfo `json:"files"`       // 文件列表
-	TotalFiles int             `json:"total_files"` // 文件总数
-	TotalSize  int64           `json:"total_size"`  // 总大小（字节）
+	MaskedDirectories []ShareFileInfo `json:"masked_directories"` // 已跳过的脱敏目录，仅用于分享媒体统计
+	ShareCode         string          `json:"share_code"`         // 分享码
+	FolderName        string          `json:"folder_name"`        // 分享文件夹名称
+	Files             []ShareFileInfo `json:"files"`              // 文件列表
+	TotalFiles        int             `json:"total_files"`        // 文件总数
+	TotalSize         int64           `json:"total_size"`         // 总大小（字节）
 }
 
 // ShareTransferFileItem 转存文件项（用于提交转存请求）

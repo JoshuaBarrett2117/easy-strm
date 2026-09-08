@@ -105,6 +105,7 @@ func (c *TmdbController) Search(ctx *gin.Context) {
 	}
 
 	mediaType := ctx.Query("type")
+	metadataSource := ctx.Query("metadata_source")
 
 	var results []domain.TmdbSearchResult
 	var err error
@@ -112,12 +113,12 @@ func (c *TmdbController) Search(ctx *gin.Context) {
 	// 根据媒体类型搜索
 	switch mediaType {
 	case "movie":
-		results, err = c.tmdbService.SearchMovie(keyword, year)
+		results, err = c.tmdbService.SearchMovieBySource(keyword, year, metadataSource)
 	case "tv":
 		results, err = c.tmdbService.SearchTV(keyword, year)
 	default:
 		// 同时搜索电影和剧集
-		movieResults, movieErr := c.tmdbService.SearchMovie(keyword, year)
+		movieResults, movieErr := c.tmdbService.SearchMovieBySource(keyword, year, metadataSource)
 		tvResults, tvErr := c.tmdbService.SearchTV(keyword, year)
 
 		if movieErr != nil && tvErr != nil {
@@ -165,7 +166,7 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	var detail map[string]interface{}
 	var err error
 	if req.TmdbType == "movie" {
-		detail, err = c.tmdbService.GetMovieDetail(req.TmdbID)
+		detail, err = c.tmdbService.GetMovieDetailBySource(req.TmdbID, req.MetadataSource, req.MetadataID, req.MetadataProvider)
 	} else {
 		detail, err = c.tmdbService.GetTVDetail(req.TmdbID)
 	}
@@ -177,8 +178,9 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	}
 
 	// 保存识别结果到缓存（以 file_id 作为 query_key）
+	cacheKey := c.tmdbService.CacheKeyForSource(req.FileID, req.TmdbType, req.MetadataSource)
 	cache := &dao.TmdbCache{
-		QueryKey:  req.FileID,
+		QueryKey:  cacheKey,
 		MediaType: req.TmdbType,
 		TmdbID:    req.TmdbID,
 		Title:     req.Title,
@@ -207,6 +209,15 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	}
 
 	// 序列化详情为 JSON
+	if req.MetadataSource != "" {
+		detail["metadata_source"] = req.MetadataSource
+	}
+	if req.MetadataID != "" {
+		detail["metadata_id"] = req.MetadataID
+	}
+	if req.MetadataProvider != "" {
+		detail["metadata_provider"] = req.MetadataProvider
+	}
 	rawData, err := json.Marshal(detail)
 	if err != nil {
 		logger.Warnf("TmdbController[Identify] 序列化详情失败: %v", err)
@@ -218,7 +229,7 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	cache.ExpireAt = time.Now().Add(7 * 24 * time.Hour)
 
 	// 检查是否已存在缓存
-	existing, _ := c.cacheDAO.GetByQueryKey(req.FileID, req.TmdbType)
+	existing, _ := c.cacheDAO.GetByQueryKey(cacheKey, req.TmdbType)
 	if existing != nil {
 		// 更新逻辑
 		cache.ID = existing.ID
@@ -250,9 +261,10 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 // 不写入缓存，仅返回候选列表；用户选择后再调用 Identify 端点绑定
 func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 	var req struct {
-		Filename  string `json:"filename" binding:"required"`
-		FilePath  string `json:"file_path"`
-		MediaType string `json:"media_type"` // 可选：movie | tv，不传则自动判断
+		Filename       string `json:"filename" binding:"required"`
+		FilePath       string `json:"file_path"`
+		MediaType      string `json:"media_type"` // 可选：movie | tv，不传则自动判断
+		MetadataSource string `json:"metadata_source"`
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
@@ -268,7 +280,7 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 
 	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", identifyInput)
 
-	result, err := c.tmdbService.GetCandidatesWithPath(identifyInput)
+	result, err := c.tmdbService.GetCandidatesWithPathBySource(identifyInput, req.MetadataSource)
 	if err != nil {
 		logger.Errorf("TmdbController[AutoIdentify] 获取候选失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取候选失败: "+err.Error())

@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-02",
+  "executor": "Codex",
+  "request": "美化 Emby 媒体库卡片，展示封面、类型和媒体文件数量，隐藏目录与 Idle 状态",
+  "findings": {
+    "frontend": "EmbyManagement.vue 当前直接展示 CollectionType、Path/Locations 和 RefreshStatus",
+    "backend": "管理接口仅返回 /emby/Library/VirtualFolders 原始数据，已有图片代理模式但没有媒体库封面读取接口",
+    "similar_implementations": [
+      "Emby 用户头像通过后端代理并由前端 Blob URL 展示",
+      "Emby 监控媒体图片通过 /Items/{id}/Images/Primary 代理",
+      "媒体库封面上传与生成已使用媒体库 ItemId"
+    ],
+    "risk": "ListLibraries 同时用于刷新轮询，不能直接在基础列表方法中附加逐库统计请求"
+  },
+  "decision": [
+    "新增只供管理列表使用的摘要查询，避免影响刷新轮询",
+    "媒体数量由 Emby Items 查询的 TotalRecordCount 提供",
+    "封面沿用现有后端图片代理与前端 Blob URL 生命周期管理"
+  ],
+  "sufficiency": {
+    "interface_contract": true,
+    "technical_choice": true,
+    "risks_identified": true,
+    "verification_known": true
+  }
+}

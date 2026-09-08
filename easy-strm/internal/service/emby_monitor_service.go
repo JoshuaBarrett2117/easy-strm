@@ -83,9 +83,31 @@ type pluginPlaybackRow struct {
 	UserID   string `json:"user_id"`
 	UserName string `json:"user_name"`
 	Name     string `json:"name"`
-	ItemID   string `json:"item_id"`
-	Type     string `json:"type"`
-	Duration int64  `json:"duration"`
+	// Playback Reporting 不同版本可能返回数字或字符串，使用 interface{} 兼容两种格式。
+	ItemID   interface{}   `json:"item_id"`
+	Type     string        `json:"type"`
+	Duration flexibleInt64 `json:"duration"`
+}
+
+// flexibleInt64 兼容插件将时长返回为数字或数字字符串。
+type flexibleInt64 int64
+
+func (v *flexibleInt64) UnmarshalJSON(data []byte) error {
+	var n int64
+	if err := json.Unmarshal(data, &n); err == nil {
+		*v = flexibleInt64(n)
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return err
+	}
+	*v = flexibleInt64(n)
+	return nil
 }
 
 type pluginUsageRow struct {
@@ -371,14 +393,14 @@ func rowsRanking(rows []pluginPlaybackRow, dimension, mediaType string) []domain
 		}
 		key, name, subtitle := row.UserID, row.UserName, ""
 		if dimension == "media" {
-			key, name, subtitle = row.ItemID, row.Name, row.Type
+			key, name, subtitle = fmt.Sprint(row.ItemID), row.Name, row.Type
 		}
 		item := items[key]
 		if item == nil {
 			item = &domain.EmbyMonitorRankingItem{ID: key, Name: name, Subtitle: subtitle}
 			items[key] = item
 		}
-		item.WatchedSeconds += row.Duration
+		item.WatchedSeconds += int64(row.Duration)
 		item.PlayCount++
 	}
 	result := make([]domain.EmbyMonitorRankingItem, 0, len(items))
@@ -508,17 +530,17 @@ func summaryFromRows(rows []pluginPlaybackRow, today, week, month time.Time) dom
 		if e != nil {
 			continue
 		}
-		r.TotalSeconds += row.Duration
+		r.TotalSeconds += int64(row.Duration)
 		if !at.Before(month) {
-			r.MonthSeconds += row.Duration
+			r.MonthSeconds += int64(row.Duration)
 			mu[row.UserID] = true
 		}
 		if !at.Before(week) {
-			r.WeekSeconds += row.Duration
+			r.WeekSeconds += int64(row.Duration)
 			wu[row.UserID] = true
 		}
 		if !at.Before(today) {
-			r.TodaySeconds += row.Duration
+			r.TodaySeconds += int64(row.Duration)
 			tu[row.UserID] = true
 		}
 	}
@@ -539,7 +561,7 @@ func trendFromRows(rows []pluginPlaybackRow, start, end time.Time, loc *time.Loc
 		if e != nil || at.Before(start) || !at.Before(end) {
 			continue
 		}
-		splitPlaybackHours(at, row.Duration, func(hour time.Time, seconds int64) {
+		splitPlaybackHours(at, int64(row.Duration), func(hour time.Time, seconds int64) {
 			if hour.Before(start) || !hour.Before(end) {
 				return
 			}
@@ -697,8 +719,8 @@ func heatmapFromRows(rows []pluginPlaybackRow, userID string, loc *time.Location
 			by[row.UserID] = u
 			cells[row.UserID] = map[string]int64{}
 		}
-		u.TotalSeconds += row.Duration
-		splitPlaybackHours(at, row.Duration, func(hour time.Time, seconds int64) {
+		u.TotalSeconds += int64(row.Duration)
+		splitPlaybackHours(at, int64(row.Duration), func(hour time.Time, seconds int64) {
 			key := fmt.Sprintf("%s|%02d", hour.Format("2006-01-02"), hour.Hour())
 			cells[row.UserID][key] += seconds
 		})

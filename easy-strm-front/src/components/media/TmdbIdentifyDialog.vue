@@ -2,15 +2,15 @@
   <n-modal
     v-model:show="visible"
     preset="card"
-    title="TMDB 手动搜索"
+    :title="`${metadataSourceLabel} 手动搜索`"
     class="w-[96vw] max-w-[960px]"
   >
     <div class="min-h-[400px]">
       <section class="mb-4 flex flex-col gap-3 sm:flex-row">
         <div class="flex-1 rounded-2xl border border-cyan-500/10 bg-gradient-to-br from-cyan-500/10 to-amber-400/10 p-4 lg:p-5">
-          <h3 class="text-lg font-bold text-slate-800 dark:text-white">手动搜索 TMDB</h3>
+          <h3 class="text-lg font-bold text-slate-800 dark:text-white">手动搜索元数据</h3>
           <p class="mt-2 text-sm leading-relaxed text-slate-500 dark:text-slate-400">
-            当自动识别不够准确时，可以在这里切换电影或剧集并人工确认目标条目。
+            当自动识别不够准确时，可以切换元数据来源、媒体类型并人工确认目标条目。
           </p>
         </div>
         <div class="min-w-[180px] rounded-2xl bg-slate-100 p-4 dark:bg-white/5 lg:p-5">
@@ -23,6 +23,7 @@
         <n-input
           v-model:value="searchKeyword"
           placeholder="输入电影或剧集名称搜索"
+          class="min-w-0 flex-1"
           @keyup.enter="handleSearch"
         >
           <template #prefix>
@@ -34,7 +35,16 @@
           v-model:value="searchType"
           placeholder="类型"
           :options="searchTypeOptions"
-          class="w-full shrink-0 sm:w-[140px]"
+          class="w-full shrink-0 sm:!w-[140px]"
+        />
+
+        <n-select
+          v-model:value="selectedMetadataSource"
+          placeholder="元数据来源"
+          :options="metadataSourceOptions"
+          class="w-full shrink-0 sm:!w-[160px]"
+          data-testid="metadata-source-select"
+          @update:value="handleMetadataSourceChange"
         />
 
         <n-button type="primary" class="shrink-0" @click="handleSearch">搜索</n-button>
@@ -90,7 +100,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { NModal, NInput, NSelect, NButton, NSpin, NRate, NIcon, useMessage } from 'naive-ui'
 import { SearchOutline } from '@vicons/ionicons5'
 import EmptyState from '../common/EmptyState.vue'
@@ -104,7 +114,8 @@ const props = defineProps({
   currentFile: {
     type: Object,
     default: null
-  }
+  },
+  metadataSource: { type: String, default: 'auto' }
 })
 
 const emit = defineEmits(['select'])
@@ -116,6 +127,17 @@ const searchKeyword = ref('')
 const searchType = ref('movie')
 const results = ref([])
 const loading = ref(false)
+const selectedMetadataSource = ref('auto')
+
+const metadataSourceOptions = [
+  { label: '自动（媒体源设置）', value: 'auto' },
+  { label: 'TMDB', value: 'tmdb' },
+  { label: 'MetaTube', value: 'metatube' }
+]
+
+const metadataSourceLabel = computed(() => {
+  return metadataSourceOptions.find(option => option.value === selectedMetadataSource.value)?.label || '元数据'
+})
 
 const searchTypeOptions = [
   { label: '电影', value: 'movie' },
@@ -127,8 +149,21 @@ watch(visible, (val) => {
     const filename = props.currentFile.name || props.currentFile.file_name || ''
     searchKeyword.value = filename.replace(/\.[^/.]+$/, '')
     results.value = []
+    selectedMetadataSource.value = metadataSourceOptions.some(option => option.value === props.metadataSource)
+      ? props.metadataSource
+      : 'auto'
   }
 })
+
+watch(() => props.metadataSource, (value) => {
+  if (!visible.value && metadataSourceOptions.some(option => option.value === value)) {
+    selectedMetadataSource.value = value
+  }
+})
+
+const handleMetadataSourceChange = () => {
+  results.value = []
+}
 
 const handleSearch = async () => {
   if (!searchKeyword.value.trim()) {
@@ -140,7 +175,8 @@ const handleSearch = async () => {
   try {
     const response = await searchTmdb({
       keyword: searchKeyword.value,
-      type: searchType.value
+      type: searchType.value,
+      metadata_source: selectedMetadataSource.value
     })
     results.value = response.data.data?.data || []
   } catch (error) {
@@ -156,7 +192,8 @@ const handleSelect = (item) => {
   emit('select', {
     item,
     mode: props.selectMode,
-    searchType: searchType.value
+    searchType: searchType.value,
+    metadataSource: selectedMetadataSource.value
   })
 }
 

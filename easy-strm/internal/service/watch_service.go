@@ -717,6 +717,9 @@ func (ws *WatchService) pollCloud115Directory(state *cloud115WatchState) {
 }
 
 func (ws *WatchService) fetchCloud115FileSet(source *domain.MediaSource) (map[string]cloud115WatchFile, error) {
+	if ws.cloud115DAO == nil || ws.client == nil {
+		return nil, fmt.Errorf("115 监控依赖未初始化")
+	}
 	if source.Cloud115ID == nil {
 		return nil, fmt.Errorf("未关联 115 账号")
 	}

@@ -890,6 +890,9 @@ DO $$ BEGIN
 	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'media_type') THEN
 		ALTER TABLE t_media_source ADD COLUMN media_type VARCHAR(20) DEFAULT 'all';
 	END IF;
+	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'metadata_source') THEN
+		ALTER TABLE t_media_source ADD COLUMN metadata_source VARCHAR(20) NOT NULL DEFAULT 'auto';
+	END IF;
 	IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_media_source' AND column_name = 'conflict_policy') THEN
 		ALTER TABLE t_media_source ADD COLUMN conflict_policy VARCHAR(20) DEFAULT 'skip';
 	END IF;
@@ -950,6 +953,10 @@ END $$;
 	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.media_type IS '自动整理默认媒体类型（all/movie/tv）'`)
 	if err != nil {
 		Warn("Failed to add comment for media_type: %v", err)
+	}
+	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.metadata_source IS '元数据来源策略（auto/tmdb/metatube）'`)
+	if err != nil {
+		Warn("Failed to add comment for metadata_source: %v", err)
 	}
 	_, err = db.Exec(`COMMENT ON COLUMN t_media_source.conflict_policy IS '自动整理默认冲突策略（skip/overwrite/suffix）'`)
 	if err != nil {
@@ -1071,6 +1078,17 @@ END $$;
 		Warn("Failed to create idx_offline_download_task_account_status: %v", err)
 	}
 
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS t_share_record (id SERIAL PRIMARY KEY, url TEXT NOT NULL, password TEXT NOT NULL DEFAULT '', file_name TEXT NOT NULL, metadata_source VARCHAR(20) NOT NULL DEFAULT 'auto', status VARCHAR(20) NOT NULL DEFAULT 'pending', result JSONB, error TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT now(), updated_at TIMESTAMP NOT NULL DEFAULT now())`)
+	if err != nil {
+		return err
+	}
+	if err = migrateShareRecords(); err != nil {
+		return err
+	}
+	if err = migratePlaybackRecords(); err != nil {
+		Error("Failed to migrate STRM playback records: %v", err)
+		return err
+	}
 	Info("Database initialized successfully")
 	return nil
 }

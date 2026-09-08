@@ -130,7 +130,7 @@ func (c *Client) GetCIDByPath(path string, cloud115ID int, cookie string) (strin
 		Warn("CID lookup returned empty or zero for path: %s, this may indicate the path does not exist", path)
 	}
 
-	Info("Found CID %s for path: %s", resp.CategoryID, path)
+	Debug("Resolved CID: path=%s cid=%s", path, resp.CategoryID)
 	return string(resp.CategoryID), nil
 }
 
@@ -207,7 +207,7 @@ func getCIDByPathWithDriver(d *driver.Pan115Client, path string) (string, error)
 		}
 	}
 
-	Info("Found CID %s for path: %s", currentCID, path)
+	Debug("Resolved CID: path=%s cid=%s", path, currentCID)
 	return currentCID, nil
 }
 

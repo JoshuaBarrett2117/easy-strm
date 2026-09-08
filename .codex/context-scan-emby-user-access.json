@@ -1,0 +1,17 @@
+{
+ "date": "2026-09-07",
+ "author": "Codex",
+ "request": "修复已配置媒体库名称回显、允许访问媒体库保存，并自行验证",
+ "evidence": [
+  "用户原有 EnabledFolders 为 32 位 Guid，当前提交为 127953 等 ItemId",
+  "EmbyManagement.vue 权限下拉复用了媒体库管理 libraryOptions",
+  "官方 SelectableMediaFolders 返回 Name、Id、Guid、IsUserAccessConfigurable",
+  "旧 UpdateUser 原样发送数字ID，不回读，同时丢弃页面未编辑的 Policy 字段"
+ ],
+ "source": "https://dev.emby.media/reference/RestAPI/LibraryService/getLibrarySelectablemediafolders.html",
+ "similar_patterns": ["ListLibraries 控制器列表包装", "ListUsers 实例作用域与 requestJSON", "前端 e2e-emby-monitor Playwright 接口夹具"],
+ "plan": ["先补回归测试复现", "新增权限选项接口，Guid 名称映射", "规范化提交并保留原有策略，回读验证", "浏览器交互与本地构建测试"],
+ "sufficiency": {"contract": true, "approach": true, "risks": true, "verification": true},
+ "limits": "真实 Emby 用户权限没有修改；验证基于官方接口结构、本地 httptest 和浏览器模拟接口",
+ "tools": "sequential-thinking、shrimp-task-manager、code-index、exa 未提供，使用本地分析、rg、官方文档 HTTP 读取与现有 Go/Playwright 验证。"
+}

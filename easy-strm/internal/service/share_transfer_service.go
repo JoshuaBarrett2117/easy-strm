@@ -125,6 +125,11 @@ func NewShareTransferService(
 // 匹配模式：115.com/s/{shareCode} 或 115cdn.com/s/{shareCode}
 var shareCodeRe = regexp.MustCompile(`(?:115cdn\.com|115\.com)/s/(\w+)`)
 
+// isMaskedSharePath 识别被连续星号替换的分享名称，兼容已保存的多层路径。
+func isMaskedSharePath(name string) bool {
+	return strings.Contains(name, "**") || strings.Contains(name, "＊＊")
+}
+
 // ParseShareLink 解析115分享链接，获取分享文件列表
 // 采用两步策略：
 //  1. 正则提取URL中的shareCode（密码可从URL query参数或password参数获取）
@@ -165,30 +170,9 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 		password = extractSharePassword(url)
 	}
 
-	// 3. 循环分页拉取分享文件（根目录 dirID="0"，每页最多 200 条）
-	// 115driver 默认 limit=20，需主动分页才能拿全（如 26 个文件只返回前 20 个）
-	const shareSnapPageSize = 200
-	var allFiles []driver.ShareFile
-	offset := 0
-	shareTitle := ""
-	var snapErr error
-	for {
-		snapResp, err := s.client.GetShareSnap(shareCode, password, "0",
-			driver.QueryLimit(shareSnapPageSize), driver.QueryOffset(offset))
-		if err != nil {
-			snapErr = mapShareSnapError(err)
-			break
-		}
-		if shareTitle == "" {
-			shareTitle = snapResp.Data.Shareinfo.ShareTitle
-		}
-		allFiles = append(allFiles, snapResp.Data.List...)
-		// 终止条件：已拿全或本页为空
-		if len(allFiles) >= snapResp.Data.Count || len(snapResp.Data.List) == 0 {
-			break
-		}
-		offset += shareSnapPageSize
-	}
+	// 3. 循环分页拉取分享根目录文件。
+	masked := make([]domain.ShareFileInfo, 0)
+	allFiles, shareTitle, snapErr := s.fetchShareTree(ctx, shareCode, password, "0", "", 0, map[string]bool{}, &masked)
 	if snapErr != nil {
 		logger.Errorf("[INFO] ShareTransfer | shareCode=%s | action=parse | result=API_ERROR | err=%v | duration=%s",
 			maskedCode, snapErr, time.Since(startTime).String())
@@ -197,14 +181,14 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 
 	// 4. 转换为领域模型
 	result := &domain.ParseShareResponse{
-		ShareCode:  shareCode,
-		FolderName: shareTitle,
-		TotalFiles: len(allFiles),
+		MaskedDirectories: masked,
+		ShareCode:         shareCode,
+		FolderName:        shareTitle,
+		TotalFiles:        len(allFiles),
 	}
 
 	var totalSize int64
-	for _, f := range allFiles {
-		fileInfo := convertToShareFileInfo(f)
+	for _, fileInfo := range allFiles {
 		result.Files = append(result.Files, fileInfo)
 		totalSize += fileInfo.Size
 	}
@@ -221,6 +205,129 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 		maskedCode, result.TotalFiles, result.TotalSize, time.Since(startTime).String())
 
 	return result, nil
+}
+
+// fetchAllShareFiles 受控遍历分享目录，最多下探两层，避免一次性读取季目录内容。
+func (s *ShareTransferService) fetchAllShareFiles(ctx context.Context, shareCode, password string) ([]domain.ShareFileInfo, string, error) {
+	visited := map[string]bool{}
+	masked := make([]domain.ShareFileInfo, 0)
+	return s.fetchShareTree(ctx, shareCode, password, "0", "", 0, visited, &masked)
+}
+
+func (s *ShareTransferService) fetchShareTree(ctx context.Context, shareCode, password, dirID, parentPath string, depth int, visited map[string]bool, masked *[]domain.ShareFileInfo) ([]domain.ShareFileInfo, string, error) {
+	if visited[dirID] {
+		return nil, "", nil
+	}
+	visited[dirID] = true
+	logger.Infof("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q start", truncateShareCode(shareCode), dirID, parentPath)
+	files, title, err := s.fetchShareDirectory(ctx, shareCode, password, dirID)
+	if err != nil {
+		logger.Errorf("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q error=%v", truncateShareCode(shareCode), dirID, parentPath, err)
+		return nil, title, err
+	}
+	logger.Infof("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q items=%d", truncateShareCode(shareCode), dirID, parentPath, len(files))
+	result := make([]domain.ShareFileInfo, 0, len(files))
+	for _, file := range files {
+		info := convertToShareFileInfo(file)
+		info.Path = strings.TrimPrefix(filepath.Join(parentPath, info.Name), string(filepath.Separator))
+		if info.IsDir && isMaskedSharePath(info.Name) {
+			*masked = append(*masked, info)
+			logger.Infof("[ShareIdentify] 跳过脱敏目录 | directory=%q | reason=目录名包含连续星号", filepath.Join(parentPath, info.Name))
+			continue
+		}
+		// 根目录为第0层，仅下探两层；第二层目录（通常为剧集/电影目录）
+		// 只读取其直接子项（如 Season 1），不再进入季目录内容。
+		if info.IsDir && info.DirID != "" && depth < 2 {
+			children, _, childErr := s.fetchShareTree(ctx, shareCode, password, info.DirID, info.Path, depth+1, visited, masked)
+			if childErr != nil {
+				return nil, title, childErr
+			}
+			// 目录下直接包含视频，或第二层目录下包含季目录时，
+			// 将该目录视为一部电影/剧集候选；不再继续向季目录内部读取。
+			hasVideo := false
+			hasChildDir := false
+			for _, child := range children {
+				hasVideo = hasVideo || (!child.IsDir && child.Type == "video")
+				hasChildDir = hasChildDir || child.IsDir
+			}
+			if hasVideo || (depth == 1 && hasChildDir) {
+				info.Type = "media"
+				reason := "包含视频文件"
+				if !hasVideo && hasChildDir {
+					reason = "包含季目录"
+				}
+				logger.Infof("[ShareIdentify] 发现媒体目录 | directory=%q | reason=%s", info.Path, reason)
+			}
+			// 必须在完成候选类型判断后再追加当前目录，否则结果中会保留旧的 folder 类型。
+			result = append(result, info)
+			result = append(result, children...)
+			continue
+		}
+		result = append(result, info)
+	}
+	return result, title, nil
+}
+
+// fetchShareDirectory 分页获取指定分享目录的全部直接子项，每页最多100条。
+// 该方法只获取指定目录的一层，完整解析由 fetchAllShareFiles 按最大深度调用。
+func (s *ShareTransferService) fetchShareDirectory(ctx context.Context, shareCode, password, dirID string) ([]driver.ShareFile, string, error) {
+	const shareSnapPageSize = 100
+	const shareSnapMaxAttempts = 4
+	var allFiles []driver.ShareFile
+	shareTitle := ""
+	offset := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
+		var snapResp *driver.ShareSnapResp
+		var err error
+		for attempt := 1; attempt <= shareSnapMaxAttempts; attempt++ {
+			snapResp, err = s.client.GetShareSnap(shareCode, password, dirID,
+				driver.QueryLimit(shareSnapPageSize), driver.QueryOffset(offset))
+			if err == nil {
+				break
+			}
+			if !isRetryableShareSnapError(err) || attempt == shareSnapMaxAttempts {
+				break
+			}
+			backoff := time.Duration(attempt) * time.Second
+			logger.Warnf("ShareTransferService[fetchShareDirectory] share=%s dir=%s offset=%d attempt=%d/%d network_error=%v retry_in=%s", truncateShareCode(shareCode), dirID, offset, attempt, shareSnapMaxAttempts, err, backoff)
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		if err != nil {
+			return nil, "", mapShareSnapError(err)
+		}
+		if shareTitle == "" {
+			shareTitle = snapResp.Data.Shareinfo.ShareTitle
+		}
+		allFiles = append(allFiles, snapResp.Data.List...)
+		if len(allFiles) >= snapResp.Data.Count || len(snapResp.Data.List) == 0 {
+			return allFiles, shareTitle, nil
+		}
+		offset += shareSnapPageSize
+	}
+}
+
+func isRetryableShareSnapError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"connection was forcibly closed", "connection reset", "connection refused",
+		"unexpected eof", " eof", "timeout", "timed out", "temporary failure",
+		"tls handshake timeout", "server misbehaving", "no such host",
+	} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func extractSharePassword(rawURL string) string {
@@ -261,6 +368,7 @@ func mapShareSnapError(err error) error {
 //   - ctx: 上下文
 //   - shareCode: 分享码
 //   - password: 分享密码
+//   - dirID: 待展开目录ID；0表示解析时缓存的根目录
 //   - page: 页码（从1开始）
 //   - pageSize: 每页数量
 //   - typeFilter: 类型筛选（video/audio/image/folder/other，为空则不过滤）
@@ -269,7 +377,25 @@ func mapShareSnapError(err error) error {
 // 返回:
 //   - *domain.ParseShareResponse: 分页后的文件列表
 //   - error: 查询失败时返回错误
-func (s *ShareTransferService) GetShareFiles(ctx context.Context, shareCode, password string, page, pageSize int, typeFilter, keyword string) (*domain.ParseShareResponse, error) {
+func (s *ShareTransferService) GetShareFiles(ctx context.Context, shareCode, password, dirID string, page, pageSize int, typeFilter, keyword string) (*domain.ParseShareResponse, error) {
+	if dirID != "" && dirID != "0" {
+		files, shareTitle, err := s.fetchShareDirectory(ctx, shareCode, password, dirID)
+		if err != nil {
+			return nil, err
+		}
+		result := &domain.ParseShareResponse{
+			ShareCode:  shareCode,
+			FolderName: shareTitle,
+			TotalFiles: len(files),
+		}
+		for _, file := range files {
+			fileInfo := convertToShareFileInfo(file)
+			result.Files = append(result.Files, fileInfo)
+			result.TotalSize += fileInfo.Size
+		}
+		return result, nil
+	}
+
 	// 1. 从Redis缓存读取
 	cacheKey := shareCacheKeyPrefix + shareCode
 	var cacheData *domain.ParseShareResponse
@@ -881,12 +1007,13 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 // ==================== 内部类型与辅助函数 ====================
 
 // convertToShareFileInfo 将115driver的ShareFile（share/snap接口文件项）转换为领域模型
-// 字段映射（115真实API）：n→Name, s→Size, ico→扩展名, fid→文件ID, sha→Sha1, cid→CategoryID
+// 字段映射（115真实API）：n→Name, s→Size, ico→扩展名, fid→文件ID, sha→Sha1, cid→父目录ID, fc→文件标志
 // 注意：share/snap接口的 fid 可能返回为整数（Go string 无法直接反序列化），
 // 因此需要通过 json.RawMessage 二次提取，确保 Fid 始终为字符串。
 func convertToShareFileInfo(f driver.ShareFile) domain.ShareFileInfo {
+	// share/snap 的 cid 表示父目录 ID，不能据此判断当前项类型；fc=1 表示文件，fc=0 表示目录。
 	cid := string(f.CategoryID)
-	isDir := cid != "" && cid != "0"
+	isDir := f.IsFile == 0
 
 	// 类型判断：根据文件名后缀识别媒体类型，无法识别时归为other
 	fileType := "other"
@@ -894,7 +1021,7 @@ func convertToShareFileInfo(f driver.ShareFile) domain.ShareFileInfo {
 		fileType = "folder"
 	} else {
 		switch strings.ToLower(filepath.Ext(f.FileName)) {
-		case ".mkv", ".mp4":
+		case ".mkv", ".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts", ".m2ts", ".rmvb", ".iso":
 			fileType = "video"
 		case ".mp3", ".flac":
 			fileType = "audio"
@@ -917,6 +1044,14 @@ func convertToShareFileInfo(f driver.ShareFile) domain.ShareFileInfo {
 			}
 		}
 	}
+	// 目录项部分响应不带 fid，使用 cid（目录 ID）作为转存接口的 file_id。
+	if isDir && fidStr == "" {
+		fidStr = cid
+	}
+	dirID := ""
+	if isDir {
+		dirID = cid
+	}
 
 	return domain.ShareFileInfo{
 		Name:     f.FileName,
@@ -925,6 +1060,7 @@ func convertToShareFileInfo(f driver.ShareFile) domain.ShareFileInfo {
 		Path:     "",
 		PickCode: "",
 		Fid:      fidStr,
+		DirID:    dirID,
 		Sha1:     f.Sha1,
 		IsDir:    isDir,
 	}

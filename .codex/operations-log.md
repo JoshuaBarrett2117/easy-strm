@@ -248,6 +248,14 @@
 # 2026-08-09 前后端启动与手动验证
 
 - 执行者：Codex。
+
+## 2026-09-05 启动前后端供手动验证
+
+- 检索：使用 `rg` 核对项目启动脚本、Vite 代理和默认端口；当前环境未提供 sequential-thinking、code-index、shrimp-task-manager，已使用本地命令行替代。
+- 操作：启动后端 `go run .`，启动前端 `npm run dev -- --host 127.0.0.1`。
+- 验证：前端 `http://127.0.0.1:3001/` 返回 HTTP 200；后端登录接口返回 HTTP 401，证明服务已响应且鉴权生效；端口 3001、8082 均处于监听状态。
+- 注意：后端数据库与 Redis 连接成功；Telegram Bot 出现同账号长轮询冲突警告，不影响普通页面和 API 手动验证。
+- 执行者：Codex。
 - 工具降级：当前会话未提供 `sequential-thinking`、`shrimp-task-manager`、`code-index`，改用本地 `rg`、`update_plan`、PowerShell 与应用内浏览器完成上下文检查和验证。
 - 仓库检查：工作区存在用户未提交改动，本轮未修改业务代码，也未覆盖或清理现有改动。
 - 环境检查：Go 1.25.6、Node.js 24.13.0、npm 11.6.2 可用；前端 `node_modules` 已就绪；配置中的 PostgreSQL `15432` 与 Redis `16379` 端口可达。Docker Desktop daemon 未运行，但本地进程启动不依赖 Docker。
@@ -679,3 +687,215 @@
 - 红队增量证据：本地执行 `docker compose -f docker-compose.yml config --images` 复现默认镜像展开为无效的 `/easy-strm:latest`，已纳入 G-06/RQ-05 P0。
 - 工具降级：当前会话未提供项目手册指定的 `sequential-thinking`、`code-index`、`shrimp-task-manager` 和 `exa`；使用计划工具、`rg`、PowerShell、并行代理、源码阅读和本地自动验证替代，并在需求文档中声明。
 - 外部写入边界：未执行真实 115、Emby、通知或用户媒体目录写入 E2E，避免审计过程产生外部副作用。
+
+## 2026-09-02 Emby 监控排行与热力图修复
+
+- 修改：用户/客户端排行 SQL 不再将展示用空字符串常量加入 `GROUP BY`，避免 PostgreSQL `non-integer constant in GROUP BY`。
+- 修改：活跃热力图改用显式 260px 高度、包含坐标标签并为热力单元格增加边框，避免图表过矮和内容挤压。
+- 验证：`go test ./internal/dao ./internal/service -run 'EmbyMonitor|RowsRanking|Heatmap'` 通过；`easy-strm-front` 执行 `npm run build` 通过。
+- 追加排查：同时移除趋势与热力图查询中的位置常量分组写法，统一改为显式表达式，避免不同 PostgreSQL 版本解析位置常量时再次触发同类错误。
+## 2026-09-02 Emby 用户媒体库名称展示
+
+- 检查：`easy-strm-front/src/views/EmbyManagement.vue` 的媒体库选项和值映射。
+- 修改：兼容 Emby 虚拟文件夹的 `ItemId`、`Id`、`id` 及名称字段，选中用户权限中的媒体库 ID 统一转为字符串，以名称作为展示文本。
+- 验证：在 `easy-strm-front` 执行 `npm run build`，构建成功。
+
+## 2026-09-02 Emby 媒体库卡片改造
+
+- 工具降级：未提供 sequential-thinking、shrimp-task-manager 和 code-index，使用 `rg`、本地读取、计划工具与浏览器页面检查替代。
+- 后端：新增管理列表摘要查询和媒体库封面代理；摘要按最多 4 个并发请求统计各库非文件夹媒体项，基础 `ListLibraries` 保持轻量，避免影响刷新轮询。
+- 前端：媒体库改为封面卡片，增加中文类型标签和媒体文件数量，移除媒体目录及 Idle 标签；无封面时展示渐变占位。
+- 验证：新增摘要统计与封面代理测试通过；全包编译通过；前端生产构建通过；完整 Service 包测试被工作区既有 MetaTube 测试失败阻断。
+
+## 2026-09-02 前后端手动验证服务启动
+
+- 操作：启动后端 `go run .`（`easy-strm`），启动前端 `npm run dev -- --host 0.0.0.0`（`easy-strm-front`）。
+- 结果：后端连接 PostgreSQL/Redis 成功并监听 `:8082`；前端 Vite 监听 `:3001`。
+- 连通性：`http://localhost:3001/` 返回 200；`http://localhost:8082/` 返回 404，表明服务可达。
+
+## 2026-09-02 MetaTube 本地数据源
+
+- 执行者：Codex；任务 ID：`metatube-source-20260902`。
+- 工具降级：会话未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`、`exa`；使用 `rg`、PowerShell、GitHub 公开 API、`apply_patch` 和本地测试替代。
+- 上下文：扫描系统设置、TMDB 识别、详情缓存、整理和刮削链路；通过 MetaTube 官方 Jellyfin 客户端确认 `/v1/movies/search` 与 `/v1/movies/{provider}/{id}` 契约。
+- 实现：增加 MetaTube 设置页、配置持久化和热更新；电影识别/详情走 MetaTube，剧集保留 TMDB；详情转换为现有 NFO 模型。
+- 数据兼容：保留原始 metadata source/provider/id，并用稳定合成整数兼容现有 `tmdb_id` 接口；令牌不在通用配置读取结果中回显，留空保持原值。
+- 验证：`go test ./...` 通过；`npm run build` 通过；前端仅有既存大分块提示。
+
+## 2026-09-03 媒体源级元数据来源
+
+- 需求：允许电影资源按媒体源选择“自动 / TMDB / MetaTube”。
+- 实现：媒体源模型、数据库迁移、DAO/Service/Controller CRUD 统一保存 `metadata_source`；整理预览、批量识别、手动识别与刮削链路透传来源及 MetaTube 标识。
+- 策略：`auto` 跟随系统 MetaTube 默认开关；`tmdb` 强制 TMDB；`metatube` 强制 MetaTube，未配置时返回可读错误；电视剧仍走 TMDB。
+- 前端：媒体源编辑对话框新增“元数据来源”下拉选项，列表摘要展示当前来源。
+- 回归修复：手动搜索返回 MetaTube 候选后，识别详情按 provider/id 调用 MetaTube，不再把合成 ID 当作 TMDB ID；前端优先保留候选项实际来源。
+- 工具降级：本会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用本地检索、补丁编辑和项目既有测试命令替代。
+## 2026-09-02 解析结果目录选择修复
+
+- 检索：检查 `ResourceTransfer.vue`、`ShareLinkInput.vue` 与 `FileSelector.vue` 的解析及选中链路。
+- 发现：115 分享解析可能返回 `is_dir=true` 且无 `children` 的目录项；旧逻辑将其视为容器，复选框切换不会写入 `checkedFiles`。
+- 修改：将无子节点目录视为可转存叶子节点，统一修正叶子统计、全选、目录递归选中和选中状态刷新。
+- 验证：在 `easy-strm-front` 执行 `npm run build`，构建通过。
+## 2026-09-03 115 分享文件类型与转存修复
+
+- 发现：115 `share/snap` 响应中的 `cid` 是父目录 ID，不能用于判断当前项是否为目录；使用该字段会把嵌套普通文件误判为文件夹。
+- 修改：改用协议字段 `fc`（`1` 文件、`0` 目录）生成 `is_dir`，避免错误提交目录项导致 `4100012`。
+- 验证：`go test ./internal/service -run 'TestParseShareLink_POC_(ConvertFields|EndToEnd)$'` 通过；前端 `npm run build` 通过。
+
+## 2026-09-03 启动前后端供手动验证
+
+- 操作：启动 `go run .`（后端）和 `npm run dev -- --host 0.0.0.0`（前端）。
+- 结果：后端监听 `0.0.0.0:8082`，前端监听 `0.0.0.0:3001`；前端 `/api` 代理预检返回 `204`。
+- 日志：后端 `easy-strm/logs/manual-backend-start.log`、`easy-strm/logs/manual-backend-start.err.log`；前端 `easy-strm-front/manual-frontend-start.log`、`easy-strm-front/manual-frontend-start.err.log`。
+- 注意：后端日志出现 Telegram Bot 长轮询冲突警告，说明已有其他实例使用同一 Bot。
+
+## 2026-09-05 115 分享转存目录展开修复
+
+- 需求：修复分享解析完成后目录节点点击无内容的问题。
+- 定位：解析仅缓存根目录；前端展开只切换本地状态，未按目录ID请求 `share/snap`。
+- 修改：新增 `dir_id` 查询参数与按目录懒加载；目录节点新增 `dir_id`，前端支持加载状态、失败重试和任意层级展开；分享密码同步用于展开及转存提交。
+- 测试：新增 `TestGetShareFilesLoadsDirectory`，验证目录ID和密码透传；`go test ./...`、前端 `npm run build`、前端目录树单测均通过。
+- 工具降级：本会话未提供 sequential-thinking、code-index、shrimp-task-manager；使用本地检索、补丁编辑和项目既有测试命令替代。
+- 执行者：Codex。
+## 2026-09-05 Emby 用户媒体库名称显示修复
+
+- 问题：用户编辑弹窗可能在媒体库列表异步加载完成前打开，Naive UI 找不到选项标签时会显示 `EnabledFolders` 原始 ID。
+- 修复：打开编辑弹窗前确保媒体库列表已加载且包含当前权限 ID；媒体库 ID 和权限值统一转为字符串，并统一兼容 `ItemId`/`Id`/`id` 与大小写名称字段。
+- 验证：`easy-strm-front` 执行 `npm run build` 通过。
+
+## 2026-09-06 启动前后端供手动验证
+
+- 工具降级：当前环境未提供 `sequential-thinking`、`code-index`、`shrimp-task-manager`，使用 PowerShell 与 `rg` 完成配置和运行状态检查。
+- 配置检查：确认后端监听 `8082`，前端 Vite 监听 `3001`，PostgreSQL `192.168.31.12:15432` 与 Redis `192.168.31.12:16379` 均可连接。
+- 启动操作：后端执行 `go run .`，前端执行 `npm run dev -- --host 127.0.0.1`，均以隐藏后台进程运行。
+- 验证结果：前端 `http://127.0.0.1:3001/` 返回 HTTP 200；后端 `http://127.0.0.1:8082/` 返回路由级 HTTP 404，端口和 Gin 服务正常响应。
+- 日志：`debug/manual-backend.out.log`、`debug/manual-backend.err.log`、`debug/manual-frontend.out.log`、`debug/manual-frontend.err.log`。
+- 注意：后端日志出现 Telegram Bot 重复长轮询冲突警告，不影响网页手动验证。
+- 执行者：Codex。
+
+2026-09-06 Codex：将分享主表与媒体子表拆为 1:N，完成分页 CRUD、媒体识别、失败重试、前端表格展开和编辑。
+
+
+[2026-09-06 18:08:08] Codex: 修复分享名称解析，保留名称中的括号；运行 go test ./...、npm run build；重启 Go 后端并通过浏览器验证新增名称回显、编辑/删除按钮和批量识别任务进度展示。
+
+[2026-09-06] Codex：分享媒体详情升级。识别结果补充 poster_path，前端识别成功的媒体子行显示海报、中文名、原名、年份、类型和文件名；未识别分享记录禁用展开，仅保留主记录操作。
+验证：go test ./... 通过；npm run build 通过；浏览器验证已识别子行可展开并显示“灿烂人生”等中文媒体信息，未识别状态由 expandable 条件阻止展开。
+
+[2026-09-06] Codex：分享解析改为递归遍历所有子目录，并保留媒体相对路径；批量识别使用相对路径作为文件名，避免不同目录同名文件被去重漏掉；补充更多视频扩展名识别。大分享可完整建立媒体记录后统一识别。
+验证：go test ./... 通过；npm run build 通过；后端已重启。
+
+[2026-09-06] Codex：分享表格操作列新增“识别”按钮。新增单条分享识别接口，创建独立任务，仅解析并识别当前分享下的全部媒体；前端复用任务进度卡展示处理状态。
+验证：go test ./... 通过；npm run build 通过；浏览器确认每条分享行显示识别按钮；后端已重启。
+
+[2026-09-06] Codex：修复分享识别任务长期 pending/无错误问题。任务启动即标记 running；解析阶段记录当前分享、解析数量和日志；解析失败、媒体写入失败、超时和 panic 均写入任务错误及 metadata.parse_errors；任务增加 30 分钟超时和取消注册。服务启动时自动将遗留 pending/running 任务标记为失败并提示重新执行。分享识别继续复用 TmdbService 当前识别测试规则和详情补全逻辑。
+验证：go test ./... 通过；npm run build 通过；后端已重启。
+
+[2026-09-06] Codex：分析 swwhkzz3z5o 异常。22:18:14 失败发生在已成功读取大量目录后的单个 share/snap 子目录请求，底层为 Fake-IP/代理链路上的 wsarecv connection forcibly closed，非访问码或目录权限错误。新增 share/snap 目录分页级 4 次重试与线性退避，业务错误不重试；记录 share、dir、path、offset、attempt。识别测试与分享识别共用同一 TmdbService 实例及 filename recognition rule store，分享识别调用同一文件名解析链路并补充详情元数据。
+
+[2026-09-06] Codex：按需求将分享解析分页大小调整为100；完整解析最多下探两层（根目录深度0，读取深度1和深度2目录的直接子项），深度2目录下的 Season 1/Season 2 等目录只作为结构项保留，不继续读取其媒体内容，后续可单独解析。后端已重启。
+验证：go test ./... 通过；npm run build 通过。
+
+[2026-09-06] Codex：修复深度限制后媒体数为0的问题。受控解析会将“目录下直接包含视频”或第二层目录下包含季目录的剧集/电影目录标记为 type=media；批量识别保留这些目录作为媒体候选，跳过普通目录和季目录内容。任务总数和主表媒体数因此按剧集/电影候选数量回写。
+验证：go test ./... 通过；npm run build 通过；后端已重启。
+
+## 2026-09-07 分享识别进度修复
+- 调整 ShareRecordService.runBatchIdentify：解析阶段按分享数量写入 1-20% 进度，解析失败也推进进度；无待识别媒体时写入 100%。
+- 分享管理页显示已处理/总数、当前分享和当前文件。
+- 重启后端并执行 go test ./...、
+pm run build，均通过。
+
+## 2026-09-07 Emby 用户媒体库权限（Codex）
+- 根因：用户权限选项复用 VirtualFolders.ItemId；官方 SelectableMediaFolders 同时返回 Id 和 Guid，EnabledFolders 应使用权限 Guid。
+- 实施：新增 user-libraries 控制器/API/领域返回结构；用户弹窗显示名称并选择 Guid；后端规范化旧数字 ID、保留未编辑的 Policy 字段、写入后回读；恢复全部媒体库开关的明确语义。
+- 工具与过程：functions.exec/rg/Get-Content 检索 Service、Controller、API、Vue 和现有测试；Invoke-WebRequest 读取官方文档；apply_patch 小步修改；go test 先复现原样传数字 ID、遗漏策略字段、未回读造成假成功，再验证修复；Playwright 验证页面交互。
+- 工具降级：sequential-thinking、shrimp-task-manager、code-index、exa 不在工具目录中，使用本地分析、rg 和官方文档 HTTP 请求。
+- 初次浏览器测试失败：3001 未提供可连接前端；启动独立 3017 Vite。后续发现通配 API 拦截误匹配 src/utils/api 模块，限制为 /api/ 根路径后通过。
+- 验证：go test ./... 通过；新增 Service 权限往返 6 场景、选项查询 3 场景、Controller 3 场景通过；浏览器 7 场景通过；npm run build 通过（已有大块警告）。
+- 浏览器场景：名称回显、Guid 提交、保存后重开、全部媒体库、空范围、旧数字 ID、保存失败保留弹窗。截图：debug/emby-user-access/names-after-save.png。
+- 限制：Go 测试使用 httptest/sqlmock/miniredis；浏览器使用可回读模拟接口，未联调或修改真实 Emby 用户。需要部署更新的前后端才能使用新接口。
+
+## 2026-09-07 分享媒体候选与识别日志修复
+- 根据真实任务日志确认分享已解析 3761 项，但媒体目录在追加结果后才修改类型，导致结果仍为 folder 并全部被过滤。
+- 调整 etchShareTree 的追加顺序，先判断并标记 media，再写入结果。
+- 新增 [ShareIdentify] 日志：输出媒体目录名、候选原因，以及 TMDB 识别后的类型、ID、中英文名、年份和失败信息。
+- 零媒体任务改为 failed，避免显示 completed 但总数为 0。
+- 新增受控两层目录回归测试，确认剧集目录被识别且不会下探 Season 内容。
+- go test ./... 通过，后端已重启。
+
+## 2026-09-07 系统日志缺失修复（Codex）
+- 原因：internal/pkg/logger 使用标准 log 默认控制台输出；系统日志接口读取主程序 info/debug 文件，且仅返回最近 500 行。
+- 将服务层日志接入 InitLogger 已有四级输出及日志级别，复用现有文件；前端标明最近 500 行范围。
+- 新增日志分流及级别回归测试；go test ./...、npm run build 通过（既有大 chunk 提示）。后端已重启，核对 info 文件出现服务层日志。
+
+## 2026-09-07 23:20 Emby 真实实例权限闭环（Codex）
+- 直接读取当前实例 users/accesstab.js：原生选项使用 folder.Guid || folder.Id，并通过 EnabledFolders.includes(folderId) 判断勾选。
+- 真实只读诊断：115tv 仍存储 [127953,127954,127956,127955]；BlockedMediaFolders=null、ExcludedSubFolders=[]，故本次不是排除字段冲突。
+- 真实映射：127953=电视剧STRM、127954=电影STRM、127956=动漫电影STRM、127955=动漫STRM。
+- 新增显式环境变量触发的 TestEmbyUserAccessLiveRepair，默认全量测试跳过真实写入。使用真实服务器凭据（仅内存）、现有 Service 和模拟任务存储修复原有四项 ID，不扩大范围。首次测试夹具误用了 test-key 导致 401（写入前失败），改为真实连接凭据后通过。
+- 真实验证：Service UpdateUser 保存回读通过；刷新 Emby 原生页面，4 个 chkFolder.checked 均为 true。
+- 再次通过真实 localhost:3001 easy-strm 页面打开 115tv，四项显示媒体库名称；点击保存后弹窗关闭；刷新真实 Emby 页面仍勾选相同四项。证明当前运行中的前后端链路已生效。
+- go test ./... 通过；本轮未改前端生产代码，未重复构建。
+- 结论修正：之前仅修复代码未迁移 Emby 已保存的错误数字 ID，不能将模拟测试通过宣称为真实用户问题已解决。本次已完成真实数据修复与 UI 验证。
+- 工具：rg/Get-Content 检索；Invoke-WebRequest 读取部署版本公开 JS；Go 读取已配置实例及目标权限；cua_repl 读取原生 checkbox data-id、刷新并核对 checked 状态，以及真实 easy-strm 保存操作。
+
+## 2026-09-07 Codex：分享列表被关联分页截断
+- 修复主表先分页、再关联完整媒体列表；原 JOIN 后 LIMIT 20 导致其他分享消失，后台 LIMIT 200 同样漏识别媒体。
+- 前端显示总数、已识别、失败和待识别数量；保持仅成功媒体可展开海报详情。
+- sqlmock 回归覆盖 404 个媒体、第二个无媒体分享、关键词和第二页参数。
+- go test ./... 与 npm run build 均通过，后端重启。尚未通过登录态对真实数据进行端到端验证。
+
+## 2026-09-07 Codex：分享海报布局
+- 提取 ShareMediaGallery 模板组件，替换表格 render 函数中的散排内容，让 scoped 样式作用于组件自身元素。
+- 响应式多列卡片、2:3 封面、两行标题、原名/年份/来源、路径提示和固定底部操作；展开区限高滚动，图片懒加载与失败占位。
+- npm run build 通过，既有 chunk 提示；未执行真实浏览器视觉验收。
+
+## 2026-09-07 Codex：分享海报手动识别
+- 卡片新增手动识别：名称、年份、电影/剧集选择，复用 TMDB 搜索接口（电影可选 MetaTube），用户选择后保存并刷新。
+- 新增 manual-identify API，校验选择结果；DAO 检查受影响行数，过期版本返回错误，避免后台识别覆盖手动选择。
+- 回归覆盖无效结果和保存/版本冲突；go test ./...、npm run build 通过。后端重启。未执行浏览器端到端操作。
+
+## 2026-09-07 Codex：跳过脱敏目录
+- 目录名含连续半角或全角星号时，在递归前跳过，不读取子目录、不返回媒体候选；记录目录名与原因。
+- 已保存的脱敏路径在批量识别中跳过，单项自动识别返回明确提示；不删除已有记录。
+- 回归覆盖半角/全角、已存路径、正常名称和禁止子目录请求。go test ./... 通过，后端重启。
+
+## 2026-09-07 Codex：分享级媒体类型
+- 编辑移除媒体文件列表，仅更新主表保留媒体识别结果。新增 movie/tv 字段及 v23 自动迁移，默认 movie。
+- 单项及后台识别复用规则解析并强制分享类型；结果类型不符时重新识别。
+- 主表分页测试同步字段，新增编辑不修改媒体回归。go test ./...、npm run build 通过；修复一次编译变量重复声明；后端重启。
+
+## 分享脱敏目录统计（2026-09-08，Codex）
+- 名称含连续半角或全角星号的目录不下探、不识别；解析结果通过 masked_directories 单独携带统计目录。
+- 复用分享媒体记录保存脱敏路径；同名路径按出现次数补齐，重复扫描不累加。列表服务归一化历史脱敏项为 masked，并返回 masked_count。
+- 总数包含脱敏项；脱敏项不计入已识别、失败、待识别。全脱敏分享任务正常完成。
+- 本地验证：go test ./... 通过；npm run build 通过（存在大于 500 kB 的构建分块提示）。回归覆盖扫描跳过、同名计数、重复扫描、历史状态归一化、数据库错误、全脱敏任务完成。
+- 测试过程：先复现解析结果缺失脱敏统计；新增任务测试适配已有 Redis 全局初始化以及工作区新增 media_type 字段后通过。
+- 工具：functions.exec / exec_command 用于 rg、读取、gofmt、测试和构建；apply_patch 用于代码与测试修改。指定 sequential-thinking、shrimp-task-manager、code-index 不可用，采用本地分析与 rg。
+- 原始输出：.codex/share-masked-go-test.log、.codex/share-masked-build.log。未进行线上分享调用和浏览器端到端验证。
+
+## 批量导入分享按钮修复（2026-09-08，Codex）
+- 根因：ShareRecords.vue 缺失 batchImportShow 对应弹窗；原拆行正则错误匹配字面量反斜杠。
+- 实现：补全输入、取消与提交弹窗，修复换行拆分、连续链接名称误用；提交期间禁止重复操作，部分失败保留未完成项供重试，成功后刷新列表。
+- 验证：node scripts/e2e-share-batch-import.mjs 通过，覆盖打开/取消、无链接、CRLF/LF、名称、列表刷新、失败恢复和窄屏；使用模拟 API，无真实数据写入。npm run build 通过（4848 modules，既有大分块提示）。仅前端修改，未运行后端测试。
+- 复现：先修正测试夹具误拦截 src/utils/api 模块的问题，再确认修改前点击后等待弹窗超时；修复后全场景通过。
+- 审查：通过；技术/需求/综合评分 94/96/95。复用 Naive UI 与既有 API，无新增依赖。真实后端导入未验证；名称支持链接上一行，访问码需与链接同一行，已在输入提示注明。
+- 工具记录：functions.exec/exec_command 执行 git status、rg、Get-Content、Vite、Playwright、npm run build、git diff --check；apply_patch 写入上下文、回归和弹窗；Python 定点替换原单行函数及追加记录。sequential-thinking、shrimp-task-manager、code-index 不可用，使用本地分析与 rg。
+- git diff --check 发现既有 .codex/testing.md:829 尾随空格，本次未改动该历史内容。保留工作区其他改动。
+
+## 混合分享解析及预览导入（2026-09-08，Codex）
+- 已完成：domain响应、Service纯解析、控制器与路由、API封装、独立ShareImportDialog、单元/控制器/浏览器测试及长期文档。
+- 关键决策：按当前文本分享编号去重；URL移除密码查询并独立保存访问码，避免预览修改密码后被URL旧值覆盖；歧义与冲突默认不选，已成功项锁定。
+- 验证：go test ./... 全部通过（easy-strm、controller、dao、domain、logger、service）；Playwright全部通过；npm run build通过（4850模块，既有大分块提示）。构建完整输出见 .codex/share-import-build.log。
+- 失败及修复：浏览器初次断言使用原生disabled判定Naive UI checkbox，改为其实际disabled类后通过；后端新增块边界回归先复现结束标记后标题被吞，修复只消费到访问码/复制结束行后通过。
+- 审查：通过；技术94、需求96、综合95。前后名称冲突保留候选；导入失败保留状态；解析与导入保持分层，无新依赖和数据库变更。API夹具验证未调用真实网盘；未部署。
+- 工具留痕：functions.exec / exec_command 执行 Get-Content、rg、gofmt、go test、node Playwright、npm run build、git diff --check；apply_patch 创建和更新代码/测试/结构化需求；Python 定点替换页面旧弹窗/函数及追加文档。指定思考/规划/索引MCP不可用，使用本地分析及rg。保留所有已有工作区变更。
+
+## GitHub main 提交验证（2026-09-08，Codex）
+- 请求：提交当前全部代码及配套文档变更并推送 origin/main，用户已明确授权。
+- 上下文：当前分支 main；git fetch origin 成功，HEAD 与 origin/main 提交前一致。范围为分享管理与批量导入、Emby 用户权限与媒体库、播放记录、MetaTube 元数据、日志及对应测试文档。
+- 工具降级：sequential-thinking、shrimp-task-manager、code-index 当前不可用；采用本地分析、Git 与 rg。计划为检查范围、运行本地验证、提交全部变更、正常推送并核对远程。
+- 验证：go test ./... 全包通过；npm run build 通过，仅既有大分块提示。完整输出：.codex/github-main-go-test.log、.codex/github-main-build.log。
+- 浏览器：node scripts/e2e-share-batch-import.mjs 与 node scripts/e2e-emby-user-access.mjs 均通过，使用本地页面及模拟 API，未验证真实外部服务。
+- 修正：修复 testing.md 中断裂的 npm 命令及尾随空白。
+- 工具留痕：functions.exec 调用 exec_command 执行 Git 状态/分支/远程/fetch/diff/log、rg、Get-Content、Go 测试、前端构建及两项 Playwright；write_stdin 获取测试结果；apply_patch 修正文档。后续执行 git add/commit/push 与远程哈希核对。
+- 审查：提交范围与请求一致，本地基线及两项相关回归通过；本次为提交前验证，未重新逐行审计全部历史功能。

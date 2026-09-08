@@ -19,7 +19,8 @@ func TestSystemConfigServiceHidesRemovedAlistSettings(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"id", "config_key", "config_val", "create_time", "update_time"}).
 			AddRow(1, "alist_url", "http://unused", now, now).
 			AddRow(2, "alist_token", "unused", now, now).
-			AddRow(3, "proxy_url", "http://127.0.0.1:7890", now, now))
+			AddRow(3, "proxy_url", "http://127.0.0.1:7890", now, now).
+			AddRow(4, "metatube_token", "secret", now, now))
 
 	service := NewSystemConfigService(dao.NewSystemConfigDAO())
 
@@ -33,6 +34,13 @@ func TestSystemConfigServiceHidesRemovedAlistSettings(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("SQL 预期未满足: %v", err)
+	}
+}
+
+func TestSystemConfigServiceDoesNotExposeMetaTubeToken(t *testing.T) {
+	service := NewSystemConfigService(nil)
+	if config, err := service.GetByKey("metatube_token"); err != nil || config != nil {
+		t.Fatalf("MetaTube 令牌不应通过读取接口返回: config=%#v err=%v", config, err)
 	}
 }
 

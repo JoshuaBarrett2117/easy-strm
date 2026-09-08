@@ -120,6 +120,59 @@
           </n-form>
         </n-tab-pane>
 
+        <!-- MetaTube 本地数据源 -->
+        <n-tab-pane name="metatube" tab="MetaTube">
+          <n-form :model="metatubeForm" label-placement="top" class="max-w-2xl">
+            <n-form-item label="启用成人内容识别">
+              <div class="w-full">
+                <n-switch :value="adultContentEnabled" @update:value="handleAdultContentToggle">
+                  <template #checked>已启用</template>
+                  <template #unchecked>默认关闭</template>
+                </n-switch>
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">开启后才允许配置 MetaTube 和识别成人内容，首次开启必须二次确认。</p>
+              </div>
+            </n-form-item>
+            <n-form-item label="自动策略默认使用 MetaTube">
+              <n-switch v-model:value="metatubeForm.enabled" :disabled="!adultContentEnabled"><template #checked>MetaTube</template><template #unchecked>TMDB</template></n-switch>
+            </n-form-item>
+            <n-form-item label="MetaTube 服务地址">
+              <div class="w-full">
+                <n-input v-model:value="metatubeForm.url" :disabled="!adultContentEnabled" placeholder="例如 http://127.0.0.1:8080" clearable />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">填写 easy-strm 可访问的本地 MetaTube 地址，后端将调用官方 /v1/movies 接口。</p>
+              </div>
+            </n-form-item>
+            <n-form-item label="访问令牌（可选）">
+              <n-input v-model:value="metatubeForm.token" :disabled="!adultContentEnabled" type="password" show-password-on="click" placeholder="无鉴权可留空" clearable />
+            </n-form-item>
+            <div class="mt-6 flex flex-wrap gap-2">
+              <n-button type="primary" :loading="metatubeLoading" @click="handleMetaTubeSubmit"><template #icon><n-icon :component="CheckmarkOutline" /></template>保存设置</n-button>
+              <n-button @click="handleMetaTubeReset"><template #icon><n-icon :component="RefreshOutline" /></template>重置</n-button>
+            </div>
+          </n-form>
+        </n-tab-pane>
+
+        <!-- MDC-NG 成人刮削集成 -->
+        <n-tab-pane name="mdc" tab="MDC-NG">
+          <n-form :model="mdcForm" label-placement="top" class="max-w-2xl">
+            <n-form-item label="启用 MDC-NG 成人刮削">
+              <n-switch v-model:value="mdcForm.enabled" :disabled="!adultContentEnabled">
+                <template #checked>已启用</template><template #unchecked>默认关闭</template>
+              </n-switch>
+            </n-form-item>
+            <n-form-item label="MDC-NG 服务地址">
+              <div class="w-full">
+                <n-input v-model:value="mdcForm.url" :disabled="!adultContentEnabled" placeholder="例如 http://192.168.31.12:9208" clearable />
+                <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">easy-strm 将通过该地址连接 MDC-NG；任务仍由 MDC-NG 负责执行。</p>
+              </div>
+            </n-form-item>
+            <div class="mt-6 flex flex-wrap gap-2">
+              <n-button type="primary" :loading="mdcLoading" @click="handleMdcSubmit"><template #icon><n-icon :component="CheckmarkOutline" /></template>保存设置</n-button>
+              <n-button :loading="mdcTesting" :disabled="!mdcForm.url" @click="handleMdcTest">测试连接</n-button>
+              <n-button @click="handleMdcReset"><template #icon><n-icon :component="RefreshOutline" /></template>重置</n-button>
+            </div>
+          </n-form>
+        </n-tab-pane>
+
         <!-- Emby 实例已迁移至 Emby 管理页面 -->
         <!--
           <n-form :model="embyForm" label-placement="top" class="max-w-2xl">
@@ -630,7 +683,8 @@ import {
 } from 'naive-ui'
 import { CheckmarkOutline, RefreshOutline, PaperPlaneOutline } from '@vicons/ionicons5'
 import PageCard from '../components/common/PageCard.vue'
-import { getSettings, updateSettings } from '../utils/api/setting'
+import { showConfirmDialog } from '../utils/ui/messageBox'
+import { getSettings, updateSettings, testMdcConnection } from '../utils/api/setting'
 import { getGlobalApiConfig, updateGlobalApiConfig } from '../utils/api/systemApi'
 import { getTmdbConfig, updateTmdbApiKey } from '../utils/api/media'
 import {
@@ -650,6 +704,14 @@ const loading = ref(false)
 const globalApiLoading = ref(false)
 const globalApiForm = ref({ enabled: false, base_url: '', api_key: '', has_api_key: false })
 const tmdbLoading = ref(false)
+const metatubeLoading = ref(false)
+const metatubeForm = ref({ enabled: false, url: '', token: '' })
+const initialMetaTubeForm = ref({ enabled: false, url: '', token: '' })
+const mdcLoading = ref(false)
+const mdcTesting = ref(false)
+const mdcForm = ref({ enabled: false, url: '' })
+const initialMdcForm = ref({ enabled: false, url: '' })
+const adultContentEnabled = ref(false)
 const initialForm = ref({})
 
 const form = ref({
@@ -843,6 +905,11 @@ const fetchSettings = async () => {
       movie_naming_template: data.movie_naming_template || '',
       tv_naming_template: data.tv_naming_template || ''
     }
+    adultContentEnabled.value = data.adult_content_enabled === 'true' || data.adult_content_enabled === '1'
+    metatubeForm.value = { enabled: adultContentEnabled.value && (data.metatube_enabled === 'true' || data.metatube_enabled === '1'), url: adultContentEnabled.value ? (data.metatube_url || '') : '', token: '' }
+    initialMetaTubeForm.value = { ...metatubeForm.value }
+    mdcForm.value = { enabled: adultContentEnabled.value && (data.mdc_enabled === 'true' || data.mdc_enabled === '1'), url: adultContentEnabled.value ? (data.mdc_url || '') : '' }
+    initialMdcForm.value = { ...mdcForm.value }
     initialForm.value = { ...form.value }
 
   } catch (error) {
@@ -984,6 +1051,53 @@ const handleTelegramSubmit = async () => {
     message.error(error.response?.data?.error || '保存 Telegram 配置失败')
   } finally {
     telegramLoading.value = false
+  }
+}
+
+const handleMetaTubeSubmit = async () => {
+  if (metatubeForm.value.enabled && !metatubeForm.value.url.trim()) { message.warning('启用 MetaTube 时请输入服务地址'); return }
+  metatubeLoading.value = true
+  try {
+    const settings = { adult_content_enabled: adultContentEnabled.value ? 'true' : 'false', metatube_enabled: metatubeForm.value.enabled ? 'true' : 'false', metatube_url: metatubeForm.value.url.trim() }
+    if (metatubeForm.value.token.trim()) settings.metatube_token = metatubeForm.value.token.trim()
+    await updateSettings(settings, { skipGlobalErrorMessage: true })
+    message.success('MetaTube 配置保存成功'); initialMetaTubeForm.value = { ...metatubeForm.value }
+  } catch (error) { message.error(error?.response?.data?.error || 'MetaTube 配置保存失败') } finally { metatubeLoading.value = false }
+}
+
+const handleMetaTubeReset = () => { metatubeForm.value = { ...initialMetaTubeForm.value } }
+
+const handleMdcSubmit = async () => {
+  if (mdcForm.value.enabled && !mdcForm.value.url.trim()) { message.warning('启用 MDC-NG 时请输入服务地址'); return }
+  mdcLoading.value = true
+  try {
+    await updateSettings({ adult_content_enabled: adultContentEnabled.value ? 'true' : 'false', mdc_enabled: mdcForm.value.enabled ? 'true' : 'false', mdc_url: mdcForm.value.url.trim() }, { skipGlobalErrorMessage: true })
+    message.success('MDC-NG 配置保存成功'); initialMdcForm.value = { ...mdcForm.value }
+  } catch (error) { message.error(error?.response?.data?.error || 'MDC-NG 配置保存失败') } finally { mdcLoading.value = false }
+}
+const handleMdcTest = async () => {
+  mdcTesting.value = true
+  try { const response = await testMdcConnection(mdcForm.value.url.trim(), { skipGlobalErrorMessage: true }); const result = response?.data?.data || response?.data || {}; message.success(result.authenticated ? 'MDC-NG 连接成功且已认证' : 'MDC-NG 可访问，但尚未认证') } catch (error) { message.error(error?.response?.data?.error || 'MDC-NG 连接失败') } finally { mdcTesting.value = false }
+}
+const handleMdcReset = () => { mdcForm.value = { ...initialMdcForm.value } }
+
+const handleAdultContentToggle = async (enabled) => {
+  if (!enabled) {
+    adultContentEnabled.value = false
+    metatubeForm.value.enabled = false
+    metatubeForm.value.url = ''
+    metatubeForm.value.token = ''
+    return
+  }
+  try {
+    await showConfirmDialog(
+      '成人内容识别可能返回露骨内容，并将允许配置 MetaTube 数据源。确定要开启吗？',
+      '确认开启成人内容识别',
+      { type: 'warning', confirmButtonText: '确认开启', cancelButtonText: '取消' }
+    )
+    adultContentEnabled.value = true
+  } catch {
+    adultContentEnabled.value = false
   }
 }
 

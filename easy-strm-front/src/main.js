@@ -20,6 +20,7 @@ const FilenameRecognition = () => import('./views/FilenameRecognition.vue')
 const FileManager = () => import('./views/FileManager.vue')
 const EmbyManagement = () => import('./views/EmbyManagement.vue')
 const EmbyMonitor = () => import('./views/EmbyMonitor.vue')
+const ShareRecords = () => import('./views/ShareRecords.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -151,6 +152,7 @@ const routes = [
           description: '115分享链接一键解析与批量转存、115云下载（ed2k/磁力等离线下载）。'
         }
       }
+      ,{ path: 'share-records', component: ShareRecords, meta: { title: '分享管理', description: '管理分享记录并批量识别媒体' } }
     ]
   }
 ]

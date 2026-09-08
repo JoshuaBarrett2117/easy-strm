@@ -675,3 +675,57 @@
 - 当前仓库有大量审计前已存在的未提交业务改动，本任务未修改业务代码；后续实施必须按需求包建立独立基线并避免混入现有变更。
 - 20 个后端测试 skip、真实 115/Emby/通知写入链路和 Docker fresh-install 尚不是“已修复”；它们已转化为明确验收项。
 - 无需求文档阻塞项，结论为通过。
+# 2026-09-02 Emby 媒体库卡片改造审查
+
+- 审查者：Codex；结论：通过；综合评分：94/100。
+- 技术评分：94/100。封面访问沿用受保护代理，媒体统计限制 4 并发且与刷新轮询隔离，前端 Blob URL 生命周期完整，专项测试覆盖正常响应和查询参数。
+- 战略评分：95/100。完整满足封面、类型标签、媒体数量、隐藏目录和移除 Idle 标签的需求，未引入新依赖或平行访问体系。
+- 验证：专项 Service、Controller、全包编译和前端生产构建通过；完整 Service 包受既有 MetaTube 测试配置问题阻断。
+- 遗留风险：未在有登录态且连接真实 Emby 的浏览器中截图验证；无封面或统计失败时分别使用渐变占位和 `—` 降级。
+
+## 2026-09-05 115 分享转存目录展开修复审查
+
+- 审查者：Codex；结论：通过；综合评分：93/100。
+- 技术检查：目录ID由后端协议字段产生，Service 复用现有 115 客户端并按层懒加载；前端递归渲染、缓存已加载节点并展示失败重试；新增后端回归测试。
+- 契约检查：根目录仍读取解析缓存；非根目录通过 `dir_id` 请求；分享密码贯穿展开和提交转存。
+- 验证：后端全量测试、前端构建、前端目录树单测通过；未执行真实 115 E2E。
+- 遗留风险：真实服务若对目录 `cid` 有额外权限限制，需使用实际分享链接验证错误提示和深层目录行为。
+
+## 2026-09-07 Emby 用户媒体库权限审查（Codex）
+- 结论：本地验证通过；技术 94/100，需求匹配 94/100，综合 94/100。
+- 核查：权限与媒体操作的 ID 语义分离；列表契约完整；保存失败同步返回；全库开关、空选择、未知 ID、保留未编辑权限均有验证；未引入额外依赖。
+- 风险：真实 Emby 版本尚未联调；专用接口缺失或 Guid 缺失将明确报错，不再回退错误的数字 ID。
+- 留痕：context-scan-emby-user-access.json、testing.md、operations-log.md、verification.md、debug/emby-user-access/names-after-save.png。
+
+2026-09-07 Codex 追加审查：真实 Emby 原有四项范围已转换并回读，真实 easy-strm 保存与 Emby 原生页面均验证通过；默认测试不触发真实权限写入。
+
+
+## 分享脱敏统计审查（2026-09-08，Codex）
+结论：通过。技术 94，需求匹配 95，综合 94。复用现有 DAO，无新增数据库迁移；扫描、持久化及展示契约一致；历史脱敏项即时重新分类；同名与重扫、全脱敏边界有本地回归。浏览器实测未执行。工作区其他未提交修改已保留。
+
+## 批量导入分享按钮修复（2026-09-08，Codex）
+- 根因：ShareRecords.vue 缺失 batchImportShow 对应弹窗；原拆行正则错误匹配字面量反斜杠。
+- 实现：补全输入、取消与提交弹窗，修复换行拆分、连续链接名称误用；提交期间禁止重复操作，部分失败保留未完成项供重试，成功后刷新列表。
+- 验证：node scripts/e2e-share-batch-import.mjs 通过，覆盖打开/取消、无链接、CRLF/LF、名称、列表刷新、失败恢复和窄屏；使用模拟 API，无真实数据写入。npm run build 通过（4848 modules，既有大分块提示）。仅前端修改，未运行后端测试。
+- 复现：先修正测试夹具误拦截 src/utils/api 模块的问题，再确认修改前点击后等待弹窗超时；修复后全场景通过。
+- 审查：通过；技术/需求/综合评分 94/96/95。复用 Naive UI 与既有 API，无新增依赖。真实后端导入未验证；名称支持链接上一行，访问码需与链接同一行，已在输入提示注明。
+- 工具记录：functions.exec/exec_command 执行 git status、rg、Get-Content、Vite、Playwright、npm run build、git diff --check；apply_patch 写入上下文、回归和弹窗；Python 定点替换原单行函数及追加记录。sequential-thinking、shrimp-task-manager、code-index 不可用，使用本地分析与 rg。
+- git diff --check 发现既有 .codex/testing.md:829 尾随空格，本次未改动该历史内容。保留工作区其他改动。
+
+## 混合分享解析及预览导入（2026-09-08，Codex）
+- 已完成：domain响应、Service纯解析、控制器与路由、API封装、独立ShareImportDialog、单元/控制器/浏览器测试及长期文档。
+- 关键决策：按当前文本分享编号去重；URL移除密码查询并独立保存访问码，避免预览修改密码后被URL旧值覆盖；歧义与冲突默认不选，已成功项锁定。
+- 验证：go test ./... 全部通过（easy-strm、controller、dao、domain、logger、service）；Playwright全部通过；npm run build通过（4850模块，既有大分块提示）。构建完整输出见 .codex/share-import-build.log。
+- 失败及修复：浏览器初次断言使用原生disabled判定Naive UI checkbox，改为其实际disabled类后通过；后端新增块边界回归先复现结束标记后标题被吞，修复只消费到访问码/复制结束行后通过。
+- 审查：通过；技术94、需求96、综合95。前后名称冲突保留候选；导入失败保留状态；解析与导入保持分层，无新依赖和数据库变更。API夹具验证未调用真实网盘；未部署。
+- 工具留痕：functions.exec / exec_command 执行 Get-Content、rg、gofmt、go test、node Playwright、npm run build、git diff --check；apply_patch 创建和更新代码/测试/结构化需求；Python 定点替换页面旧弹窗/函数及追加文档。指定思考/规划/索引MCP不可用，使用本地分析及rg。保留所有已有工作区变更。
+
+## GitHub main 提交验证（2026-09-08，Codex）
+- 请求：提交当前全部代码及配套文档变更并推送 origin/main，用户已明确授权。
+- 上下文：当前分支 main；git fetch origin 成功，HEAD 与 origin/main 提交前一致。范围为分享管理与批量导入、Emby 用户权限与媒体库、播放记录、MetaTube 元数据、日志及对应测试文档。
+- 工具降级：sequential-thinking、shrimp-task-manager、code-index 当前不可用；采用本地分析、Git 与 rg。计划为检查范围、运行本地验证、提交全部变更、正常推送并核对远程。
+- 验证：go test ./... 全包通过；npm run build 通过，仅既有大分块提示。完整输出：.codex/github-main-go-test.log、.codex/github-main-build.log。
+- 浏览器：node scripts/e2e-share-batch-import.mjs 与 node scripts/e2e-emby-user-access.mjs 均通过，使用本地页面及模拟 API，未验证真实外部服务。
+- 修正：修复 testing.md 中断裂的 npm 命令及尾随空白。
+- 工具留痕：functions.exec 调用 exec_command 执行 Git 状态/分支/远程/fetch/diff/log、rg、Get-Content、Go 测试、前端构建及两项 Playwright；write_stdin 获取测试结果；apply_patch 修正文档。后续执行 git add/commit/push 与远程哈希核对。
+- 审查：提交范围与请求一致，本地基线及两项相关回归通过；本次为提交前验证，未重新逐行审计全部历史功能。

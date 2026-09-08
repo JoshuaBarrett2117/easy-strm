@@ -122,7 +122,7 @@ func LoadCronTasksFromDB() error {
 			Warn("Failed to add cron task %s: %v", task.TaskName, err)
 			continue
 		}
-		Info("Loaded cron task: %s (ID: %d)", task.TaskName, task.ID)
+		Debug("Loaded cron task: %s (ID: %d)", task.TaskName, task.ID)
 	}
 
 	return nil

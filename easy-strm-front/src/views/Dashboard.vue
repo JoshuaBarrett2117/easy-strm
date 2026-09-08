@@ -94,6 +94,10 @@
 
         <div class="flex items-center gap-2">
           <n-tooltip trigger="hover">
+            <template #trigger><button type="button" class="icon-button" @click="playbackVisible = true"><n-icon size="18" :component="PlayCircleOutline" /></button></template>
+            STRM 播放记录
+          </n-tooltip>
+          <n-tooltip trigger="hover">
             <template #trigger>
               <button
                 type="button"
@@ -104,6 +108,14 @@
               </button>
             </template>
             {{ isDark ? '切换浅色' : '切换深色' }}
+          </n-tooltip>
+          <n-tooltip trigger="hover">
+            <template #trigger>
+              <button type="button" class="icon-button" @click="systemLogsVisible = true">
+                <n-icon size="18" :component="ReaderOutline" />
+              </button>
+            </template>
+            查看系统日志
           </n-tooltip>
           <n-tooltip trigger="hover">
             <template #trigger>
@@ -119,6 +131,11 @@
           </n-tooltip>
         </div>
       </header>
+
+      <n-modal v-model:show="systemLogsVisible" preset="card" title="系统日志" class="system-logs-modal" :content-style="{ maxHeight: 'calc(100vh - 32px)', overflow: 'hidden' }" :mask-closable="true">
+        <SystemLogs />
+      </n-modal>
+      <PlaybackRecordsDrawer v-model:show="playbackVisible" />
 
       <!-- 内容 -->
       <main class="flex-1 overflow-y-auto px-3 py-4 sm:px-4 lg:px-7 lg:py-6">
@@ -137,7 +154,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { NIcon, NTooltip } from 'naive-ui'
+import { NIcon, NModal, NTooltip } from 'naive-ui'
 import {
   HomeOutline,
   ListOutline,
@@ -153,6 +170,7 @@ import {
   MoonOutline,
   SunnyOutline,
   LogOutOutline,
+  PlayCircleOutline,
   LinkOutline,
   SearchOutline,
   SwapHorizontalOutline
@@ -161,12 +179,16 @@ import {
 import { useTheme } from '../composables/useTheme'
 import { showConfirmDialog } from '../utils/ui/messageBox'
 import { logout } from '../utils/api/auth'
+import SystemLogs from './dashboard/SystemLogs.vue'
+import PlaybackRecordsDrawer from '../components/dashboard/PlaybackRecordsDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
 
 const mobileMenuOpen = ref(false)
+const systemLogsVisible = ref(false)
+const playbackVisible = ref(false)
 
 const allMenuSections = [
   {
@@ -182,6 +204,7 @@ const allMenuSections = [
       { path: '/dashboard/media-manager', label: '文件工作台', icon: FolderOpenOutline },
       { path: '/dashboard/file-manager', label: '文件管理', icon: SwapHorizontalOutline },
       { path: '/dashboard/resources/transfer', label: '资源聚合', icon: LinkOutline },
+      { path: '/dashboard/share-records', label: '分享管理', icon: LinkOutline },
       { path: '/dashboard/strm-config', label: 'STRM 配置', icon: DocumentTextOutline },
       { path: '/dashboard/cloud115', label: '115 云管理', icon: CloudOutline },
       { path: '/dashboard/emby-management', label: 'Emby 管理', icon: ServerOutline },
@@ -194,7 +217,6 @@ const allMenuSections = [
     title: '运维观察',
     items: [
       { path: '/dashboard/emby-monitor', label: 'Emby 监控', icon: PulseOutline },
-      { path: '/dashboard/system-logs', label: '系统日志', icon: ReaderOutline },
       { path: '/dashboard/network', label: '网络测试', icon: WifiOutline },
       { path: '/dashboard/cache', label: '缓存管理', icon: ServerOutline }
     ]

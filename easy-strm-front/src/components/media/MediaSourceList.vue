@@ -147,6 +147,12 @@
               <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">自动整理时默认采用的媒体类型筛选条件。</p>
             </div>
           </n-form-item>
+          <n-form-item label="元数据来源" path="metadata_source">
+            <div class="w-full">
+              <n-select v-model:value="form.metadata_source" :options="metadataSourceOptions" />
+              <p class="mt-1 text-xs leading-relaxed text-slate-400 dark:text-slate-500">自动跟随系统设置；TMDB 或 MetaTube 会强制该媒体源使用指定来源。剧集固定使用 TMDB。</p>
+            </div>
+          </n-form-item>
           <n-form-item label="冲突策略" path="conflict_policy">
             <div class="w-full">
               <n-select v-model:value="form.conflict_policy" :options="conflictPolicyOptions" />
@@ -349,6 +355,7 @@ const form = ref({
   watch_path: '',
   organize_target_path: '',
   media_type: 'all',
+  metadata_source: 'auto',
   conflict_policy: 'skip',
   operation_mode: 'move',
   enabled: true,
@@ -368,6 +375,12 @@ const mediaTypeOptions = [
   { label: '全部', value: 'all' },
   { label: '电影', value: 'movie' },
   { label: '剧集', value: 'tv' }
+]
+
+const metadataSourceOptions = [
+  { label: '自动（跟随系统设置）', value: 'auto' },
+  { label: 'TMDB', value: 'tmdb' },
+  { label: 'MetaTube', value: 'metatube' }
 ]
 
 const conflictPolicyOptions = [
@@ -396,8 +409,8 @@ const getCloud115Name = (source) => {
 const embyLibraryOptions = computed(() => [
   { label: '不绑定', value: '' },
   ...embyLibraries.value.map((lib) => ({
-    label: lib.Name,
-    value: lib.ItemId
+    label: lib.Name || lib.name || lib.LibraryOptions?.Name || lib.LibraryOptions?.name || lib.ItemId || lib.Id,
+    value: String(lib.ItemId || lib.Id || lib.id || '')
   }))
 ])
 
@@ -473,9 +486,11 @@ const getOperationModeName = (mode) => {
   return map[mode] || '移动'
 }
 
+const getMetadataSourceName = (source) => ({ auto: '自动数据源', tmdb: 'TMDB', metatube: 'MetaTube' }[source] || '自动数据源')
+
 const getOrganizeDefaultsSummary = (source) => {
   if (!source) return '未配置'
-  return `${getMediaTypeName(source.media_type)} / ${getConflictPolicyName(source.conflict_policy)} / ${getOperationModeName(source.operation_mode)}`
+  return `${getMediaTypeName(source.media_type)} / ${getMetadataSourceName(source.metadata_source)} / ${getConflictPolicyName(source.conflict_policy)} / ${getOperationModeName(source.operation_mode)}`
 }
 
 const cloud115FeatureStatus = computed(() => {
@@ -743,6 +758,7 @@ const handleEdit = (row) => {
     watch_path: row.watch_path || row.path || '',
     organize_target_path: row.organize_target_path || '',
     media_type: row.media_type || 'all',
+    metadata_source: row.metadata_source || 'auto',
     conflict_policy: row.conflict_policy || 'skip',
     operation_mode: row.operation_mode || 'move',
     enabled: row.enabled !== false,
@@ -828,6 +844,7 @@ const resetForm = () => {
     watch_path: '',
     organize_target_path: '',
     media_type: 'all',
+    metadata_source: 'auto',
     conflict_policy: 'skip',
     operation_mode: 'move',
     enabled: true,

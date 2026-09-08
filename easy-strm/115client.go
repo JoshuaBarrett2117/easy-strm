@@ -154,7 +154,8 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 		return nil, fmt.Errorf("get file list failed: %v", err)
 	}
 
-	Info("Got file list response with %d files", len(*files))
+	// 文件浏览请求频率高，结果详情仅在调试级别记录，避免系统日志被正常轮询淹没。
+	Debug("Got file list response: cid=%d offset=%d limit=%d files=%d", cid, offset, limit, len(*files))
 
 	fileListResp := &driver.FileListResp{
 		Count: len(*files),
