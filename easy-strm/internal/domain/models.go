@@ -103,19 +103,24 @@ type StrmFile struct {
 
 // CronTask 领域模型：定时任务配置
 type CronTask struct {
-	ID             int        `json:"id"`
-	TaskName       string     `json:"task_name"`
-	TaskType       string     `json:"task_type"`
-	Cloud115ID     int        `json:"cloud115_id"`
-	StrmConfigID   int        `json:"strm_config_id"`
-	CronExpr       string     `json:"cron_expr"`
-	Status         string     `json:"status"`
-	LastRunTime    *time.Time `json:"last_run_time"`
-	NextRunTime    *time.Time `json:"next_run_time"`
-	LastRunStatus  string     `json:"last_run_status"`
-	LastRunMessage string     `json:"last_run_message"`
-	CreateTime     time.Time  `json:"create_time"`
-	UpdateTime     time.Time  `json:"update_time"`
+	TaskKey        string                 `json:"task_key"`
+	Handler        string                 `json:"handler"`
+	Params         map[string]interface{} `json:"params"`
+	Timezone       string                 `json:"timezone"`
+	Builtin        bool                   `json:"builtin"`
+	ID             int                    `json:"id"`
+	TaskName       string                 `json:"task_name"`
+	TaskType       string                 `json:"task_type"`
+	Cloud115ID     int                    `json:"cloud115_id"`
+	StrmConfigID   int                    `json:"strm_config_id"`
+	CronExpr       string                 `json:"cron_expr"`
+	Status         string                 `json:"status"`
+	LastRunTime    *time.Time             `json:"last_run_time"`
+	NextRunTime    *time.Time             `json:"next_run_time"`
+	LastRunStatus  string                 `json:"last_run_status"`
+	LastRunMessage string                 `json:"last_run_message"`
+	CreateTime     time.Time              `json:"create_time"`
+	UpdateTime     time.Time              `json:"update_time"`
 }
 
 // TaskType 任务类型枚举

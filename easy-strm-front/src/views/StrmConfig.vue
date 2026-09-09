@@ -620,7 +620,7 @@ const fetchCronTaskList = async () => {
 
 // 根据配置 ID 获取对应的 Cron 任务
 const getCronTask = (configId) => {
-  return cronTaskList.value.find(task => task.strm_config_id === configId)
+  return cronTaskList.value.find(task => task.strm_config_id === configId && (task.handler || task.task_type) === 'full_generate')
 }
 
 // 格式化时间
@@ -809,8 +809,8 @@ const handleToggleCronTask = async (task) => {
 const handleRunCronTask = async (task) => {
   try {
     cronTaskLoading.value = true
-    await runCronTask(task.id)
-    message.success('定时任务已触发执行，请查看任务进度')
+    const response = await runCronTask(task.id)
+    message.success(`定时任务已触发：${response.data.data.task_id}，可在任务中心查看`)
     // 刷新任务列表
     await fetchCronTaskList()
   } catch (error) {

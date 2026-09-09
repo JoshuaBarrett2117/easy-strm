@@ -1,0 +1,1 @@
+{"author":"Codex","date":"2026-09-09","scope":"规则与TMDB优先，AI仅在无确认匹配时兜底","verification":"本地HTTP调用次数回归及Go全量、前端构建通过"}

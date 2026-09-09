@@ -205,11 +205,14 @@ const allMenuSections = [
       { path: '/dashboard/file-manager', label: '文件管理', icon: SwapHorizontalOutline },
       { path: '/dashboard/resources/transfer', label: '资源聚合', icon: LinkOutline },
       { path: '/dashboard/share-records', label: '分享管理', icon: LinkOutline },
+      { path: '/dashboard/share-library', label: '分享资源库', icon: LinkOutline },
+      { path: '/dashboard/scheduled-tasks', label: '定时任务管理', icon: LinkOutline },
       { path: '/dashboard/strm-config', label: 'STRM 配置', icon: DocumentTextOutline },
       { path: '/dashboard/cloud115', label: '115 云管理', icon: CloudOutline },
       { path: '/dashboard/emby-management', label: 'Emby 管理', icon: ServerOutline },
       { path: '/dashboard/category-strategy', label: '整理规则', icon: OptionsOutline },
       { path: '/dashboard/filename-recognition', label: '识别测试', icon: SearchOutline },
+      { path: '/dashboard/ai-recognition', label: 'AI 辅助识别', icon: SearchOutline },
       { path: '/dashboard/settings', label: '系统设置', icon: SettingsOutline }
     ]
   },

@@ -1,3 +1,5 @@
+const ShareLibrary = () => import('./views/ShareLibrary.vue')
+const ScheduledTasks = () => import('./views/ScheduledTasks.vue')
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
@@ -21,6 +23,7 @@ const FileManager = () => import('./views/FileManager.vue')
 const EmbyManagement = () => import('./views/EmbyManagement.vue')
 const EmbyMonitor = () => import('./views/EmbyMonitor.vue')
 const ShareRecords = () => import('./views/ShareRecords.vue')
+const AIRecognition = () => import('./views/AIRecognition.vue')
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -152,6 +155,9 @@ const routes = [
           description: '115分享链接一键解析与批量转存、115云下载（ed2k/磁力等离线下载）。'
         }
       }
+      ,{ path: 'ai-recognition', component: AIRecognition, meta: { title: 'AI 辅助识别', description: '配置模型连接、调用场景和提示词' } }
+      ,{ path: 'share-library', component: ShareLibrary, meta: { title: '分享资源库', description: '浏览已识别作品与分享来源' } }
+      ,{ path: 'scheduled-tasks', component: ScheduledTasks, meta: { title: '定时任务管理', description: '统一管理系统定时任务' } }
       ,{ path: 'share-records', component: ShareRecords, meta: { title: '分享管理', description: '管理分享记录并批量识别媒体' } }
     ]
   }

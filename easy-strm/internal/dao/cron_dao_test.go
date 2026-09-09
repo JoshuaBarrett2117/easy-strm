@@ -28,7 +28,7 @@ func TestCronTaskDAOCreateHandlesNullableRunFields(t *testing.T) {
 		RETURNING id`)).
 		WithArgs("STRM全量生成-test", "full_generate", 2, 3, "0 2 * * *").
 		WillReturnRows(createRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task WHERE id = $1`)).
 		WithArgs(1).
@@ -66,7 +66,7 @@ func TestCronTaskDAOUpdateHandlesNullableRunFields(t *testing.T) {
 		RETURNING id`)).
 		WithArgs("STRM全量生成-test", "full_generate", "15 3 * * *", "disabled", 9).
 		WillReturnRows(updateRows)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task WHERE id = $1`)).
 		WithArgs(9).

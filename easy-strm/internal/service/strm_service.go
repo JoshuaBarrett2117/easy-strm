@@ -13,11 +13,7 @@ type StrmService struct {
 	strmConfigDAO *dao.StrmConfigDAO
 	strmFileDAO   *dao.StrmFileDAO
 	cronTaskDAO   *dao.CronTaskDAO
-	scheduler     interface {
-		AddTask(task *domain.CronTask) error
-		RemoveTask(taskID int)
-		UpdateTask(task *domain.CronTask) error
-	}
+	scheduler     *CronService
 }
 
 func NewStrmService(strmConfigDAO *dao.StrmConfigDAO, strmFileDAO *dao.StrmFileDAO, cronTaskDAO *dao.CronTaskDAO) *StrmService {
@@ -28,13 +24,8 @@ func NewStrmService(strmConfigDAO *dao.StrmConfigDAO, strmFileDAO *dao.StrmFileD
 	}
 }
 
-func (s *StrmService) SetScheduler(scheduler interface {
-	AddTask(task *domain.CronTask) error
-	RemoveTask(taskID int)
-	UpdateTask(task *domain.CronTask) error
-}) {
-	s.scheduler = scheduler
-}
+// SetScheduler 注入与管理页面共享的调度服务。
+func (s *StrmService) SetScheduler(scheduler *CronService) { s.scheduler = scheduler }
 
 // GetConfigByID 根据ID获取STRM配置
 func (s *StrmService) GetConfigByID(id int) (*domain.StrmConfig, error) {
@@ -50,197 +41,90 @@ func buildFullGenerateCronTaskName(strmConfigID int) string {
 	return fmt.Sprintf("STRM全量生成-%d", strmConfigID)
 }
 
-// CreateConfig 创建STRM配置
-func (s *StrmService) CreateConfig(cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
-	var err error
-	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := s.strmConfigDAO.Create(cloud115Id, netDiskPath, localPath, cron, extension)
-	if err != nil {
-		logger.Errorf("StrmService[CreateConfig] 创建配置失败: %v", err)
-		return nil, fmt.Errorf("创建配置失败: %v", err)
-	}
-	logger.Infof("StrmService[CreateConfig] 创建配置成功: ID %d", cfg.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(cfg.ID)
-		cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
-		if err != nil {
-			logger.Warnf("StrmService[CreateConfig] 创建定时任务失败: %v", err)
-		} else if s.scheduler != nil {
-			if err := s.scheduler.AddTask(cronTask); err != nil {
-				logger.Warnf("StrmService[CreateConfig] 添加定时任务到调度器失败: %v", err)
-			}
-		}
-	}
-
-	return cfg, nil
+// CreateConfig 创建基础配置并同步定时任务。
+func (s *StrmService) CreateConfig(cloud int, netPath, localPath, expr, extension string) (*domain.StrmConfig, error) {
+	return s.CreateConfigExt(cloud, netPath, localPath, expr, extension, "manual", 0, 0, "", false, 0, "", 1)
 }
 
-// UpdateConfig 更新STRM配置
-func (s *StrmService) UpdateConfig(id, cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
-	var err error
-	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
-	if err != nil {
-		return nil, err
+// UpdateConfig 更新基础字段，保留其他配置。
+func (s *StrmService) UpdateConfig(id, cloud int, netPath, localPath, expr, extension string) (*domain.StrmConfig, error) {
+	c, e := s.GetConfigByID(id)
+	if e != nil {
+		return nil, e
 	}
-	cfg, err := s.strmConfigDAO.Update(id, cloud115Id, netDiskPath, localPath, cron, extension)
-	if err != nil {
-		logger.Errorf("StrmService[UpdateConfig] 更新配置失败: %v", err)
-		return nil, fmt.Errorf("更新配置失败: %v", err)
+	if c == nil {
+		return nil, fmt.Errorf("配置不存在")
 	}
-	logger.Infof("StrmService[UpdateConfig] 更新配置成功: ID %d", cfg.ID)
-
-	existingTask, _ := s.cronTaskDAO.GetByStrmConfigID(cfg.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(cfg.ID)
-		if existingTask != nil {
-			_, err = s.cronTaskDAO.Update(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
-			if err != nil {
-				logger.Warnf("StrmService[UpdateConfig] 更新定时任务失败: %v", err)
-			} else if s.scheduler != nil {
-				updatedTask, _ := s.cronTaskDAO.GetByID(existingTask.ID)
-				if updatedTask != nil {
-					if err := s.scheduler.UpdateTask(updatedTask); err != nil {
-						logger.Warnf("StrmService[UpdateConfig] 更新调度器任务失败: %v", err)
-					}
-				}
-			}
-		} else {
-			cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
-			if err != nil {
-				logger.Warnf("StrmService[UpdateConfig] 创建定时任务失败: %v", err)
-			} else if s.scheduler != nil {
-				if err := s.scheduler.AddTask(cronTask); err != nil {
-					logger.Warnf("StrmService[UpdateConfig] 添加定时任务到调度器失败: %v", err)
-				}
-			}
-		}
-	} else {
-		if existingTask != nil {
-			if s.scheduler != nil {
-				s.scheduler.RemoveTask(existingTask.ID)
-			}
-			if err := s.cronTaskDAO.DeleteByName(existingTask.TaskName); err != nil {
-				logger.Warnf("StrmService[UpdateConfig] 删除定时任务失败: %v", err)
-			}
-		}
-	}
-
-	return cfg, nil
+	c.Cloud115Id = cloud
+	c.NetDiskPath = netPath
+	c.LocalPath = localPath
+	c.Cron = expr
+	c.Extension = extension
+	return s.saveScheduledConfig(c)
 }
 
-// CreateConfigExt 创建STRM配置（扩展版，包含秒传同步字段）
-func (s *StrmService) CreateConfigExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
-	var err error
-	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
-	if err != nil {
-		return nil, err
-	}
-	targetDirectory, err = normalizeCloud115DirectoryPath(targetDirectory, "115 转存目录", true)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := s.strmConfigDAO.CreateExt(cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
-	if err != nil {
-		logger.Errorf("StrmService[CreateConfigExt] 创建配置失败: %v", err)
-		return nil, fmt.Errorf("创建配置失败: %v", err)
-	}
-	logger.Infof("StrmService[CreateConfigExt] 创建配置成功: ID %d", cfg.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(cfg.ID)
-		cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
-		if err != nil {
-			logger.Warnf("StrmService[CreateConfigExt] 创建定时任务失败: %v", err)
-		} else if s.scheduler != nil {
-			if err := s.scheduler.AddTask(cronTask); err != nil {
-				logger.Warnf("StrmService[CreateConfigExt] 添加定时任务到调度器失败: %v", err)
-			}
-		}
-	}
-
-	return cfg, nil
+// CreateConfigExt 原子创建配置及调度定义。
+func (s *StrmService) CreateConfigExt(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*domain.StrmConfig, error) {
+	return s.saveScheduledConfig(&domain.StrmConfig{Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency})
 }
 
-// UpdateConfigExt 更新STRM配置（扩展版，包含秒传同步字段）
-func (s *StrmService) UpdateConfigExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
+// UpdateConfigExt 原子更新配置及调度定义。
+func (s *StrmService) UpdateConfigExt(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*domain.StrmConfig, error) {
+	return s.saveScheduledConfig(&domain.StrmConfig{ID: id, Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency})
+}
+func (s *StrmService) saveScheduledConfig(c *domain.StrmConfig) (*domain.StrmConfig, error) {
 	var err error
-	netDiskPath, err = normalizeCloud115DirectoryPath(netDiskPath, "115 网盘目录", false)
+	c.NetDiskPath, err = normalizeCloud115DirectoryPath(c.NetDiskPath, "115 网盘目录", false)
 	if err != nil {
 		return nil, err
 	}
-	targetDirectory, err = normalizeCloud115DirectoryPath(targetDirectory, "115 转存目录", true)
+	c.TargetDirectory, err = normalizeCloud115DirectoryPath(c.TargetDirectory, "115 转存目录", true)
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := s.strmConfigDAO.UpdateExt(id, cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
+	if c.Cron != "" {
+		if _, err = ParseCron(c.Cron, "Local"); err != nil {
+			return nil, err
+		}
+	}
+	if c.SyncMode == "" {
+		c.SyncMode = "manual"
+	}
+	if c.MaxConcurrency == 0 {
+		c.MaxConcurrency = 1
+	}
+	if s.scheduler == nil {
+		return nil, fmt.Errorf("统一调度服务未初始化")
+	}
+	s.scheduler.mu.Lock()
+	defer s.scheduler.mu.Unlock()
+	ids, err := s.strmConfigDAO.SaveWithSchedule(c)
 	if err != nil {
-		logger.Errorf("StrmService[UpdateConfigExt] 更新配置失败: %v", err)
-		return nil, fmt.Errorf("更新配置失败: %v", err)
+		return nil, err
 	}
-	logger.Infof("StrmService[UpdateConfigExt] 更新配置成功: ID %d", cfg.ID)
-
-	existingTask, _ := s.cronTaskDAO.GetByStrmConfigID(cfg.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(cfg.ID)
-		if existingTask != nil {
-			_, err = s.cronTaskDAO.Update(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
-			if err != nil {
-				logger.Warnf("StrmService[UpdateConfigExt] 更新定时任务失败: %v", err)
-			} else if s.scheduler != nil {
-				updatedTask, _ := s.cronTaskDAO.GetByID(existingTask.ID)
-				if updatedTask != nil {
-					if err := s.scheduler.UpdateTask(updatedTask); err != nil {
-						logger.Warnf("StrmService[UpdateConfigExt] 更新调度器任务失败: %v", err)
-					}
-				}
-			}
-		} else {
-			cronTask, err := s.cronTaskDAO.Create(taskName, "full_generate", cloud115Id, cfg.ID, cron)
-			if err != nil {
-				logger.Warnf("StrmService[UpdateConfigExt] 创建定时任务失败: %v", err)
-			} else if s.scheduler != nil {
-				if err := s.scheduler.AddTask(cronTask); err != nil {
-					logger.Warnf("StrmService[UpdateConfigExt] 添加定时任务到调度器失败: %v", err)
-				}
-			}
-		}
-	} else {
-		if existingTask != nil {
-			if s.scheduler != nil {
-				s.scheduler.RemoveTask(existingTask.ID)
-			}
-			if err := s.cronTaskDAO.DeleteByName(existingTask.TaskName); err != nil {
-				logger.Warnf("StrmService[UpdateConfigExt] 删除定时任务失败: %v", err)
-			}
-		}
+	for _, id := range ids {
+		s.scheduler.removeLocked(id)
 	}
-
-	return cfg, nil
+	if err = s.scheduler.reloadConfigLocked(c.ID); err != nil {
+		return nil, fmt.Errorf("配置已保存，但调度同步失败，请修复后重试: %w", err)
+	}
+	return c, nil
 }
 
-// DeleteConfig 删除STRM配置
+// DeleteConfig 原子删除配置及全部关联调度，当前执行可由任务中心取消。
 func (s *StrmService) DeleteConfig(id int) error {
-	existingTask, _ := s.cronTaskDAO.GetByStrmConfigID(id)
-	if existingTask != nil {
-		if s.scheduler != nil {
-			s.scheduler.RemoveTask(existingTask.ID)
-		}
-		if err := s.cronTaskDAO.DeleteByName(existingTask.TaskName); err != nil {
-			logger.Warnf("StrmService[DeleteConfig] 删除定时任务失败: %v", err)
-		}
+	if s.scheduler == nil {
+		return fmt.Errorf("统一调度服务未初始化")
 	}
-
-	if err := s.strmConfigDAO.Delete(id); err != nil {
-		logger.Errorf("StrmService[DeleteConfig] 删除配置失败: %v", err)
-		return fmt.Errorf("删除配置失败: %v", err)
+	s.scheduler.mu.Lock()
+	defer s.scheduler.mu.Unlock()
+	ids, err := s.strmConfigDAO.DeleteWithSchedules(id)
+	if err != nil {
+		return err
 	}
-	logger.Infof("StrmService[DeleteConfig] 删除配置成功: ID %d", id)
+	for _, taskID := range ids {
+		s.scheduler.removeLocked(taskID)
+	}
 	return nil
 }
 

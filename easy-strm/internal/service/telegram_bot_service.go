@@ -35,7 +35,7 @@ type TelegramBotService struct {
 	resources     *TelegramResourceService
 	httpClient    *http.Client
 	retryTask     func(taskID string) error
-	runCronTask   func(task *domain.CronTask)
+	runCronTask   func(*domain.CronTask)
 
 	mu     sync.RWMutex
 	bot    *telegram.Bot
@@ -44,6 +44,9 @@ type TelegramBotService struct {
 	config TelegramConfig
 	status TelegramBotStatus
 }
+
+// SetRunCronTask 注入定时任务执行回调，供机器人命令复用。
+func (s *TelegramBotService) SetRunCronTask(fn func(*domain.CronTask)) { s.runCronTask = fn }
 
 // NewTelegramBotService 创建 Telegram 机器人服务。
 func NewTelegramBotService(
@@ -70,11 +73,6 @@ func NewTelegramBotService(
 // SetRetryTask 注入具备真实执行链路的任务重试函数。
 func (s *TelegramBotService) SetRetryTask(retry func(taskID string) error) {
 	s.retryTask = retry
-}
-
-// SetRunCronTask 注入定时任务立即执行函数。
-func (s *TelegramBotService) SetRunCronTask(run func(task *domain.CronTask)) {
-	s.runCronTask = run
 }
 
 // SetResourceService 注入 Telegram 发起的115分享转存与云下载服务。
@@ -429,15 +427,19 @@ func (s *TelegramBotService) runCron(ctx context.Context, instance *telegram.Bot
 		return
 	}
 	task, err := s.cron.GetByID(id)
-	if err != nil || task == nil || s.runCronTask == nil {
+	if err != nil || task == nil {
 		if err == nil {
 			err = fmt.Errorf("定时任务不存在或执行器未初始化")
 		}
 		s.sendError(ctx, instance, "运行定时任务失败", err)
 		return
 	}
-	go s.runCronTask(task)
-	s.send(ctx, instance, NotificationCard{Title: "定时任务已触发", Status: "▶️", Fields: [][2]string{{"任务", task.TaskName}}})
+	runID, err := s.cron.Run(task.ID, "manual")
+	if err != nil {
+		s.sendError(ctx, instance, "运行定时任务失败", err)
+		return
+	}
+	s.send(ctx, instance, NotificationCard{Title: "定时任务已触发", Status: "▶️", Fields: [][2]string{{"任务", task.TaskName}, {"执行ID", runID}}})
 }
 
 func (s *TelegramBotService) sendEmby(ctx context.Context, instance *telegram.Bot) {

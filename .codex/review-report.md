@@ -729,3 +729,115 @@
 - 修正：修复 testing.md 中断裂的 npm 命令及尾随空白。
 - 工具留痕：functions.exec 调用 exec_command 执行 Git 状态/分支/远程/fetch/diff/log、rg、Get-Content、Go 测试、前端构建及两项 Playwright；write_stdin 获取测试结果；apply_patch 修正文档。后续执行 git add/commit/push 与远程哈希核对。
 - 审查：提交范围与请求一致，本地基线及两项相关回归通过；本次为提交前验证，未重新逐行审计全部历史功能。
+
+### 分享已取消状态（2026-09-08，维护者：Codex）
+
+新增 t_share_record.share_cancelled BOOLEAN NOT NULL DEFAULT FALSE，v24迁移随程序启动在现有事务中执行。识别分享时仅明确的网盘分享取消错误置为true，成功重新解析置为false；任务超时、context取消、密码错误、原因不明的过期/失效不标记。更新状态时核对原链接与密码，避免并发编辑后的旧结果污染。编辑链接/密码自动清除原状态，单纯改名称保留。
+
+列表API返回share_cancelled，名称旁显示红色“分享已取消”标签，刷新后通过数据库字段回显。此次不根据历史任务超时回填取消状态，需重新识别确认。保留原有媒体记录和识别操作。
+
+- 验证：go test ./... 全部通过；npm run build 通过（既有大分块提示，完整输出 .codex/share-cancelled-build.log）；node scripts/e2e-share-cancelled.mjs 验证标签、刷新保留、超时不标记和恢复移除，API为模拟。
+- Service回归覆盖取消、已标记、恢复、任务取消、超时、密码错误、网络错误、未知失效及数据库失败；DAO分页测试读取true/false字段，状态保存使用sqlmock核对参数。
+- 工具：functions.exec/exec_command用于rg、读取、gofmt、go test、Vite、Playwright和构建；apply_patch修改代码与迁移；Python定点修改DAO扫描及夹具和追加文档。第一次Python默认GBK读取失败，明确UTF-8后完成；浏览器首次因Vite未运行连接失败，启动后重试。
+- 审查：通过，综合94/100。未部署或连接真实数据库，迁移尚未在真实PostgreSQL执行；保留工作区既有改动。
+
+### 分享剧集海报合并（2026-09-08，维护者：Codex）
+
+列表 Service 对同一分享内已识别成功的电视剧按 TMDB ID（无 TMDB ID 时按元数据源+MetadataID）标记 gallery_duplicate。海报墙默认折叠重复记录，可通过“展开同剧集记录”查看并逐条修正、删除。电影、不同ID、无可信ID或失败记录不按名称合并。该标记由读取时生成，无需迁移或删除历史数据；识别统计仍表示原始记录数量。
+
+扫描判断目录候选仅检查直接子项，避免把集合目录因后代视频误当一部媒体；入库前对已有媒体目录覆盖的 SxxExx 单集候选跳过。裸露在根目录的单集、没有父目录候选的文件和独立电影仍保留，以免丢失混合分享中的内容。
+
+- 验证：go test ./... 全部通过；node scripts/e2e-share-gallery.mjs通过（同剧集一张海报、展开三条原记录、逐条操作、重新合并，API mocked）；npm run build通过（既有大分块提示），完整构建日志 .codex/share-gallery-build.log。
+- Service测试覆盖相同TV ID、同名不同ID、电影、未知ID、失败、手动修正后解除折叠、跨分享、Windows/Unix路径、已覆盖单集与根目录独立文件。
+- 审查通过，综合94/100。未访问用户数据库或115链接，不删除原记录；已有数据读取时自动应用展示规则，尚未部署。无新增依赖。
+- 工具留痕：functions.exec/exec_command执行rg、Get-Content、gofmt、go test、Playwright及npm build；apply_patch更新领域、Service、前端与测试；Python追加上下文与文档。指定思考/规划/索引工具不可用，使用本地分析和rg。保留工作区原有改动。
+
+### 清空分享识别内容（2026-09-08，维护者：Codex）
+
+分享管理每行新增“清空识别内容”。确认提示列出分享名称及媒体数量；执行后删除该分享全部 t_share_media 行，包括已识别、待识别、失败、脱敏和重复单集记录。保留分享主记录、链接、密码及其他配置，不操作115文件。清空完成后可点击“识别”，重新从分享扫描生成候选，不沿用旧单集记录。
+
+DELETE /media/share-records/:id/media 返回 SuccessResp {deleted}。DAO事务锁定分享主行后按share_id删除；空分享返回0，不存在返回404，非法ID返回400。Service在本服务实例有分享识别任务运行时拒绝清空（409），任务锁在创建前获取并在后台终止后释放。该互斥适用于当前单后端实例部署；不提供跨进程任务互斥。
+
+- 本地验证：go test ./...全部通过；node scripts/e2e-share-clear.mjs通过（取消不请求、失败保留确认、清空后列表为0、分享保留及重新识别）；npm run build通过，既有大分块提示，输出 .codex/share-clear-build.log。
+- Controller/sqlmock回归覆盖非法ID、成功删除43条、重复清空0条、不存在、删除错误回滚；Service回归覆盖识别运行中拒绝清空。浏览器仅模拟API，未执行真实清理。
+- 审查通过，综合94/100；无新增依赖或schema变更。尚未部署，未删除用户数据库内容。保留既有工作区修改。
+- 工具留痕：functions.exec/exec_command读取DAO/Service/UI工具，rg查找，gofmt、go test、Playwright、npm build；apply_patch新增Service/DAO、Controller及API与测试；Python定点插入页面按钮及追加文档。指定MCP不可用，使用本地分析与rg。
+
+
+## 2026-09-08 已识别媒体数据库分页（Codex）
+- 分享 HTTP 列表仅返回统计和空 media；后台识别保留完整读取入口。
+- 新增 GET /media/share-records/:id/media，默认 page=1、page_size=10；可切换 show_duplicates。数据库先按可信剧集身份分组再分页，计数及当前页使用同一 SQL 快照。
+- 前端展开时按需读取，翻页加载十条；删除尾页后回退、刷新后重新读取、请求序号隔离旧响应。
+- 验证：go test ./...、npm run build、浏览器 e2e-share-gallery 均通过。真实数据库只读验证分享17，总数1236，前两页各10条且无重叠。
+- 已构建 debug/easy-strm-pagination.exe 并重启，PID 30460。前端3001返回200。后端8082根路由受鉴权保护。
+- 工具：命令行 rg/Python/Go/npm/Playwright、apply_patch；sequential-thinking、shrimp-task-manager、code-index 本轮不可用，使用本地分析和检索。首次测试发现 SQL 格式串中的百分号冲突，已修复并通过全量测试。
+- 自动审批曾拒绝一次组合测试命令，拆分为补丁写入和独立本地测试后成功完成，无需用户操作。
+
+
+## 2026-09-08 海报墙每页条数偏好（Codex）
+- 新增每页10/20/50/100条选择，全局偏好通过 GET/PUT /media/share-gallery-settings 保存到 Redis share:gallery:page_size。SET expiration=0，无失效时间；未配置默认10。
+- 复用现有 Redis 客户端和 DAO/Service/Controller/API 分层。读取偏好后加载媒体，修改成功后回第一页；读取失败提示并以10条加载，保存失败不替换当前配置。
+- 本地验证：go test ./...、新增 Controller 测试、npm run build、e2e-share-gallery 通过。miniredis 测试覆盖默认10、修改保存、TTL=-1、覆盖已有TTL、时间推进一年后仍可读取；浏览器覆盖改为20、刷新恢复及原分页/合并。
+- 首次浏览器测试使用错误的 option 选择器超时，改为 Naive UI 实际选项选择器后通过。
+- 已构建并重启 debug/easy-strm-gallery-settings.exe。工具采用 apply_patch、PowerShell、rg、Python、Go、npm 和 Playwright；命名的 thinking/planner/code-index 工具不可用，沿用本地分析检索。
+- 审查通过：未新增数据库迁移或依赖；偏好对所有分享生效，Redis不设置TTL。
+
+
+## 2026-09-08 分页偏好改为浏览器缓存（Codex）
+- 按用户最新要求替换固定选项为自定义输入（1至100整数，与现有数据库分页接口范围一致），应用后回到第一页。默认10条。
+- 使用 localStorage share:gallery:page_size 保存；无效缓存回退10，缓存不可写时提示且当前页面可用。删除本轮前序新增的Redis DAO、Service、Controller、路由、API及对应测试，不再读写Redis。
+- 本地验证：go test ./...、npm run build、e2e-share-gallery 通过。浏览器覆盖17条保存/刷新恢复、空输入不覆盖、损坏缓存回退及无Redis配置请求。
+- 已构建并启动 debug/easy-strm-browser-pagination.exe；沿用已有前端开发服务。
+- 工具：apply_patch、PowerShell、Python、rg、Go、npm、Playwright。原指定thinking/planning/code-index不可用，采用本地分析与检索。
+- 审查通过；复用已有Naive输入组件、localStorage及数据库分页，无新增依赖。
+
+
+## 2026-09-08 分享工具栏与待识别续跑（Codex）
+- 工具栏按用户要求排列：新增分享、批量导入分享、导入记录、批量自动识别、重新识别失败项、继续识别待识别内容、识别任务设置。
+- 批量识别接口新增 pending_only，和 retry_failed 互斥；续跑直接读取所有分页的数据库候选，不调用分享扫描。只选 pending 或空状态，跳过失败/已识别/脱敏/取消分享；无候选正常完成。
+- 复用既有任务互斥、取消、超时配置和进度展示。
+- 验证：go test ./...、npm run build、浏览器工具栏顺序/续跑请求/原海报分页测试通过；最终服务测试通过。一次追加集成测试命令因工作目录错误未执行，未计为通过测试；现有新增筛选单测已执行通过。
+- 已构建并重启 debug/easy-strm-pending.exe。工具：rg、Python、apply_patch、Go、npm、Playwright；指定思考和规划MCP不可用，沿用本地分析。
+
+
+## 2026-09-08 单行分享待识别续跑（Codex）
+- 每行识别按钮后新增“继续识别待识别”；无待识别条数或分享取消时禁用；操作区可换行。
+- 复用单分享识别接口，query pending_only=true 通过现有recordIDs限制分享范围，不扫描或重试失败项。
+- 验证：go test ./...、npm run build、浏览器行按钮请求测试通过。新增服务集成测试验证其他分享pending候选不处理、当前分享失败项不重试、解析器未调用。
+- 初次集成测试遗漏项目TaskRedisDAO全局初始化，修正夹具后全量通过。已构建并重启debug/easy-strm-record-pending.exe。
+- 工具：rg、Python、apply_patch、Go、npm、Playwright；沿用本地分析代替不可用的专用思考/规划工具。审查通过。
+
+
+## 2026-09-08 单分享失败内容重试（Codex）
+- 每行新增“识别失败内容”，在继续识别按钮后；无失败项或取消分享时禁用。
+- 复用单分享识别入口，failed_only=true与pending_only互斥，只处理当前分享failed记录，跳过扫描并保留其他状态。
+- 验证：go test ./...、npm run build、浏览器单行失败重试请求测试通过；新增单测覆盖failed/pending/identified/masked及空状态筛选。
+- 已构建并重启debug/easy-strm-record-failed.exe。工具使用rg、Python、Go、npm、Playwright；沿用本地分析代替不可用的专用MCP思考与规划工具。审查通过。
+## 2026-09-09 分享资源库与统一定时任务复审（Codex）
+
+- 技术实现：92/100。资源库查询投影、聚合筛选、版本条件补全和统一 Cron 处理器均落在既有 DAO/Service 分层。
+- 需求覆盖：93/100。菜单、分页、筛选、来源详情、历史补全、任务 CRUD、启停、立即执行和执行记录均已接入。
+- 验证证据：通过 Go 全量测试、前端构建、PGlite 迁移回放及两组 Playwright 流程。
+- 遗留风险：当前环境没有可用 PostgreSQL 与完整后端服务，真实运行时联调未执行；PGlite 与模拟 API 验证不能替代部署环境验证。
+- 综合结论：通过，建议部署前在目标 PostgreSQL 上执行迁移并完成一次真实任务调度回归。
+
+
+## 2026-09-09 分享标题及显式TMDB ID修复（Codex）
+- 确认之前仅分析未修复。本次实现：年份优先括号年份、禁止从中文标题内部截断1958；保留完整混合标题；提取tmdbid标记，已知电影/剧集类型时直接获取详情并核对ID；模糊查询失败后核验官方alternative_titles，保留年份及唯一性要求。
+- go test ./... 通过。新增回归覆盖搜查班长1958 (2024)、财阀X刑警、显式ID绕过搜索、闪烁的西瓜官方别名。外部TMDB使用本地HTTP夹具，未批量修改用户识别数据。
+- 已构建debug/easy-strm-title-id-fix.exe并替换原后端。重新识别失败内容可应用新规则；无需清空或重新扫描。
+- 工具：rg、PowerShell、Python、Go；专用思考/规划MCP不可用，采用本地代码分析。审查通过，识别未知类型时仍用查询推断，避免直接把无类型ID认成电影。
+
+
+## 2026-09-09 AI仅兜底（Codex）
+- 原复杂标题/未知类型会在TMDB搜索前调用AI；现先完成规则与TMDB搜索/别名核验，仅无确认结果时按所选场景调用AI，单次最多一次。明确TMDB ID仍优先详情直查。
+- 保留AI开关和场景偏好，不改数据库配置；更新页面场景说明。
+- go test ./...、npm run build通过。新增本地HTTP测试：所有场景开启时，规则成功AI调用0次，规则失败AI调用1次且二次TMDB验证成功。
+- 已构建并启动debug/easy-strm-ai-fallback.exe。工具rg/PowerShell/Python/Go/npm；专用MCP规划工具不可用，沿用本地分析。审查通过。
+
+
+## 2026-09-09 目录年份导致剧集匹配失败（Codex）
+- 用户飞起来吧蝴蝶单文件测试无年份，分享路径父目录2022被用于SearchTV first_air_date_year过滤；截图候选年份2026，因此带年份失败。
+- 增加目录年份来源标记，常规及别名核验失败后、AI前，无年份重查剧集，只有完整标题匹配且身份唯一才接受；同名多项不自动选择。
+- go test ./...通过；新增HTTP夹具覆盖2022目录/2026候选成功和同名歧义拒绝。未调用真实TMDB或修改用户识别记录。
+- 已构建并启动debug/easy-strm-year-fallback.exe。工具采用rg/Python/Go/PowerShell，专用规划MCP不可用，使用本地分析。审查通过。

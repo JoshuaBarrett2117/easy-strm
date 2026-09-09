@@ -1,6 +1,8 @@
 package main
 
 import (
+	"easy-strm/internal/dao"
+	"easy-strm/internal/service"
 	"fmt"
 )
 
@@ -77,154 +79,20 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 	return strmConfigList, nil
 }
 
-// CreateStrmConfig 创建STRM配置
-
-func CreateStrmConfig(cloud115Id int, netDiskPath, localPath, cron, extension string, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfig, error) {
-	Debug("Creating new strm config")
-	strmConfig := &StrmConfig{}
-	if syncMode == "" {
-		syncMode = "manual"
-	}
-	if maxConcurrency == 0 {
-		maxConcurrency = 1
-	}
-	err := db.QueryRow(
-		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), sync_mode,
-		source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency,
-	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode, &strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory, &strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy, &strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
-	if err != nil {
-		Error("Failed to create strm config: %v", err)
-		return nil, err
-	}
-	Info("Created new strm config (ID: %d)", strmConfig.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(strmConfig.ID)
-		cronTask, err := CreateCronTask(taskName, "full_generate", cloud115Id, strmConfig.ID, cron)
-		if err != nil {
-			Warn("Failed to create cron task for strm config: %v", err)
-		} else {
-			Info("Created cron task (ID: %d) for strm config (ID: %d)", cronTask.ID, strmConfig.ID)
-			if scheduler != nil {
-				if err := scheduler.AddTask(cronTask); err != nil {
-					Warn("Failed to add cron task to scheduler: %v", err)
-				}
-			}
-		}
-	}
-
-	return strmConfig, nil
+// CreateStrmConfig 将旧入口转发给统一Service，避免配置与任务分开提交。
+func CreateStrmConfig(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*StrmConfig, error) {
+	return strmWriteService().CreateConfigExt(cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency)
 }
 
-// UpdateStrmConfig 更新STRM配置
-
-func UpdateStrmConfig(id, cloud115Id int, netDiskPath, localPath, cron, extension string, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfig, error) {
-	Debug("Updating strm config with ID: %d", id)
-	strmConfig := &StrmConfig{}
-	if syncMode == "" {
-		syncMode = "manual"
-	}
-	if maxConcurrency == 0 {
-		maxConcurrency = 1
-	}
-	err := db.QueryRow(
-		`UPDATE t_strm_config SET cloud115_id = $1, net_disk_path = $2, local_path = $3, cron = $4, extension = $5, sync_mode = $6, source_account = $7, target_account = $8, target_directory = $9, auto_cleanup = $10, cleanup_threshold = $11, cleanup_policy = $12, max_concurrency = $13 WHERE id = $14
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, COALESCE(dir_tree_file, ''), sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, id,
-	).Scan(&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath, &strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode, &strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory, &strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy, &strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
-	if err != nil {
-		Error("Failed to update strm config with ID %d: %v", id, err)
-		return nil, err
-	}
-	Info("Updated strm config (ID: %d)", strmConfig.ID)
-
-	existingTask, _ := GetCronTaskByStrmConfigID(strmConfig.ID)
-
-	if cron != "" {
-		taskName := buildFullGenerateCronTaskName(strmConfig.ID)
-		if existingTask != nil {
-			_, err = UpdateCronTask(existingTask.ID, taskName, "full_generate", cron, existingTask.Status)
-			if err != nil {
-				Warn("Failed to update cron task: %v", err)
-			} else {
-				if scheduler != nil {
-					updatedTask, _ := GetCronTaskByID(existingTask.ID)
-					if updatedTask != nil {
-						if err := scheduler.UpdateTask(updatedTask); err != nil {
-							Warn("Failed to update cron task in scheduler: %v", err)
-						} else {
-							// 重新获取任务数据，因为 scheduler.UpdateTask 会更新 next_run_time
-							if finalTask, err := GetCronTaskByID(existingTask.ID); err == nil {
-								Debug("Cron task next run time updated: %v", finalTask.NextRunTime)
-							}
-						}
-					}
-				}
-			}
-		} else {
-			cronTask, err := CreateCronTask(taskName, "full_generate", cloud115Id, strmConfig.ID, cron)
-			if err != nil {
-				Warn("Failed to create cron task: %v", err)
-			} else {
-				Info("Created cron task (ID: %d) for strm config(ID: %d)", cronTask.ID, strmConfig.ID)
-				if scheduler != nil {
-					if err := scheduler.AddTask(cronTask); err != nil {
-						Warn("Failed to add cron task to scheduler: %v", err)
-					}
-				}
-			}
-		}
-	} else {
-		if existingTask != nil {
-			if scheduler != nil {
-				scheduler.RemoveTask(existingTask.ID)
-			}
-			err := DeleteCronTaskByName(existingTask.TaskName)
-			if err != nil {
-				Warn("Failed to delete cron task: %v", err)
-			}
-		}
-	}
-
-	return strmConfig, nil
+// UpdateStrmConfig 将旧入口转发给统一Service。
+func UpdateStrmConfig(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*StrmConfig, error) {
+	return strmWriteService().UpdateConfigExt(id, cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency)
 }
 
-// DeleteStrmConfig 删除STRM配置
-
-func DeleteStrmConfig(id int) error {
-	Debug("Deleting strm config with ID: %d", id)
-
-	existingTask, _ := GetCronTaskByStrmConfigID(id)
-	if existingTask != nil {
-		if scheduler != nil {
-			scheduler.RemoveTask(existingTask.ID)
-		}
-		err := DeleteCronTaskByName(existingTask.TaskName)
-		if err != nil {
-			Warn("Failed to delete cron task: %v", err)
-		}
-	}
-
-	result, err := db.Exec("DELETE FROM t_strm_config WHERE id = $1", id)
-	if err != nil {
-		Error("Failed to delete strm config with ID %d: %v", id, err)
-		return err
-	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		Error("Failed to get rows affected for delete operation: %v", err)
-		return err
-	}
-
-	if rowsAffected == 0 {
-		Debug("No strm config found with ID %d for deletion", id)
-		return fmt.Errorf("no strm config found with ID %d", id)
-	}
-
-	Info("Deleted strm config with ID: %d", id)
-	return nil
+// DeleteStrmConfig 删除配置及全部关联调度。
+func DeleteStrmConfig(id int) error { return strmWriteService().DeleteConfig(id) }
+func strmWriteService() *service.StrmService {
+	s := service.NewStrmService(dao.NewStrmConfigDAO(), dao.NewStrmFileDAO(), dao.NewCronTaskDAO())
+	s.SetScheduler(scheduler)
+	return s
 }

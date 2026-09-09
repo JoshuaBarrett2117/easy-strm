@@ -507,17 +507,7 @@ END $$;
 		return err
 	}
 
-	// 全量任务名称使用 STRM 配置 ID，保持展示名称稳定并避免同名目录产生歧义。
-	_, err = db.Exec(`
-		UPDATE t_cron_task
-		SET task_name = 'STRM全量生成-' || strm_config_id::text
-		WHERE task_type = 'full_generate'
-		  AND task_name IS DISTINCT FROM 'STRM全量生成-' || strm_config_id::text
-	`)
-	if err != nil {
-		Error("Failed to normalize full generate cron task names: %v", err)
-		return err
-	}
+	// 名称由用户维护；任务身份由配置ID与处理器保证唯一。
 	_, err = db.Exec(`
 		CREATE UNIQUE INDEX IF NOT EXISTS idx_cron_task_config_type
 		ON t_cron_task(strm_config_id, task_type)
@@ -1083,6 +1073,9 @@ END $$;
 		return err
 	}
 	if err = migrateShareRecords(); err != nil {
+		return err
+	}
+	if err = migrateUnifiedCron(); err != nil {
 		return err
 	}
 	if err = migratePlaybackRecords(); err != nil {

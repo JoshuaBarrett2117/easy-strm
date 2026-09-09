@@ -237,7 +237,7 @@ func (s *ShareTransferService) fetchShareTree(ctx context.Context, shareCode, pa
 		}
 		// 根目录为第0层，仅下探两层；第二层目录（通常为剧集/电影目录）
 		// 只读取其直接子项（如 Season 1），不再进入季目录内容。
-		if info.IsDir && info.DirID != "" && depth < 2 {
+		if info.IsDir && info.DirID != "" && depth < 32 {
 			children, _, childErr := s.fetchShareTree(ctx, shareCode, password, info.DirID, info.Path, depth+1, visited, masked)
 			if childErr != nil {
 				return nil, title, childErr
@@ -247,6 +247,9 @@ func (s *ShareTransferService) fetchShareTree(ctx context.Context, shareCode, pa
 			hasVideo := false
 			hasChildDir := false
 			for _, child := range children {
+				if filepath.Dir(child.Path) != info.Path {
+					continue
+				}
 				hasVideo = hasVideo || (!child.IsDir && child.Type == "video")
 				hasChildDir = hasChildDir || child.IsDir
 			}
@@ -344,6 +347,9 @@ func extractSharePassword(rawURL string) string {
 //   - 990010: 分享需要访问密码
 //   - 990011 / 含"提取码": 访问密码错误
 func mapShareSnapError(err error) error {
+	if isShareCancelledError(err) {
+		return fmt.Errorf("%w: %v", ErrShareCancelled, err)
+	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "4100026"), strings.Contains(msg, "shared link not found"),
@@ -355,7 +361,7 @@ func mapShareSnapError(err error) error {
 	case strings.Contains(msg, "990011"), strings.Contains(msg, "提取码"):
 		return fmt.Errorf("访问密码错误")
 	default:
-		return fmt.Errorf("解析分享链接失败: %v", err)
+		return fmt.Errorf("解析分享链接失败: %w", err)
 	}
 }
 

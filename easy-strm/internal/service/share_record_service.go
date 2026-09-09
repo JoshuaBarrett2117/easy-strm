@@ -8,7 +8,9 @@ import (
 	"fmt"
 	neturl "net/url"
 	"regexp"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -18,10 +20,13 @@ var (
 )
 
 type ShareRecordService struct {
-	dao    *dao.ShareRecordDAO
-	tmdb   *TmdbService
-	tasks  *TaskService
-	parser ShareRecordParser
+	enrichMu          sync.Mutex
+	taskSettingsStore ShareTaskSettingsStore
+	identifyMu        sync.RWMutex // 清空与后台识别互斥，避免旧任务重新写入刚清空的内容
+	dao               *dao.ShareRecordDAO
+	tmdb              *TmdbService
+	tasks             *TaskService
+	parser            ShareRecordParser
 }
 
 // ShareRecordParser 获取分享中的文件列表。
@@ -35,7 +40,10 @@ func NewShareRecordService(d *dao.ShareRecordDAO, t *TmdbService, tasks *TaskSer
 func (s *ShareRecordService) List(ctx context.Context, q domain.ShareRecordQuery) (domain.ShareRecordPage, error) {
 	page, err := s.dao.List(ctx, q)
 	for i := range page.Data {
-		normalizeShareMaskedMedia(&page.Data[i])
+		if !q.Summary {
+			normalizeShareMaskedMedia(&page.Data[i])
+		}
+		normalizeShareGallery(&page.Data[i])
 	}
 	return page, err
 }
@@ -77,10 +85,10 @@ func (s *ShareRecordService) saveMaskedDirectories(ctx context.Context, record d
 }
 func (s *ShareRecordService) Create(ctx context.Context, r *domain.ShareRecord) error {
 	if r.MediaType == "" {
-		r.MediaType = "movie"
+		r.MediaType = "auto"
 	}
-	if r.MediaType != "movie" && r.MediaType != "tv" {
-		return fmt.Errorf("媒体类型必须为电影或电视剧")
+	if r.MediaType != "auto" && r.MediaType != "movie" && r.MediaType != "tv" {
+		return fmt.Errorf("媒体类型必须为自动、电影或电视剧")
 	}
 	parsedURL, parsedPassword, parsedName, err := parseShareRecordInput(r.URL)
 	if err != nil {
@@ -143,8 +151,8 @@ func extractShareRecordName(input, rawURL string) string {
 	return strings.TrimSpace(strings.Trim(rest, "[] ：:\r\n"))
 }
 func (s *ShareRecordService) Update(ctx context.Context, r *domain.ShareRecord) error {
-	if r.MediaType != "movie" && r.MediaType != "tv" {
-		return fmt.Errorf("媒体类型必须为电影或电视剧")
+	if r.MediaType != "auto" && r.MediaType != "movie" && r.MediaType != "tv" {
+		return fmt.Errorf("媒体类型必须为自动、电影或电视剧")
 	}
 	return s.dao.Update(ctx, r)
 }
@@ -182,6 +190,9 @@ func (s *ShareRecordService) ManualIdentify(ctx context.Context, m domain.ShareM
 	m.Result.Success = true
 	m.Result.Message = "手动识别"
 	m.Result.Filename = m.FileName
+	if s.tmdb != nil {
+		s.tmdb.EnsureIdentifyMetadata(m.Result)
+	}
 	return s.dao.Identify(ctx, m, "identified", m.Result, "")
 }
 
@@ -189,10 +200,10 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 	if isMaskedSharePath(m.FileName) {
 		return false, fmt.Errorf("目录名称已脱敏，已跳过识别")
 	}
-	if !retry && m.Status == "identified" && (m.MediaType == "" || (m.Result != nil && m.Result.MediaType == m.MediaType)) {
+	if !retry && m.Status == "identified" && (m.MediaType == "" || m.MediaType == "auto" || (m.Result != nil && m.Result.MediaType == m.MediaType)) {
 		return true, nil
 	}
-	r, e := s.tmdb.identifyFile(m.FileName, m.MetadataSource, m.MediaType)
+	r, e := s.tmdb.IdentifyShareFile(ctx, m.FileName, m.MetadataSource, m.MediaType)
 	if e != nil {
 		logger.Errorf("[ShareIdentify] TMDB识别异常 | directory=%q | source=%s | error=%v", m.FileName, m.MetadataSource, e)
 		return false, s.dao.Identify(ctx, m, "failed", nil, e.Error())
@@ -208,30 +219,49 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 }
 
 // StartBatchIdentify 创建后台识别任务并立即返回任务 ID。
-func (s *ShareRecordService) StartBatchIdentify(ctx context.Context, ids []int, retry bool) (string, error) {
-	return s.startIdentifyTask(ctx, ids, retry, nil)
+func (s *ShareRecordService) StartBatchIdentify(ctx context.Context, ids []int, retry bool, pendingOnly ...bool) (string, error) {
+	return s.startIdentifyTask(ctx, ids, retry, nil, pendingOnly...)
 }
 
 // StartRecordIdentify 为单条分享创建识别任务，并只处理该分享下的全部媒体。
-func (s *ShareRecordService) StartRecordIdentify(ctx context.Context, recordID int) (string, error) {
-	return s.startIdentifyTask(ctx, nil, false, []int{recordID})
+func (s *ShareRecordService) StartRecordIdentify(ctx context.Context, recordID int, pendingOnly ...bool) (string, error) {
+	onlyPending := len(pendingOnly) > 0 && pendingOnly[0]
+	onlyFailed := len(pendingOnly) > 1 && pendingOnly[1]
+	if onlyPending && onlyFailed {
+		return "", fmt.Errorf("待识别与失败筛选不能同时启用")
+	}
+	return s.startIdentifyTask(ctx, nil, !onlyPending, []int{recordID}, onlyPending, onlyFailed)
 }
 
-func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, retry bool, recordIDs []int) (string, error) {
+func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, retry bool, recordIDs []int, pendingOnly ...bool) (string, error) {
 	if s.tasks == nil {
 		return "", fmt.Errorf("任务服务未初始化")
 	}
+	if !s.identifyMu.TryLock() {
+		return "", fmt.Errorf("已有分享识别任务运行，请等待结束后再发起")
+	}
 	taskID := fmt.Sprintf("share_identify_%d", time.Now().UnixNano())
 	if err := s.tasks.Create(taskID, "share_identify", "分享媒体批量识别"); err != nil {
+		s.identifyMu.Unlock()
 		return "", err
 	}
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
-	go s.runBatchIdentify(context.Background(), taskID, ids, retry, recordIDs)
+	go func() {
+		defer s.identifyMu.Unlock()
+		s.runBatchIdentify(context.Background(), taskID, ids, retry, recordIDs, pendingOnly...)
+	}()
 	return taskID, nil
 }
 
-func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string, ids []int, retry bool, recordIDs []int) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string, ids []int, retry bool, recordIDs []int, pendingOnly ...bool) {
+	onlyPending := len(pendingOnly) > 0 && pendingOnly[0]
+	onlyFailed := len(pendingOnly) > 1 && pendingOnly[1]
+	settings, settingsErr := s.GetTaskSettings()
+	if settingsErr != nil {
+		_ = s.tasks.SetError(taskID, settingsErr.Error())
+		return
+	}
+	ctx, cancel := newShareTaskContext(ctx, settings.TimeoutMinutes)
 	defer cancel()
 	defer s.tasks.RemoveCancel(taskID)
 	defer func() {
@@ -249,8 +279,9 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		_ = s.tasks.SetError(taskID, err.Error())
 		return
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "获取分享媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "获取分享媒体", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
-	if s.parser != nil {
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "phase": "获取分享媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "获取分享媒体", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
+	cancelledShares := make(map[int]bool)
+	if s.parser != nil && !onlyPending && !onlyFailed {
 		parseErrors := make([]string, 0)
 		parseTotal := len(page.Data)
 		if parseTotal > 0 {
@@ -258,13 +289,27 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			_ = s.tasks.UpdateProgressPercent(taskID, 1)
 		}
 		for recordIndex, record := range page.Data {
+			if ctx.Err() != nil {
+				s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
+				return
+			}
 			if len(recordIDs) > 0 && !contains(recordIDs, record.ID) {
 				continue
 			}
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "获取分享媒体", "current_share": record.Name, "current_share_id": record.ID, "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "获取分享媒体", "status": "running", "message": fmt.Sprintf("正在解析分享 %d", record.ID)}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "获取分享媒体", "current_share": record.Name, "current_share_id": record.ID, "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "获取分享媒体", "status": "running", "message": fmt.Sprintf("正在解析分享 %d", record.ID)}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 			logger.Infof("ShareRecordService[runBatchIdentify] task=%s parsing share=%d name=%q", taskID, record.ID, record.Name)
-			parsed, parseErr := s.parser.ParseShareLink(ctx, record.URL, record.Password)
+			parsed, parseErr := s.parseRecordShare(ctx, record)
+			if ctx.Err() != nil {
+				s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
+				return
+			}
 			if parseErr != nil {
+				if isShareCancelledError(parseErr) {
+					cancelledShares[record.ID] = true
+					logger.Infof("ShareRecordService[runBatchIdentify] task=%s share=%d 已取消分享，已保存标签并跳过", taskID, record.ID)
+					_ = s.tasks.UpdateProgressPercent(taskID, 1+int(float64(recordIndex+1)/float64(parseTotal)*19))
+					continue
+				}
 				message := fmt.Sprintf("分享 %d（%s）解析失败: %v", record.ID, record.Name, parseErr)
 				parseErrors = append(parseErrors, message)
 				logger.Errorf("ShareRecordService[runBatchIdentify] task=%s %s", taskID, message)
@@ -283,7 +328,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			for _, media := range record.Media {
 				existing[media.FileName] = true
 			}
-			for _, file := range parsed.Files {
+			for _, file := range selectShareMediaFiles(parsed.Files) {
 				fileName := file.Path
 				if fileName == "" {
 					fileName = file.Name
@@ -291,8 +336,10 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 				if (file.IsDir && file.Type != "media") || (file.Type != "" && file.Type != "video" && file.Type != "media") || existing[fileName] {
 					continue
 				}
-				if addErr := s.AddMedia(ctx, &domain.ShareMedia{ShareID: record.ID, FileName: fileName, MetadataSource: domain.MetadataSourceAuto}); addErr != nil {
+				if addErr := s.dao.AddMediaCandidate(ctx, &domain.ShareMedia{ShareID: record.ID, FileName: fileName, MetadataSource: domain.MetadataSourceAuto}); addErr != nil {
 					logger.Errorf("ShareRecordService[runBatchIdentify] task=%s share=%d add_media=%q error=%v", taskID, record.ID, fileName, addErr)
+				} else {
+					existing[fileName] = true
 				}
 			}
 			// 解析阶段占任务前 20%，识别阶段由文件处理进度接管。
@@ -307,68 +354,113 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			return
 		}
 		if len(parseErrors) > 0 {
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"parse_errors": parseErrors})
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "parse_errors": parseErrors})
 			if len(recordIDs) > 0 {
 				_ = s.tasks.SetError(taskID, strings.Join(parseErrors, "; "))
 				return
 			}
 		}
 	}
+	// 继续识别直接读取已入库候选，遍历所有分享页，不重新扫描网盘。
+	if onlyPending || onlyFailed {
+		for number := 2; len(page.Data) < page.Total; number++ {
+			next, loadErr := s.List(ctx, domain.ShareRecordQuery{Page: number, PageSize: 200})
+			if loadErr != nil {
+				s.tasks.SetError(taskID, loadErr.Error())
+				return
+			}
+			if len(next.Data) == 0 {
+				break
+			}
+			page.Data = append(page.Data, next.Data...)
+		}
+	}
 	items := make([]domain.ShareMedia, 0)
-	mediaTotal, maskedTotal := 0, 0
+	mediaTotal, maskedTotal, availableShares := 0, 0, 0
 	for _, record := range page.Data {
 		if len(recordIDs) > 0 && !contains(recordIDs, record.ID) {
 			continue
 		}
+		if record.ShareCancelled || cancelledShares[record.ID] {
+			cancelledShares[record.ID] = true
+			continue
+		}
+		availableShares++
+		seenPaths := map[string]bool{}
 		for _, media := range record.Media {
+			key := shareCandidatePath(media.FileName)
+			if seenPaths[key] {
+				continue
+			}
+			seenPaths[key] = true
+			if AnalyzeShareFilename(media.FileName).Container {
+				continue
+			}
 			if isMaskedSharePath(media.FileName) {
 				maskedTotal++
 				logger.Infof("[ShareIdentify] 跳过已有脱敏媒体 | task=%s | directory=%q", taskID, media.FileName)
 				continue
 			}
 			mediaTotal++
-			if (len(ids) == 0 || contains(ids, media.ID)) && (retry || media.Status != "identified" || media.Result == nil || media.Result.MediaType != record.MediaType) {
+			if (len(ids) == 0 || contains(ids, media.ID)) && shouldIdentifyShareMedia(media, record.MediaType, retry, onlyPending, onlyFailed) {
 				media.MediaType = record.MediaType
 				items = append(items, media)
 			}
 		}
 	}
+	// 优先处理尚未尝试的候选；大分享超时后重开不会反复消耗在前面的失败记录上。
+	sort.SliceStable(items, func(i, j int) bool {
+		rank := func(status string) int {
+			if status == "pending" || status == "" {
+				return 0
+			}
+			if status == "failed" {
+				return 1
+			}
+			return 2
+		}
+		return rank(items[i].Status) < rank(items[j].Status)
+	})
 	_ = s.tasks.UpdateProgress(taskID, len(items), 0, 0, 0)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"masked": maskedTotal})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
 	if len(items) == 0 {
-		if mediaTotal == 0 && maskedTotal == 0 {
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "success": 0, "failed": 0, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "failed", "message": "未从分享目录中解析到媒体候选"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
+		if !onlyPending && !onlyFailed && mediaTotal == 0 && maskedTotal == 0 && !(availableShares == 0 && len(cancelledShares) > 0) {
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "准备媒体列表", "current_file": "", "success": 0, "failed": 0, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "failed", "message": "未从分享目录中解析到媒体候选"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 			_ = s.tasks.SetError(taskID, "未从分享目录中解析到媒体候选，请检查目录层级和分享内容")
 			return
 		}
 		// 没有待识别媒体时任务仍是正常完成，进度应显示100%，避免出现“完成但0%”的误导状态。
 		_ = s.tasks.UpdateProgressPercent(taskID, 100)
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
 	success, failed := 0, 0
 	for index, media := range items {
 		if err := ctx.Err(); err != nil {
-			_ = s.tasks.SetError(taskID, "分享识别任务超时或已取消: "+err.Error())
+			s.finishShareTaskContext(taskID, err, settings.TimeoutMinutes)
 			return
 		}
 		if s.tasks.IsCancelled(taskID) {
 			return
 		}
 		ok, identifyErr := s.identifyOne(ctx, media, retry)
+		if ctx.Err() != nil {
+			s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
+			return
+		}
 		if identifyErr != nil || !ok {
 			failed++
 		} else {
 			success++
 		}
 		_ = s.tasks.UpdateProgress(taskID, len(items), index+1, success, failed)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "识别媒体", "current_file": media.FileName, "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", index+1, len(items))}, {"name": "汇总结果", "status": "pending"}}})
+		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": media.FileName, "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", index+1, len(items))}, {"name": "汇总结果", "status": "pending"}}})
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
 	if failed > 0 {
 		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
 		return
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
 	_ = s.tasks.UpdateStatus(taskID, "completed")
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
 }
@@ -403,4 +495,20 @@ func contains(a []int, v int) bool {
 		}
 	}
 	return false
+}
+
+// ListMedia 获取已识别媒体分页，保留完整任务扫描的原有读取入口。
+func (s *ShareRecordService) ListMedia(ctx context.Context, id, page, size int, duplicates bool) (domain.ShareMediaPage, error) {
+	return s.dao.ListMedia(ctx, id, page, size, duplicates)
+}
+
+// shouldIdentifyShareMedia 继续任务仅处理未尝试候选，不重试失败或覆盖已识别记录。
+func shouldIdentifyShareMedia(media domain.ShareMedia, mediaType string, retry, pendingOnly bool, failedOnly ...bool) bool {
+	if len(failedOnly) > 0 && failedOnly[0] {
+		return media.Status == "failed"
+	}
+	if pendingOnly {
+		return media.Status == "pending" || media.Status == ""
+	}
+	return retry || media.Status != "identified" || media.Result == nil || (mediaType != "auto" && media.Result.MediaType != mediaType)
 }

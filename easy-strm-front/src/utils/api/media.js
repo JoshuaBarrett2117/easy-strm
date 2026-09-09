@@ -76,16 +76,21 @@ export const resetFilenameRecognitionRules = () => api.post('/media/tmdb/filenam
 // 批量识别文件
 export const batchIdentifyTmdb = (data) => api.post('/media/tmdb/batch-identify', data)
 export const getShareRecords = (params) => api.get('/media/share-records', { params })
+// 任务总时限配置，0代表无限制。
+export const getShareTaskSettings = () => api.get('/media/share-task-settings')
+export const saveShareTaskSettings = data => api.put('/media/share-task-settings', data)
 export const createShareRecord = (data) => api.post('/media/share-records', data)
 // 解析混合分享文案，仅生成预览，不写入分享记录。
 export const parseShareImport = (text) => api.post('/media/share-records/parse', { text })
 export const updateShareRecord = (id, data) => api.put(`/media/share-records/${id}`, data)
 export const deleteShareRecord = (id) => api.delete(`/media/share-records/${id}`)
+// 清空媒体候选及识别内容，保留分享链接配置。
+export const clearShareMedia = (id) => api.delete(`/media/share-records/${id}/media`)
 export const identifyShareMedia = (id, data) => api.post(`/media/share-records/media/${id}/identify`, data)
 export const manualIdentifyShareMedia = (id, data) => api.post(`/media/share-records/media/${id}/manual-identify`, data)
 export const deleteShareMedia = (shareId, mediaId) => api.delete(`/media/share-records/${shareId}/media/${mediaId}`)
 export const batchIdentifyShareRecords = (data) => api.post('/media/share-records/batch-identify', data)
-export const identifyShareRecord = (id) => api.post(`/media/share-records/${id}/identify`)
+export const identifyShareRecord = (id, pendingOnly = false, failedOnly = false) => api.post(`/media/share-records/${id}/identify`, null, {params: {pending_only: pendingOnly, failed_only: failedOnly}})
 export const getShareIdentifyTask = (taskId) => api.get(`/tasks/${taskId}`)
 
 // 获取电影详情
@@ -202,3 +207,6 @@ export const scrapeFile = (data) => api.post('/media/scrape/file', data)
 // 批量刮削文件 NFO
 export const scrapeFiles = (data) => api.post('/media/scrape/files', data)
 export const scrapeDirectoryFiles = (data) => api.post('/media/scrape/directory', data)
+
+// 按数据库分页读取已识别媒体。
+export const getShareMedia = (id, params) => api.get(`/media/share-records/${id}/media`, { params })

@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-08",
+  "executor": "Codex",
+  "scope": "按分享清空媒体内容后重新扫描",
+  "references": [
+    "ShareRecordDAO.DeleteMedia",
+    "ShareRecordService.startIdentifyTask",
+    "ShareRecords.vue",
+    "utils/ui/feedback.js"
+  ],
+  "contract": "DELETE /media/share-records/:id/media 删除指定分享全部媒体行，保留分享，返回deleted",
+  "plan": [
+    "DAO事务删除与Service任务互斥",
+    "Controller及前端确认操作",
+    "本地回归和文档"
+  ],
+  "risks": [
+    "正在运行的识别重新插入数据",
+    "误删其他分享"
+  ],
+  "sufficiency": "明确接口、事务范围、已有弹窗工具和测试约定",
+  "tools": "指定思考/规划/索引MCP不可用，采用本地分析和rg"
+}

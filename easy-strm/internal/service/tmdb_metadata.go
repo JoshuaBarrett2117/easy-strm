@@ -3,49 +3,69 @@ package service
 import (
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+	"fmt"
+	"strconv"
 )
 
-// EnsureIdentifyMetadata loads genre/country/language metadata when the current
-// identify result is missing it, so category matching can use precise TMDB data.
+// EnsureIdentifyMetadata 补齐识别元数据；已有身份在详情接口失败时仍保留。
 func (s *TmdbService) EnsureIdentifyMetadata(result *domain.TmdbIdentifyResult) {
-	if result == nil || result.TmdbID <= 0 {
-		return
+	if err := s.EnrichIdentifyMetadata(result); err != nil {
+		logger.Warnf("识别详情补全失败: %v", err)
+	}
+}
+
+// EnrichIdentifyMetadata 返回详情获取失败原因，供历史补全任务记录和重试。
+func (s *TmdbService) EnrichIdentifyMetadata(result *domain.TmdbIdentifyResult) error {
+	if result == nil {
+		return fmt.Errorf("没有可补全的识别结果")
 	}
 	if isIdentifyMetadataComplete(result) {
-		return
+		return nil
 	}
-
+	if result.MetadataSource == domain.MetadataSourceMetaTube || result.MetadataProvider != "" {
+		detail, err := s.GetMovieDetailBySource(result.TmdbID, result.MetadataSource, result.MetadataID, result.MetadataProvider)
+		if err != nil {
+			return err
+		}
+		applyDetailMetadata(result, detail, result.MediaType)
+		return nil
+	}
+	if result.TmdbID <= 0 {
+		return fmt.Errorf("缺少可信媒体身份")
+	}
 	if s.cacheDAO != nil {
-		cache, err := s.cacheDAO.GetByTmdbID(result.TmdbID, result.MediaType)
-		if err == nil && cache != nil && len(cache.RawData) > 0 {
-			applyCachedMetadata(result, cache.RawData)
+		cached, err := s.cacheDAO.GetByTmdbID(result.TmdbID, result.MediaType)
+		if err == nil && cached != nil && len(cached.RawData) > 0 {
+			applyCachedMetadata(result, cached.RawData)
 			if isIdentifyMetadataComplete(result) {
-				return
+				return nil
 			}
 		}
 	}
-
-	var (
-		detail map[string]interface{}
-		err    error
-	)
-
+	var detail map[string]interface{}
+	var err error
 	if result.MediaType == "tv" {
 		detail, err = s.GetTVDetail(result.TmdbID)
 	} else {
 		detail, err = s.GetMovieDetail(result.TmdbID)
 	}
 	if err != nil {
-		logger.Warnf("TmdbService[EnsureIdentifyMetadata] fetch detail failed: tmdb_id=%d, err=%v", result.TmdbID, err)
-		return
+		return err
 	}
-
 	applyDetailMetadata(result, detail, result.MediaType)
+	return nil
 }
 
 func applyDetailMetadata(result *domain.TmdbIdentifyResult, detail map[string]interface{}, mediaType string) {
 	if result == nil || detail == nil {
 		return
+	}
+	if rating, ok := detail["vote_average"].(float64); ok && rating >= 0 && rating <= 10 {
+		result.VoteAverage = &rating
+	}
+	if result.Year==0 {
+		field:="release_date";if mediaType=="tv"{field="first_air_date"}
+		if date,ok:=detail[field].(string);ok && len(date)>=4 {if year,err:=strconv.Atoi(date[:4]);err==nil && year>0{result.Year=year}}
 	}
 	if poster, ok := detail["poster_path"].(string); ok && poster != "" {
 		if len(poster) > 0 && poster[0] == '/' {
@@ -54,7 +74,6 @@ func applyDetailMetadata(result *domain.TmdbIdentifyResult, detail map[string]in
 			result.PosterPath = poster
 		}
 	}
-
 	genreIDs := extractGenreIDsFromDetail(detail)
 	countries := extractCountriesFromDetail(detail, mediaType)
 
@@ -92,13 +111,13 @@ func isIdentifyMetadataComplete(result *domain.TmdbIdentifyResult) bool {
 	if result == nil {
 		return true
 	}
-	if len(result.GenreIDs) == 0 || result.Language == "" {
+	if len(result.GenreIDs) == 0 || result.Language == "" || result.VoteAverage == nil || len(result.Countries) == 0 {
 		return false
 	}
 	if result.MediaType == "tv" && len(result.Countries) == 0 {
 		return false
 	}
-	if result.Title == "" || result.OriginalTitle == "" {
+	if result.Title == "" || result.OriginalTitle == "" || result.Year==0 {
 		return false
 	}
 	return true

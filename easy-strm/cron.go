@@ -1,276 +1,100 @@
 package main
 
 import (
+	"context"
+	"easy-strm/internal/dao"
+	"easy-strm/internal/domain"
+	"easy-strm/internal/service"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
-
-	"github.com/robfig/cron/v3"
 )
 
-// CronScheduler 全局cron调度器
-type CronScheduler struct {
-	cron   *cron.Cron
-	entrys map[int]cron.EntryID
-	mu     sync.RWMutex
-}
+// CronScheduler 复用业务层统一调度实例。
+type CronScheduler = service.CronService
 
 var scheduler *CronScheduler
 
-// InitCronScheduler 初始化cron调度器
+// InitCronScheduler 注册现有业务与维护方法，路由依赖就绪后启动。
 func InitCronScheduler() error {
-	Debug("Initializing cron scheduler")
-
-	scheduler = &CronScheduler{
-		cron:   cron.New(cron.WithSeconds(), cron.WithLocation(time.Local)),
-		entrys: make(map[int]cron.EntryID),
-	}
-
-	scheduler.cron.Start()
-	Info("Cron scheduler started")
-
-	// 添加账号冷却恢复定时任务，每分钟执行一次
-	_, err := scheduler.cron.AddFunc("0 * * * * *", func() {
-		RecoverCoolingAccounts()
-	})
-	if err != nil {
-		Warn("Failed to add cooling account recovery task: %v", err)
-	} else {
-		Info("账号冷却恢复定时任务已添加 (每分钟执行)")
-	}
-
-	if err := LoadCronTasksFromDB(); err != nil {
-		Error("Failed to load cron tasks from database: %v", err)
-		return err
-	}
-
-	return nil
-}
-
-// RecoverCoolingAccounts 恢复超过冷却时间的账号（由定时任务调用）
-func RecoverCoolingAccounts() {
-	const coolingDuration = 5 * time.Minute
-
-	Debug("[cooling] 开始检查冷却账号...")
-
-	// 获取所有cooling状态的账号
-	rows, err := db.Query("SELECT id, name, status, cooling_start_time FROM t_cloud_115 WHERE status = 'cooling'")
-	if err != nil {
-		Error("[cooling] 查询冷却账号失败: %v", err)
-		return
-	}
-	defer rows.Close()
-
-	now := time.Now()
-	recoveredCount := 0
-
-	for rows.Next() {
-		var id int
-		var name string
-		var status string
-		var coolingStartTime *time.Time
-
-		if err := rows.Scan(&id, &name, &status, &coolingStartTime); err != nil {
-			Error("[cooling] 扫描账号行失败: %v", err)
-			continue
+	scheduler = service.NewCronService(dao.NewCronTaskDAO())
+	scheduler.SetTaskService(service.NewTaskService(dao.NewTaskRedisDAOWithGlobal()))
+	params := []service.CronParameter{{Key: "cloud115_id", Label: "115账号ID"}, {Key: "strm_config_id", Label: "STRM配置ID"}}
+	for _, kind := range []string{"full_generate", "incremental_sync"} {
+		name := "STRM全量生成"
+		if kind == "incremental_sync" {
+			name = "STRM增量同步"
 		}
-
-		if coolingStartTime == nil {
-			// 如果没有冷却开始时间，视为已超过冷却时间，直接恢复
-			if _, err := db.Exec("UPDATE t_cloud_115 SET status = 'active', cooling_start_time = NULL WHERE id = $1", id); err != nil {
-				Error("[cooling] 恢复账号 %d 失败: %v", id, err)
-				continue
+		scheduler.Register(service.CronHandler{Key: kind, Name: name, Parameters: params, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+			cfg, e := GetStrmConfigByID(t.StrmConfigID)
+			if e != nil {
+				return "", e
 			}
-			recoveredCount++
-			Info("[cooling] 恢复账号 %s (ID: %d) - 无冷却开始时间", name, id)
-			continue
-		}
-
-		// 检查冷却时间是否已超过5分钟
-		coolingElapsed := now.Sub(*coolingStartTime)
-		if coolingElapsed >= coolingDuration {
-			if _, err := db.Exec("UPDATE t_cloud_115 SET status = 'active', cooling_start_time = NULL WHERE id = $1", id); err != nil {
-				Error("[cooling] 恢复账号 %d 失败: %v", id, err)
-				continue
+			if cfg == nil {
+				return "", fmt.Errorf("STRM配置不存在")
 			}
-			recoveredCount++
-			Info("[cooling] 恢复账号 %s (ID: %d) - 冷却时间 %.0f 分钟", name, id, coolingElapsed.Minutes())
+			cloud, e := GetCloud115ByID(t.Cloud115ID)
+			if e != nil {
+				return "", e
+			}
+			if cloud == nil {
+				return "", fmt.Errorf("115账号不存在")
+			}
+			if t.Handler == "full_generate" {
+				r, e := RunFullStrmGenerate(cfg, cloud, id)
+				if e != nil {
+					return "", e
+				}
+				return fmt.Sprintf("生成%d个STRM文件", r.Total), nil
+			}
+			r, e := RunIncrementalSync(cfg, cloud, id)
+			if e != nil {
+				return "", e
+			}
+			return fmt.Sprintf("新增%d，删除%d，跳过%d", r.Added, r.Deleted, r.Skipped), nil
+		}})
+	}
+	scheduler.Register(service.CronHandler{Key: "log_cleanup", Name: "日志清理", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+		if logger == nil {
+			return "", fmt.Errorf("日志服务未初始化")
 		}
-	}
-
-	if recoveredCount > 0 {
-		Info("[cooling] 本次共恢复 %d 个账号", recoveredCount)
-	} else {
-		Debug("[cooling] 没有需要恢复的冷却账号")
-	}
-}
-
-// LoadCronTasksFromDB 从数据库加载定时任务
-func LoadCronTasksFromDB() error {
-	Debug("Loading cron tasks from database")
-
-	tasks, err := GetEnabledCronTasks()
-	if err != nil {
-		return err
-	}
-
-	for _, task := range tasks {
-		if err := scheduler.AddTask(task); err != nil {
-			Warn("Failed to add cron task %s: %v", task.TaskName, err)
-			continue
+		days := logger.keepDays
+		cfg, e := GetSystemConfigByKey("log_save_day_limit")
+		if e != nil {
+			return "", e
 		}
-		Debug("Loaded cron task: %s (ID: %d)", task.TaskName, task.ID)
-	}
-
+		if cfg != nil {
+			var value int
+			if _, e = fmt.Sscanf(cfg.ConfigVal, "%d", &value); e == nil && value > 0 {
+				days = value
+			}
+		}
+		return "日志清理完成", cleanOldLogs(logger.logDir, days)
+	}})
+	scheduler.Register(service.CronHandler{Key: "identify_cache_cleanup", Name: "识别缓存清理", Parameters: []service.CronParameter{{Key: "keep_days", Label: "保留天数", Default: 30}}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+		n, e := dao.NewIdentifyCacheDAO().DeleteOlderThan(service.CronInt(t.Params, "keep_days"))
+		return fmt.Sprintf("已清理%d条缓存", n), e
+	}})
 	return nil
 }
 
-// AddTask 添加定时任务到调度器
-func (s *CronScheduler) AddTask(task *CronTask) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// LoadCronTasksFromDB 统一装载任务。
+func LoadCronTasksFromDB() error { return scheduler.LoadTasksFromDB() }
 
-	if _, exists := s.entrys[task.ID]; exists {
-		Debug("Task %d already exists, removing first", task.ID)
-		s.cron.Remove(s.entrys[task.ID])
-		delete(s.entrys, task.ID)
-	}
-
-	cronExpr := task.CronExpr
-	fields := strings.Fields(cronExpr)
-	if len(fields) == 5 {
-		cronExpr = "0 " + cronExpr
-		Debug("Converting 5-field cron expression to 6-field: %s -> %s", task.CronExpr, cronExpr)
-	}
-
-	entryID, err := s.cron.AddFunc(cronExpr, func() {
-		ExecuteCronTask(task)
-	})
-	if err != nil {
-		return fmt.Errorf("failed to add cron task: %v", err)
-	}
-
-	s.entrys[task.ID] = entryID
-
-	nextRun := s.cron.Entry(entryID).Next
-	task.NextRunTime = &nextRun
-	UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, task.LastRunStatus, task.LastRunMessage)
-
-	Debug("Added cron task %s (ID: %d), next run: %v", task.TaskName, task.ID, nextRun)
-	return nil
-}
-
-// RemoveTask 从调度器移除定时任务
-func (s *CronScheduler) RemoveTask(taskID int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if entryID, exists := s.entrys[taskID]; exists {
-		s.cron.Remove(entryID)
-		delete(s.entrys, taskID)
-		Debug("Removed cron task ID: %d", taskID)
-	}
-}
-
-// UpdateTask 更新调度器中的定时任务
-func (s *CronScheduler) UpdateTask(task *CronTask) error {
-	s.RemoveTask(task.ID)
-	if task.Status == "enabled" {
-		return s.AddTask(task)
-	}
-	return nil
-}
-
-// GetNextRunTime 获取任务的下次执行时间
-func (s *CronScheduler) GetNextRunTime(taskID int) *time.Time {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if entryID, exists := s.entrys[taskID]; exists {
-		next := s.cron.Entry(entryID).Next
-		return &next
-	}
-	return nil
-}
-
-// StopScheduler 停止调度器
+// StopScheduler 停止调度。
 func StopScheduler() {
 	if scheduler != nil {
-		scheduler.cron.Stop()
-		Info("Cron scheduler stopped")
+		scheduler.Stop()
 	}
 }
 
-// ExecuteCronTask 执行定时任务
+// ExecuteCronTask 将旧入口转发给统一执行器。
 func ExecuteCronTask(task *CronTask) {
-	Info("[cron] Executing cron task: %s (ID: %d), type: %s", task.TaskName, task.ID, task.TaskType)
-
-	now := time.Now()
-	task.LastRunTime = &now
-
-	var taskType TaskType
-	if task.TaskType == "full_generate" {
-		taskType = TaskTypeStrmGenerate
-	} else {
-		taskType = TaskTypeIncrementalSync
+	if _, err := scheduler.Run(task.ID, "manual"); err != nil {
+		Error("任务启动失败: %v", err)
 	}
-
-	taskStatus, err := CreateTask(fmt.Sprintf("cron_%d_%d", task.ID, now.Unix()), taskType, task.TaskName)
-	if err != nil {
-		Error("[cron] Failed to create task for cron job: %v", err)
-		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("创建任务失败: %v", err))
-		return
-	}
-
-	UpdateTaskStatus(taskStatus.TaskID, TaskStatusRunning)
-
-	strmConfig, err := GetStrmConfigByID(task.StrmConfigID)
-	if err != nil {
-		Error("[cron] Failed to get strm config: %v", err)
-		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("获取STRM配置失败: %v", err))
-		SetTaskError(taskStatus.TaskID, fmt.Sprintf("获取STRM配置失败: %v", err))
-		return
-	}
-
-	cloud115, err := GetCloud115ByID(task.Cloud115ID)
-	if err != nil {
-		Error("[cron] Failed to get cloud115 account: %v", err)
-		UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", fmt.Sprintf("获取115账号失败: %v", err))
-		SetTaskError(taskStatus.TaskID, fmt.Sprintf("获取115账号失败: %v", err))
-		return
-	}
-
-	var successMsg string
-	if task.TaskType == "full_generate" {
-		result, err := RunFullStrmGenerate(strmConfig, cloud115, taskStatus.TaskID)
-		if err != nil {
-			Error("[cron] Full STRM generate failed: %v", err)
-			UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", err.Error())
-			SetTaskError(taskStatus.TaskID, err.Error())
-			return
-		}
-		successMsg = fmt.Sprintf("成功: 生成 %d 个STRM文件", result.Total)
-	} else {
-		result, err := RunIncrementalSync(strmConfig, cloud115, taskStatus.TaskID)
-		if err != nil {
-			Error("[cron] Incremental sync failed: %v", err)
-			UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "failed", err.Error())
-			SetTaskError(taskStatus.TaskID, err.Error())
-			return
-		}
-		successMsg = fmt.Sprintf("成功: 新增 %d, 删除 %d, 跳过 %d", result.Added, result.Deleted, result.Skipped)
-	}
-
-	nextRun := scheduler.GetNextRunTime(task.ID)
-	task.NextRunTime = nextRun
-
-	UpdateCronTaskRunInfo(task.ID, task.LastRunTime, task.NextRunTime, "success", successMsg)
-	UpdateTaskStatus(taskStatus.TaskID, TaskStatusCompleted)
-
-	Info("[cron] Cron task completed: %s (ID: %d), %s", task.TaskName, task.ID, successMsg)
 }
 
 // IncrementalSyncResult 增量同步结果
@@ -287,6 +111,11 @@ type FullGenerateResult struct {
 
 // RunIncrementalSync 执行增量同步
 func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID string) (*IncrementalSyncResult, error) {
+	release, err := scheduler.AcquireStrmExecution(strmConfig.ID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	Info("Running incremental sync for config ID: %d", strmConfig.ID)
 
 	result := &IncrementalSyncResult{}
@@ -321,6 +150,9 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	var pickCode string
 	maxRetries := 60
 	for i := 0; i < maxRetries; i++ {
+		if IsTaskCancelled(taskID) {
+			return nil, fmt.Errorf("任务已取消")
+		}
 		// 等待目录树导出时也检查取消标记
 		if IsTaskCancelled(taskID) {
 			Info("[cron] 任务在等待目录树导出时被取消: %s", taskID)
@@ -448,6 +280,11 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 
 // RunFullStrmGenerate 执行全量生成STRM文件
 func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID string) (*FullGenerateResult, error) {
+	release, err := scheduler.AcquireStrmExecution(strmConfig.ID, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	Info("[cron] Running full STRM generate for config ID: %d", strmConfig.ID)
 
 	result := &FullGenerateResult{}
@@ -483,6 +320,9 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	var pickCode string
 	maxRetries := 60
 	for i := 0; i < maxRetries; i++ {
+		if IsTaskCancelled(taskID) {
+			return nil, fmt.Errorf("任务已取消")
+		}
 		statusResp, err := client.GetExportDirectoryTreeStatus(exportId, cloud115.Cookie)
 		if err != nil {
 			time.Sleep(5 * time.Second)
@@ -541,12 +381,15 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 
 	// 全量生成必须先清空目标目录，避免已从网盘移除的旧文件继续残留。
 	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	if IsTaskCancelled(taskID) {
+		return nil, fmt.Errorf("任务已取消")
+	}
 	if err := generator.CleanupStrmFiles(); err != nil {
 		return nil, fmt.Errorf("清空STRM目标目录失败: %v", err)
 	}
 
 	if err := DeleteStrmFilesByConfigID(strmConfig.ID); err != nil {
-		Warn("[cron] Failed to delete existing STRM file records: %v", err)
+		return nil, fmt.Errorf("删除旧STRM记录失败: %w", err)
 	}
 
 	if result.Total == 0 {
@@ -599,5 +442,8 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	}
 
 	Info("[cron] Full STRM generation completed: total=%d success=%d failed=%d output=%s", result.Total, successFiles, failedFiles, strmConfig.LocalPath)
+	if failedFiles > 0 {
+		return result, fmt.Errorf("生成结束：成功%d，失败%d", successFiles, failedFiles)
+	}
 	return result, nil
 }

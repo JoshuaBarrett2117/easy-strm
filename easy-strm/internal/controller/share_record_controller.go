@@ -1,14 +1,62 @@
 package controller
 
 import (
+	"database/sql"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/service"
+	"errors"
 	"github.com/gin-gonic/gin"
 	"net/http"
 	"strconv"
 )
 
 type ShareRecordController struct{ s *service.ShareRecordService }
+
+// GetTaskSettings 返回分享任务的总时限配置。
+func (c *ShareRecordController) GetTaskSettings(x *gin.Context) {
+	value, err := c.s.GetTaskSettings()
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, value)
+}
+
+// SaveTaskSettings 保存总时限，使用指针区分无限制0与缺少字段。
+func (c *ShareRecordController) SaveTaskSettings(x *gin.Context) {
+	var input struct {
+		TimeoutMinutes *int `json:"timeout_minutes"`
+	}
+	if x.ShouldBindJSON(&input) != nil || input.TimeoutMinutes == nil {
+		ErrorResp(x, 400, "请输入总时限，0表示无限制")
+		return
+	}
+	value := service.ShareTaskSettings{TimeoutMinutes: *input.TimeoutMinutes}
+	if err := c.s.SaveTaskSettings(value); err != nil {
+		ErrorResp(x, 400, err.Error())
+		return
+	}
+	SuccessResp(x, value)
+}
+
+// ClearMedia 清空指定分享的媒体内容，返回实际删除条数。
+func (c *ShareRecordController) ClearMedia(x *gin.Context) {
+	id, err := strconv.Atoi(x.Param("id"))
+	if err != nil || id <= 0 {
+		ErrorResp(x, 400, "分享ID无效")
+		return
+	}
+	count, err := c.s.ClearMedia(x, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		ErrorResp(x, 404, "分享不存在")
+		return
+	}
+	if err != nil {
+		ErrorResp(x, 409, err.Error())
+		return
+	}
+	SuccessResp(x, gin.H{"deleted": count})
+}
 
 // ParseImport 返回批量分享预览，不创建分享或执行网盘操作。
 func (c *ShareRecordController) ParseImport(x *gin.Context) {
@@ -49,7 +97,8 @@ func NewShareRecordController(s *service.ShareRecordService) *ShareRecordControl
 func (c *ShareRecordController) List(x *gin.Context) {
 	p, _ := strconv.Atoi(x.DefaultQuery("page", "1"))
 	z, _ := strconv.Atoi(x.DefaultQuery("page_size", "20"))
-	v, e := c.s.List(x, domain.ShareRecordQuery{Keyword: x.Query("keyword"), Page: p, PageSize: z})
+	shareID, _ := strconv.Atoi(x.Query("share_id"))
+	v, e := c.s.List(x, domain.ShareRecordQuery{ShareID:shareID, Summary: true, Keyword: x.Query("keyword"), Page: p, PageSize: z})
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
@@ -112,7 +161,7 @@ func (c *ShareRecordController) Identify(x *gin.Context) {
 	var m domain.ShareMedia
 	_ = x.ShouldBindJSON(&m)
 	m.ID = id
-	if e := c.s.Identify(x, m, false); e != nil {
+	if e := c.s.Identify(x, m, true); e != nil {
 		ErrorResp(x, http.StatusBadRequest, e.Error())
 		return
 	}
@@ -120,11 +169,15 @@ func (c *ShareRecordController) Identify(x *gin.Context) {
 }
 func (c *ShareRecordController) Batch(x *gin.Context) {
 	var r struct {
-		IDs   []int `json:"ids"`
-		Retry bool  `json:"retry_failed"`
+		IDs         []int `json:"ids"`
+		Retry       bool  `json:"retry_failed"`
+		PendingOnly bool  `json:"pending_only"`
 	}
-	_ = x.ShouldBindJSON(&r)
-	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry)
+	if x.ShouldBindJSON(&r) != nil || (r.Retry && r.PendingOnly) {
+		ErrorResp(x, 400, "识别任务参数无效")
+		return
+	}
+	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry, r.PendingOnly)
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
@@ -134,11 +187,35 @@ func (c *ShareRecordController) Batch(x *gin.Context) {
 
 // IdentifyRecord 为单条分享创建后台识别任务。
 func (c *ShareRecordController) IdentifyRecord(x *gin.Context) {
-	id, _ := strconv.Atoi(x.Param("id"))
-	taskID, e := c.s.StartRecordIdentify(x, id)
+	id, err := strconv.Atoi(x.Param("id"))
+	pendingOnly, parseErr := strconv.ParseBool(x.DefaultQuery("pending_only", "false"))
+	failedOnly, failedErr := strconv.ParseBool(x.DefaultQuery("failed_only", "false"))
+	if err != nil || id < 1 || parseErr != nil || failedErr != nil || (pendingOnly && failedOnly) {
+		ErrorResp(x, 400, "分享ID或识别参数无效")
+		return
+	}
+	taskID, e := c.s.StartRecordIdentify(x, id, pendingOnly, failedOnly)
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
 	}
 	SuccessResp(x, gin.H{"task_id": taskID, "message": "单条分享识别任务已创建"})
+}
+
+// ListMedia 按页读取已识别海报，默认每页十条。
+func (c *ShareRecordController) ListMedia(x *gin.Context) {
+	id, e1 := strconv.Atoi(x.Param("id"))
+	page, e2 := strconv.Atoi(x.DefaultQuery("page", "1"))
+	size, e3 := strconv.Atoi(x.DefaultQuery("page_size", "10"))
+	duplicates, e4 := strconv.ParseBool(x.DefaultQuery("show_duplicates", "false"))
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || id < 1 || page < 1 || size < 1 || size > 100 || page > 10000000 {
+		ErrorResp(x, 400, "分页参数无效")
+		return
+	}
+	result, err := c.s.ListMedia(x, id, page, size, duplicates)
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, result)
 }

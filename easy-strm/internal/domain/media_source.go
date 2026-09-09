@@ -198,6 +198,7 @@ type TmdbSearchResult struct {
 
 // TmdbIdentifyResult TMDB 识别结果
 type TmdbIdentifyResult struct {
+	VoteAverage      *float64           `json:"vote_average"`
 	Success          bool               `json:"success"`
 	Message          string             `json:"message"`
 	Filename         string             `json:"filename"`

@@ -97,6 +97,7 @@ func main() {
 	// 初始化cron调度器
 	if err := InitCronScheduler(); err != nil {
 		Error("Failed to initialize cron scheduler: %v", err)
+		return
 	}
 
 	// 设置认证相关路由（登录等）

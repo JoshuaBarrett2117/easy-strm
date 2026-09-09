@@ -21,7 +21,7 @@ func NewCronTaskDAO() *CronTaskDAO {
 func (c *CronTaskDAO) GetByID(id int) (*domain.CronTask, error) {
 	task := &domain.CronTask{}
 	err := db.QueryRow(
-		`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+		`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task WHERE id = $1`,
 		id,
@@ -41,7 +41,7 @@ func (c *CronTaskDAO) GetByID(id int) (*domain.CronTask, error) {
 func (c *CronTaskDAO) GetByName(taskName string) (*domain.CronTask, error) {
 	task := &domain.CronTask{}
 	err := db.QueryRow(
-		`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+		`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task WHERE task_name = $1`,
 		taskName,
@@ -61,9 +61,9 @@ func (c *CronTaskDAO) GetByName(taskName string) (*domain.CronTask, error) {
 func (c *CronTaskDAO) GetByStrmConfigID(strmConfigID int) (*domain.CronTask, error) {
 	task := &domain.CronTask{}
 	err := db.QueryRow(
-		`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+		`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
-		create_time, update_time FROM t_cron_task WHERE strm_config_id = $1`,
+		create_time, update_time FROM t_cron_task WHERE strm_config_id = $1 AND task_type = 'full_generate'`,
 		strmConfigID,
 	).Scan(&task.ID, &task.TaskName, &task.TaskType, &task.Cloud115ID, &task.StrmConfigID,
 		&task.CronExpr, &task.Status, &task.LastRunTime, &task.NextRunTime,
@@ -80,7 +80,7 @@ func (c *CronTaskDAO) GetByStrmConfigID(strmConfigID int) (*domain.CronTask, err
 // GetAll 获取所有定时任务
 func (c *CronTaskDAO) GetAll() ([]*domain.CronTask, error) {
 	rows, err := db.Query(
-		`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+		`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task ORDER BY id`)
 	if err != nil {
@@ -105,7 +105,7 @@ func (c *CronTaskDAO) GetAll() ([]*domain.CronTask, error) {
 // GetEnabled 获取所有启用的定时任务
 func (c *CronTaskDAO) GetEnabled() ([]*domain.CronTask, error) {
 	rows, err := db.Query(
-		`SELECT id, task_name, task_type, cloud115_id, strm_config_id, cron_expr, status,
+		`SELECT id, task_name, task_type, COALESCE(cloud115_id,0), COALESCE(strm_config_id,0), cron_expr, status,
 		last_run_time, next_run_time, COALESCE(last_run_status, ''), COALESCE(last_run_message, ''),
 		create_time, update_time FROM t_cron_task WHERE status = 'enabled'`)
 	if err != nil {
@@ -179,12 +179,12 @@ func (c *CronTaskDAO) UpdateRunInfo(id int, lastRunTime, nextRunTime *time.Time,
 
 // Delete 删除定时任务
 func (c *CronTaskDAO) Delete(id int) error {
-	result, err := db.Exec("DELETE FROM t_cron_task WHERE id = $1", id)
+	var count int
+	err := db.QueryRow(`WITH deleted AS (DELETE FROM t_cron_task WHERE id=$1 AND NOT builtin RETURNING strm_config_id,handler), cleared AS (UPDATE t_strm_config SET cron='' WHERE id IN(SELECT strm_config_id FROM deleted WHERE handler='full_generate')) SELECT count(*) FROM deleted`, id).Scan(&count)
 	if err != nil {
 		return fmt.Errorf("CronTaskDAO[Delete] 删除失败: %v", err)
 	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
+	if count == 0 {
 		return fmt.Errorf("CronTaskDAO[Delete] 任务不存在")
 	}
 	return nil

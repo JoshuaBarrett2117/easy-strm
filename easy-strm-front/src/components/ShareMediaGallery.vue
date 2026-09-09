@@ -1,8 +1,10 @@
 <template>
   <section class="share-gallery">
-    <div class="gallery-heading"><strong>已识别媒体 <span>{{ media.length }}</span></strong><span>封面与媒体信息</span></div>
+    <div class="gallery-heading"><strong>已识别媒体 <span>{{ total }}</span></strong><n-button v-if="duplicateCount" size="small" @click="showDuplicates = !showDuplicates">{{ showDuplicates ? '合并相同剧集' : `展开同剧集记录（${duplicateCount}）` }}</n-button></div>
+    <p v-if="loading">正在加载…</p>
+    <n-button v-if="loadError" @click="loadPage">加载失败，点击重试</n-button>
     <div class="gallery-grid">
-      <article v-for="item in media" :key="item.id" class="media-card">
+      <article v-for="item in visibleMedia" :key="item.id" class="media-card">
         <div class="poster">
           <img v-if="poster(item) && !failedImages[poster(item)]" :src="poster(item)" :alt="title(item)" loading="lazy" @error="failedImages[poster(item)] = true" />
           <div v-else class="poster-empty">暂无海报</div>
@@ -21,6 +23,12 @@
         </div>
       </article>
     </div>
+    <n-space align="center" style="margin-top: 16px">
+      <n-pagination v-model:page="page" :page-size="pageSize" :item-count="total" :disabled="loading" />
+      <span>每页条数</span>
+      <n-input-number v-model:value="pageSizeInput" aria-label="每页条数" :min="1" :max="100" :precision="0" style="width: 120px" @keyup.enter="changePageSize" />
+      <n-button :disabled="loading" @click="changePageSize">应用</n-button>
+    </n-space>
     <n-modal v-model:show="manualShow" preset="card" title="手动识别" style="width: min(720px, 94vw)" :mask-closable="!saving" :closable="!saving">
       <p class="manual-path">{{ target?.file_name }}</p>
       <n-space vertical>
@@ -43,11 +51,63 @@
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
-import { NButton, NModal, NInput, NInputNumber, NSelect, NSpace, useMessage } from 'naive-ui'
-import { searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
+import { reactive, ref, watch, onBeforeUnmount } from 'vue'
+import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, useMessage } from 'naive-ui'
+import { getShareMedia, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
 
-defineProps({ media: { type: Array, default: () => [] } })
+const props = defineProps({ shareId: { type: Number, required: true }, revision: Number })
+const showDuplicates = ref(false), page = ref(1), total = ref(0)
+const duplicateCount = ref(0), visibleMedia = ref([]), loading = ref(false), loadError = ref(false)
+const pageSizeStorageKey = 'share:gallery:page_size'
+const readPageSize = () => {
+  try {
+    const size = Number(localStorage.getItem(pageSizeStorageKey))
+    return Number.isInteger(size) && size >= 1 && size <= 100 ? size : 10
+  } catch { return 10 }
+}
+const pageSize = ref(readPageSize()), pageSizeInput = ref(pageSize.value)
+let disposed = false
+let requestVersion = 0
+const loadPage = async () => {
+  if (disposed) return
+  const version = ++requestVersion
+  loading.value = true
+  loadError.value = false
+  visibleMedia.value = []
+  try {
+    const response = await getShareMedia(props.shareId, {page: page.value, page_size: pageSize.value, show_duplicates: showDuplicates.value})
+    if (version !== requestVersion) return
+    const result = response.data.data
+    total.value = result.total
+    duplicateCount.value = result.duplicate_count
+    const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value))
+    if (page.value > lastPage) { page.value = lastPage; return }
+    visibleMedia.value = result.data
+  } catch (error) {
+    if (version === requestVersion) loadError.value = true
+  } finally {
+    if (version === requestVersion) loading.value = false
+  }
+}
+watch([() => props.shareId, showDuplicates], () => {
+  if (page.value !== 1) page.value = 1
+  else loadPage()
+})
+watch([page, () => props.revision], loadPage, {immediate: true})
+const changePageSize = () => {
+  const size = pageSizeInput.value
+  if (!Number.isInteger(size) || size < 1 || size > 100) {
+    message.error('每页条数请输入1至100的整数')
+    return
+  }
+  try { localStorage.setItem(pageSizeStorageKey, String(size)) }
+  catch { message.warning('浏览器缓存不可用，本次设置仅在当前页面生效') }
+  if (size === pageSize.value) return
+  pageSize.value = size
+  if (page.value !== 1) page.value = 1
+  else loadPage()
+}
+onBeforeUnmount(() => { disposed = true; requestVersion++; searchVersion++ })
 const emit = defineEmits(['identify', 'remove', 'saved'])
 const message = useMessage()
 const manualShow = ref(false), target = ref(null), keyword = ref(''), year = ref(null), mediaType = ref('tv'), metadataSource = ref('tmdb')

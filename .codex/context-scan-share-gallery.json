@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-08",
+  "executor": "Codex",
+  "scope": "剧集单集重复海报",
+  "findings": [
+    "fetchShareTree同时返回目录和单集",
+    "runBatchIdentify逐条入库",
+    "ShareMediaGallery逐条展示"
+  ],
+  "plan": [
+    "仅直接子项判断媒体目录",
+    "入库候选跳过已覆盖单集",
+    "Service按tv元数据ID标记重复",
+    "前端折叠及展开原始记录",
+    "Go和浏览器回归"
+  ],
+  "constraints": "不删除已有数据，不按名称合并；跨分享独立；没有可信ID不合并",
+  "tools": "sequential-thinking/shrimp-task-manager/code-index不可用，采用本地分析和rg"
+}

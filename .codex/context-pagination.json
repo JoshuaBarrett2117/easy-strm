@@ -1,0 +1,1 @@
+{"date":"2026-09-08","author":"Codex","scope":"已识别媒体数据库分页","known":"DAO 原列表供后台任务复用；页面改为统计查询和独立分页","validation":"全量 Go 测试、Vue 构建、浏览器翻页及真实数据库只读查询通过","open_questions":[]}

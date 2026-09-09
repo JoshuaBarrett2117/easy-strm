@@ -1,0 +1,1 @@
+{"date":"2026-09-08","executor":"Codex","scope":"分享识别总时限配置支持无限制","finding":"原runBatchIdentify固定30分钟，扫描占用大部分预算","plan":["系统配置表持久化0/分钟数","任务读取配置并使用可取消无deadline上下文","分享管理配置弹窗","服务与接口单测、浏览器回归、全量测试构建","本地后端更新及配置无限制"],"contract":"GET/PUT /media/share-task-settings，timeout_minutes=0无限制，1至43200自定义；新任务生效","tools":"指定思考/规划/索引MCP不可用，采用本地分析和rg"}

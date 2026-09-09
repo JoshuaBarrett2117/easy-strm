@@ -19,6 +19,7 @@ import (
 // TmdbService TMDB 服务
 // 负责与 TMDB API 交互，提供媒体信息识别功能
 type TmdbService struct {
+	aiRecognition          *AIRecognitionService
 	apiKey                 string
 	baseURL                string
 	imageBaseURL           string

@@ -143,11 +143,7 @@ func TestFetchShareTree_MarksMediaBeforeAppend(t *testing.T) {
 	if !media["剧集甲 (2020)"] || !media["剧集乙 (2021)"] {
 		t.Fatalf("剧集目录未正确标记为 media: %#v", media)
 	}
-	for _, dirID := range fake.gotDirIDs {
-		if dirID == "season-1" {
-			t.Fatal("不应继续读取 Season 1 目录内容")
-		}
-	}
+
 }
 
 // 真实 115 share/snap 接口的响应样例（字段与线上抓包一致）

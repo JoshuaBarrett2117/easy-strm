@@ -68,17 +68,17 @@ func TestShareRecordListPaginatesParents(t *testing.T) {
 			} else {
 				query.WithArgs(20, 20)
 			}
-			rows := sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "mid", "file_name", "source", "status", "result", "error", "mversion"})
+			rows := sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"})
 			for i := 1; i <= 404; i++ {
-				rows.AddRow(3, "tv", "大合集", "https://115.com/s/a", "", "", 1, "now", "now", i, fmt.Sprintf("剧集%d", i), "tmdb", "identified", []byte(`{"success":true,"title":"剧集"}`), "", 1)
+				rows.AddRow(3, "tv", "大合集", "https://115.com/s/a", "", "", 1, "now", "now", true, i, fmt.Sprintf("剧集%d", i), "tmdb", "identified", []byte(`{"success":true,"title":"剧集"}`), "", 1)
 			}
-			rows.AddRow(2, "movie", "另一分享", "https://115.com/s/b", "", "", 1, "now", "now", nil, nil, nil, nil, nil, nil, nil)
+			rows.AddRow(2, "movie", "另一分享", "https://115.com/s/b", "", "", 1, "now", "now", false, nil, nil, nil, nil, nil, nil, nil)
 			query.WillReturnRows(rows)
 			page, err := NewShareRecordDAO(db).List(context.Background(), domain.ShareRecordQuery{Page: 2, PageSize: 20, Keyword: keyword})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if page.Total != 23 || len(page.Data) != 2 || len(page.Data[0].Media) != 404 || page.Data[1].ID != 2 || len(page.Data[1].Media) != 0 {
+			if !page.Data[0].ShareCancelled || page.Data[1].ShareCancelled || page.Total != 23 || len(page.Data) != 2 || len(page.Data[0].Media) != 404 || page.Data[1].ID != 2 || len(page.Data[1].Media) != 0 {
 				t.Fatalf("分页丢失分享或媒体: total=%d records=%d", page.Total, len(page.Data))
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {

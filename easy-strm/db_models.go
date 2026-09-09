@@ -1,6 +1,9 @@
 package main
 
-import "time"
+import (
+	"easy-strm/internal/domain"
+	"time"
+)
 
 type User struct {
 	ID         int       `json:"id"`
@@ -34,25 +37,7 @@ type Cloud115 struct {
 }
 
 // StrmConfig STRM文件配置信息。
-type StrmConfig struct {
-	ID               int       `json:"id"`
-	Cloud115Id       int       `json:"cloud115_id"`       // 115账号ID
-	NetDiskPath      string    `json:"net_disk_path"`     // 网盘目录
-	LocalPath        string    `json:"local_path"`        // 本地目录
-	Cron             string    `json:"cron"`              // cron表达式
-	Extension        string    `json:"extension"`         // STRM文件后缀名
-	DirTreeFile      string    `json:"dir_tree_file"`     // 本地目录树文件路径
-	SyncMode         string    `json:"sync_mode"`         // 同步模式: manual/instant/cron
-	SourceAccount    int       `json:"source_account"`    // 源账号ID
-	TargetAccount    int       `json:"target_account"`    // 目标账号ID
-	TargetDirectory  string    `json:"target_directory"`  // 目标目录
-	AutoCleanup      bool      `json:"auto_cleanup"`      // 自动清理
-	CleanupThreshold int       `json:"cleanup_threshold"` // 清理阈值
-	CleanupPolicy    string    `json:"cleanup_policy"`    // 清理策略
-	MaxConcurrency   int       `json:"max_concurrency"`   // 最大并发数
-	CreateTime       time.Time `json:"create_time"`
-	UpdateTime       time.Time `json:"update_time"`
-}
+type StrmConfig = domain.StrmConfig
 
 // SystemConfig 系统配置信息。
 type SystemConfig struct {
@@ -78,18 +63,4 @@ type StrmFile struct {
 }
 
 // CronTask 定时任务配置。
-type CronTask struct {
-	ID             int        `json:"id"`
-	TaskName       string     `json:"task_name"`        // 任务名：账号id+"增量更新任务"
-	TaskType       string     `json:"task_type"`        // 任务类型：incremental_sync
-	Cloud115ID     int        `json:"cloud115_id"`      // 关联的115账号ID
-	StrmConfigID   int        `json:"strm_config_id"`   // 关联的STRM配置ID
-	CronExpr       string     `json:"cron_expr"`        // cron表达式
-	Status         string     `json:"status"`           // enabled/disabled
-	LastRunTime    *time.Time `json:"last_run_time"`    // 上次执行时间
-	NextRunTime    *time.Time `json:"next_run_time"`    // 下次执行时间
-	LastRunStatus  string     `json:"last_run_status"`  // 上次执行状态
-	LastRunMessage string     `json:"last_run_message"` // 上次执行消息
-	CreateTime     time.Time  `json:"create_time"`
-	UpdateTime     time.Time  `json:"update_time"`
-}
+type CronTask = domain.CronTask

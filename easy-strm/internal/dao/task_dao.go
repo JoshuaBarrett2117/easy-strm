@@ -211,6 +211,8 @@ func (t *TaskRedisDAO) Cancel(taskID string) error {
 	}
 
 	status, _ := task["status"].(string)
+	// 处理器可能在取消函数返回后先写入终态；重复取消保持幂等。
+	if status == "cancelled" { return nil }
 	if status != "pending" && status != "running" {
 		return fmt.Errorf("TaskRedisDAO[Cancel] 任务状态不允许取消: %s (当前: %s)", taskID, status)
 	}

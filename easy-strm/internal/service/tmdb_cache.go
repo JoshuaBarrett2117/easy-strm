@@ -107,6 +107,9 @@ func (s *TmdbService) enrichCachedIdentifyMetadata(result *domain.TmdbIdentifyRe
 	if genreIDs := extractGenreIDsFromDetail(raw); len(genreIDs) > 0 {
 		result.GenreIDs = genreIDs
 	}
+	if rating, ok := raw["vote_average"].(float64); ok && rating >= 0 && rating <= 10 {
+		result.VoteAverage = &rating
+	}
 	// 提取 origin_country 作为 Countries
 	if countries := extractCountriesFromDetail(raw, result.MediaType); len(countries) > 0 {
 		result.Countries = countries

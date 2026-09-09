@@ -27,7 +27,7 @@ func TestMaskedOnlyShareTaskCompletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery(`SELECT count\(\*\) FROM t_share_record`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(`FROM \(SELECT .* FROM t_share_record`).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(7, "auto", "合集", "https://115.com/s/test", "", "", 1, "now", "now", 1, "名***", "auto", "failed", nil, "旧失败", 1))
+	mock.ExpectQuery(`FROM \(SELECT .* FROM t_share_record`).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(7, "auto", "合集", "https://115.com/s/test", "", "", 1, "now", "now", false, 1, "名***", "auto", "failed", nil, "旧失败", 1))
 	s := &ShareRecordService{dao: dao.NewShareRecordDAO(db), tasks: tasks}
 	s.runBatchIdentify(context.Background(), "masked-only", nil, true, []int{7})
 	task, err := tasks.Get("masked-only")

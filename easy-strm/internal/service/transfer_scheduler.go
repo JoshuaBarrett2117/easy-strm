@@ -301,10 +301,6 @@ func (s *TransferScheduler) getCircuitBreaker(accountID int) *CircuitBreaker {
 }
 
 func (s *TransferScheduler) SubmitTask(task *TransferTask) error {
-	if task.SourceAccount.Status == domain.AccountStatusCooling {
-		return fmt.Errorf("account %d is in cooling state", task.SourceAccount.ID)
-	}
-
 	if task.SourceAccount.Status == domain.AccountStatusDisabled {
 		return fmt.Errorf("account %d is disabled", task.SourceAccount.ID)
 	}

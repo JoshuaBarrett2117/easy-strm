@@ -131,7 +131,7 @@ func InitLogger(config *Config) {
 	go cleanOldLogs(logDir, keepDays)
 
 	// 启动定时清理任务（每小时检查一次）
-	go startLogCleaner(logDir, keepDays)
+	// 周期清理由统一调度管理。
 }
 
 // setupFileOutput 设置日志文件输出（拆分为INFO和DEBUG两个文件）
@@ -162,7 +162,8 @@ func setupFileOutput(logDir string) (io.Writer, *os.File, io.Writer, *os.File, e
 }
 
 // cleanOldLogs 清理旧日志
-func cleanOldLogs(logDir string, keepDays int) {
+func cleanOldLogs(logDir string, keepDays int) error {
+ var firstErr error
 	// 获取当前时间
 	now := time.Now()
 
@@ -175,7 +176,7 @@ func cleanOldLogs(logDir string, keepDays int) {
 	for _, pattern := range patterns {
 		files, err := filepath.Glob(filepath.Join(logDir, pattern))
 		if err != nil {
-			fmt.Printf("Failed to glob log files with pattern %s: %v\n", pattern, err)
+			if firstErr == nil { firstErr = err }; fmt.Printf("Failed to glob log files with pattern %s: %v\n", pattern, err)
 			continue
 		}
 
@@ -184,44 +185,21 @@ func cleanOldLogs(logDir string, keepDays int) {
 			// 获取文件信息
 			info, err := os.Stat(file)
 			if err != nil {
-				fmt.Printf("Failed to stat file %s: %v\n", file, err)
+				if firstErr == nil { firstErr = err }; fmt.Printf("Failed to stat file %s: %v\n", file, err)
 				continue
 			}
 
 			// 检查文件是否过期
 			if info.ModTime().Before(expireTime) {
 				if err := os.Remove(file); err != nil {
-					fmt.Printf("Failed to remove old log file %s: %v\n", file, err)
+					if firstErr == nil { firstErr = err }; fmt.Printf("Failed to remove old log file %s: %v\n", file, err)
 				} else {
 					fmt.Printf("Removed old log file %s\n", file)
 				}
 			}
 		}
 	}
-}
-
-// startLogCleaner 启动定时清理日志任务
-func startLogCleaner(logDir string, keepDays int) {
-	// 每小时检查一次
-	ticker := time.NewTicker(1 * time.Hour)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		// 从数据库获取最新的保留天数配置
-		config, err := GetSystemConfigByKey("log_save_day_limit")
-		if err == nil {
-			var days int
-			fmt.Sscanf(config.ConfigVal, "%d", &days)
-			if days > 0 {
-				keepDays = days
-				// 更新logger的keepDays
-				if logger != nil {
-					logger.keepDays = days
-				}
-			}
-		}
-		cleanOldLogs(logDir, keepDays)
-	}
+return firstErr
 }
 
 // getLogPrefix 生成日志前缀
