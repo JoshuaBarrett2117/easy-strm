@@ -1,41 +1,67 @@
 {
-  "date": "2026-08-30",
+  "date": "2026-09-09",
   "executor": "Codex",
-  "task": "修复115自动转存目标目录失效",
-  "location": [
-    "easy-strm/115client.go",
-    "easy-strm/internal/service/share_transfer_service.go",
-    "easy-strm/internal/service/cloud115_client.go",
-    "easy-strm/internal/service/share_transfer_service_test.go"
+  "modules": [
+    "internal/service/share_library.go",
+    "share_transfer_service.go",
+    "organize_category.go",
+    "internal/controller/directlink_controller.go",
+    "src/views/ShareLibrary.vue"
   ],
-  "current_state": [
-    "ShareTransferService已把目标路径解析为CID，并传给Client.ReceiveShare",
-    "Client.ReceiveShare错误地把CID写入save_folder_id，115接口忽略后按默认位置接收",
-    "目标路径解析失败时现有实现会静默回退CID=0并继续转存"
+  "stack": "Go/Gin/PostgreSQL/Redis + Vue3/NaiveUI",
+  "findings": [
+    "资料库来源存储识别路径，须匹配分享实际视频",
+    "分享遍历已递归32层",
+    "分类匹配与季集文件名解析可复用",
+    "资料库路由未注册"
   ],
-  "similar_patterns": [
-    "DirectLinkController在转存前解析TransferDirectory为CID",
-    "OfflineDownloadService通过MkdirAll115取得目标目录CID",
-    "FileOperationService的移动与复制接口均显式传递目标目录CID"
+  "questions": [
+    {
+      "priority": "high",
+      "question": "重启后的播放映射",
+      "answer": "新增PG映射，确定性目标目录复用转存文件"
+    },
+    {
+      "priority": "high",
+      "question": "季集识别失败",
+      "answer": "报告失败，不伪造集数"
+    }
   ],
-  "technical_stack": ["Go", "Gin", "115driver v1.3.5", "115 webapi share/receive"],
-  "tests": [
-    "easy-strm/115client_receive_test.go",
-    "easy-strm/internal/service/share_transfer_service_test.go",
-    "go test ./... -count=1",
-    "go vet ./..."
-  ],
-  "key_questions": [
-    {"priority": "high", "question": "业务层是否成功生成目标CID？", "answer": "是，executeTransfer通过GetCIDByPath生成并传入ReceiveShare。"},
-    {"priority": "high", "question": "115接口是否识别当前字段？", "answer": "否，share/receive要求cid，当前save_folder_id被忽略。"},
-    {"priority": "medium", "question": "目录解析失败是否可能继续错放？", "answer": "是，旧实现会回退CID=0继续执行。"}
-  ],
-  "decision": "使用标准url.Values构造115官方share/receive表单并发送cid；指定路径解析失败或返回无效CID时停止任务。",
   "sufficiency": {
-    "interface_contract": true,
-    "technical_choice": true,
-    "main_risks_identified": true,
-    "verification_known": true
+    "contract": true,
+    "reuse": true,
+    "risks": true,
+    "verification": true
   },
-  "tool_fallback": "当前会话未提供 sequential-thinking、shrimp-task-manager、code-index；使用结构化分析、update_plan、rg、PowerShell、apply_patch 和本地自动化测试替代。"
+  "local_export_revision": {
+    "date": "2026-09-10",
+    "executor": "Codex",
+    "request": "STRM导出只使用本地t_share_media，不扫描分享",
+    "findings": [
+      "file_name/result已保存",
+      "115文件ID未保存，首次播放定向定位并缓存"
+    ],
+    "plan": [
+      "移除导出解析器",
+      "本地记录生成映射",
+      "首次播放定位",
+      "回归与文档"
+    ],
+    "status": "completed"
+  },
+  "progress_revision": {
+    "date": "2026-09-10",
+    "executor": "Codex",
+    "request": "分享资料库STRM导出任务显示执行进度条",
+    "findings": [
+      "后端已更新真实进度",
+      "复用TaskCard",
+      "弹窗与详情补进度，列表默认刷新"
+    ],
+    "status": "completed",
+    "checks": [
+      "frontend build",
+      "browser E2E"
+    ]
+  }
 }

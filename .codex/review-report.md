@@ -1,5 +1,29 @@
 # 2026-08-30 115自动转存目标目录修复审查
 
+## 2026-09-10 Codex：导出进度条审查
+
+通过；技术94、需求98、综合96。复用TaskCard/Naive UI进度条和既有任务API，展示真实百分比/处理数量，不新增后端进度体系；轮询在关闭、卸载及终态停止。前端构建和浏览器E2E通过，覆盖进度更新与停止行为。日志：.codex/share-strm-progress-*.log。
+
+## 2026-09-10 本地数据库导出修正审查（Codex）
+
+- 需求符合：导出依赖仅为本地DAO、分类/文件名规则及文件系统；已移除分享解析器构造参数，nil115客户端的导出测试通过。
+- 播放链路：本地记录没有文件ID，首次播放才沿保存路径定位；缓存后直接转存；网络定位失败不转存，重复导出不清空已缓存ID。
+- 技术/需求评分：94/98；综合96；结论：通过。DAO/Service/前端说明/测试/文档一致，现有API路由修复改动得到保留。
+- 证据：go test ./...、npm run build及浏览器E2E通过，详见.codex/share-strm-local-*.log。真实115可用性未验证。
+
+## 2026-09-10 分享资料库 STRM 审查
+
+- 执行者/审查者：Codex；任务：share-library-strm。
+- 技术质量：93/100；需求匹配：96/100；综合评分：94/100；结论：通过本地代码交付。
+- 需求映射：资料库配置与导出入口、分类规则复用、电影/季/集路径、持久映射、115单文件转存、即时直链302均落地；DAO、Service、Controller、路由、前端API、弹窗、任务详情、迁移、代理、文档均同步。
+- 复用：现有分享递归解析、视频过滤、文件名规则、分类匹配/路径规则、账号DAO、115客户端、系统配置和Redis任务服务，无新增依赖。
+- 验证：后端全量测试、前端构建和模拟API浏览器E2E通过；并发、取消、上游失败、重启复用和部分导出失败有针对性回归。手机截图已检查。
+- 边界：同作品同集选首个可导出来源；不清理历史STRM或转存媒体；手动识别明确季集优先。播放器断开后，转存锁持续到不支持context的115调用返回。
+- 限制：未提供/选择真实播放账号，因此未真实转存和播放；PostgreSQL以sqlmock验证，未在真实PG/Nginx实例执行。部署后需配置账号、共享输出目录和网络可达地址。
+- 留痕：`.codex/context-scan.json`、`.codex/structured-request.json`、`.codex/operations-log.md`、`.codex/testing.md`、`verification.md`、`.codex/share-strm-*.log`、`debug/share-strm/export-mobile.png`。
+
+以下保留历史审查记录。
+
 - 执行者：Codex
 - 技术质量：96/100
 - 需求匹配：98/100
@@ -841,3 +865,15 @@ DELETE /media/share-records/:id/media 返回 SuccessResp {deleted}。DAO事务�
 - 增加目录年份来源标记，常规及别名核验失败后、AI前，无年份重查剧集，只有完整标题匹配且身份唯一才接受；同名多项不自动选择。
 - go test ./...通过；新增HTTP夹具覆盖2022目录/2026候选成功和同名歧义拒绝。未调用真实TMDB或修改用户识别记录。
 - 已构建并启动debug/easy-strm-year-fallback.exe。工具采用rg/Python/Go/PowerShell，专用规划MCP不可用，使用本地分析。审查通过。
+
+
+## 2026-09-10 接口404排查（Codex）
+- 分享资料库：HEAD遗漏的列表、筛选选项、来源、补全路由已由任务开始前的工作区修改补齐，本次保留并纳入契约测试；没有重复添加或覆盖原有STRM开发。
+- 本次补齐 GET /cron/handlers、GET /cron/task/:id/runs、GET/PUT /media/share-task-settings。
+- 修复 CronController.SetScheduler 没有将管理操作连接共享调度器的问题，避免处理器列表为空及管理状态分裂。
+- 新增 api_routes_test.go：解析真实Go注册源码、建立Gin路由表，通过httptest核对194处前端调用与206条路由（空处理器，不执行写操作）。覆盖路径、方法及分组；不代表194个接口业务功能全部经过集成测试。
+- 修复前契约测试明确复现4个404；共享调度器回归测试复现200但data为空。修复后 go test ./... 全部通过（main/controller/dao/domain/logger/service）。
+- npm run build 通过（4861模块，仅已有大chunk提示）；node scripts/e2e-share-strm.mjs 通过，覆盖配置、筛选导出、失败恢复、窄屏，使用模拟API。
+- git diff --check 通过。本机3001/8082/80没有运行服务，Docker不可用；未取得用户实际页面地址，因此尚未完成部署实例的真实请求验证。生效需要重新构建并重启实际后端。
+
+审查结论：代码通过；技术94/需求匹配92/综合93。保留已有修改，复用现有Controller/Service，增加能复现缺陷的测试；部署验证待页面地址及实际后端运行环境。

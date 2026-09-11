@@ -3,3 +3,6 @@ export const getShareLibrary = (params) => api.get('/media/share-library', { par
 export const getLibraryOptions = () => api.get('/media/share-library/options')
 export const getLibrarySources = (params) => api.get('/media/share-library/sources', { params })
 export const enrichLibrary = () => api.post('/media/share-library/enrich')
+export const getLibraryStrmSettings = () => api.get('/media/share-library/strm/settings')
+export const saveLibraryStrmSettings = (data) => api.put('/media/share-library/strm/settings', data)
+export const exportLibraryStrm = (params) => api.post('/media/share-library/strm/export', null, { params })

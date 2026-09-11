@@ -21,7 +21,13 @@ func NewCronController(s *service.CronService, _ *service.StrmService, _ *servic
 }
 
 // SetScheduler 注入共享调度实例，供管理接口与后台任务保持同一调度状态。
-func (c *CronController) SetScheduler(scheduler *service.CronService) { c.scheduler = scheduler }
+func (c *CronController) SetScheduler(scheduler *service.CronService) {
+	if scheduler == nil {
+		return
+	}
+	c.scheduler = scheduler
+	c.cronService = scheduler
+}
 
 // SetExecuteCronTaskFn 注入定时任务执行回调。
 func (c *CronController) SetExecuteCronTaskFn(fn func(*domain.CronTask)) { c.runTask = fn }

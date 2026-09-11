@@ -10,6 +10,10 @@ export default defineConfig({
   server: {
     port: 3001,
     proxy: {
+      '/share-strm/': {
+        target: 'http://localhost:8082',
+        changeOrigin: true
+      },
       '/api': {
         target: 'http://localhost:8082',
         changeOrigin: true,

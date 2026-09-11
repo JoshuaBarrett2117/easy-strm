@@ -72,7 +72,10 @@
                 <n-descriptions-item label="状态">{{ taskDetailData.status || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="创建时间">{{ taskDetailData.create_time || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="更新时间">{{ taskDetailData.update_time || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="进度">{{ taskDetailData.progress ?? 0 }}%</n-descriptions-item>
+                <n-descriptions-item label="进度">
+                  <n-progress type="line" :percentage="taskDetailProgress" :status="taskDetailData.status === 'failed' ? 'error' : taskDetailData.status === 'completed' ? 'success' : taskDetailData.status === 'cancelled' ? 'warning' : 'default'">{{ taskDetailProgress }}%</n-progress>
+                  <span>已处理 {{ taskDetailData.processed_files || 0 }} / {{ taskDetailData.total_files || 0 }}</span>
+                </n-descriptions-item>
                 <n-descriptions-item label="文件统计">
                   成功 {{ taskDetailData.success_files || 0 }} / 总数 {{ taskDetailData.total_files || 0 }} / 失败 {{ taskDetailData.failed_files || 0 }}
                 </n-descriptions-item>
@@ -99,7 +102,7 @@
                     class="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5 dark:border-white/5 dark:bg-white/5"
                   >
                     <div class="mb-1 text-xs text-slate-400 dark:text-slate-500">{{ item.label }}</div>
-                    <div class="break-words text-sm leading-relaxed text-slate-700 dark:text-slate-200">{{ item.value }}</div>
+                    <div class="whitespace-pre-line break-words text-sm leading-relaxed text-slate-700 dark:text-slate-200">{{ item.value }}</div>
                   </div>
                 </div>
                 <EmptyState v-else title="暂无任务元数据" />
@@ -162,6 +165,7 @@ import {
   NDrawerContent,
   NDatePicker,
   NIcon,
+  NProgress,
   NSpin,
   NSelect,
   NSwitch,
@@ -186,10 +190,11 @@ const message = useMessage()
 
 const taskLoading = ref(false)
 const taskList = ref([])
-const autoRefresh = ref(false)
+const autoRefresh = ref(true)
 const taskDetailVisible = ref(false)
 const taskDetailLoading = ref(false)
 const taskDetailData = ref(null)
+const taskDetailProgress = computed(() => taskDetailData.value?.status === 'completed' ? 100 : Math.min(100, Math.max(0, Number(taskDetailData.value?.progress) || 0)))
 const taskDetailError = ref('')
 const activeTaskId = ref('')
 const filters = ref({ serverId: null, taskType: null, status: null, origin: null, timeRange: null })
@@ -255,6 +260,9 @@ const taskDetailMetadataRows = computed(() => {
   }
 
   const labelMap = {
+    exported_files: '已生成 STRM 文件数',
+    output_path: '服务器导出目录',
+    errors: '失败详情',
     source_id: '来源ID',
     source_name: '来源媒体源',
     source_type: '来源类型',
@@ -309,6 +317,8 @@ const taskDetailMetadataRows = computed(() => {
         formatted = ({ strm_scan_capture: '扫描 STRM 并生成视频封面', media_info: '媒体信息提取', subtitle_scan: '外挂字幕扫描', metadata_refresh: '元数据刷新' })[value] || value
       } else if (key === 'watch_interval' && Number.isFinite(Number(value))) {
         formatted = `${value} 秒`
+      } else if (key === 'errors' && Array.isArray(value)) {
+        formatted = value.join('\n') || '无'
       } else if (Array.isArray(value)) {
         formatted = `${value.length} 项`
       } else if (typeof value === 'object') {
@@ -468,6 +478,7 @@ const syncTaskInList = (taskDetail) => {
 }
 
 const loadTasks = async () => {
+  if (taskLoading.value) return
   taskLoading.value = true
   try {
     const response = await getUnifiedTaskList()
@@ -566,6 +577,7 @@ onBeforeUnmount(() => {
 })
 
 onMounted(async () => {
+  if (autoRefresh.value) startAutoRefresh()
   if (route.query.emby_server_id) filters.value.serverId = Number(route.query.emby_server_id)
   await loadTasks()
   await openRouteTask()

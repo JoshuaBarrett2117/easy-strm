@@ -1,5 +1,22 @@
 # 2026-08-18 云下载大批量队列提交
 
+## 2026-09-10 Codex：STRM导出进度展示
+
+前端构建与浏览器E2E通过。覆盖弹窗25%→75%→完成、已处理/总数、关闭停止查询、重开继续查询、完成停止查询、任务详情100%进度条。日志：.codex/share-strm-progress-build.log、.codex/share-strm-progress-e2e.log。本次仅前端变更，复用后端已有真实进度字段。
+
+## 2026-09-10 Codex：导出仅使用本地记录
+
+go test ./...、npm run build、node scripts/e2e-share-strm.mjs全部通过，完整日志见.codex/share-strm-local-*.log。新增/更新回归覆盖115客户端为空时本地导出成功、具体单集记录逐条生成、目录记录不补扫、首次播放仅逐级定位目标路径、文件ID持久化复用、定位失败不转存、数据库读取取消。前端构建仅有既有大分包提示。真实115与真实PG迁移未执行。
+
+## 2026-09-10 Codex 分享资料库 STRM
+
+- `easy-strm: go test ./...`：全部通过（main、controller、dao、domain、logger、service）。完整输出：`.codex/share-strm-go-test.log`。
+- `easy-strm-front: npm run build`：通过；保留既有大分包提示，非构建失败。完整输出：`.codex/share-strm-build.log`。
+- `easy-strm-front: node scripts/e2e-share-strm.mjs`：通过。完整输出：`.codex/share-strm-e2e.log`；手机截图 `debug/share-strm/export-mobile.png` 已由 Codex 查看，主操作完整可达。
+- 新增测试覆盖分类、季集/特别篇/季目录、手动修正、部分失败后继续导出、重复导出URL稳定、取消任务、并发转存去重、重启复用、UA传递、GET/HEAD 302、失败不跳转、筛选DAO、映射及转存锁。另验证HTTP请求取消后，转存调用返回前不提前释放数据库锁。
+- 初次编译修正115 FileInfo目录字段；测试夹具补齐项目TaskRedisDAO全局初始化；errors局部变量与包名冲突已消除。浏览器脚本最初误拦截`src/utils/api`模块导致加载失败，限制为`/api/`请求后通过。
+- 115请求使用本地客户端桩，PostgreSQL使用sqlmock，Redis使用miniredis；未使用真实账号转存视频，未执行线上迁移或真实Nginx进程检查。
+
 ## 2026-09-08 Codex 分享任务时限验证
 
 go test ./...全部通过。新增时限上下文及配置Service/Controller测试；node scripts/e2e-share-task-settings.mjs通过，覆盖默认无限制、90分钟保存重开、切回无限制和刷新回显。npm run build通过，详见.codex/share-task-timeout-build.log。无限制通过无deadline及主动取消断言验证，无需真实等待30分钟。
@@ -1077,3 +1094,13 @@ DELETE /media/share-records/:id/media 返回 SuccessResp {deleted}。DAO事务�
 - 增加目录年份来源标记，常规及别名核验失败后、AI前，无年份重查剧集，只有完整标题匹配且身份唯一才接受；同名多项不自动选择。
 - go test ./...通过；新增HTTP夹具覆盖2022目录/2026候选成功和同名歧义拒绝。未调用真实TMDB或修改用户识别记录。
 - 已构建并启动debug/easy-strm-year-fallback.exe。工具采用rg/Python/Go/PowerShell，专用规划MCP不可用，使用本地分析。审查通过。
+
+
+## 2026-09-10 接口404排查（Codex）
+- 分享资料库：HEAD遗漏的列表、筛选选项、来源、补全路由已由任务开始前的工作区修改补齐，本次保留并纳入契约测试；没有重复添加或覆盖原有STRM开发。
+- 本次补齐 GET /cron/handlers、GET /cron/task/:id/runs、GET/PUT /media/share-task-settings。
+- 修复 CronController.SetScheduler 没有将管理操作连接共享调度器的问题，避免处理器列表为空及管理状态分裂。
+- 新增 api_routes_test.go：解析真实Go注册源码、建立Gin路由表，通过httptest核对194处前端调用与206条路由（空处理器，不执行写操作）。覆盖路径、方法及分组；不代表194个接口业务功能全部经过集成测试。
+- 修复前契约测试明确复现4个404；共享调度器回归测试复现200但data为空。修复后 go test ./... 全部通过（main/controller/dao/domain/logger/service）。
+- npm run build 通过（4861模块，仅已有大chunk提示）；node scripts/e2e-share-strm.mjs 通过，覆盖配置、筛选导出、失败恢复、窄屏，使用模拟API。
+- git diff --check 通过。本机3001/8082/80没有运行服务，Docker不可用；未取得用户实际页面地址，因此尚未完成部署实例的真实请求验证。生效需要重新构建并重启实际后端。

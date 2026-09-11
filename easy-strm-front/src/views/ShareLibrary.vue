@@ -5,7 +5,7 @@
         <h2>分享资源库</h2>
         <p>已识别作品 · {{ total }} 部</p>
       </div>
-      <n-button :loading="enriching" @click="enrich">补全历史元数据</n-button></n-space
+      <n-space><n-button @click="openExport">导出 STRM</n-button><n-button :loading="enriching" @click="enrich">补全历史元数据</n-button></n-space></n-space
     >
     <n-card class="filters">
       <n-grid :cols="'1 s:2 m:4'" responsive="screen" :x-gap="12" :y-gap="12">
@@ -110,11 +110,13 @@
         <n-empty v-if="!sourceLoading && !sources.length && !sourceError" description="暂无来源" /> </n-spin
       ><n-pagination v-model:page="sourcePage" :page-size="20" :item-count="sourceTotal" :disabled="sourceLoading" />
     </n-modal>
+    <ShareStrmDialog v-model:show="showExport" :filters="exportFilters" :count="total" />
   </section>
 </template>
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import ShareStrmDialog from '../components/ShareStrmDialog.vue'
 import {
   NAlert,
   NButton,
@@ -136,6 +138,8 @@ import {
 import { getShareLibrary, getLibraryOptions, getLibrarySources, enrichLibrary } from '../utils/api/share-library'
 const router = useRouter(),
   message = useMessage()
+const showExport = ref(false), exportFilters = ref({})
+const openExport = () => { exportFilters.value = { ...active }; showExport.value = true }
 const defaults = () => ({
   keyword: '',
   tmdb_id: null,

@@ -1,11 +1,44 @@
 {
-  "date": "2026-08-30",
+  "date": "2026-09-09",
   "executor": "Codex",
-  "goal": "修复115自动转存未按指定目录保存、而落入最近接收的问题",
+  "task": "分享资料库 STRM 导出及按需115转存播放",
   "scope": [
-    "核对自动转存请求中的目标目录路径与CID传递链路",
-    "修正115 share/receive接口的目标目录字段",
-    "阻止目标目录解析失败后静默回退继续转存",
-    "补充协议字段与失败保护回归测试并执行本地验证"
-  ]
+    "持久化导出配置与播放映射",
+    "复用分类与季集解析",
+    "异步导出及任务取消",
+    "播放按需转存、直链302",
+    "前端配置与导出入口",
+    "本地测试与文档"
+  ],
+  "local_export_revision": {
+    "date": "2026-09-10",
+    "executor": "Codex",
+    "request": "STRM导出只使用本地t_share_media，不扫描分享",
+    "findings": [
+      "file_name/result已保存",
+      "115文件ID未保存，首次播放定向定位并缓存"
+    ],
+    "plan": [
+      "移除导出解析器",
+      "本地记录生成映射",
+      "首次播放定位",
+      "回归与文档"
+    ],
+    "status": "completed"
+  },
+  "progress_revision": {
+    "date": "2026-09-10",
+    "executor": "Codex",
+    "request": "分享资料库STRM导出任务显示执行进度条",
+    "findings": [
+      "后端已更新真实进度",
+      "复用TaskCard",
+      "弹窗与详情补进度，列表默认刷新"
+    ],
+    "status": "completed",
+    "checks": [
+      "frontend build",
+      "browser E2E"
+    ]
+  }
 }

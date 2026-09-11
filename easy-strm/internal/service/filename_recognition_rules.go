@@ -13,6 +13,10 @@ import (
 
 const filenameRecognitionRulesConfigKey = "filename_recognition_rules"
 
+const legacySxePattern = `(?i)^(?P<title>.+?)\s+S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?:\s+.*)?$`
+
+var filenameEpisodeToken = regexp.MustCompile(`(?i)E(\d{1,3})`)
+
 // FilenameRecognitionRuleStore 定义文件名识别规则所需的配置读写能力。
 type FilenameRecognitionRuleStore interface {
 	GetByKey(key string) (*domain.SystemConfig, error)
@@ -85,10 +89,13 @@ func (s *TmdbService) ResetFilenameRecognitionRules() (FilenameRecognitionRuleSe
 // DefaultFilenameRecognitionRules 返回参考常见媒体命名约定的内置模板。
 func DefaultFilenameRecognitionRules() []FilenameRecognitionRule {
 	return []FilenameRecognitionRule{
+		{ID: "tv_sxe_compact", Name: "紧凑型 SxxExx 合并剧集", MediaType: "tv", Enabled: true, Priority: 9,
+			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)\s*$`,
+			Example: "举重妖精金福珠S01E01.mkv", Description: "支持中文标题紧贴 S01E01，以及 S01E01E02 连续合并集。"},
 		{
 			ID: "tv_sxe", Name: "SxxExx 标准剧集", MediaType: "tv", Enabled: true, Priority: 10,
-			Pattern: `(?i)^(?P<title>.+?)\s+S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?:\s+.*)?$`,
-			Example: "妖精的尾巴 百年任务 - S01E05 - 艰难的决断.mp4", Description: "适用于 Sonarr、Plex、Emby 常见的 S01E05 命名。",
+			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)(?:\s+.*)?$`,
+			Example: "你是谁 - S01E01E02 .mp4", Description: "支持片名紧贴S01E01、特别篇S00及S01E01E02合并集；episodes保留后续全部集号。",
 		},
 		{
 			ID: "tv_x", Name: "数字 x 数字剧集", MediaType: "tv", Enabled: true, Priority: 20,
@@ -138,6 +145,13 @@ func (s *TmdbService) loadFilenameRecognitionRules() ([]FilenameRecognitionRule,
 		if config, err := s.filenameRuleStore.GetByKey(filenameRecognitionRulesConfigKey); err == nil && config != nil && strings.TrimSpace(config.ConfigVal) != "" {
 			var stored []FilenameRecognitionRule
 			if json.Unmarshal([]byte(config.ConfigVal), &stored) == nil {
+				// 仅升级未修改过的旧内置表达式，保留用户的开关、顺序及自定义规则。
+				for i := range stored {
+					if stored[i].ID == "tv_sxe" && stored[i].Pattern == legacySxePattern {
+						stored[i].Pattern = rules[0].Pattern
+						stored[i].Description = rules[0].Description
+					}
+				}
 				if normalized, _, validateErr := validateAndCompileFilenameRecognitionRules(stored); validateErr == nil {
 					rules = normalized
 				}
@@ -251,6 +265,24 @@ func matchFilenameRecognitionRule(input string, rules []compiledFilenameRecognit
 			season, _ = strconv.Atoi(values["season"])
 		}
 		episode, _ := strconv.Atoi(values["episode"])
+		episodes := []int{}
+		if episode > 0 {
+			episodes = append(episodes, episode)
+		}
+		valid := true
+		for _, token := range filenameEpisodeToken.FindAllStringSubmatch(values["episodes"], -1) {
+			n, _ := strconv.Atoi(token[1])
+			if n <= episode {
+				valid = false
+				break
+			}
+			episodes = append(episodes, n)
+			episode = n
+		}
+		if !valid {
+			continue
+		}
+		episode, _ = strconv.Atoi(values["episode"])
 		year, _ := strconv.Atoi(values["year"])
 		return &ParsedFilename{
 			Title:           values["title"],
@@ -258,6 +290,7 @@ func matchFilenameRecognitionRule(input string, rules []compiledFilenameRecognit
 			MediaType:       compiled.rule.MediaType,
 			Season:          season,
 			Episode:         episode,
+			Episodes:        episodes,
 			MatchedRuleID:   compiled.rule.ID,
 			MatchedRuleName: compiled.rule.Name,
 		}, true

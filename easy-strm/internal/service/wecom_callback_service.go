@@ -265,7 +265,9 @@ func notificationTaskStatusName(status string) string {
 		return "运行中"
 	case "completed", "success":
 		return "成功"
-	case "failed", "partial_failed", "partial_success", "unknown":
+	case "partial_failed", "partial_success":
+		return "⚠️ 部分失败"
+	case "failed", "unknown":
 		return "失败"
 	case "cancelled", "canceled":
 		return "已取消"

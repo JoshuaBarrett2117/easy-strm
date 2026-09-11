@@ -128,7 +128,22 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	organizeController := controller.NewOrganizeController(organizeService)
 	organizeController.SetTaskService(taskService)
 	tmdbController := controller.NewTmdbController(tmdbService)
-	shareRecordController := controller.NewShareRecordController(service.NewShareRecordService(dao.NewShareRecordDAO(dao.DB), tmdbService, taskService, shareTransferService))
+	shareRecordService := service.NewShareRecordService(dao.NewShareRecordDAO(dao.DB), tmdbService, taskService, shareTransferService)
+	shareRecordService.SetTaskSettingsStore(systemConfigDAO)
+	shareRecordController := controller.NewShareRecordController(shareRecordService)
+	shareStrmService := service.NewShareStrmService(dao.NewShareRecordDAO(dao.DB), systemConfigDAO, client, tmdbService, organizeService, taskService, mediaCategoryDAO.GetAll, cloud115DAO.GetByID, func(pick string, accountID int, cookie, ua string) (string, error) {
+		link, err := client.GetFileDirectLink(0, pick, accountID, cookie, ua)
+		if err != nil {
+			return "", err
+		}
+		if link == nil {
+			return "", fmt.Errorf("115返回空直链")
+		}
+		return link.Url.Url, nil
+	})
+	shareStrmController := controller.NewShareStrmController(shareStrmService)
+	r.GET("/share-strm/:id", shareStrmController.Playback)
+	r.HEAD("/share-strm/:id", shareStrmController.Playback)
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)
 	scrapeController := controller.NewScrapeController(scrapeService, organizeService)
 	strmController := controller.NewStrmController(strmService)
@@ -724,6 +739,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== Cron 任务管理 ==========
 		auth.GET("/cron/tasks", cronController.GetAll)
+		auth.GET("/cron/handlers", cronController.Handlers)
+		auth.GET("/cron/task/:id/runs", cronController.Runs)
 		auth.POST("/cron/task", cronController.Create)
 		auth.PUT("/cron/task/:id", cronController.Update)
 		auth.DELETE("/cron/task/:id", cronController.Delete)
@@ -901,6 +918,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/tmdb/filename-rules/reset", tmdbController.ResetFilenameRecognitionRules)
 		auth.POST("/media/tmdb/batch-identify", tmdbController.BatchIdentify)
 		auth.GET("/media/share-records", shareRecordController.List)
+		auth.GET("/media/share-task-settings", shareRecordController.GetTaskSettings)
+		auth.PUT("/media/share-task-settings", shareRecordController.SaveTaskSettings)
+		auth.GET("/media/share-library", shareRecordController.Library)
+		auth.GET("/media/share-library/options", shareRecordController.LibraryOptions)
+		auth.GET("/media/share-library/sources", shareRecordController.LibrarySources)
+		auth.POST("/media/share-library/enrich", shareRecordController.EnrichLibrary)
+		auth.GET("/media/share-library/strm/settings", shareStrmController.Settings)
+		auth.PUT("/media/share-library/strm/settings", shareStrmController.SaveSettings)
+		auth.POST("/media/share-library/strm/export", shareStrmController.Export)
 		auth.POST("/media/share-records", shareRecordController.Create)
 		auth.POST("/media/share-records/parse", shareRecordController.ParseImport)
 		auth.PUT("/media/share-records/:id", shareRecordController.Update)

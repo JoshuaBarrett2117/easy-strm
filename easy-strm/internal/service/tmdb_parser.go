@@ -95,6 +95,7 @@ func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
 			result.MediaType = contextParsed.MediaType
 			result.Season = contextParsed.Season
 			result.Episode = contextParsed.Episode
+			result.Episodes = append([]int(nil), contextParsed.Episodes...)
 		}
 		searchTitles = appendUniqueNonEmpty(searchTitles, contextParsed.Title)
 	}
@@ -211,6 +212,7 @@ type ParsedFilename struct {
 	MediaType       string   `json:"media_type"` // movie | tv
 	Season          int      `json:"season"`
 	Episode         int      `json:"episode"`
+	Episodes        []int    `json:"episodes,omitempty"` // 同一文件包含的明确集号，首集仍由episode表示
 	Quality         string   `json:"quality"`
 	Source          string   `json:"source"`
 	Codec           string   `json:"codec"`

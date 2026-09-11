@@ -53,6 +53,24 @@ func TestDefaultFilenameRecognitionRulesCoverCommonTVNames(t *testing.T) {
 	}
 }
 
+func TestFilenameRulesTightTitleAndCombinedEpisodes(t *testing.T) {
+	s := NewTmdbService("", nil)
+	for _, tt := range []struct {
+		name, title string
+		count, last int
+	}{
+		{"举重妖精金福珠S01E01.mkv", "举重妖精金福珠", 1, 1},
+		{"你是谁 - S01E01E02 .mp4", "你是谁", 2, 2},
+		{"坏家伙们 - S01E01E02 - 第1-2集.mkv", "坏家伙们", 2, 2},
+		{"剧名S01E01E02E03.mkv", "剧名", 3, 3},
+	} {
+		p := s.ParseFilename(tt.name)
+		if p.Title != tt.title || p.Season != 1 || p.Episode != 1 || len(p.Episodes) != tt.count || p.Episodes[len(p.Episodes)-1] != tt.last {
+			t.Fatalf("%s: %+v", tt.name, p)
+		}
+	}
+}
+
 func TestSaveFilenameRecognitionRulesUpdatesParserImmediately(t *testing.T) {
 	store := &memoryFilenameRuleStore{}
 	service := NewTmdbService("fake-key", nil)

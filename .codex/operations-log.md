@@ -1045,3 +1045,52 @@ DELETE /media/share-records/:id/media 返回 SuccessResp {deleted}。DAO事务�
 - 增加目录年份来源标记，常规及别名核验失败后、AI前，无年份重查剧集，只有完整标题匹配且身份唯一才接受；同名多项不自动选择。
 - go test ./...通过；新增HTTP夹具覆盖2022目录/2026候选成功和同名歧义拒绝。未调用真实TMDB或修改用户识别记录。
 - 已构建并启动debug/easy-strm-year-fallback.exe。工具采用rg/Python/Go/PowerShell，专用规划MCP不可用，使用本地分析。审查通过。
+
+# 操作记录
+
+## 2026-09-10 Codex：资料库STRM导出任务进度条
+
+- 扫描：functions.exec/exec_command通过rg、Get-Content检查TaskCard、TaskCenter、ShareStrmDialog及后端UpdateProgress；后端已有逐条处理进度，任务卡有进度条，弹窗缺少任务展示，详情只有文本，列表刷新默认关闭。
+- 计划及执行：复用TaskCard在弹窗展示真实进度；每秒非重叠查询、关闭/卸载/终态停止、重开恢复；列表默认3秒刷新且防重复请求；详情显示进度条；卡片增加处理数量和STRM数量。
+- apply_patch/本地定向编辑完成；没有改动后端或恢复分享网络扫描。MCP规划与代码索引工具沿用之前不可用的降级方案。
+- 本地验证：npm run build、node scripts/e2e-share-strm.mjs通过；完成状态最初显示组件默认图标，补显式百分比后详情100%断言通过。验证关闭后不再请求、完成后不再请求、25%到75%更新。
+- 日志：.codex/share-strm-progress-build.log、.codex/share-strm-progress-e2e.log。未部署或重启服务。
+
+## 2026-09-10 Codex：STRM导出改为本地数据库
+
+- 用户修正：导出只查询t_share_media，禁止重新读取分享记录。工具扫描本地schema、DAO、Service及测试确认file_name/result已存在，表内没有115文件ID。
+- 执行计划：移除导出网络依赖；保存相对路径播放映射；首次播放逐级定位并缓存文件ID；更新回归和文档。四项已完成。
+- functions.exec / exec_command：rg、Get-Content、git status用于增量扫描；发现另有API路由修复工作，保留其改动。专用规划/代码检索MCP沿用此前不可用的降级方案。
+- functions.exec / apply_patch及本地Python定向编辑：拆出share_strm_export.go，移除ShareRecordParser依赖；本地记录逐条生成；播放才定位；重复导出保留已缓存文件ID。没有修改资料库采集或重扫逻辑。
+- 回归：115客户端为nil仍导出成功；只有目录不补扫；逐级仅请求目标路径；定位失败不转存；缓存ID复用；任务取消改为验证数据库读取取消。
+- 验证：go test ./...、npm run build、node scripts/e2e-share-strm.mjs全部通过。日志：.codex/share-strm-local-go-test.log、share-strm-local-build.log、share-strm-local-e2e.log。测试变量名与已有读取内容变量重名导致的一次编译错误已修复。
+- 尚未真实115联调或重启用户服务；本次修改没有额外迁移，FilePath存入已有播放映射JSON。
+
+日期：2026-09-09；执行者：Codex
+
+- 工具发现：sequential-thinking、shrimp-task-manager、code-index 不可用；使用内部分析、文件计划、rg/PowerShell 降级。
+- functions.exec / exec_command：git status、rg --files、Get-Content、rg 定向读取资料库、分享转存、分类、直链、任务、路由；工作区初始干净。
+- 计划：1. 配置与映射 DAO/迁移；2. 导出/播放 Service 与 Controller；3. 页面入口；4. 本地测试、构建与审查。
+- 验收：不提前转存；每集一文件；分类复用；持久链接；重复播放复用；转存失败不跳转；任务可跟踪/取消；前后端本地验证。
+
+### 2026-09-10 Codex：实现与验证完成
+
+- functions.exec / apply_patch：新增share_strm领域、DAO、Service、Controller、v29迁移；装配资料库路由；创建Vue配置弹窗、API与导出入口；更新任务失败详情和Nginx/Vite播放代理。
+- 关键决策：分类沿用既有路径规则；STRM以分享码+文件ID派生稳定ID；播放读取当前目标账号；独立网盘子目录查找已有文件；事务锁涵盖转存调用生命周期，HTTP取消不提前解锁。
+- functions.exec / exec_command：gofmt及go test ./...通过；npm run build通过；node scripts/e2e-share-strm.mjs通过。工具输出保存到.codex/share-strm-go-test.log、share-strm-build.log、share-strm-e2e.log。
+- 调试修复：FileInfo字段契约、miniredis全局初始化、errors变量遮蔽；E2E路由拦截误匹配源码已缩小为/api/请求。季目录与具体视频的旧自动识别冲突已补回归，手动修正仍优先。
+- functions.exec / view_image：检查debug/share-strm/export-mobile.png，390px宽度配置字段及保存导出按钮完整显示。
+- functions.exec / exec_command：git diff --check及范围自查；保留历史operations-log内容，以追加方式记录本次任务。更新产品/开发文档、testing.md、verification.md及审查报告。
+- 计划1至4均完成；没有提交、推送、部署或真实115转存操作。真实账号可用性与媒体服务器播放作为部署配置后的验证边界记录。
+
+
+## 2026-09-10 接口404排查（Codex）
+- 分享资料库：HEAD遗漏的列表、筛选选项、来源、补全路由已由任务开始前的工作区修改补齐，本次保留并纳入契约测试；没有重复添加或覆盖原有STRM开发。
+- 本次补齐 GET /cron/handlers、GET /cron/task/:id/runs、GET/PUT /media/share-task-settings。
+- 修复 CronController.SetScheduler 没有将管理操作连接共享调度器的问题，避免处理器列表为空及管理状态分裂。
+- 新增 api_routes_test.go：解析真实Go注册源码、建立Gin路由表，通过httptest核对194处前端调用与206条路由（空处理器，不执行写操作）。覆盖路径、方法及分组；不代表194个接口业务功能全部经过集成测试。
+- 修复前契约测试明确复现4个404；共享调度器回归测试复现200但data为空。修复后 go test ./... 全部通过（main/controller/dao/domain/logger/service）。
+- npm run build 通过（4861模块，仅已有大chunk提示）；node scripts/e2e-share-strm.mjs 通过，覆盖配置、筛选导出、失败恢复、窄屏，使用模拟API。
+- git diff --check 通过。本机3001/8082/80没有运行服务，Docker不可用；未取得用户实际页面地址，因此尚未完成部署实例的真实请求验证。生效需要重新构建并重启实际后端。
+
+工具留痕：2026-09-10 functions.exec/exec_command 使用 rg、Get-Content、git status/diff、端口查询、Docker状态、Python静态比对、go test、npm build、Playwright现有E2E；apply_patch新增测试并修复路由及共享调度注入；request_user_input_async询问页面地址。sequential-thinking/shrimp/code-index未提供，降级为本地分析、分步计划和rg；无网络检索。

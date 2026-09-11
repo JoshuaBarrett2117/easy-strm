@@ -123,7 +123,7 @@
         v-if="showProgress"
         type="line"
         class="mb-3"
-        :percentage="task.progress || 0"
+        :percentage="task.status === 'completed' ? 100 : (task.progress || 0)"
         :status="progressStatus"
         :height="14"
         indicator-placement="outside"
@@ -188,6 +188,7 @@ import {
   SyncOutline,
   CheckmarkCircleOutline,
   CloseCircleOutline,
+  AlertCircleOutline,
   TimerOutline,
   DocumentTextOutline,
   RefreshOutline,
@@ -352,6 +353,7 @@ const taskStatusIcon = computed(() => {
   if (!t) return TimerOutline
   if (t.status === 'running') return SyncOutline
   if (t.status === 'completed' || t.status === 'success') return CheckmarkCircleOutline
+  if (t.status === 'partial_success' || t.status === 'partial_failed') return AlertCircleOutline
   if (t.status === 'failed' || t.status === 'cancelled') return CloseCircleOutline
   if (t.status === 'scheduled') return TimeOutline
   return taskTypeIcons[t.task_type] || TimerOutline
@@ -530,6 +532,13 @@ const taskStageText = computed(() => {
 const taskSummaryItems = computed(() => {
   const t = task.value
   if (!t) return []
+
+  if (String(t.task_id || '').startsWith('share_strm_')) {
+    return [
+      { label: '已处理记录', value: `${t.processed_files || 0} / ${t.total_files || 0}` },
+      { label: '已生成 STRM', value: t.metadata?.exported_files || 0 }
+    ]
+  }
 
   const items = []
 

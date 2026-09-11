@@ -45,7 +45,7 @@
           <ResultField label="年份" :value="parsedResult.year || '-'" />
           <ResultField label="画质" :value="parsedResult.quality || '-'" />
           <ResultField v-if="parsedResult.media_type === 'tv'" label="季" :value="numberText(parsedResult.season)" highlight />
-          <ResultField v-if="parsedResult.media_type === 'tv'" label="集" :value="numberText(parsedResult.episode)" highlight />
+          <ResultField v-if="parsedResult.media_type === 'tv'" label="集" :value="parsedResult.episodes?.length ? parsedResult.episodes.join('、') : numberText(parsedResult.episode)" highlight />
           <ResultField label="来源" :value="parsedResult.source || '-'" />
           <ResultField label="编码" :value="parsedResult.codec || '-'" />
           <ResultField label="命中规则" :value="parsedResult.matched_rule_name || '未命中规则，按电影标题清理'" class="col-span-2" />
@@ -105,7 +105,7 @@
       <n-alert type="info" :show-icon="true" class="mb-4">
         正则匹配的是标准化文件名：{{ inputTransform || '去扩展名并统一分隔符' }}。所有规则必须包含
         <code>(?P&lt;title&gt;...)</code>；剧集规则还必须包含 <code>(?P&lt;episode&gt;...)</code>，季数可用
-        <code>(?P&lt;season&gt;...)</code> 或“默认季”。优先级数字越小越先匹配。
+        <code>(?P&lt;season&gt;...)</code> 或“默认季”。合并集可使用 <code>(?P&lt;episodes&gt;...)</code> 捕获后续 E02E03，结果保留全部集号。优先级数字越小越先匹配。
       </n-alert>
 
       <div v-if="rulesLoading" class="py-16 text-center text-sm text-slate-400">正在加载规则...</div>
