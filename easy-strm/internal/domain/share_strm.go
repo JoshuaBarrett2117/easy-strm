@@ -10,13 +10,16 @@ type ShareStrmSettings struct {
 
 // ShareStrmSource 是可导出来源及作品识别信息。
 type ShareStrmSource struct {
-	Remaining int
-	ID        int
-	WorkKey   string
-	URL       string
-	Password  string
-	FileName  string
-	Result    TmdbIdentifyResult
+	MediaID      int
+	Remaining    int
+	ID           int
+	WorkKey      string
+	URL          string
+	Password     string
+	FileName     string
+	RemoteFileID string
+	Episodes     []ShareEpisode
+	Result       TmdbIdentifyResult
 }
 
 // ShareStrmEntry 保存单个视频的稳定播放映射，独立于分享管理记录生命周期。

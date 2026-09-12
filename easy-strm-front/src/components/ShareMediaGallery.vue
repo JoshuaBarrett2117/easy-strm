@@ -1,10 +1,10 @@
 <template>
   <section class="share-gallery">
-    <div class="gallery-heading"><strong>已识别媒体 <span>{{ total }}</span></strong><n-button v-if="duplicateCount" size="small" @click="showDuplicates = !showDuplicates">{{ showDuplicates ? '合并相同剧集' : `展开同剧集记录（${duplicateCount}）` }}</n-button></div>
+    <div class="gallery-heading"><strong>已识别媒体 <span>{{ total }}</span></strong><n-button size="small" @click="openFiles">查看全部文件</n-button></div>
     <p v-if="loading">正在加载…</p>
     <n-button v-if="loadError" @click="loadPage">加载失败，点击重试</n-button>
     <div class="gallery-grid">
-      <article v-for="item in visibleMedia" :key="item.id" class="media-card">
+      <article v-for="item in visibleMedia" :key="item.media_id || item.id" class="media-card">
         <div class="poster">
           <img v-if="poster(item) && !failedImages[poster(item)]" :src="poster(item)" :alt="title(item)" loading="lazy" @error="failedImages[poster(item)] = true" />
           <div v-else class="poster-empty">暂无海报</div>
@@ -14,11 +14,10 @@
           <h3 :title="title(item)">{{ title(item) }}</h3>
           <div class="original-title" :title="item.result?.original_title">{{ item.result?.original_title || '—' }}</div>
           <div class="media-facts"><span>{{ item.result?.year || '年份未知' }}</span><span>{{ source(item) }}</span></div>
-          <div class="directory" :title="item.file_name">{{ item.file_name }}</div>
+          <div class="directory">关联 {{ item.file_count || 1 }} 个有效文件</div>
           <div class="card-actions">
             <n-button size="tiny" secondary type="primary" @click="$emit('identify', item)">重新识别</n-button>
             <n-button size="tiny" secondary @click="openManual(item)">手动识别</n-button>
-            <n-button size="tiny" quaternary type="error" @click="$emit('remove', item)">删除</n-button>
           </div>
         </div>
       </article>
@@ -39,6 +38,10 @@
           <n-input-number v-model:value="year" placeholder="年份（可选）" :min="1800" :max="2200" style="width:150px" />
           <n-button type="primary" :loading="searching" :disabled="saving" @click="search">搜索</n-button>
         </n-space>
+        <n-space v-if="mediaType === 'tv'">
+          <n-input-number v-model:value="season" placeholder="季" :min="0" :precision="0" style="width:120px" />
+          <n-input v-model:value="episodeText" placeholder="集号，多个用逗号分隔，如 1,2" style="width:280px" />
+        </n-space>
         <div v-for="candidate in candidates" :key="`${candidate.media_type}-${candidate.tmdb_id}-${candidate.metadata_id}`" class="manual-result">
           <img v-if="candidate.poster_path" :src="candidate.poster_path" alt="候选海报" />
           <div><strong>{{ candidate.title }}</strong><p>{{ candidate.original_title }} · {{ candidate.year }} · {{ candidate.media_type === 'tv' ? '电视剧' : '电影' }}</p></div>
@@ -47,17 +50,22 @@
         <p v-if="searched && !searching && !candidates.length">没有匹配结果，请调整名称、年份或媒体类型。</p>
       </n-space>
     </n-modal>
+    <n-modal v-model:show="filesShow" preset="card" title="分享文件" style="width: min(1000px, 96vw)">
+      <n-data-table :columns="fileColumns" :data="files" :loading="filesLoading" :row-key="row => row.id" />
+      <n-pagination v-model:page="filePage" :page-size="20" :item-count="fileTotal" style="margin-top:16px" />
+    </n-modal>
   </section>
 </template>
 
 <script setup>
-import { reactive, ref, watch, onBeforeUnmount } from 'vue'
-import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, useMessage } from 'naive-ui'
-import { getShareMedia, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
+import { h, reactive, ref, watch, onBeforeUnmount } from 'vue'
+import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, NDataTable, NTag, useMessage } from 'naive-ui'
+import { getShareMedia, getShareFiles, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
 
 const props = defineProps({ shareId: { type: Number, required: true }, revision: Number })
 const showDuplicates = ref(false), page = ref(1), total = ref(0)
 const duplicateCount = ref(0), visibleMedia = ref([]), loading = ref(false), loadError = ref(false)
+const filesShow = ref(false), filesLoading = ref(false), files = ref([]), filePage = ref(1), fileTotal = ref(0)
 const pageSizeStorageKey = 'share:gallery:page_size'
 const readPageSize = () => {
   try {
@@ -108,9 +116,9 @@ const changePageSize = () => {
   else loadPage()
 }
 onBeforeUnmount(() => { disposed = true; requestVersion++; searchVersion++ })
-const emit = defineEmits(['identify', 'remove', 'saved'])
+const emit = defineEmits(['identify', 'saved'])
 const message = useMessage()
-const manualShow = ref(false), target = ref(null), keyword = ref(''), year = ref(null), mediaType = ref('tv'), metadataSource = ref('tmdb')
+const manualShow = ref(false), target = ref(null), keyword = ref(''), year = ref(null), mediaType = ref('tv'), metadataSource = ref('tmdb'), season = ref(1), episodeText = ref('')
 const candidates = ref([]), searching = ref(false), saving = ref(false), searched = ref(false)
 let searchVersion = 0
 const openManual = item => {
@@ -120,6 +128,8 @@ const openManual = item => {
   keyword.value = (item.file_name || '').split(/[\\/]/).pop().replace(/\s*[（(]\d{4}[）)].*$/, '')
   year.value = null
   mediaType.value = item.result?.media_type || 'tv'
+  season.value = item.episodes?.[0]?.season_number ?? item.result?.season_number ?? 1
+  episodeText.value = (item.episodes || []).map(value => value.episode_number).join(',') || String(item.result?.episode_number || '')
   candidates.value = []
   searched.value = false
   manualShow.value = true
@@ -138,13 +148,36 @@ const search = async () => {
 const saveManual = async candidate => {
   saving.value = true
   try {
-    await manualIdentifyShareMedia(target.value.id, {...target.value, result:candidate})
+    const episodeNumbers = mediaType.value === 'tv' ? [...new Set(episodeText.value.split(/[,，\s]+/).map(Number).filter(value => Number.isInteger(value) && value > 0))] : []
+    if (mediaType.value === 'tv' && (!Number.isInteger(season.value) || season.value < 0 || !episodeNumbers.length)) {
+      message.error('电视剧必须填写有效的季号和集号')
+      return
+    }
+    await manualIdentifyShareMedia(target.value.id, {...target.value, result:candidate, episodes:episodeNumbers.map(value => ({season_number:season.value, episode_number:value}))})
     message.success('手动识别已保存')
     manualShow.value = false
     emit('saved')
   } catch (error) { message.error(error.response?.data?.message || '保存失败，请刷新后重试') }
   finally { saving.value = false }
 }
+const loadFiles = async () => {
+  filesLoading.value = true
+  try {
+    const response = await getShareFiles(props.shareId, {page:filePage.value, page_size:20})
+    const result = response.data?.data || {}
+    files.value = result.data || []
+    fileTotal.value = result.total || 0
+  } finally { filesLoading.value = false }
+}
+const openFiles = async () => { filesShow.value = true; filePage.value = 1; await loadFiles() }
+watch(filePage, () => { if (filesShow.value) loadFiles() })
+const fileColumns = [
+  {title:'路径', key:'file_name', ellipsis:{tooltip:true}},
+  {title:'状态', key:'status', render:row => h(NTag, {size:'small', type:row.status==='identified'?'success':row.status==='failed'?'error':'default'}, {default:() => row.available===false?'失效':row.status})},
+  {title:'季集', render:row => (row.episodes || []).map(value => `S${String(value.season_number).padStart(2,'0')}E${String(value.episode_number).padStart(2,'0')}`).join('、') || '—'},
+  {title:'错误', key:'error', ellipsis:{tooltip:true}},
+  {title:'操作', render:row => h(NSpace, {}, {default:() => [h(NButton,{size:'tiny',onClick:()=>emit('identify',row)},{default:()=>'自动识别'}),h(NButton,{size:'tiny',onClick:()=>openManual(row)},{default:()=>'手动识别'})]})}
+]
 const failedImages = reactive({})
 const title = item => item.result?.title || item.result?.original_title || item.file_name
 const poster = item => item.result?.poster_path || item.result?.candidates?.[0]?.poster_path

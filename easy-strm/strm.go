@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"easy-strm/internal/service"
 	"fmt"
 	"net/url"
 	"os"
@@ -13,6 +15,7 @@ type ProgressCallback func(totalFiles, processedFiles, successFiles, failedFiles
 
 // StrmGenerator STRM文件生成器
 type StrmGenerator struct {
+	Output           *service.StrmOutput
 	OutputDir        string
 	BaseURL          string
 	Extension        string
@@ -100,7 +103,13 @@ func (sg *StrmGenerator) generateStrmFile(video VideoFile) error {
 	strmContent := sg.buildStrmContent(video)
 
 	// 写入STRM文件
-	if err := os.WriteFile(strmFilepath, []byte(strmContent), 0644); err != nil {
+	var writeErr error
+	if sg.Output != nil {
+		_, writeErr = sg.Output.Write(context.Background(), video.RelativePath, strmFilepath, strmContent+"\n", "", "")
+	} else {
+		writeErr = os.WriteFile(strmFilepath, []byte(strmContent), 0644)
+	}
+	if err := writeErr; err != nil {
 		Error("Failed to write STRM file %s: %v", strmFilepath, err)
 		return fmt.Errorf("write STRM file failed: %v", err)
 	}
@@ -425,7 +434,13 @@ func (sg *StrmGenerator) generateStrmFileWithDirectLink(video VideoFile, netDisk
 	}
 	Debug("Using path for STRM content: %s, cloud115_id: %d", netDiskFullPath, video.Cloud115ID)
 
-	if err := os.WriteFile(strmFilepath, []byte(strmContent), 0644); err != nil {
+	var writeErr error
+	if sg.Output != nil {
+		_, writeErr = sg.Output.Write(context.Background(), video.RelativePath, strmFilepath, strmContent+"\n", "", "")
+	} else {
+		writeErr = os.WriteFile(strmFilepath, []byte(strmContent), 0644)
+	}
+	if err := writeErr; err != nil {
 		Error("Failed to write STRM file %s: %v", strmFilepath, err)
 		return fmt.Errorf("write STRM file failed: %v", err)
 	}
@@ -470,9 +485,14 @@ func (sg *StrmGenerator) GenerateSingleStrmFile(video VideoFile, netDiskBasePath
 	}
 	Debug("Using path for STRM content: %s, cloud115_id: %d", netDiskFullPath, video.Cloud115ID)
 
-	if err := os.WriteFile(strmFilepath, []byte(strmContent), 0644); err != nil {
-		Error("Failed to write STRM file %s: %v", strmFilepath, err)
-		return "", fmt.Errorf("write STRM file failed: %v", err)
+	var writeErr error
+	if sg.Output != nil {
+		_, writeErr = sg.Output.Write(context.Background(), video.RelativePath, strmFilepath, strmContent+"\n", "", "")
+	} else {
+		writeErr = os.WriteFile(strmFilepath, []byte(strmContent), 0644)
+	}
+	if writeErr != nil {
+		return "", writeErr
 	}
 
 	return strmFilepath, nil

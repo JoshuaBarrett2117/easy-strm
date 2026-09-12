@@ -10,9 +10,15 @@ import (
 )
 
 type TaskController struct {
+	retryStrmTask         func(string, map[string]interface{}) error
 	taskService           *service.TaskService
 	getAllTasks           func() (interface{}, error)
 	retryAutoOrganizeTask func(taskID string) error
+}
+
+// SetRetryStrmTask 注入可恢复的 STRM 执行入口。
+func (c *TaskController) SetRetryStrmTask(fn func(string, map[string]interface{}) error) {
+	c.retryStrmTask = fn
 }
 
 func NewTaskController(taskService *service.TaskService) *TaskController {
@@ -144,6 +150,14 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 	}
 
 	taskType, _ := task["task_type"].(string)
+	if taskType == "strm_generate" && c.retryStrmTask != nil {
+		if err := c.retryStrmTask(taskID, task); err != nil {
+			ErrorResp(ctx, 400, err.Error())
+			return
+		}
+		SuccessResp(ctx, gin.H{"task_id": taskID, "message": "任务已重新派发"})
+		return
+	}
 	if taskType == "watch_auto_organize" && c.retryAutoOrganizeTask != nil {
 		if err := c.retryAutoOrganizeTask(taskID); err != nil {
 			logger.Errorf("TaskController[Resume] failed to retry auto organize task: %v", err)

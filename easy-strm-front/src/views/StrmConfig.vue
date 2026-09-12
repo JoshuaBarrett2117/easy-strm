@@ -200,6 +200,8 @@ import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import {
   NAlert,
   NButton,
+  NCheckbox,
+  useDialog,
   NDataTable,
   NDropdown,
   NForm,
@@ -242,6 +244,7 @@ import { showAlertDialog, showConfirmDialog } from '../utils/ui/messageBox'
 const DEFAULT_EXTENSION = '.mp4,.avi,.mkv,.mov,.wmv,.flv,.webm,.m4v,.mpeg,.mpg,.3gp,.rmvb,.rm,.vob,.ts,.m2ts,.divx,.asf'
 
 const message = useMessage()
+const generateDialog = useDialog()
 
 // STRM 配置列表
 const strmConfigList = ref([])
@@ -741,17 +744,19 @@ const handleDelete = (id) => {
 
 // 全量生成 STRM 文件
 const handleFullGenerate = (id) => {
-  showConfirmDialog('确定要全量生成 STRM 文件吗？这将清空目标目录内的所有内容并重新生成 STRM 文件。', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消'
-  }).then(() => {
+  const clear = ref(false)
+  generateDialog.warning({title:'全量生成 STRM', content:()=>h('div',{},[
+    h('p',{},`配置 #${id}：${strmConfigList.value.find(row=>row.id===id)?.local_path || ''}`),
+    h(NCheckbox,{checked:clear.value,'onUpdate:checked':value=>clear.value=value},()=> '生成前清空目标目录'),
+    h('p',{},clear.value?'将删除目录内全部内容，包括分享 STRM、字幕、图片和其他配置文件。':'保留现有文件；其他来源占用的路径将报告冲突。')
+  ]),positiveText:'生成',negativeText:'取消',onPositiveClick:() => {
     // 先清除之前的任务
     clearTask()
     generatingConfigId.value = id
     // 初始化任务状态为 running
     taskInfo.value = { status: 'running', total_files: 0, processed_files: 0, success_files: 0, failed_files: 0 }
 
-    generateFullStrmConfig(id).then((resp) => {
+    generateFullStrmConfig(id, clear.value).then((resp) => {
       const taskId = resp.data.task_id
       if (taskId) {
         currentTaskId.value = taskId
@@ -764,7 +769,7 @@ const handleFullGenerate = (id) => {
       message.error('全量生成 STRM 文件失败')
       clearTask()
     })
-  }).catch(() => {})
+  }})
 }
 
 // 处理定时任务下拉菜单命令

@@ -14,22 +14,23 @@ import (
 
 // StrmConfigDetail STRM配置详情（用于回调注入时传递配置数据）
 type StrmConfigDetail struct {
-	ID               int
-	Cloud115Id       int
-	NetDiskPath      string
-	LocalPath        string
-	Cron             string
-	Extension        string
-	SyncMode         string
-	SourceAccount    int
-	TargetAccount    int
-	TargetDirectory  string
-	AutoCleanup      bool
-	CleanupThreshold int
-	CleanupPolicy    string
-	MaxConcurrency   int
-	CreateTime       time.Time
-	UpdateTime       time.Time
+	ClearBeforeGenerate bool
+	ID                  int
+	Cloud115Id          int
+	NetDiskPath         string
+	LocalPath           string
+	Cron                string
+	Extension           string
+	SyncMode            string
+	SourceAccount       int
+	TargetAccount       int
+	TargetDirectory     string
+	AutoCleanup         bool
+	CleanupThreshold    int
+	CleanupPolicy       string
+	MaxConcurrency      int
+	CreateTime          time.Time
+	UpdateTime          time.Time
 }
 
 // Cloud115AccountBrief 115账号简要信息（用于回调注入时传递账号数据）
@@ -369,6 +370,15 @@ func (c *StrmController) DeleteConfig(ctx *gin.Context) {
 // GenerateFull 全量生成STRM文件（异步）
 // Route: POST /strm/config/:id/generate/full
 func (c *StrmController) GenerateFull(ctx *gin.Context) {
+	var input struct {
+		Clear bool `json:"clear_before_generate"`
+	}
+	if ctx.Request.ContentLength > 0 {
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ErrorResp(ctx, 400, "清空选项必须为布尔值")
+			return
+		}
+	}
 	idStr := ctx.Param("id")
 	var id int
 	fmt.Sscanf(idStr, "%d", &id)
@@ -390,6 +400,7 @@ func (c *StrmController) GenerateFull(ctx *gin.Context) {
 	}
 	logger.Infof("StrmController[GenerateFull] 找到配置 ID %d: cloud115_id=%d, net_disk_path=%s, local_path=%s",
 		strmConfig.ID, strmConfig.Cloud115Id, strmConfig.NetDiskPath, strmConfig.LocalPath)
+	strmConfig.ClearBeforeGenerate = input.Clear
 
 	// 获取115云账号
 	cloud115, err := c.getCloud115ByID(strmConfig.Cloud115Id)

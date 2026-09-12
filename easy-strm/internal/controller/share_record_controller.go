@@ -58,6 +58,16 @@ func (c *ShareRecordController) ClearMedia(x *gin.Context) {
 	SuccessResp(x, gin.H{"deleted": count})
 }
 
+// ClearAllMedia 清空全部分享的媒体内容，返回实际删除条数。
+func (c *ShareRecordController) ClearAllMedia(x *gin.Context) {
+	count, err := c.s.ClearAllMedia(x)
+	if err != nil {
+		ErrorResp(x, 409, err.Error())
+		return
+	}
+	SuccessResp(x, gin.H{"deleted": count})
+}
+
 // ParseImport 返回批量分享预览，不创建分享或执行网盘操作。
 func (c *ShareRecordController) ParseImport(x *gin.Context) {
 	var input struct {
@@ -98,7 +108,7 @@ func (c *ShareRecordController) List(x *gin.Context) {
 	p, _ := strconv.Atoi(x.DefaultQuery("page", "1"))
 	z, _ := strconv.Atoi(x.DefaultQuery("page_size", "20"))
 	shareID, _ := strconv.Atoi(x.Query("share_id"))
-	v, e := c.s.List(x, domain.ShareRecordQuery{ShareID:shareID, Summary: true, Keyword: x.Query("keyword"), Page: p, PageSize: z})
+	v, e := c.s.List(x, domain.ShareRecordQuery{ShareID: shareID, Summary: true, Keyword: x.Query("keyword"), Page: p, PageSize: z})
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
@@ -200,6 +210,38 @@ func (c *ShareRecordController) IdentifyRecord(x *gin.Context) {
 		return
 	}
 	SuccessResp(x, gin.H{"task_id": taskID, "message": "单条分享识别任务已创建"})
+}
+
+// SyncRecord 为单条分享创建文件同步任务。
+func (c *ShareRecordController) SyncRecord(x *gin.Context) {
+	id, err := strconv.Atoi(x.Param("id"))
+	if err != nil || id < 1 {
+		ErrorResp(x, 400, "分享ID无效")
+		return
+	}
+	taskID, err := c.s.StartRecordSync(x, id)
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, gin.H{"task_id": taskID, "message": "分享文件同步任务已创建"})
+}
+
+// ListFiles 按页读取分享中的真实文件及识别状态。
+func (c *ShareRecordController) ListFiles(x *gin.Context) {
+	id, e1 := strconv.Atoi(x.Param("id"))
+	page, e2 := strconv.Atoi(x.DefaultQuery("page", "1"))
+	size, e3 := strconv.Atoi(x.DefaultQuery("page_size", "20"))
+	if e1 != nil || e2 != nil || e3 != nil || id < 1 || page < 1 || size < 1 || size > 200 {
+		ErrorResp(x, 400, "分页参数无效")
+		return
+	}
+	result, err := c.s.ListFiles(x, id, page, size)
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, result)
 }
 
 // ListMedia 按页读取已识别海报，默认每页十条。

@@ -23,11 +23,15 @@ func InitCronScheduler() error {
 	scheduler.SetTaskService(service.NewTaskService(dao.NewTaskRedisDAOWithGlobal()))
 	params := []service.CronParameter{{Key: "cloud115_id", Label: "115账号ID"}, {Key: "strm_config_id", Label: "STRM配置ID"}}
 	for _, kind := range []string{"full_generate", "incremental_sync"} {
+		handlerParams := append([]service.CronParameter(nil), params...)
+		if kind == "full_generate" {
+			handlerParams = append(handlerParams, service.CronParameter{Key: "clear_before_generate", Label: "生成前清空目标目录全部内容", Type: "boolean"})
+		}
 		name := "STRM全量生成"
 		if kind == "incremental_sync" {
 			name = "STRM增量同步"
 		}
-		scheduler.Register(service.CronHandler{Key: kind, Name: name, Parameters: params, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+		scheduler.Register(service.CronHandler{Key: kind, Name: name, Parameters: handlerParams, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
 			cfg, e := GetStrmConfigByID(t.StrmConfigID)
 			if e != nil {
 				return "", e
@@ -43,6 +47,7 @@ func InitCronScheduler() error {
 				return "", fmt.Errorf("115账号不存在")
 			}
 			if t.Handler == "full_generate" {
+				cfg.ClearBeforeGenerate, _ = t.Params["clear_before_generate"].(bool)
 				r, e := RunFullStrmGenerate(cfg, cloud, id)
 				if e != nil {
 					return "", e
@@ -117,6 +122,11 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	}
 	defer release()
 	Info("Running incremental sync for config ID: %d", strmConfig.ID)
+	output, err := service.NewStrmOutput(context.Background(), db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer output.Store.Close()
 
 	result := &IncrementalSyncResult{}
 
@@ -234,6 +244,14 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 		}
 
 		if _, exists := cloudFilesMap[path]; !exists {
+			normalized, e := service.NormalizeStrmOutputPath(existingFile.LocalStrmPath)
+			if e != nil {
+				return nil, e
+			}
+			own, e := output.Store.CheckPath(context.Background(), normalized, output.Owner, path)
+			if e != nil || !own {
+				continue
+			}
 			if err := os.Remove(existingFile.LocalStrmPath); err != nil && !os.IsNotExist(err) {
 				Warn("删除STRM文件失败 %s: %v", existingFile.LocalStrmPath, err)
 			} else {
@@ -245,6 +263,7 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 	}
 
 	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	generator.Output = output
 	generator.ProgressCallback = func(totalFiles, processedFiles, successFiles, failedFiles int) {
 		UpdateTaskProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles)
 	}
@@ -256,20 +275,15 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 			return result, nil
 		}
 
-		if existingFile, exists := existingMap[video.RelativePath]; exists {
-			if existingFile.PickCode == video.PickCode && existingFile.Sha1 == video.Sha1 {
-				result.Skipped++
-				continue
-			}
-		}
-
 		localStrmPath, err := generator.GenerateSingleStrmFile(video, strmConfig.NetDiskPath)
 		if err != nil {
 			Warn("生成STRM文件失败 %s: %v", video.Name, err)
 			continue
 		}
 
-		UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath)
+		if _, e := UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath); e != nil {
+			return result, e
+		}
 		result.Added++
 		Debug("生成STRM文件: %s", localStrmPath)
 	}
@@ -286,11 +300,32 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	}
 	defer release()
 	Info("[cron] Running full STRM generate for config ID: %d", strmConfig.ID)
+	taskStore := dao.NewTaskRedisDAOWithGlobal()
+	metadata := map[string]interface{}{}
+	if task, e := taskStore.Get(taskID); e == nil && task != nil {
+		if m, ok := task["metadata"].(map[string]interface{}); ok {
+			metadata = m
+		}
+	}
+	if prior, ok := metadata["clear_before_generate"].(bool); ok {
+		strmConfig.ClearBeforeGenerate = prior
+	}
+	metadata["clear_before_generate"] = strmConfig.ClearBeforeGenerate
+	metadata["output_path"] = strmConfig.LocalPath
+	metadata["strm_config_id"] = strmConfig.ID
+	if e := taskStore.UpdateMetadata(taskID, metadata); e != nil {
+		return nil, e
+	}
 
 	result := &FullGenerateResult{}
 
 	client := NewClient(&Config{ServerURL: "http://localhost:8082"})
 	Info("[cron] STRM output directory: %s", strmConfig.LocalPath)
+	output, err := service.NewStrmOutput(context.Background(), db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer output.Store.Close()
 
 	cid, err := client.GetCIDByPath(strmConfig.NetDiskPath, cloud115.ID, cloud115.Cookie)
 	if err != nil {
@@ -381,15 +416,14 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 
 	// 全量生成必须先清空目标目录，避免已从网盘移除的旧文件继续残留。
 	generator := NewStrmGeneratorWithServer(strmConfig.LocalPath, GetConfig().ServerURL, ".strm")
+	generator.Output = output
 	if IsTaskCancelled(taskID) {
 		return nil, fmt.Errorf("任务已取消")
 	}
-	if err := generator.CleanupStrmFiles(); err != nil {
-		return nil, fmt.Errorf("清空STRM目标目录失败: %v", err)
-	}
-
-	if err := DeleteStrmFilesByConfigID(strmConfig.ID); err != nil {
-		return nil, fmt.Errorf("删除旧STRM记录失败: %w", err)
+	if strmConfig.ClearBeforeGenerate {
+		if err := output.Clear(context.Background()); err != nil {
+			return nil, fmt.Errorf("清空STRM目标目录失败: %w", err)
+		}
 	}
 
 	if result.Total == 0 {
@@ -412,10 +446,7 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 		if fileID == "" {
 			fileID = video.Sha1
 		}
-		if fileID != "" && IsFileProcessed(taskID, fileID) {
-			Debug("[cron] 跳过已处理文件: %s", video.Name)
-			continue
-		}
+		// 恢复时由文件内容核对决定是否跳过，不能只信任旧进度集合。
 
 		localStrmPath, err := generator.GenerateSingleStrmFile(video, strmConfig.NetDiskPath)
 		processedFiles++
@@ -426,7 +457,9 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 			continue
 		}
 
-		UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath)
+		if _, e := UpsertStrmFile(strmConfig.ID, video.Name, video.RelativePath, video.PickCode, video.Sha1, int64(video.Size), localStrmPath); e != nil {
+			return result, e
+		}
 		successFiles++
 		UpdateTaskProgress(taskID, result.Total, processedFiles, successFiles, failedFiles)
 		Debug("[cron] 生成STRM文件: %s", localStrmPath)
@@ -442,6 +475,14 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 	}
 
 	Info("[cron] Full STRM generation completed: total=%d success=%d failed=%d output=%s", result.Total, successFiles, failedFiles, strmConfig.LocalPath)
+	metadata["added"] = output.Added
+	metadata["updated"] = output.Updated
+	metadata["skipped"] = output.Skipped
+	metadata["conflicts"] = output.Conflicts
+	metadata["failed"] = failedFiles
+	if e := taskStore.UpdateMetadata(taskID, metadata); e != nil {
+		return result, e
+	}
 	if failedFiles > 0 {
 		return result, fmt.Errorf("生成结束：成功%d，失败%d", successFiles, failedFiles)
 	}

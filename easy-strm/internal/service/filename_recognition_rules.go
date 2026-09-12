@@ -90,11 +90,11 @@ func (s *TmdbService) ResetFilenameRecognitionRules() (FilenameRecognitionRuleSe
 func DefaultFilenameRecognitionRules() []FilenameRecognitionRule {
 	return []FilenameRecognitionRule{
 		{ID: "tv_sxe_compact", Name: "紧凑型 SxxExx 合并剧集", MediaType: "tv", Enabled: true, Priority: 9,
-			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)\s*$`,
+			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d+)E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)\s*$`,
 			Example: "举重妖精金福珠S01E01.mkv", Description: "支持中文标题紧贴 S01E01，以及 S01E01E02 连续合并集。"},
 		{
 			ID: "tv_sxe", Name: "SxxExx 标准剧集", MediaType: "tv", Enabled: true, Priority: 10,
-			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d{1,2})E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)(?:\s+.*)?$`,
+			Pattern: `(?i)^(?P<title>.+?)\s*S(?P<season>\d+)E(?P<episode>\d{1,3})(?P<episodes>(?:\s*E\d{1,3})*)(?:\s+.*)?$`,
 			Example: "你是谁 - S01E01E02 .mp4", Description: "支持片名紧贴S01E01、特别篇S00及S01E01E02合并集；episodes保留后续全部集号。",
 		},
 		{
@@ -147,9 +147,15 @@ func (s *TmdbService) loadFilenameRecognitionRules() ([]FilenameRecognitionRule,
 			if json.Unmarshal([]byte(config.ConfigVal), &stored) == nil {
 				// 仅升级未修改过的旧内置表达式，保留用户的开关、顺序及自定义规则。
 				for i := range stored {
-					if stored[i].ID == "tv_sxe" && stored[i].Pattern == legacySxePattern {
-						stored[i].Pattern = rules[0].Pattern
-						stored[i].Description = rules[0].Description
+					for _, builtin := range rules {
+						if stored[i].ID != builtin.ID {
+							continue
+						}
+						oldPattern := strings.ReplaceAll(builtin.Pattern, `(?P<season>\d+)`, `(?P<season>\d{1,2})`)
+						if stored[i].Pattern == oldPattern || (stored[i].ID == "tv_sxe" && stored[i].Pattern == legacySxePattern) {
+							stored[i].Pattern = builtin.Pattern
+							stored[i].Description = builtin.Description
+						}
 					}
 				}
 				if normalized, _, validateErr := validateAndCompileFilenameRecognitionRules(stored); validateErr == nil {

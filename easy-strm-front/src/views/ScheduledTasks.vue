@@ -43,7 +43,7 @@
             @update:value="resetParams"
         /></n-form-item>
         <n-form-item v-for="parameter in currentHandler?.parameters || []" :key="parameter.key" :label="parameter.label"
-          ><n-input-number v-model:value="form.params[parameter.key]" :min="1" :precision="0"
+          ><n-checkbox v-if="parameter.type === 'boolean'" v-model:checked="form.params[parameter.key]">清空目标目录全部内容</n-checkbox><n-input-number v-else v-model:value="form.params[parameter.key]" :min="1" :precision="0"
         /></n-form-item>
         <n-form-item label="Cron表达式（五段或六段）"
           ><n-input v-model:value="form.cron_expr" placeholder="0 0 3 * * *"
@@ -77,6 +77,7 @@ import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   NAlert,
   NButton,
+  NCheckbox,
   NDataTable,
   NForm,
   NFormItem,
@@ -148,7 +149,7 @@ const showEdit = ref(false),
 const currentHandler = computed(() => handlers.value.find((h) => h.key === form.value.handler))
 const resetParams = () => {
   form.value.params = Object.fromEntries(
-    (currentHandler.value?.parameters || []).map((p) => [p.key, p.default || null])
+    (currentHandler.value?.parameters || []).map((p) => [p.key, p.type==='boolean' ? false : p.default || null])
   )
 }
 const edit = (row) => {

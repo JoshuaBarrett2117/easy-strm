@@ -89,11 +89,11 @@ func (t *TaskRedisDAO) CreateWithPriority(taskID string, taskType, taskName stri
 
 	ctx := context.Background()
 	key := taskKeyPrefix + taskID
-	if err := redisClient.Set(ctx, key, taskJSON, 24*time.Hour).Err(); err != nil {
+	if err := t.client.Set(ctx, key, taskJSON, 24*time.Hour).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 保存失败: %v", err)
 	}
 
-	if err := redisClient.RPush(ctx, taskListKey, taskID).Err(); err != nil {
+	if err := t.client.RPush(ctx, taskListKey, taskID).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 添加到列表失败: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func (t *TaskRedisDAO) Get(taskID string) (map[string]interface{}, error) {
 	ctx := context.Background()
 	key := taskKeyPrefix + taskID
 
-	taskJSON, err := redisClient.Get(ctx, key).Result()
+	taskJSON, err := t.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return nil, nil
 	}
@@ -212,7 +212,9 @@ func (t *TaskRedisDAO) Cancel(taskID string) error {
 
 	status, _ := task["status"].(string)
 	// 处理器可能在取消函数返回后先写入终态；重复取消保持幂等。
-	if status == "cancelled" { return nil }
+	if status == "cancelled" {
+		return nil
+	}
 	if status != "pending" && status != "running" {
 		return fmt.Errorf("TaskRedisDAO[Cancel] 任务状态不允许取消: %s (当前: %s)", taskID, status)
 	}
@@ -227,11 +229,11 @@ func (t *TaskRedisDAO) Delete(taskID string) error {
 	ctx := context.Background()
 	key := taskKeyPrefix + taskID
 
-	if err := redisClient.Del(ctx, key).Err(); err != nil {
+	if err := t.client.Del(ctx, key).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[Delete] 删除失败: %v", err)
 	}
 
-	if err := redisClient.LRem(ctx, taskListKey, 0, taskID).Err(); err != nil {
+	if err := t.client.LRem(ctx, taskListKey, 0, taskID).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[Delete] 从列表移除失败: %v", err)
 	}
 
@@ -242,7 +244,7 @@ func (t *TaskRedisDAO) Delete(taskID string) error {
 // GetAll 获取所有任务（按创建时间降序）
 func (t *TaskRedisDAO) GetAll() ([]map[string]interface{}, error) {
 	ctx := context.Background()
-	taskIDs, err := redisClient.LRange(ctx, taskListKey, 0, -1).Result()
+	taskIDs, err := t.client.LRange(ctx, taskListKey, 0, -1).Result()
 	if err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("TaskRedisDAO[GetAll] 获取列表失败: %v", err)
 	}
@@ -295,7 +297,7 @@ func (t *TaskRedisDAO) save(taskID string, task map[string]interface{}) error {
 		return fmt.Errorf("TaskRedisDAO[save] 序列化失败: %v", err)
 	}
 
-	if err := redisClient.Set(ctx, key, taskJSON, 24*time.Hour).Err(); err != nil {
+	if err := t.client.Set(ctx, key, taskJSON, 24*time.Hour).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[save] 保存失败: %v", err)
 	}
 
@@ -308,14 +310,14 @@ func (t *TaskRedisDAO) save(taskID string, task map[string]interface{}) error {
 func (t *TaskRedisDAO) SetCancelFlag(taskID string) error {
 	ctx := context.Background()
 	key := taskCancelKeyPrefix + taskID
-	return redisClient.Set(ctx, key, "1", 24*time.Hour).Err()
+	return t.client.Set(ctx, key, "1", 24*time.Hour).Err()
 }
 
 // IsCancelled 检查任务是否已被取消
 func (t *TaskRedisDAO) IsCancelled(taskID string) bool {
 	ctx := context.Background()
 	key := taskCancelKeyPrefix + taskID
-	val, err := redisClient.Get(ctx, key).Result()
+	val, err := t.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return false
 	}
@@ -330,7 +332,7 @@ func (t *TaskRedisDAO) IsCancelled(taskID string) bool {
 func (t *TaskRedisDAO) ClearCancelFlag(taskID string) error {
 	ctx := context.Background()
 	key := taskCancelKeyPrefix + taskID
-	return redisClient.Del(ctx, key).Err()
+	return t.client.Del(ctx, key).Err()
 }
 
 // --- 任务进度追踪操作（用于恢复） ---
@@ -339,14 +341,14 @@ func (t *TaskRedisDAO) ClearCancelFlag(taskID string) error {
 func (t *TaskRedisDAO) AddProcessedFileID(taskID string, fileID string) error {
 	ctx := context.Background()
 	key := taskProgressKeyPrefix + taskID
-	return redisClient.SAdd(ctx, key, fileID).Err()
+	return t.client.SAdd(ctx, key, fileID).Err()
 }
 
 // IsFileProcessed 检查文件是否已被处理过
 func (t *TaskRedisDAO) IsFileProcessed(taskID string, fileID string) bool {
 	ctx := context.Background()
 	key := taskProgressKeyPrefix + taskID
-	isMember, err := redisClient.SIsMember(ctx, key, fileID).Result()
+	isMember, err := t.client.SIsMember(ctx, key, fileID).Result()
 	if err != nil {
 		logger.Warnf("TaskRedisDAO[IsFileProcessed] 检查文件处理状态失败 %s/%s: %v", taskID, fileID, err)
 		return false
@@ -358,14 +360,14 @@ func (t *TaskRedisDAO) IsFileProcessed(taskID string, fileID string) bool {
 func (t *TaskRedisDAO) GetProcessedFileIDs(taskID string) ([]string, error) {
 	ctx := context.Background()
 	key := taskProgressKeyPrefix + taskID
-	return redisClient.SMembers(ctx, key).Result()
+	return t.client.SMembers(ctx, key).Result()
 }
 
 // ClearProgress 清除任务的进度记录
 func (t *TaskRedisDAO) ClearProgress(taskID string) error {
 	ctx := context.Background()
 	key := taskProgressKeyPrefix + taskID
-	return redisClient.Del(ctx, key).Err()
+	return t.client.Del(ctx, key).Err()
 }
 
 // Resume 恢复已取消或失败的任务

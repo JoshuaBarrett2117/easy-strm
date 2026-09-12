@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -142,6 +143,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		return link.Url.Url, nil
 	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
+	shareStrmService.SetExportDatabase(dao.DB)
+	scheduler.Register(service.CronHandler{Key: "share_strm_incremental_export", Name: "分享库 STRM 增量导出", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+		return "分享库增量检查完成", shareStrmService.RunScheduledExport(ctx, id)
+	}})
 	r.GET("/share-strm/:id", shareStrmController.Playback)
 	r.HEAD("/share-strm/:id", shareStrmController.Playback)
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)
@@ -155,6 +160,65 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
 	logController := controller.NewLogController(systemConfigService)
 	taskController := controller.NewTaskController(taskService)
+	taskController.SetRetryStrmTask(func(id string, task map[string]interface{}) error {
+		metadata, _ := task["metadata"].(map[string]interface{})
+		configID := service.CronInt(metadata, "strm_config_id")
+		share, _ := metadata["share_export"].(bool)
+		if !share && configID == 0 {
+			return fmt.Errorf("旧任务缺少执行配置，请从配置页面重新生成")
+		}
+		var cfg *StrmConfig
+		var account *Cloud115
+		var e error
+		if !share {
+			cfg, e = GetStrmConfigByID(configID)
+			if e != nil {
+				return e
+			}
+			if cfg == nil {
+				return fmt.Errorf("配置不存在")
+			}
+			account, e = GetCloud115ByID(cfg.Cloud115Id)
+			if e != nil {
+				return e
+			}
+			if account == nil {
+				return fmt.Errorf("账号不存在")
+			}
+		}
+		if e = taskService.Resume(id); e != nil {
+			return e
+		}
+		go func() {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			taskService.RegisterCancel(id, cancel)
+			defer taskService.RemoveCancel(id)
+			if e := taskService.UpdateStatus(id, "running"); e != nil {
+				return
+			}
+			var runErr error
+			if share {
+				raw, _ := json.Marshal(metadata["export_query"])
+				var q domain.ShareLibraryQuery
+				runErr = json.Unmarshal(raw, &q)
+				if runErr == nil {
+					runErr = shareStrmService.RunExportQuery(ctx, id, q)
+				}
+			} else {
+				_, runErr = RunFullStrmGenerate(cfg, account, id)
+			}
+			if taskService.IsCancelled(id) {
+				return
+			}
+			if runErr != nil {
+				taskService.SetError(id, runErr.Error())
+			} else {
+				taskService.UpdateStatus(id, "completed")
+			}
+		}()
+		return nil
+	})
 	networkController := controller.NewNetworkController()
 	embyController := controller.NewEmbyController(embyService)
 	embyManagementController := controller.NewEmbyManagementController(embyManagementService)
@@ -252,22 +316,23 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// 转换为 main 包类型以调用 RunFullStrmGenerate
 		mainCfg := &StrmConfig{
-			ID:               cfg.ID,
-			Cloud115Id:       cfg.Cloud115Id,
-			NetDiskPath:      cfg.NetDiskPath,
-			LocalPath:        cfg.LocalPath,
-			Cron:             cfg.Cron,
-			Extension:        cfg.Extension,
-			SyncMode:         cfg.SyncMode,
-			SourceAccount:    cfg.SourceAccount,
-			TargetAccount:    cfg.TargetAccount,
-			TargetDirectory:  cfg.TargetDirectory,
-			AutoCleanup:      cfg.AutoCleanup,
-			CleanupThreshold: cfg.CleanupThreshold,
-			CleanupPolicy:    cfg.CleanupPolicy,
-			MaxConcurrency:   cfg.MaxConcurrency,
-			CreateTime:       cfg.CreateTime,
-			UpdateTime:       cfg.UpdateTime,
+			ClearBeforeGenerate: cfg.ClearBeforeGenerate,
+			ID:                  cfg.ID,
+			Cloud115Id:          cfg.Cloud115Id,
+			NetDiskPath:         cfg.NetDiskPath,
+			LocalPath:           cfg.LocalPath,
+			Cron:                cfg.Cron,
+			Extension:           cfg.Extension,
+			SyncMode:            cfg.SyncMode,
+			SourceAccount:       cfg.SourceAccount,
+			TargetAccount:       cfg.TargetAccount,
+			TargetDirectory:     cfg.TargetDirectory,
+			AutoCleanup:         cfg.AutoCleanup,
+			CleanupThreshold:    cfg.CleanupThreshold,
+			CleanupPolicy:       cfg.CleanupPolicy,
+			MaxConcurrency:      cfg.MaxConcurrency,
+			CreateTime:          cfg.CreateTime,
+			UpdateTime:          cfg.UpdateTime,
 		}
 		mainAcc := &Cloud115{
 			ID:                acc.ID,
@@ -929,12 +994,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/share-library/strm/export", shareStrmController.Export)
 		auth.POST("/media/share-records", shareRecordController.Create)
 		auth.POST("/media/share-records/parse", shareRecordController.ParseImport)
+		auth.DELETE("/media/share-records/media", shareRecordController.ClearAllMedia)
 		auth.PUT("/media/share-records/:id", shareRecordController.Update)
 		auth.DELETE("/media/share-records/:id", shareRecordController.Delete)
 		auth.GET("/media/share-records/:id/media", shareRecordController.ListMedia)
+		auth.GET("/media/share-records/:id/files", shareRecordController.ListFiles)
 		auth.DELETE("/media/share-records/:id/media", shareRecordController.ClearMedia)
 		auth.POST("/media/share-records/:id/media", shareRecordController.AddMedia)
 		auth.POST("/media/share-records/:id/identify", shareRecordController.IdentifyRecord)
+		auth.POST("/media/share-records/:id/sync", shareRecordController.SyncRecord)
 		auth.DELETE("/media/share-records/:id/media/:mediaId", shareRecordController.DeleteMedia)
 		auth.POST("/media/share-records/media/:mediaId/identify", shareRecordController.Identify)
 		auth.POST("/media/share-records/media/:mediaId/manual-identify", shareRecordController.ManualIdentify)

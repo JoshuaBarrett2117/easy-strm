@@ -19,7 +19,13 @@ func setupTaskRedisMock(t *testing.T) *redis.Client {
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Skip("Redis not available, skipping test")
 	}
-	client.Del(ctx, "easy_strm:task:*", "easy_strm:task:cancel:*", "easy_strm:task:progress:*")
+	for _, pattern := range []string{"easy_strm:task:*", "easy_strm:task:cancel:*", "easy_strm:task:progress:*"} {
+		keys, _ := client.Keys(ctx, pattern).Result()
+		if len(keys) > 0 {
+			_ = client.Del(ctx, keys...).Err()
+		}
+	}
+	_ = client.Del(ctx, "easy_strm:task:list").Err()
 	return client
 }
 

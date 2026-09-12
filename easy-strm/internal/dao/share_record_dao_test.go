@@ -35,8 +35,19 @@ func TestShareMediaIdentifyConflict(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.ExpectExec("UPDATE t_share_media SET status").WithArgs("identified", sqlmock.AnyArg(), "", 7, 2).WillReturnResult(sqlmock.NewResult(0, affected))
-		err = NewShareRecordDAO(db).Identify(context.Background(), domain.ShareMedia{ID: 7, Version: 2}, "identified", &domain.TmdbIdentifyResult{Success: true, Title: "七龙珠", MediaType: "tv", TmdbID: 12609}, "")
+		mock.ExpectBegin()
+		mock.ExpectExec("UPDATE t_share_media_file SET status").WithArgs("identified", sqlmock.AnyArg(), "", 7, 2).WillReturnResult(sqlmock.NewResult(0, affected))
+		if affected == 1 {
+			mock.ExpectQuery("SELECT media_id FROM t_share_media_file").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"media_id"}).AddRow(nil))
+			mock.ExpectQuery("INSERT INTO t_share_media").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
+			mock.ExpectExec("UPDATE t_share_media_file SET media_id").WithArgs(int64(11), "tmdb", 7).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectExec("DELETE FROM t_share_media_file_episode").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 0))
+			mock.ExpectExec("INSERT INTO t_share_media_file_episode").WithArgs(7, 1, 1).WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectCommit()
+		} else {
+			mock.ExpectRollback()
+		}
+		err = NewShareRecordDAO(db).Identify(context.Background(), domain.ShareMedia{ID: 7, Version: 2}, "identified", &domain.TmdbIdentifyResult{Success: true, Title: "七龙珠", MediaType: "tv", TmdbID: 12609}, "", domain.ShareEpisode{SeasonNumber: 1, EpisodeNumber: 1})
 		if (err != nil) != (affected == 0) {
 			t.Fatalf("affected=%d err=%v", affected, err)
 		}
@@ -44,6 +55,50 @@ func TestShareMediaIdentifyConflict(t *testing.T) {
 			t.Fatal(err)
 		}
 		db.Close()
+	}
+}
+
+// TestFailedShareIdentifyStaysInFileTable 失败候选仅保存重试状态，禁止写入媒体实体表。
+func TestFailedShareIdentifyStaysInFileTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE t_share_media_file SET status").WithArgs("failed", sqlmock.AnyArg(), "未匹配", 7, 2).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT media_id FROM t_share_media_file").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"media_id"}).AddRow(nil))
+	mock.ExpectExec("DELETE FROM t_share_media_file_episode").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	err = NewShareRecordDAO(db).Identify(context.Background(), domain.ShareMedia{ID: 7, Version: 2}, "failed", &domain.TmdbIdentifyResult{Success: false}, "未匹配")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFailedReidentifyRemovesMediaEntity 已识别文件重试失败后必须解除并清理旧媒体实体。
+func TestFailedReidentifyRemovesMediaEntity(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE t_share_media_file SET status").WithArgs("failed", sqlmock.AnyArg(), "未匹配", 7, 2).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT media_id FROM t_share_media_file").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"media_id"}).AddRow(11))
+	mock.ExpectExec("UPDATE t_share_media_file SET media_id=NULL").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM t_share_media_file_episode").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM t_share_media master").WithArgs(int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	err = NewShareRecordDAO(db).Identify(context.Background(), domain.ShareMedia{ID: 7, Version: 2}, "failed", nil, "未匹配")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -62,7 +117,7 @@ func TestShareRecordListPaginatesParents(t *testing.T) {
 			}
 			count.WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(23))
 			// 限制必须在 JOIN 之前，SQL 模式会使旧的关联行分页实现失败。
-			query := mock.ExpectQuery(`FROM \(SELECT .* FROM t_share_record s.*ORDER BY s.id DESC LIMIT \$\d OFFSET \$\d\) s LEFT JOIN t_share_media`)
+			query := mock.ExpectQuery(`FROM \(SELECT .* FROM t_share_record s.*ORDER BY s.id DESC LIMIT \$\d OFFSET \$\d\) s LEFT JOIN v_share_media_detail`)
 			if keyword != "" {
 				query.WithArgs("%合集%", 20, 20)
 			} else {

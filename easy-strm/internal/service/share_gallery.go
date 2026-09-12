@@ -37,20 +37,44 @@ func shareCandidatePath(value string) string {
 	return path.Clean(strings.ReplaceAll(value, "\\", "/"))
 }
 
+func isShareVideoFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts", ".m2ts", ".rm", ".rmvb", ".mpg", ".mpeg", ".iso":
+		return true
+	default:
+		return false
+	}
+}
+
 // selectShareIdentifyCandidates 目录已覆盖的单集不重复识别；混放在根目录的单集和独立电影仍保留。
 // selectShareMediaFiles returns concrete media files for step 1 ingestion.
 func selectShareMediaFiles(files []domain.ShareFileInfo) []domain.ShareFileInfo {
 	result := make([]domain.ShareFileInfo, 0, len(files))
-	for _, file := range files {
-		if file.IsDir {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(file.Name))
-		switch ext {
-		case ".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv", ".webm", ".m4v", ".ts", ".m2ts", ".mpg", ".mpeg", ".iso":
-			result = append(result, file)
+	seen := map[string]bool{}
+	var walk func([]domain.ShareFileInfo)
+	walk = func(items []domain.ShareFileInfo) {
+		for _, file := range items {
+			if file.IsDir {
+				walk(file.Children)
+				continue
+			}
+			name := file.Name
+			if name == "" {
+				name = file.Path
+			}
+			if isShareVideoFile(name) {
+				key := file.Fid
+				if key == "" {
+					key = shareCandidatePath(file.Path)
+				}
+				if !seen[key] {
+					seen[key] = true
+					result = append(result, file)
+				}
+			}
 		}
 	}
+	walk(files)
 	return result
 }
 

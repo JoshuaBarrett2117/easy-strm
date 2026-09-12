@@ -16,6 +16,7 @@ import (
 
 // CronParameter 描述处理器表单参数。
 type CronParameter struct {
+	Type    string `json:"type,omitempty"`
 	Key     string `json:"key"`
 	Label   string `json:"label"`
 	Default int    `json:"default"`
@@ -122,6 +123,16 @@ func (s *CronService) ValidateDefinition(t *domain.CronTask) error {
 	allowed := map[string]bool{}
 	for _, p := range h.Parameters {
 		allowed[p.Key] = true
+		if p.Type == "boolean" {
+			if v, ok := t.Params[p.Key]; ok {
+				if _, valid := v.(bool); !valid {
+					return fmt.Errorf("%s必须为布尔值", p.Label)
+				}
+			} else {
+				t.Params[p.Key] = false
+			}
+			continue
+		}
 		raw, exists := t.Params[p.Key]
 		if !exists {
 			raw = float64(p.Default)
@@ -399,6 +410,8 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 	}
 	kind := "cleanup"
 	if t.Handler == "full_generate" {
+		kind = "strm_generate"
+	} else if t.Handler == "share_strm_incremental_export" {
 		kind = "strm_generate"
 	} else if t.Handler == "incremental_sync" {
 		kind = "incremental_sync"

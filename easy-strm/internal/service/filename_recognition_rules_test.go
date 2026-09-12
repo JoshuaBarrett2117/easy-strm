@@ -29,7 +29,8 @@ func TestDefaultFilenameRecognitionRulesCoverCommonTVNames(t *testing.T) {
 		ruleID   string
 	}{
 		{"Show.Name.S02E07.1080p.mkv", "Show Name", 2, 7, "tv_sxe"},
-		{"Show.Name.S00E01.mkv", "Show Name", 0, 1, "tv_sxe"},
+		{"Show.Name.S452E07.1080p.mkv", "Show Name", 452, 7, "tv_sxe"},
+		{"Show.Name.S00E01.mkv", "Show Name", 0, 1, "tv_sxe_compact"},
 		{"Show Name - 2x07 - Episode title.mp4", "Show Name", 2, 7, "tv_x"},
 		{"Show Name Season 2 Episode 7.mkv", "Show Name", 2, 7, "tv_words"},
 		{"庆余年 第2季 第07集.mp4", "庆余年", 2, 7, "tv_chinese"},

@@ -88,33 +88,6 @@ func TestNormalizeMaskedMedia(t *testing.T) {
 	}
 }
 
-// TestSaveMaskedDirectories 验证同名目录按数量补齐、重扫幂等及数据库错误上报。
-func TestSaveMaskedDirectories(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	s := &ShareRecordService{dao: dao.NewShareRecordDAO(db)}
-	r := domain.ShareRecord{ID: 7, Media: []domain.ShareMedia{{FileName: "名***", Status: "failed"}}}
-	directories := []domain.ShareFileInfo{{Name: "名***"}, {Name: "名***"}}
-	mock.ExpectQuery("INSERT INTO t_share_media").WithArgs(7, "名***", "auto").WillReturnRows(sqlmock.NewRows([]string{"id", "version"}).AddRow(2, 1))
-	if err := s.saveMaskedDirectories(context.Background(), r, directories); err != nil {
-		t.Fatal(err)
-	}
-	r.Media = append(r.Media, domain.ShareMedia{FileName: "名***"})
-	if err := s.saveMaskedDirectories(context.Background(), r, directories); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery("INSERT INTO t_share_media").WithArgs(7, "新名＊＊＊", "auto").WillReturnError(context.DeadlineExceeded)
-	if err := s.saveMaskedDirectories(context.Background(), r, []domain.ShareFileInfo{{Name: "新名＊＊＊"}}); err == nil {
-		t.Fatal("应返回保存失败")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // TestParseShareRetainsMaskedStatistics 验证同名脱敏目录逐个保留用于统计，但不进入可操作文件列表。
 func TestParseShareRetainsMaskedStatistics(t *testing.T) {
 	fake := &fakeShareCloud115Client{shareSnap: mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":3,"list":[{"cid":"1","n":"名********","fc":0},{"cid":"2","n":"名********","fc":0},{"cid":"3","n":"名＊＊＊","fc":0}]}}`)}

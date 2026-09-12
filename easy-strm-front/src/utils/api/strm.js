@@ -22,8 +22,8 @@ export const deleteStrmConfig = (id) => {
   return api.delete(`/strm/config/${id}`)
 }
 
-export const generateFullStrmConfig = (id) => {
-  return api.post(`/strm/config/${id}/generate/full`)
+export const generateFullStrmConfig = (id, clearBeforeGenerate = false) => {
+  return api.post(`/strm/config/${id}/generate/full`, {clear_before_generate: clearBeforeGenerate})
 }
 
 export const getStrmTaskStatus = (taskId) => {

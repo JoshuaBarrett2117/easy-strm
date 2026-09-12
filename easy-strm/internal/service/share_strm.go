@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
@@ -31,6 +32,8 @@ type ShareStrmStore interface {
 
 // ShareStrmService 负责资料库导出及按需转存播放，复用现有分类、任务和115能力。
 type ShareStrmService struct {
+	exportDB   *sql.DB
+	output     *StrmOutput
 	store      ShareStrmStore
 	settings   ShareTaskSettingsStore
 	client     Cloud115Client
@@ -41,6 +44,30 @@ type ShareStrmService struct {
 	account    func(int) (*domain.Cloud115, error)
 	directLink func(string, int, string, string) (string, error)
 	exportMu   sync.Mutex
+}
+
+// SetExportDatabase 注入统一输出清单数据库。
+func (s *ShareStrmService) SetExportDatabase(db *sql.DB) { s.exportDB = db }
+
+// RunScheduledExport 在调度任务上下文中同步执行，不另建后台任务。
+func (s *ShareStrmService) RunScheduledExport(ctx context.Context, id string) error {
+	return s.RunExportQuery(ctx, id, domain.ShareLibraryQuery{})
+}
+
+// RunExportQuery 在已有任务中执行保存的筛选条件。
+func (s *ShareStrmService) RunExportQuery(ctx context.Context, id string, q domain.ShareLibraryQuery) error {
+	if !s.exportMu.TryLock() {
+		return fmt.Errorf("分享导出正在执行")
+	}
+	defer s.exportMu.Unlock()
+	cfg, e := s.Settings()
+	if e != nil {
+		return e
+	}
+	if e = validateShareStrmSettings(&cfg); e != nil {
+		return e
+	}
+	return s.export(ctx, cfg, q, id)
 }
 
 // NewShareStrmService 在装配层注入持久化、外部客户端和现有业务服务。
@@ -177,23 +204,11 @@ func (s *ShareStrmService) strmRelativePath(source domain.ShareStrmSource, file 
 	}
 	name := folder
 	if r.MediaType == "tv" {
-		season, episode := s.strmSeasonEpisode(r.Title, file.Path)
-		if shareCandidatePath(source.FileName) == shareCandidatePath(file.Path) && r.EpisodeNumber > 0 && (episode == 0 || r.Message == "手动识别") {
-			season, episode = r.SeasonNumber, r.EpisodeNumber
-		}
+		season, episode := r.SeasonNumber, r.EpisodeNumber
 		if episode <= 0 || season < 0 {
-			return "", fmt.Errorf("无法确定季集，请修正识别结果或文件名规则：%s", file.Path)
+			return "", fmt.Errorf("文件缺少持久化季集映射：%s", file.Path)
 		}
 		name = fmt.Sprintf("%s - S%02dE%02d", title, season, episode)
-		parsed := s.tmdb.ParseFilename(path.Base(shareCandidatePath(file.Path)))
-		if parsed.Episode == 0 {
-			parsed = s.tmdb.ParseFilename(r.Title + " " + path.Base(shareCandidatePath(file.Path)))
-		}
-		if parsed.Season == season && parsed.Episode == episode && len(parsed.Episodes) > 1 {
-			for _, next := range parsed.Episodes[1:] {
-				name += fmt.Sprintf("E%02d", next)
-			}
-		}
 		return filepath.Join(root, folder, fmt.Sprintf("Season %02d", season), name+".strm"), nil
 	}
 	return filepath.Join(root, folder, name+".strm"), nil

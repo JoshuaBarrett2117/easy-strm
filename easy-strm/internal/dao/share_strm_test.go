@@ -16,7 +16,7 @@ func TestShareStrmDAOQueriesAndMapping(t *testing.T) {
 	defer db.Close()
 	d := NewShareRecordDAO(db)
 	ctx := context.Background()
-	mock.ExpectQuery(`WITH ranked AS .*`).WithArgs("tv", 100).WillReturnRows(sqlmock.NewRows([]string{"id", "key", "url", "password", "file", "result", "remaining"}).AddRow(101, "tmdb:tv:1", "url", "code", "Show", `{"success":true,"media_type":"tv"}`, 1))
+	mock.ExpectQuery(`WITH stats AS .*`).WithArgs("tv", 100).WillReturnRows(sqlmock.NewRows([]string{"id", "key", "url", "password", "file", "remote", "result", "episodes", "remaining"}).AddRow(101, "tmdb:tv:1", "url", "code", "Show", "fid", `{"success":true,"media_type":"tv"}`, `[{"season_number":1,"episode_number":1}]`, 1))
 	sources, err := d.StrmSources(ctx, domain.ShareLibraryQuery{MediaType: "tv"}, 100)
 	if err != nil || len(sources) != 1 || sources[0].ID != 101 {
 		t.Fatalf("%+v %v", sources, err)

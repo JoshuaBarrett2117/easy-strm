@@ -45,7 +45,7 @@ func (d *StrmConfigDAO) SaveWithSchedule(c *domain.StrmConfig) ([]int, error) {
 	} else {
 		_, err = tx.Exec(`INSERT INTO t_cron_task(task_key,task_name,task_type,handler,params,timezone,cloud115_id,strm_config_id,cron_expr,status)
    VALUES('task:'||md5(random()::text||clock_timestamp()::text),$2,'full_generate','full_generate',jsonb_build_object('strm_config_id',$1::integer,'cloud115_id',$3::integer),'Local',$3,$1,$4,'enabled')
-   ON CONFLICT(strm_config_id,task_type) DO UPDATE SET cloud115_id=EXCLUDED.cloud115_id,params=EXCLUDED.params,handler=EXCLUDED.handler,cron_expr=EXCLUDED.cron_expr`, c.ID, fmt.Sprintf("STRM全量生成-%d", c.ID), c.Cloud115Id, c.Cron)
+   ON CONFLICT(strm_config_id,task_type) DO UPDATE SET cloud115_id=EXCLUDED.cloud115_id,params=t_cron_task.params || EXCLUDED.params,handler=EXCLUDED.handler,cron_expr=EXCLUDED.cron_expr`, c.ID, fmt.Sprintf("STRM全量生成-%d", c.ID), c.Cloud115Id, c.Cron)
 		if err != nil {
 			return nil, err
 		}

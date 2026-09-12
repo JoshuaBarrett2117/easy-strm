@@ -11,7 +11,10 @@ import (
 func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
 	where, args := libraryWhere(q)
 	args = append(args, after)
-	query := libraryWorks + ` SELECT m.id,m.work_key,s.url,s.password,m.file_name,m.result,count(*) OVER() FROM t_share_media m JOIN t_share_record s ON s.id=m.share_id JOIN works w ON w.work_key=m.work_key WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND NOT s.share_cancelled AND m.status='identified' AND m.id>$` + fmt.Sprint(len(args)) + ` ORDER BY m.id LIMIT 100`
+	query := libraryWorks + ` SELECT f.id,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id),
+	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
+	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
+	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified' AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -20,11 +23,21 @@ func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQ
 	out := []domain.ShareStrmSource{}
 	for rows.Next() {
 		var v domain.ShareStrmSource
-		var raw []byte
-		if err = rows.Scan(&v.ID, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &raw, &v.Remaining); err != nil {
+		var raw, episodes []byte
+		if err = rows.Scan(&v.ID, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes, &v.Remaining); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &v.Result); err != nil {
+			return nil, err
+		}
+		var identity struct {
+			ID int `json:"_media_id"`
+		}
+		if err = json.Unmarshal(raw, &identity); err != nil {
+			return nil, err
+		}
+		v.MediaID = identity.ID
+		if err = json.Unmarshal(episodes, &v.Episodes); err != nil {
 			return nil, err
 		}
 		out = append(out, v)
@@ -38,7 +51,7 @@ func (d *ShareRecordDAO) SaveStrmEntry(ctx context.Context, v domain.ShareStrmEn
 	if err != nil {
 		return err
 	}
-	_, err = d.db.ExecContext(ctx, `INSERT INTO t_share_strm(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=CASE WHEN COALESCE(EXCLUDED.payload->>'file_id','')='' THEN EXCLUDED.payload || jsonb_build_object('file_id',COALESCE(t_share_strm.payload->>'file_id','')) ELSE EXCLUDED.payload END,updated_at=NOW()`, v.ID, string(raw))
+	_, err = d.db.ExecContext(ctx, `INSERT INTO t_share_strm(id,payload) VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=CASE WHEN COALESCE(EXCLUDED.payload->>'file_id','')='' THEN EXCLUDED.payload || jsonb_build_object('file_id',COALESCE(t_share_strm.payload->>'file_id','')) ELSE EXCLUDED.payload END,updated_at=NOW() WHERE t_share_strm.payload IS DISTINCT FROM CASE WHEN COALESCE(EXCLUDED.payload->>'file_id','')='' THEN EXCLUDED.payload || jsonb_build_object('file_id',COALESCE(t_share_strm.payload->>'file_id','')) ELSE EXCLUDED.payload END`, v.ID, string(raw))
 	return err
 }
 

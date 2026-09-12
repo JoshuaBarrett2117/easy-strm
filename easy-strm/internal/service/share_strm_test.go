@@ -166,28 +166,30 @@ func TestShareStrmPathsAndValidation(t *testing.T) {
 	s, _, _ := strmFixture(t)
 	source := domain.ShareStrmSource{WorkKey: "tmdb:tv:10", FileName: "Show", Result: domain.TmdbIdentifyResult{Success: true, Title: "剧/名", Year: 2024, TmdbID: 10, MediaType: "tv", Countries: []string{"CN"}}}
 	cats := []*domain.MediaCategory{{Enabled: true, MediaType: "tv", TargetPath: "/媒体/国产剧", MatchRules: json.RawMessage(`{"countries":["CN"]}`)}}
-	for _, tt := range []struct{ file, want string }{
-		{"Show/Show.S02E03.mkv", "Season 02/剧 名 - S02E03.strm"},
-		{"Show/ShowS01E01E02.mkv", "Season 01/剧 名 - S01E01E02.strm"},
-		{"Show/Show.S00E01.mkv", "Season 00/剧 名 - S00E01.strm"},
-		{"Show/Season 02/EP03.mkv", "Season 02/剧 名 - S02E03.strm"},
-		{"Show/Season 02/03.mkv", "Season 02/剧 名 - S02E03.strm"},
-		{"Show/第2季/Show.E03.mkv", "Season 02/剧 名 - S02E03.strm"},
-		{"Show/Season 02/S00E01.mkv", "Season 00/剧 名 - S00E01.strm"},
+	for _, tt := range []struct {
+		file            string
+		season, episode int
+		want            string
+	}{
+		{"Show/Show.S02E03.mkv", 2, 3, "Season 02/剧 名 - S02E03.strm"},
+		{"Show/Show.S00E01.mkv", 0, 1, "Season 00/剧 名 - S00E01.strm"},
+		{"Show/Season 02/EP03.mkv", 2, 3, "Season 02/剧 名 - S02E03.strm"},
 	} {
+		source.Result.SeasonNumber, source.Result.EpisodeNumber = tt.season, tt.episode
 		got, err := s.strmRelativePath(source, domain.ShareFileInfo{Path: tt.file}, cats)
 		if err != nil || !strings.HasPrefix(filepath.ToSlash(got), "国产剧/") || !strings.HasSuffix(filepath.ToSlash(got), tt.want) {
 			t.Fatalf("%s %v", got, err)
 		}
 	}
+	source.Result.EpisodeNumber = 0
 	if _, err := s.strmRelativePath(source, domain.ShareFileInfo{Path: "Show/unknown.mkv"}, cats); err == nil {
 		t.Fatal("未知集数不能导出")
 	}
 	source.FileName = "Show/Season 02/EP03.mkv"
 	source.Result.SeasonNumber, source.Result.EpisodeNumber = 1, 3
 	got, err := s.strmRelativePath(source, domain.ShareFileInfo{Path: source.FileName}, cats)
-	if err != nil || !strings.Contains(filepath.ToSlash(got), "Season 02/") {
-		t.Fatalf("旧自动识别覆盖季目录：%s %v", got, err)
+	if err != nil || !strings.Contains(filepath.ToSlash(got), "Season 01/") {
+		t.Fatalf("持久化映射未生效：%s %v", got, err)
 	}
 	source.Result.Message = "手动识别"
 	source.Result.SeasonNumber = 4
@@ -219,11 +221,8 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 	dao.InitTaskRedisDAO(redisClient)
 	s.tasks = NewTaskService(dao.NewTaskRedisDAO(redisClient))
 	store.sources = []domain.ShareStrmSource{{ID: 1, WorkKey: "tmdb:tv:10", URL: "https://115.com/s/share", FileName: "Show", Result: domain.TmdbIdentifyResult{Success: true, Title: "Show", Year: 2024, MediaType: "tv", TmdbID: 10}}}
-	store.sources[0].FileName = "Show/Show.S02E03.mkv"
-	second := store.sources[0]
-	second.ID = 2
-	second.FileName = "Show/Show.S02E04.mkv"
-	store.sources = append(store.sources, second)
+	store.sources[0].FileName = "Show/Show.S02E03E04.mkv"
+	store.sources[0].Episodes = []domain.ShareEpisode{{SeasonNumber: 2, EpisodeNumber: 3}, {SeasonNumber: 2, EpisodeNumber: 4}}
 	s.client = nil // 导出必须完全不依赖115客户端。
 	id, err := s.StartExport(domain.ShareLibraryQuery{})
 	if err != nil {
@@ -325,6 +324,7 @@ func TestShareStrmExportKeepsValidFilesAfterUnknownEpisode(t *testing.T) {
 	second := store.sources[0]
 	second.ID = 2
 	second.FileName = "Show/Show.S02E03.mkv"
+	second.Episodes = []domain.ShareEpisode{{SeasonNumber: 2, EpisodeNumber: 3}}
 	store.sources = append(store.sources, second)
 	s.client = nil
 	cfg, _ := s.Settings()

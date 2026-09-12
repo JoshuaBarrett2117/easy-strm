@@ -97,8 +97,11 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 			}
 		}()
 		_ = s.tasks.UpdateStatus(id, "running")
-		total,err:=s.dao.CountLibraryIncomplete(context.Background())
-		if err!=nil{_=s.tasks.SetError(id,err.Error());return}
+		total, err := s.dao.CountLibraryIncomplete(context.Background())
+		if err != nil {
+			_ = s.tasks.SetError(id, err.Error())
+			return
+		}
 		after := ""
 		processed, success, failed := 0, 0, 0
 		errors := []string{}
@@ -130,9 +133,9 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 				mergeLibraryMetadata(m.Result, &r)
 				err = detailErr
 				if err == nil {
-					err = s.dao.Identify(context.Background(), m, "identified", m.Result, "")
+					err = s.dao.UpdateMediaMetadata(context.Background(), m)
 				}
-				if err == nil && (m.Result.VoteAverage == nil || len(m.Result.GenreIDs) == 0 || len(m.Result.Countries) == 0 || m.Result.Year==0 || m.Result.Title=="") {
+				if err == nil && (m.Result.VoteAverage == nil || len(m.Result.GenreIDs) == 0 || len(m.Result.Countries) == 0 || m.Result.Year == 0 || m.Result.Title == "") {
 					err = fmt.Errorf("元数据源未提供完整年份、标题、评分、题材或国家信息")
 				}
 				if err != nil {
@@ -144,7 +147,7 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 					success++
 				}
 			}
-			_ = s.tasks.UpdateProgress(id, max(total,processed), processed, success, failed)
+			_ = s.tasks.UpdateProgress(id, max(total, processed), processed, success, failed)
 			_ = s.tasks.UpdateMetadata(id, map[string]interface{}{"errors": errors, "last_work_key": key})
 		}
 		if failed > 0 {
@@ -158,7 +161,12 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 
 // mergeLibraryMetadata 只补齐缺失信息，不以空详情抹除已有字段。
 func mergeLibraryMetadata(dst, src *domain.TmdbIdentifyResult) {
- if dst.Year==0{dst.Year=src.Year};if dst.Title==""{dst.Title=src.Title}
+	if dst.Year == 0 {
+		dst.Year = src.Year
+	}
+	if dst.Title == "" {
+		dst.Title = src.Title
+	}
 	if dst.VoteAverage == nil && src.VoteAverage != nil {
 		v := *src.VoteAverage
 		dst.VoteAverage = &v

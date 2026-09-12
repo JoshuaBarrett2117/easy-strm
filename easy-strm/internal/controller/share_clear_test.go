@@ -35,18 +35,57 @@ func TestClearShareMedia(t *testing.T) {
 					mock.ExpectRollback()
 				} else {
 					q.WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
-					e := mock.ExpectExec("DELETE FROM t_share_media WHERE share_id=\\$1").WithArgs(9)
+					e := mock.ExpectExec("DELETE FROM t_share_media_file WHERE share_id=\\$1").WithArgs(9)
 					if tt.status == 409 {
 						e.WillReturnError(fmt.Errorf("delete failed"))
 						mock.ExpectRollback()
 					} else {
 						e.WillReturnResult(sqlmock.NewResult(0, tt.count))
+						mock.ExpectExec("DELETE FROM t_share_media m WHERE NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 1))
 						mock.ExpectCommit()
 					}
 				}
 			}
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/"+tt.id+"/media", nil))
+			if w.Code != tt.status {
+				t.Fatalf("%d %s", w.Code, w.Body)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// TestClearAllShareMedia 覆盖批量清空成功和数据库失败响应。
+func TestClearAllShareMedia(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name   string
+		count  int64
+		status int
+	}{
+		{"成功", 86, 200}, {"重复清空", 0, 200}, {"删除失败", 0, 409},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, _ := sqlmock.New()
+			defer db.Close()
+			s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
+			r := gin.New()
+			r.DELETE("/shares/media", NewShareRecordController(s).ClearAllMedia)
+			mock.ExpectBegin()
+			expectation := mock.ExpectExec("DELETE FROM t_share_media_file")
+			if tt.status == 409 {
+				expectation.WillReturnError(fmt.Errorf("delete failed"))
+				mock.ExpectRollback()
+			} else {
+				expectation.WillReturnResult(sqlmock.NewResult(0, tt.count))
+				mock.ExpectExec("DELETE FROM t_share_media").WillReturnResult(sqlmock.NewResult(0, tt.count))
+				mock.ExpectCommit()
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/media", nil))
 			if w.Code != tt.status {
 				t.Fatalf("%d %s", w.Code, w.Body)
 			}
