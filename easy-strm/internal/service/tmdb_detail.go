@@ -98,6 +98,33 @@ func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
 	return result, nil
 }
 
+// GetTVSeasonDetail 获取剧集单季详情，响应包含该季完整集目录。
+func (s *TmdbService) GetTVSeasonDetail(tmdbID, season int) (map[string]interface{}, error) {
+	if s.apiKey == "" {
+		return nil, fmt.Errorf("TMDB API Key 未配置")
+	}
+	if detail, ok := s.loadDetailCache("tv_season", tmdbID, season, 0); ok {
+		return detail, nil
+	}
+
+	apiURL := fmt.Sprintf("%s/tv/%d/season/%d?api_key=%s&language=%s",
+		s.baseURL, tmdbID, season, s.apiKey, s.language)
+	resp, err := s.httpClient.Get(apiURL)
+	if err != nil {
+		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("TMDB API 返回错误: %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
+	}
+	s.saveDetailCache("tv_season", tmdbID, season, 0, result)
+	return result, nil
+}
+
 // GetTVEpisodeDetail 获取剧集某一集的详情
 func (s *TmdbService) GetTVEpisodeDetail(tmdbID, season, episode int) (map[string]interface{}, error) {
 	if s.apiKey == "" {

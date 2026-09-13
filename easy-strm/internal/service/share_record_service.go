@@ -26,6 +26,7 @@ type ShareRecordService struct {
 	tmdb              *TmdbService
 	tasks             *TaskService
 	parser            ShareRecordParser
+	autoExport        func([]int) (string, bool, error)
 }
 
 // ShareRecordParser 获取分享中的文件列表。
@@ -35,6 +36,11 @@ type ShareRecordParser interface {
 
 func NewShareRecordService(d *dao.ShareRecordDAO, t *TmdbService, tasks *TaskService, parser ShareRecordParser) *ShareRecordService {
 	return &ShareRecordService{dao: d, tmdb: t, tasks: tasks, parser: parser}
+}
+
+// SetAutoStrmExport 注入分享识别完成后的增量导出入口。
+func (s *ShareRecordService) SetAutoStrmExport(export func([]int) (string, bool, error)) {
+	s.autoExport = export
 }
 func (s *ShareRecordService) List(ctx context.Context, q domain.ShareRecordQuery) (domain.ShareRecordPage, error) {
 	page, err := s.dao.List(ctx, q)
@@ -482,6 +488,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	}
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
 	success, failed := 0, 0
+	identifiedFileIDs := make([]int, 0, len(items))
 	for index, media := range items {
 		if err := ctx.Err(); err != nil {
 			s.finishShareTaskContext(taskID, err, settings.TimeoutMinutes)
@@ -499,6 +506,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			failed++
 		} else {
 			success++
+			identifiedFileIDs = append(identifiedFileIDs, media.ID)
 		}
 		_ = s.tasks.UpdateProgress(taskID, len(items), index+1, success, failed)
 		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": media.FileName, "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", index+1, len(items))}, {"name": "汇总结果", "status": "pending"}}})
@@ -507,6 +515,15 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	if failed > 0 {
 		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
 		return
+	}
+	if s.autoExport != nil && len(identifiedFileIDs) > 0 {
+		exportID, started, exportErr := s.autoExport(identifiedFileIDs)
+		if exportErr != nil {
+			logger.Warnf("ShareRecordService[runBatchIdentify] task=%s 自动导出STRM失败: %v", taskID, exportErr)
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_error": exportErr.Error()})
+		} else if started {
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_task_id": exportID, "strm_export_file_count": len(identifiedFileIDs)})
+		}
 	}
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
 	_ = s.tasks.UpdateStatus(taskID, "completed")

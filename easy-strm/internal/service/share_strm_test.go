@@ -263,6 +263,60 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 		if key != "entry" && (entry.MediaID != 88 || entry.Title != "Show" || entry.PosterPath != "/show.jpg") {
 			t.Fatalf("导出映射缺少播放记录元数据：%+v", entry)
 		}
+		if key != "entry" && (len(entry.Episodes) != 2 || entry.Episodes[0].SeasonNumber != 2 || entry.Episodes[1].EpisodeNumber != 4) {
+			t.Fatalf("导出映射缺少季集快照：%+v", entry)
+		}
+	}
+}
+
+func TestShareStrmExportAddsShareNameOnlyForDifferentSources(t *testing.T) {
+	s, store, _ := strmFixture(t)
+	mini := miniredis.RunT(t)
+	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer rc.Close()
+	dao.InitTaskRedisDAO(rc)
+	s.tasks = NewTaskService(dao.NewTaskRedisDAO(rc))
+	base := domain.ShareStrmSource{MediaID: 88, WorkKey: "tmdb:movie:10", Result: domain.TmdbIdentifyResult{Success: true, Title: "名侦探柯南剧场版M13", Year: 2009, MediaType: "movie", TmdbID: 10}}
+	first := base
+	first.ID, first.ShareID, first.ShareName, first.URL, first.FileName = 1, 7, "动画电影9.73TB", "https://115.com/s/first", "Movie/M13.mkv"
+	duplicateInSameShare := first
+	duplicateInSameShare.ID, duplicateInSameShare.FileName = 2, "Movie/M13-remux.mkv"
+	second := base
+	second.ID, second.ShareID, second.ShareName, second.URL, second.FileName = 3, 9, "高码电影/合集", "https://115.com/s/second", "M13.mkv"
+	store.sources = []domain.ShareStrmSource{first, duplicateInSameShare, second}
+
+	id, err := s.StartExport(domain.ShareLibraryQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitShareTask(t, s.tasks, id)
+	cfg, _ := s.Settings()
+	files, err := filepath.Glob(filepath.Join(cfg.OutputPath, "movie", "*", "*.strm"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("应按两个不同分享来源各生成一个STRM：%v %v", files, err)
+	}
+	names := []string{filepath.Base(files[0]), filepath.Base(files[1])}
+	joined := strings.Join(names, "|")
+	if !strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-动画电影9.73TB.strm") || !strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-高码电影 合集.strm") {
+		t.Fatalf("分享来源名称未正确追加或清理：%v", names)
+	}
+}
+
+func waitShareTask(t *testing.T, tasks *TaskService, id string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		task, err := tasks.Get(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if task["status"] == "completed" {
+			return
+		}
+		if task["status"] == "failed" || time.Now().After(deadline) {
+			t.Fatalf("任务未成功：%+v", task)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 

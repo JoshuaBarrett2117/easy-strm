@@ -143,6 +143,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		return link.Url.Url, nil
 	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
+	shareRecordService.SetAutoStrmExport(shareStrmService.StartAutoExport)
 	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
 	shareStrmService.SetExportDatabase(dao.DB)
@@ -990,6 +991,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/media/share-library", shareRecordController.Library)
 		auth.GET("/media/share-library/options", shareRecordController.LibraryOptions)
 		auth.GET("/media/share-library/sources", shareRecordController.LibrarySources)
+		auth.GET("/media/share-library/tv-detail", shareRecordController.LibraryTVDetail)
+		auth.GET("/media/share-library/tv-seasons", shareRecordController.LibraryTVSeason)
 		auth.POST("/media/share-library/enrich", shareRecordController.EnrichLibrary)
 		auth.GET("/media/share-library/strm/settings", shareStrmController.Settings)
 		auth.PUT("/media/share-library/strm/settings", shareStrmController.SaveSettings)

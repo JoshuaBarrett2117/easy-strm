@@ -178,7 +178,23 @@ func (s *ShareStrmService) StartExport(q domain.ShareLibraryQuery) (string, erro
 	return id, nil
 }
 
-func (s *ShareStrmService) strmRelativePath(source domain.ShareStrmSource, file domain.ShareFileInfo, cats []*domain.MediaCategory) (string, error) {
+// StartAutoExport 已配置分享库输出目录时，为刚识别完成的文件创建独立增量导出任务。
+func (s *ShareStrmService) StartAutoExport(fileIDs []int) (string, bool, error) {
+	if len(fileIDs) == 0 {
+		return "", false, nil
+	}
+	cfg, err := s.Settings()
+	if err != nil {
+		return "", false, err
+	}
+	if strings.TrimSpace(cfg.OutputPath) == "" {
+		return "", false, nil
+	}
+	id, err := s.StartExport(domain.ShareLibraryQuery{FileIDs: append([]int(nil), fileIDs...)})
+	return id, err == nil, err
+}
+
+func (s *ShareStrmService) strmRelativePath(source domain.ShareStrmSource, file domain.ShareFileInfo, cats []*domain.MediaCategory, sourceSuffix ...string) (string, error) {
 	r := source.Result
 	if !r.Success || strings.TrimSpace(r.Title) == "" || (r.MediaType != "tv" && r.MediaType != "movie") {
 		return "", fmt.Errorf("作品识别信息不完整")
@@ -203,13 +219,23 @@ func (s *ShareStrmService) strmRelativePath(source domain.ShareStrmSource, file 
 		return "", fmt.Errorf("分类目录无效")
 	}
 	name := folder
+	suffix := ""
+	if len(sourceSuffix) > 0 {
+		suffix = strings.TrimSpace(sourceSuffix[0])
+	}
 	if r.MediaType == "tv" {
 		season, episode := r.SeasonNumber, r.EpisodeNumber
 		if episode <= 0 || season < 0 {
 			return "", fmt.Errorf("文件缺少持久化季集映射：%s", file.Path)
 		}
 		name = fmt.Sprintf("%s - S%02dE%02d", title, season, episode)
+		if suffix != "" {
+			name += "-" + suffix
+		}
 		return filepath.Join(root, folder, fmt.Sprintf("Season %02d", season), name+".strm"), nil
+	}
+	if suffix != "" {
+		name += "-" + suffix
 	}
 	return filepath.Join(root, folder, name+".strm"), nil
 }

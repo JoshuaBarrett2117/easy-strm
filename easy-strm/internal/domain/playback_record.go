@@ -2,7 +2,14 @@ package domain
 
 import "time"
 
-// PlaybackRecord 表示一次成功解析 STRM 直链的调用，并不代表实际观看时长。
+// PlaybackMetadata 提供播放记录的标题、海报和文件级季集信息。
+type PlaybackMetadata struct {
+	Title    string
+	Poster   string
+	Episodes []ShareEpisode
+}
+
+// PlaybackRecord 表示由一次或多次连续直链解析归并成的 STRM 播放会话，并不代表实际观看时长。
 type PlaybackRecord struct {
 	ID       string    `json:"id"`
 	Name     string    `json:"name"`

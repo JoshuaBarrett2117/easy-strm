@@ -5,12 +5,17 @@ import (
 	"database/sql"
 	"easy-strm/internal/domain"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrLibraryNotTV 表示剧集详情接口收到非电视剧作品。
+var ErrLibraryNotTV = errors.New("该作品不是电视剧")
 
 // ValidateLibraryQuery 规范分页并检查搜索范围，避免错误筛选悄悄失效。
 func ValidateLibraryQuery(q *domain.ShareLibraryQuery) error {
@@ -69,6 +74,167 @@ func (s *ShareRecordService) Library(ctx context.Context, q domain.ShareLibraryQ
 // LibrarySources 返回作品的分享文件来源。
 func (s *ShareRecordService) LibrarySources(ctx context.Context, key string, page, size int) (domain.ShareLibraryPage, error) {
 	return s.dao.LibrarySources(ctx, key, page, size)
+}
+
+// LibraryTVDetail 返回剧集的完整季目录，并合并本地文件覆盖统计。
+func (s *ShareRecordService) LibraryTVDetail(ctx context.Context, key string) (domain.ShareLibraryTVDetail, error) {
+	media, err := s.libraryTVMedia(ctx, key)
+	if err != nil {
+		return domain.ShareLibraryTVDetail{}, err
+	}
+	stats, err := s.dao.LibraryTVSeasonStats(ctx, key)
+	if err != nil {
+		return domain.ShareLibraryTVDetail{}, err
+	}
+	out := domain.ShareLibraryTVDetail{WorkKey: key, TmdbID: media.TmdbID, Title: media.Title, Seasons: make([]domain.ShareLibraryTVSeasonSummary, 0)}
+	bySeason := make(map[int]domain.ShareLibraryTVSeasonSummary, len(stats))
+	for _, item := range stats {
+		item.Name = librarySeasonName(item.SeasonNumber)
+		item.EpisodeCount = item.MatchedEpisodeCount
+		bySeason[item.SeasonNumber] = item
+	}
+
+	if media.TmdbID <= 0 || media.TmdbID > math.MaxInt32 || s.tmdb == nil {
+		out.Warning = "缺少可用的 TMDB 身份，当前仅展示已关联的季集"
+	} else {
+		var payload struct {
+			Name     string `json:"name"`
+			Overview string `json:"overview"`
+			Seasons  []struct {
+				SeasonNumber int    `json:"season_number"`
+				Name         string `json:"name"`
+				Overview     string `json:"overview"`
+				AirDate      string `json:"air_date"`
+				PosterPath   string `json:"poster_path"`
+				EpisodeCount int    `json:"episode_count"`
+			} `json:"seasons"`
+		}
+		detail, detailErr := s.tmdb.GetTVDetail(int(media.TmdbID))
+		if detailErr != nil {
+			out.Warning = "TMDB 季目录加载失败，当前仅展示已关联的季集：" + detailErr.Error()
+		} else if err = remarshalLibraryMetadata(detail, &payload); err != nil {
+			out.Warning = "TMDB 季目录格式无效，当前仅展示已关联的季集"
+		} else {
+			out.MetadataComplete = true
+			if payload.Name != "" {
+				out.Title = payload.Name
+			}
+			out.Overview = payload.Overview
+			for _, season := range payload.Seasons {
+				item := bySeason[season.SeasonNumber]
+				item.SeasonNumber = season.SeasonNumber
+				item.Name = season.Name
+				if item.Name == "" {
+					item.Name = librarySeasonName(season.SeasonNumber)
+				}
+				item.Overview = season.Overview
+				item.AirDate = season.AirDate
+				item.PosterPath = season.PosterPath
+				item.EpisodeCount = season.EpisodeCount
+				bySeason[season.SeasonNumber] = item
+			}
+		}
+	}
+	for _, item := range bySeason {
+		out.Seasons = append(out.Seasons, item)
+	}
+	sort.Slice(out.Seasons, func(i, j int) bool { return out.Seasons[i].SeasonNumber < out.Seasons[j].SeasonNumber })
+	return out, nil
+}
+
+// LibraryTVSeason 返回单季完整集目录，并把分享文件挂载到对应集下。
+func (s *ShareRecordService) LibraryTVSeason(ctx context.Context, key string, season int) (domain.ShareLibraryTVSeasonDetail, error) {
+	media, err := s.libraryTVMedia(ctx, key)
+	if err != nil {
+		return domain.ShareLibraryTVSeasonDetail{}, err
+	}
+	files, err := s.dao.LibraryTVSeasonFiles(ctx, key, season)
+	if err != nil {
+		return domain.ShareLibraryTVSeasonDetail{}, err
+	}
+	out := domain.ShareLibraryTVSeasonDetail{SeasonNumber: season, Name: librarySeasonName(season), Episodes: make([]domain.ShareLibraryEpisode, 0)}
+	byEpisode := make(map[int]domain.ShareLibraryEpisode, len(files))
+	for episode, mappedFiles := range files {
+		byEpisode[episode] = domain.ShareLibraryEpisode{EpisodeNumber: episode, Name: fmt.Sprintf("第 %d 集", episode), Files: mappedFiles}
+	}
+
+	if media.TmdbID <= 0 || media.TmdbID > math.MaxInt32 || s.tmdb == nil {
+		out.Warning = "缺少可用的 TMDB 身份，当前仅展示已关联的集"
+	} else {
+		var payload struct {
+			Name       string `json:"name"`
+			Overview   string `json:"overview"`
+			AirDate    string `json:"air_date"`
+			PosterPath string `json:"poster_path"`
+			Episodes   []struct {
+				EpisodeNumber int    `json:"episode_number"`
+				Name          string `json:"name"`
+				Overview      string `json:"overview"`
+				AirDate       string `json:"air_date"`
+				StillPath     string `json:"still_path"`
+				Runtime       int    `json:"runtime"`
+			} `json:"episodes"`
+		}
+		detail, detailErr := s.tmdb.GetTVSeasonDetail(int(media.TmdbID), season)
+		if detailErr != nil {
+			out.Warning = "TMDB 分集目录加载失败，当前仅展示已关联的集：" + detailErr.Error()
+		} else if err = remarshalLibraryMetadata(detail, &payload); err != nil {
+			out.Warning = "TMDB 分集目录格式无效，当前仅展示已关联的集"
+		} else {
+			out.MetadataComplete = true
+			if payload.Name != "" {
+				out.Name = payload.Name
+			}
+			out.Overview, out.AirDate, out.PosterPath = payload.Overview, payload.AirDate, payload.PosterPath
+			for _, episode := range payload.Episodes {
+				item := byEpisode[episode.EpisodeNumber]
+				item.EpisodeNumber = episode.EpisodeNumber
+				item.Name = episode.Name
+				if item.Name == "" {
+					item.Name = fmt.Sprintf("第 %d 集", episode.EpisodeNumber)
+				}
+				item.Overview, item.AirDate, item.StillPath, item.Runtime = episode.Overview, episode.AirDate, episode.StillPath, episode.Runtime
+				if item.Files == nil {
+					item.Files = make([]domain.ShareLibraryFile, 0)
+				}
+				byEpisode[episode.EpisodeNumber] = item
+			}
+		}
+	}
+	for _, item := range byEpisode {
+		if item.Files == nil {
+			item.Files = make([]domain.ShareLibraryFile, 0)
+		}
+		out.Episodes = append(out.Episodes, item)
+	}
+	sort.Slice(out.Episodes, func(i, j int) bool { return out.Episodes[i].EpisodeNumber < out.Episodes[j].EpisodeNumber })
+	return out, nil
+}
+
+func (s *ShareRecordService) libraryTVMedia(ctx context.Context, key string) (domain.ShareLibraryTVMedia, error) {
+	media, err := s.dao.LibraryTVMedia(ctx, key)
+	if err != nil {
+		return media, err
+	}
+	if media.MediaType != "tv" {
+		return media, ErrLibraryNotTV
+	}
+	return media, nil
+}
+
+func librarySeasonName(season int) string {
+	if season == 0 {
+		return "特别篇"
+	}
+	return fmt.Sprintf("第 %d 季", season)
+}
+
+func remarshalLibraryMetadata(value map[string]interface{}, target interface{}) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, target)
 }
 
 // LibraryOptions 返回可用筛选项。

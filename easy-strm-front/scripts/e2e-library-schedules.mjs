@@ -5,7 +5,9 @@ import fs from 'node:fs/promises'
 const browser = await chromium.launch({ headless: true })
 const origin = process.env.E2E_BASE_URL || 'http://127.0.0.1:3001'
 try {
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } })
+  const page = await browser.newPage({
+    viewport: { width: 1440, height: 1000 },
+  })
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   await page.addInitScript(() => localStorage.setItem('token', 'fixture'))
@@ -15,14 +17,14 @@ try {
       name: 'STRM全量生成',
       parameters: [
         { key: 'cloud115_id', label: '115账号ID', default: 0 },
-        { key: 'strm_config_id', label: 'STRM配置ID', default: 0 }
-      ]
+        { key: 'strm_config_id', label: 'STRM配置ID', default: 0 },
+      ],
     },
     {
       key: 'identify_cache_cleanup',
       name: '识别缓存清理',
-      parameters: [{ key: 'keep_days', label: '保留天数', default: 30 }]
-    }
+      parameters: [{ key: 'keep_days', label: '保留天数', default: 30 }],
+    },
   ]
   let task = {
     id: 1,
@@ -36,13 +38,15 @@ try {
     cron_expr: '0 0 3 * * *',
     status: 'enabled',
     builtin: false,
-    last_run_status: 'success'
+    last_run_status: 'success',
   }
   let enriched = false,
     saved = false,
     ran = false,
     filtered = false,
-    sawSecondPage = false
+    sawSecondPage = false,
+    sourceCalls = 0,
+    tvSeasonCalls = 0
   await page.route('**/api/**', async (route) => {
     const u = new URL(route.request().url()),
       path = u.pathname,
@@ -67,10 +71,10 @@ try {
               media_type: 'tv',
               rating: 8.5,
               source_count: 2,
-              available: true
-            }
+              available: true,
+            },
           ],
-          total: 1
+          total: 1,
         })
       }
       return ok({
@@ -81,12 +85,13 @@ try {
           media_type: 'movie',
           rating: i === 0 ? null : 8,
           source_count: 2,
-          available: i !== 0
+          available: i !== 0,
         })),
-        total: 25
+        total: 25,
       })
     }
-    if (path === '/api/media/share-library/sources')
+    if (path === '/api/media/share-library/sources') {
+      sourceCalls++
       return ok({
         data: [
           {
@@ -96,25 +101,102 @@ try {
             file_name: '作品/第一集.mkv',
             url: 'https://example.com/share',
             password: 'abcd',
-            share_cancelled: true
-          }
+            share_cancelled: true,
+          },
         ],
-        total: 1
+        total: 1,
       })
+    }
+    if (path === '/api/media/share-library/tv-detail')
+      return ok({
+        work_key: 'tmdb:tv:100',
+        tmdb_id: 100,
+        title: '测试作品',
+        overview: '测试剧集简介',
+        metadata_complete: true,
+        seasons: [
+          {
+            season_number: 0,
+            name: '特别篇',
+            episode_count: 1,
+            matched_episode_count: 0,
+            file_count: 0,
+          },
+          {
+            season_number: 1,
+            name: '第一季',
+            episode_count: 2,
+            matched_episode_count: 1,
+            file_count: 2,
+          },
+        ],
+      })
+    if (path === '/api/media/share-library/tv-seasons') {
+      tvSeasonCalls++
+      assert.equal(u.searchParams.get('season_number'), '1')
+      return ok({
+        season_number: 1,
+        name: '第一季',
+        metadata_complete: true,
+        episodes: [
+          {
+            episode_number: 1,
+            name: '第一集',
+            air_date: '2024-01-01',
+            overview: '第一集简介',
+            files: [
+              {
+                id: 1,
+                share_id: 9,
+                name: '测试分享来源',
+                file_name: '作品/测试作品.S01E01E02.mkv',
+                file_size: 1073741824,
+                url: 'https://example.com/share',
+                password: 'abcd',
+                available: true,
+                share_cancelled: false,
+              },
+              {
+                id: 2,
+                share_id: 10,
+                name: '失效分享来源',
+                file_name: '作品/测试作品.S01E01.mkv',
+                url: 'https://example.com/cancelled',
+                available: false,
+                share_cancelled: true,
+              },
+            ],
+          },
+          { episode_number: 2, name: '第二集', files: [] },
+        ],
+      })
+    }
     if (path === '/api/media/share-library/enrich') {
       enriched = true
       return ok({ task_id: 'metadata-1' })
     }
     if (path === '/api/media/share-records') {
       assert.equal(u.searchParams.get('share_id'), '9')
-      return ok({ data: [{ id: 9, name: '测试分享来源', identified_count: 1 }], total: 1 })
+      return ok({
+        data: [{ id: 9, name: '测试分享来源', identified_count: 1 }],
+        total: 1,
+      })
     }
     if (path === '/api/cron/handlers') return ok(handlers)
     if (path === '/api/cron/tasks')
       return ok(
         u.searchParams.has('page')
           ? { data: [task], total: 1 }
-          : [{ ...task, id: 8, handler: 'incremental_sync', task_type: 'incremental_sync', status: 'enabled' }, task]
+          : [
+              {
+                ...task,
+                id: 8,
+                handler: 'incremental_sync',
+                task_type: 'incremental_sync',
+                status: 'enabled',
+              },
+              task,
+            ],
       )
     if (path === '/api/strm/config')
       return ok([
@@ -124,8 +206,8 @@ try {
           net_disk_path: '/测试媒体',
           local_path: '/strm',
           cron: '0 0 3 * * *',
-          extension: 'mkv'
-        }
+          extension: 'mkv',
+        },
       ])
     if (path === '/api/cloud115') return ok([{ id: 1, name: '测试账号' }])
     if (path === '/api/cron/task/1' && method === 'PUT') {
@@ -153,10 +235,10 @@ try {
             trigger_type: 'manual',
             status: 'skipped',
             message: '同一配置正在执行',
-            started_at: '2026-09-09T03:00:00Z'
-          }
+            started_at: '2026-09-09T03:00:00Z',
+          },
         ],
-        total: 1
+        total: 1,
       })
     return ok([])
   })
@@ -164,6 +246,10 @@ try {
   await page.locator('.poster-card').nth(23).waitFor()
   assert.equal(await page.locator('.poster-card').count(), 24)
   await page.getByText('暂无评分', { exact: false }).first().waitFor()
+  await page.locator('.poster-card').first().click()
+  await page.getByText('测试分享来源', { exact: false }).waitFor()
+  assert.equal(sourceCalls, 1)
+  await page.keyboard.press('Escape')
   await page.locator('.library-page > .n-pagination .n-pagination-item').filter({ hasText: /^2$/ }).click()
   await page.getByText('第二页作品', { exact: true }).waitFor()
   assert.ok(sawSecondPage)
@@ -173,22 +259,32 @@ try {
   await page.getByText('测试作品', { exact: true }).waitFor()
   assert.ok(filtered)
   await page.locator('.poster-card').click()
-  await page.getByText('测试分享来源', { exact: true }).waitFor()
+  await page.getByText('测试剧集简介', { exact: true }).first().waitFor()
+  await page.getByText('特别篇', { exact: true }).waitFor()
+  await page.getByText('已关联 1 集 / 2 个文件', { exact: false }).waitFor()
+  await page.getByText('E01', { exact: true }).waitFor()
+  await page.getByText('第一集', { exact: true }).waitFor()
+  await page.getByText('测试分享来源', { exact: false }).waitFor()
+  await page.getByText('失效分享来源', { exact: false }).waitFor()
   await page.getByText('分享已取消', { exact: true }).waitFor()
-  await page.getByRole('button', { name: '进入分享管理', exact: true }).click()
+  await page.getByText('暂无关联分享文件', { exact: true }).waitFor()
+  assert.equal(tvSeasonCalls, 1)
+  await page.getByRole('button', { name: '进入分享管理', exact: false }).first().click()
   await page.waitForURL('**/share-records?share_id=9')
   await page.getByText('测试分享来源', { exact: true }).waitFor()
   await page.goto(origin + '/dashboard/share-library')
   await page.getByRole('button', { name: '补全历史元数据' }).click()
   await page.getByText(/补全任务已创建/).waitFor()
   assert.ok(enriched)
-  await fs.mkdir(new URL('../../debug/library-schedules/', import.meta.url), { recursive: true })
+  await fs.mkdir(new URL('../../debug/library-schedules/', import.meta.url), {
+    recursive: true,
+  })
   await page.screenshot({
     path: new URL('../../debug/library-schedules/library-desktop.png', import.meta.url).pathname.replace(
       /^\/([A-Z]:)/,
-      '$1'
+      '$1',
     ),
-    fullPage: true
+    fullPage: true,
   })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.locator('.poster-card').first().waitFor()
@@ -196,9 +292,9 @@ try {
   await page.screenshot({
     path: new URL('../../debug/library-schedules/library-mobile.png', import.meta.url).pathname.replace(
       /^\/([A-Z]:)/,
-      '$1'
+      '$1',
     ),
-    fullPage: true
+    fullPage: true,
   })
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto(origin + '/dashboard/scheduled-tasks')
@@ -224,9 +320,9 @@ try {
   await page.screenshot({
     path: new URL('../../debug/library-schedules/schedules-desktop.png', import.meta.url).pathname.replace(
       /^\/([A-Z]:)/,
-      '$1'
+      '$1',
     ),
-    fullPage: true
+    fullPage: true,
   })
   await page.goto(origin + '/dashboard/strm-config')
   await page.getByText('/测试媒体', { exact: true }).waitFor()
@@ -236,7 +332,7 @@ try {
   await page.getByText(/定时任务已触发：cron-fixture-1/).waitFor()
   assert.deepEqual(errors, [])
   console.log(
-    'PASS: 资源库分页/搜索/失效来源/分享跳转/历史补全/窄屏，定时任务启停/执行/历史/参数表单，原STRM页面选择全量任务并返回执行ID；API mocked，无页面异常'
+    'PASS: 资源库分页/搜索/失效来源/分享跳转/历史补全/窄屏，定时任务启停/执行/历史/参数表单，原STRM页面选择全量任务并返回执行ID；API mocked，无页面异常',
   )
 } finally {
   await browser.close()

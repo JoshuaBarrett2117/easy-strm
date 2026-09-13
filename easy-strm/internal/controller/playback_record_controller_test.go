@@ -1,9 +1,13 @@
 package controller
 
 import (
+	"context"
 	"easy-strm/internal/dao"
+	"easy-strm/internal/domain"
 	"easy-strm/internal/service"
 	"encoding/json"
+	"fmt"
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -72,6 +76,66 @@ func TestDirectLinkPlaybackRecording(t *testing.T) {
 }
 
 func fmtErrorForPlayback() error { return &playbackTestError{} }
+
+type countingPlaybackStore struct {
+	*dao.PlaybackRecordDAO
+	writes int
+}
+
+func (s *countingPlaybackStore) Save(ctx context.Context, r domain.PlaybackRecord) error {
+	s.writes++
+	return s.PlaybackRecordDAO.Save(ctx, r)
+}
+
+// TestDirectLinkRepeatedRequestsPersistOneRecord 覆盖真实控制器到 Service、DAO 的重复解析链路。
+func TestDirectLinkRepeatedRequestsPersistOneRecord(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	previous := dao.DB
+	dao.DB = db
+	defer func() { dao.DB = previous }()
+	mock.ExpectQuery("SELECT f.file_name").WithArgs(3, "same-file").
+		WillReturnRows(sqlmock.NewRows([]string{"file_name"}).AddRow("movie.mkv"))
+	mock.ExpectQuery("SELECT i.title").
+		WillReturnRows(sqlmock.NewRows([]string{"title", "poster_path", "tmdb_id", "media_type", "season_number", "episode_number"}).AddRow("龙珠", "", nil, "tv", 2, 3))
+	mock.ExpectExec("INSERT INTO t_strm_playback_record").
+		WithArgs(sqlmock.AnyArg(), "龙珠 · 第 2 季 · 第 3 集", "", "https://cdn.test/video-1", sqlmock.AnyArg(), "172.17.0.3", "未知", "HEAD").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	c := NewDirectLinkController()
+	store := &countingPlaybackStore{PlaybackRecordDAO: dao.NewPlaybackRecordDAO(nil)}
+	c.SetRecordPlayback(service.NewPlaybackRecordService(store).Record)
+	c.SetGetCloud115ByID(func(id int) (*Cloud115AccountBrief, error) { return &Cloud115AccountBrief{ID: id}, nil })
+	resolved := 0
+	c.SetGetFileDirectLink(func(int, string, int, string, string) (interface{}, error) {
+		resolved++
+		return fmt.Sprintf("https://cdn.test/video-%d", resolved), nil
+	})
+	router := gin.New()
+	router.GET("/direct-link", c.GetDirectLink)
+	router.HEAD("/direct-link", c.GetDirectLink)
+	for i := 0; i < 12; i++ {
+		method := http.MethodGet
+		if i == 0 {
+			method = http.MethodHead
+		}
+		req := httptest.NewRequest(method, "/direct-link?path=/movie.mkv&pickcode=same-file&cloud115_id=3", nil)
+		req.RemoteAddr = "172.17.0.3:1234"
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusFound || w.Header().Get("Location") != fmt.Sprintf("https://cdn.test/video-%d", i+1) {
+			t.Fatalf("第 %d 次解析未正常返回新直链", i+1)
+		}
+	}
+	if store.writes != 1 {
+		t.Fatalf("12 次解析写入了 %d 条记录，期望 1", store.writes)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 type playbackTestError struct{}
 

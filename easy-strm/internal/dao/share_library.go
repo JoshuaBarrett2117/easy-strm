@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
@@ -95,6 +96,64 @@ func (d *ShareRecordDAO) LibrarySources(ctx context.Context, key string, page, s
 	  COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json) episodes
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id WHERE m.work_key=$1)
 	 SELECT (SELECT count(*) FROM sources),COALESCE((SELECT json_agg(p) FROM (SELECT * FROM sources ORDER BY available DESC,share_id DESC,id LIMIT $2 OFFSET $3)p),'[]'::json)`, key, size, (page-1)*size)
+}
+
+// LibraryTVMedia 查询剧集的服务端身份，避免调用方直接指定外部媒体 ID。
+func (d *ShareRecordDAO) LibraryTVMedia(ctx context.Context, key string) (domain.ShareLibraryTVMedia, error) {
+	var out domain.ShareLibraryTVMedia
+	var tmdbID sql.NullInt64
+	err := d.db.QueryRowContext(ctx, `SELECT work_key,tmdb_id,title,media_type,metadata_source FROM t_share_media WHERE work_key=$1`, key).
+		Scan(&out.WorkKey, &tmdbID, &out.Title, &out.MediaType, &out.MetadataSource)
+	if tmdbID.Valid {
+		out.TmdbID = tmdbID.Int64
+	}
+	return out, err
+}
+
+// LibraryTVSeasonStats 返回本地季集映射的覆盖统计。
+func (d *ShareRecordDAO) LibraryTVSeasonStats(ctx context.Context, key string) ([]domain.ShareLibraryTVSeasonSummary, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT e.season_number,count(DISTINCT e.episode_number),count(DISTINCT f.id)
+	 FROM t_share_media_file_episode e JOIN t_share_media_file f ON f.id=e.file_id
+	 JOIN t_share_media m ON m.id=f.media_id WHERE m.work_key=$1
+	 GROUP BY e.season_number ORDER BY e.season_number`, key)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.ShareLibraryTVSeasonSummary, 0)
+	for rows.Next() {
+		var item domain.ShareLibraryTVSeasonSummary
+		if err = rows.Scan(&item.SeasonNumber, &item.MatchedEpisodeCount, &item.FileCount); err != nil {
+			return nil, err
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+// LibraryTVSeasonFiles 返回一季中每集关联的真实分享文件。
+func (d *ShareRecordDAO) LibraryTVSeasonFiles(ctx context.Context, key string, season int) (map[int][]domain.ShareLibraryFile, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT e.episode_number,f.id,f.share_id,f.file_id,f.file_name,f.file_size,
+	 f.available,f.status,s.name,s.url,s.password,s.share_cancelled
+	 FROM t_share_media_file_episode e JOIN t_share_media_file f ON f.id=e.file_id
+	 JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id
+	 WHERE m.work_key=$1 AND e.season_number=$2
+	 ORDER BY e.episode_number,f.available DESC,s.share_cancelled ASC,f.share_id DESC,f.id`, key, season)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int][]domain.ShareLibraryFile)
+	for rows.Next() {
+		var episode int
+		var file domain.ShareLibraryFile
+		if err = rows.Scan(&episode, &file.ID, &file.ShareID, &file.RemoteFileID, &file.FileName, &file.FileSize,
+			&file.Available, &file.Status, &file.Name, &file.URL, &file.Password, &file.ShareCancelled); err != nil {
+			return nil, err
+		}
+		out[episode] = append(out[episode], file)
+	}
+	return out, rows.Err()
 }
 
 func (d *ShareRecordDAO) LibraryOptions(ctx context.Context) (json.RawMessage, error) {

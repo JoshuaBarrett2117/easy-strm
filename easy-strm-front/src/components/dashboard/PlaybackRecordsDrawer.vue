@@ -2,7 +2,7 @@
   <n-drawer v-model:show="visible" placement="right" width="min(460px, 100vw)" :show-mask="false" :trap-focus="false" :block-scroll="false">
     <n-drawer-content title="STRM 播放记录" closable>
       <div class="flex h-full flex-col">
-        <div class="mb-3 text-xs text-slate-400">最近 1000 条直链调用 · 每 5 秒刷新 · HEAD 为预解析</div>
+        <div class="mb-3 text-xs text-slate-400">最近 1000 次播放会话 · 5 分钟内重复解析自动合并 · 每 5 秒刷新</div>
         <div class="mb-3 flex items-center gap-3"><n-button size="small" :loading="loading" @click="refresh">刷新</n-button><span class="text-xs text-slate-400">共 {{ total }} 条</span></div>
         <p v-if="error" role="alert" class="mb-3 text-xs text-red-500">{{ error }}</p>
         <div class="flex-1 space-y-3 overflow-y-auto pr-1">
@@ -12,7 +12,7 @@
               <img v-if="record.poster" :src="record.poster" class="h-24 w-16 rounded-lg object-cover" alt="海报">
               <div v-else class="flex h-24 w-16 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-400 dark:bg-white/10">无海报</div>
               <div class="min-w-0 flex-1">
-                <h3 class="truncate text-sm font-bold text-slate-800 dark:text-white">{{ record.name }}</h3>
+                <h3 class="break-words text-sm font-bold text-slate-800 dark:text-white" :title="record.name">{{ record.name }}</h3>
                 <a :href="record.url" target="_blank" class="mt-1 block truncate text-xs text-indigo-500" :title="record.url">{{ record.url }}</a>
                 <p class="mt-3 text-[11px] text-slate-400">{{ new Date(record.time).toLocaleString() }} · {{ record.method }}</p>
                 <p class="text-[11px] text-slate-400">{{ record.ip }} · {{ record.location }}</p>

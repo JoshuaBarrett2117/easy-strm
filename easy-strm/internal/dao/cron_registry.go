@@ -35,7 +35,7 @@ func (d *CronTaskDAO) SaveDefinition(t *domain.CronTask) error {
 		cloud = t.Cloud115ID
 	}
 	if t.ID == 0 {
-		err = tx.QueryRow(`INSERT INTO t_cron_task(task_key,task_name,task_type,handler,params,timezone,builtin,cloud115_id,strm_config_id,cron_expr,status) VALUES($1,$2,$3,$3,$4,$5,false,$6,$7,$8,$9) RETURNING id`, t.TaskKey, t.TaskName, t.Handler, raw, t.Timezone, cloud, config, t.CronExpr, t.Status).Scan(&t.ID)
+		err = tx.QueryRow(`INSERT INTO t_cron_task(task_key,task_name,task_type,handler,params,timezone,builtin,cloud115_id,strm_config_id,cron_expr,status) VALUES($1,$2,$3,$4,$5,$6,false,$7,$8,$9,$10) RETURNING id`, t.TaskKey, t.TaskName, t.Handler, t.Handler, raw, t.Timezone, cloud, config, t.CronExpr, t.Status).Scan(&t.ID)
 	} else {
 		// 更换处理器或绑定配置时，清除原配置的全量周期镜像。
 		_, err = tx.Exec(`UPDATE t_strm_config SET cron='' WHERE id IN (SELECT strm_config_id FROM t_cron_task WHERE id=$1 AND handler='full_generate' AND (handler<>$2 OR strm_config_id IS DISTINCT FROM $3::integer))`, t.ID, t.Handler, config)
@@ -43,7 +43,7 @@ func (d *CronTaskDAO) SaveDefinition(t *domain.CronTask) error {
 			return err
 		}
 		var result sql.Result
-		result, err = tx.Exec(`UPDATE t_cron_task SET task_name=$1,task_type=$2,handler=$2,params=$3,timezone=$4,cloud115_id=$5,strm_config_id=$6,cron_expr=$7,status=$8 WHERE id=$9`, t.TaskName, t.Handler, raw, t.Timezone, cloud, config, t.CronExpr, t.Status, t.ID)
+		result, err = tx.Exec(`UPDATE t_cron_task SET task_name=$1,task_type=$2,handler=$3,params=$4,timezone=$5,cloud115_id=$6,strm_config_id=$7,cron_expr=$8,status=$9 WHERE id=$10`, t.TaskName, t.Handler, t.Handler, raw, t.Timezone, cloud, config, t.CronExpr, t.Status, t.ID)
 		if err == nil {
 			n, e := result.RowsAffected()
 			err = e

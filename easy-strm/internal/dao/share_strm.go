@@ -5,16 +5,24 @@ import (
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
+
+	"github.com/lib/pq"
 )
 
 // StrmSources 按当前作品筛选条件遍历有效来源；分页采用来源ID游标。
 func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
 	where, args := libraryWhere(q)
+	fileFilter := ""
+	if len(q.FileIDs) > 0 {
+		args = append(args, pq.Array(q.FileIDs))
+		// 新识别出重复来源时必须连同该作品的旧来源一起重命名，不能只导出本批文件。
+		fileFilter = ` AND m.work_key IN (SELECT selected_media.work_key FROM t_share_media_file selected_file JOIN t_share_media selected_media ON selected_media.id=selected_file.media_id WHERE selected_file.id=ANY($` + fmt.Sprint(len(args)) + `::integer[]))`
+	}
 	args = append(args, after)
-	query := libraryWorks + ` SELECT f.id,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id),
+	query := libraryWorks + ` SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id),
 	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
-	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified' AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
+	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -24,7 +32,7 @@ func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQ
 	for rows.Next() {
 		var v domain.ShareStrmSource
 		var raw, episodes []byte
-		if err = rows.Scan(&v.ID, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes, &v.Remaining); err != nil {
+		if err = rows.Scan(&v.ID, &v.ShareID, &v.ShareName, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes, &v.Remaining); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &v.Result); err != nil {

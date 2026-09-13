@@ -4,12 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"easy-strm/internal/domain"
+	"encoding/json"
 	"fmt"
 	"github.com/go-redis/redis/v8"
 	"time"
 )
 
-// PlaybackRecordDAO 使用 PostgreSQL 保存调用记录，Redis 仅缓存归属地。
+// PlaybackRecordDAO 使用 PostgreSQL 保存播放会话记录，Redis 仅缓存归属地。
 type PlaybackRecordDAO struct{ client *redis.Client }
 
 // NewPlaybackRecordDAO 创建播放记录访问对象。
@@ -48,29 +49,38 @@ func (d *PlaybackRecordDAO) List(ctx context.Context) ([]domain.PlaybackRecord, 
 }
 
 // Metadata 通过原账号和 pickcode 找回文件名，并匹配已识别的海报。
-func (d *PlaybackRecordDAO) Metadata(ctx context.Context, account int, pickcode, name string) (string, string, error) {
+func (d *PlaybackRecordDAO) Metadata(ctx context.Context, account int, pickcode, name string) (domain.PlaybackMetadata, error) {
+	metadata := domain.PlaybackMetadata{Title: name}
+	if DB == nil {
+		return metadata, fmt.Errorf("数据库未初始化")
+	}
 	var fileName string
 	err := DB.QueryRowContext(ctx, `SELECT f.file_name FROM t_strm_file f JOIN t_strm_config c ON c.id=f.strm_config_id WHERE c.cloud115_id=$1 AND f.pick_code=$2 ORDER BY f.id DESC LIMIT 1`, account, pickcode).Scan(&fileName)
 	if err != nil && err != sql.ErrNoRows {
-		return name, "", err
+		return metadata, err
 	}
 	if fileName != "" {
 		name = fileName
 	}
+	metadata.Title = name
 	var title, poster, mediaType string
+	var season, episode sql.NullInt64
 	var tmdbID sql.NullInt64
 	autoHash := FileHash(name)
 	tmdbHash := FileHash(domain.MetadataSourceTMDB + ":" + name)
 	metaTubeHash := FileHash(domain.MetadataSourceMetaTube + ":" + name)
-	err = DB.QueryRowContext(ctx, `SELECT i.title,COALESCE(i.poster_path,''),i.tmdb_id,i.media_type
+	err = DB.QueryRowContext(ctx, `SELECT i.title,COALESCE(i.poster_path,''),i.tmdb_id,i.media_type,i.season_number,i.episode_number
 		FROM t_identify_cache i LEFT JOIN t_media_source s ON s.id=i.source_id
 		WHERE i.file_hash IN ($1,$2,$3) OR lower(i.file_name)=lower($4)
-		ORDER BY (s.cloud115_id=$5) DESC,(i.file_hash=$1) DESC,i.is_manual DESC,i.updated_at DESC,i.id DESC LIMIT 1`, autoHash, tmdbHash, metaTubeHash, name, account).Scan(&title, &poster, &tmdbID, &mediaType)
+		ORDER BY (s.cloud115_id=$5) DESC,(i.file_hash=$1) DESC,i.is_manual DESC,i.updated_at DESC,i.id DESC LIMIT 1`, autoHash, tmdbHash, metaTubeHash, name, account).Scan(&title, &poster, &tmdbID, &mediaType, &season, &episode)
 	if err == sql.ErrNoRows {
-		return name, "", nil
+		return metadata, nil
 	}
 	if err != nil {
-		return name, "", err
+		return metadata, err
+	}
+	if mediaType == "tv" && season.Valid && episode.Valid {
+		metadata.Episodes = []domain.ShareEpisode{{SeasonNumber: int(season.Int64), EpisodeNumber: int(episode.Int64)}}
 	}
 	if title != "" {
 		name = title
@@ -81,24 +91,27 @@ func (d *PlaybackRecordDAO) Metadata(ctx context.Context, account int, pickcode,
 		cacheErr := DB.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(title,''),$3),COALESCE(poster_path,'') FROM t_tmdb_cache
 			WHERE tmdb_id=$1 AND media_type=$2 AND COALESCE(poster_path,'')<>'' ORDER BY update_time DESC,id DESC LIMIT 1`, tmdbID.Int64, mediaType, name).Scan(&cachedTitle, &cachedPoster)
 		if cacheErr != nil && cacheErr != sql.ErrNoRows {
-			return name, "", cacheErr
+			return metadata, cacheErr
 		}
 		if cacheErr == nil {
 			name, poster = cachedTitle, cachedPoster
 		}
 	}
-	return name, poster, nil
+	metadata.Title, metadata.Poster = name, poster
+	return metadata, nil
 }
 
 // ShareMetadata 优先读取导出映射快照，并兼容从历史映射关联分享媒体主数据。
-func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (string, string, error) {
+func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (domain.PlaybackMetadata, error) {
+	metadata := domain.PlaybackMetadata{Title: entryID}
 	if DB == nil {
-		return entryID, "", fmt.Errorf("数据库未初始化")
+		return metadata, fmt.Errorf("数据库未初始化")
 	}
-	var title, poster string
+	var episodes []byte
 	err := DB.QueryRowContext(ctx, `SELECT
 		COALESCE(NULLIF(e.payload->>'title',''), NULLIF(metadata.title,''), NULLIF(e.payload->>'file_name',''), e.id::text),
-		COALESCE(NULLIF(e.payload->>'poster_path',''), NULLIF(metadata.poster_path,''), '')
+		COALESCE(NULLIF(e.payload->>'poster_path',''), NULLIF(metadata.poster_path,''), ''),
+		COALESCE(NULLIF(e.payload->'episodes','null'::jsonb), file_episodes.episodes, '[]'::jsonb)
 	FROM t_share_strm e
 	LEFT JOIN LATERAL (
 		SELECT m.title,m.poster_path
@@ -112,8 +125,26 @@ func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (
 		ORDER BY CASE WHEN COALESCE(e.payload->>'media_id','') ~ '^[1-9][0-9]*$' AND m.id=(e.payload->>'media_id')::integer THEN 0 ELSE 1 END, f.id DESC
 		LIMIT 1
 	) metadata ON TRUE
-	WHERE e.id=$1`, entryID).Scan(&title, &poster)
-	return title, poster, err
+	LEFT JOIN LATERAL (
+		SELECT jsonb_agg(jsonb_build_object('season_number', ep.season_number, 'episode_number', ep.episode_number)
+			ORDER BY ep.season_number, ep.episode_number) AS episodes
+		FROM t_share_media_file_episode ep
+		WHERE ep.file_id = (
+			SELECT f.id FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id
+			JOIN t_share_media m ON m.id=f.media_id
+			WHERE m.media_type='tv' AND COALESCE(e.payload->>'share_code','')<>''
+			AND POSITION(e.payload->>'share_code' IN COALESCE(s.url,''))>0
+			AND ((COALESCE(e.payload->>'file_id','')<>'' AND f.file_id=e.payload->>'file_id')
+			     OR f.file_name IN (e.payload->>'file_path',e.payload->>'file_name'))
+			ORDER BY f.id DESC LIMIT 1
+		)
+	) file_episodes ON TRUE
+	WHERE e.id=$1`, entryID).Scan(&metadata.Title, &metadata.Poster, &episodes)
+	if err != nil {
+		return metadata, err
+	}
+	err = json.Unmarshal(episodes, &metadata.Episodes)
+	return metadata, err
 }
 
 // GetLocation 读取 IP 归属地缓存。
