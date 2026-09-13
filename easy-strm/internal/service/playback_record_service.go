@@ -19,6 +19,7 @@ type PlaybackRecordStore interface {
 	Save(context.Context, domain.PlaybackRecord) error
 	List(context.Context) ([]domain.PlaybackRecord, error)
 	Metadata(context.Context, int, string, string) (string, string, error)
+	ShareMetadata(context.Context, string) (string, string, error)
 	GetLocation(context.Context, string) string
 	SetLocation(context.Context, string, string) error
 }
@@ -42,14 +43,28 @@ func (s *PlaybackRecordService) Record(filePath, pickcode string, account int, d
 	if name == "." || name == "/" || name == "" {
 		name = pickcode
 	}
-	record := domain.PlaybackRecord{ID: uuid.NewString(), Name: name, URL: directURL, IP: ip, Method: method, Time: time.Now().UTC(), Location: "未知"}
 	title, poster, err := s.store.Metadata(ctx, account, pickcode, name)
 	if err != nil {
 		logger.Warnf("播放记录媒体信息读取失败: %v", err)
-	} else {
-		record.Name = title
-		record.Poster = poster
+		title = name
 	}
+	s.save(ctx, title, poster, directURL, ip, method)
+}
+
+// RecordShare 保存分享资源库 STRM 的成功解析记录，元数据按导出映射读取。
+func (s *PlaybackRecordService) RecordShare(entryID, directURL, ip, method string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	name, poster, err := s.store.ShareMetadata(ctx, entryID)
+	if err != nil {
+		logger.Warnf("分享STRM播放记录媒体信息读取失败: %v", err)
+		name = entryID
+	}
+	s.save(ctx, name, poster, directURL, ip, method)
+}
+
+func (s *PlaybackRecordService) save(ctx context.Context, name, poster, directURL, ip, method string) {
+	record := domain.PlaybackRecord{ID: uuid.NewString(), Name: name, Poster: poster, URL: directURL, IP: ip, Method: method, Time: time.Now().UTC(), Location: "未知"}
 	if strings.HasPrefix(record.Poster, "/") {
 		record.Poster = "https://image.tmdb.org/t/p/w342" + record.Poster
 	}

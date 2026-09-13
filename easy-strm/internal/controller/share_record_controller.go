@@ -68,6 +68,23 @@ func (c *ShareRecordController) ClearAllMedia(x *gin.Context) {
 	SuccessResp(x, gin.H{"deleted": count})
 }
 
+// ClearSelectedMedia 清空选中分享下的媒体内容。
+func (c *ShareRecordController) ClearSelectedMedia(x *gin.Context) {
+	var input struct {
+		IDs []int `json:"share_ids"`
+	}
+	if x.ShouldBindJSON(&input) != nil || len(input.IDs) == 0 {
+		ErrorResp(x, 400, "请至少选择一个分享")
+		return
+	}
+	count, err := c.s.ClearSelectedMedia(x, input.IDs)
+	if err != nil {
+		ErrorResp(x, 409, err.Error())
+		return
+	}
+	SuccessResp(x, gin.H{"deleted": count})
+}
+
 // ParseImport 返回批量分享预览，不创建分享或执行网盘操作。
 func (c *ShareRecordController) ParseImport(x *gin.Context) {
 	var input struct {
@@ -179,7 +196,8 @@ func (c *ShareRecordController) Identify(x *gin.Context) {
 }
 func (c *ShareRecordController) Batch(x *gin.Context) {
 	var r struct {
-		IDs         []int `json:"ids"`
+		IDs         []int `json:"ids"` // 兼容历史按媒体ID筛选的调用。
+		ShareIDs    []int `json:"share_ids"`
 		Retry       bool  `json:"retry_failed"`
 		PendingOnly bool  `json:"pending_only"`
 	}
@@ -187,12 +205,29 @@ func (c *ShareRecordController) Batch(x *gin.Context) {
 		ErrorResp(x, 400, "识别任务参数无效")
 		return
 	}
-	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry, r.PendingOnly)
+	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry, r.ShareIDs, r.PendingOnly)
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
 	}
 	SuccessResp(x, gin.H{"task_id": taskID, "message": "批量识别任务已创建"})
+}
+
+// BatchSync 为选中分享创建批量文件同步任务。
+func (c *ShareRecordController) BatchSync(x *gin.Context) {
+	var input struct {
+		IDs []int `json:"share_ids"`
+	}
+	if x.ShouldBindJSON(&input) != nil || len(input.IDs) == 0 {
+		ErrorResp(x, 400, "请至少选择一个分享")
+		return
+	}
+	taskID, err := c.s.StartBatchSync(x, input.IDs)
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, gin.H{"task_id": taskID, "message": "批量同步分享文件任务已创建"})
 }
 
 // IdentifyRecord 为单条分享创建后台识别任务。

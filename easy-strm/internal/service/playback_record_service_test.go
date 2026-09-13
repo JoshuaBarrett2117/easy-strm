@@ -25,10 +25,25 @@ func (s *playbackStoreStub) List(context.Context) ([]domain.PlaybackRecord, erro
 func (s *playbackStoreStub) Metadata(_ context.Context, _ int, _ string, name string) (string, string, error) {
 	return name, "/poster.jpg", nil
 }
+func (s *playbackStoreStub) ShareMetadata(_ context.Context, _ string) (string, string, error) {
+	return "分享影片", "/share-poster.jpg", nil
+}
 func (s *playbackStoreStub) GetLocation(context.Context, string) string { return s.location }
 func (s *playbackStoreStub) SetLocation(_ context.Context, _, location string) error {
 	s.location = location
 	return nil
+}
+
+func TestSharePlaybackRecordUsesExportMetadata(t *testing.T) {
+	store := &playbackStoreStub{}
+	NewPlaybackRecordService(store).RecordShare("entry-1", "https://cdn.test/share", "192.168.1.2", "GET")
+	if len(store.records) != 1 {
+		t.Fatalf("播放记录数量 = %d，期望 1", len(store.records))
+	}
+	record := store.records[0]
+	if record.Name != "分享影片" || record.Poster != "https://image.tmdb.org/t/p/w342/share-poster.jpg" || record.Method != "GET" {
+		t.Fatalf("分享播放记录错误: %+v", record)
+	}
 }
 
 func TestPlaybackRecordAndPagination(t *testing.T) {

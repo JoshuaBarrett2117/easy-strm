@@ -1,6 +1,10 @@
 package dao
 
-import "context"
+import (
+	"context"
+
+	"github.com/lib/pq"
+)
 
 // ClearMedia 原子清除指定分享的全部媒体行，不删除分享配置或其他分享的数据。
 func (d *ShareRecordDAO) ClearMedia(ctx context.Context, id int) (int64, error) {
@@ -46,6 +50,33 @@ func (d *ShareRecordDAO) ClearAllMedia(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media"); err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ClearSelectedMedia 清除指定分享的媒体候选及识别结果，不删除分享配置。
+func (d *ShareRecordDAO) ClearSelectedMedia(ctx context.Context, ids []int) (int64, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, "DELETE FROM t_share_media_file WHERE share_id = ANY($1)", pq.Array(ids))
+	if err != nil {
+		return 0, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {

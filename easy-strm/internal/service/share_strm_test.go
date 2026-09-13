@@ -220,7 +220,7 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 	defer redisClient.Close()
 	dao.InitTaskRedisDAO(redisClient)
 	s.tasks = NewTaskService(dao.NewTaskRedisDAO(redisClient))
-	store.sources = []domain.ShareStrmSource{{ID: 1, WorkKey: "tmdb:tv:10", URL: "https://115.com/s/share", FileName: "Show", Result: domain.TmdbIdentifyResult{Success: true, Title: "Show", Year: 2024, MediaType: "tv", TmdbID: 10}}}
+	store.sources = []domain.ShareStrmSource{{ID: 1, MediaID: 88, WorkKey: "tmdb:tv:10", URL: "https://115.com/s/share", FileName: "Show", Result: domain.TmdbIdentifyResult{Success: true, Title: "Show", Year: 2024, MediaType: "tv", TmdbID: 10, PosterPath: "/show.jpg"}}}
 	store.sources[0].FileName = "Show/Show.S02E03E04.mkv"
 	store.sources[0].Episodes = []domain.ShareEpisode{{SeasonNumber: 2, EpisodeNumber: 3}, {SeasonNumber: 2, EpisodeNumber: 4}}
 	s.client = nil // 导出必须完全不依赖115客户端。
@@ -259,6 +259,9 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 	for key, entry := range store.entries {
 		if key != "entry" && (entry.FilePath == "" || entry.FileID != "") {
 			t.Fatalf("导出映射必须仅保存本地路径：%+v", entry)
+		}
+		if key != "entry" && (entry.MediaID != 88 || entry.Title != "Show" || entry.PosterPath != "/show.jpg") {
+			t.Fatalf("导出映射缺少播放记录元数据：%+v", entry)
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"bytes"
 	"database/sql"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/service"
@@ -55,6 +56,28 @@ func TestClearShareMedia(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+// TestClearSelectedShareMedia 覆盖选中分享批量清空的参数校验和成功响应。
+func TestClearSelectedShareMedia(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
+	r := gin.New()
+	r.POST("/shares/batch-clear", NewShareRecordController(s).ClearSelectedMedia)
+	mock.ExpectBegin()
+	mock.ExpectExec("DELETE FROM t_share_media_file WHERE share_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectExec("DELETE FROM t_share_media m WHERE NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/shares/batch-clear", bytes.NewBufferString(`{"share_ids":[2,3]}`)))
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -345,7 +345,14 @@ func (s *OrganizeService) saveIdentifyCacheToRedis(fileHash string, result *doma
 }
 
 func (s *OrganizeService) saveIdentifyCacheToDB(fileHash, fileName string, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) {
-	cache := &dao.IdentifyCache{
+	cache := buildIdentifyCache(fileHash, fileName, result, sourceID, isManual)
+	if err := s.identifyCacheDAO.CreateOrUpdate(cache); err != nil {
+		logger.Warnf("OrganizeService[saveIdentifyCacheToDB] 保存数据库失败: %v", err)
+	}
+}
+
+func buildIdentifyCache(fileHash, fileName string, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) *dao.IdentifyCache {
+	return &dao.IdentifyCache{
 		FileHash:      fileHash,
 		FileName:      fileName,
 		MediaType:     result.MediaType,
@@ -355,11 +362,9 @@ func (s *OrganizeService) saveIdentifyCacheToDB(fileHash, fileName string, resul
 		Year:          result.Year,
 		SeasonNumber:  result.SeasonNumber,
 		EpisodeNumber: result.EpisodeNumber,
+		PosterPath:    result.PosterPath,
 		IsManual:      isManual,
 		SourceID:      sourceID,
-	}
-	if err := s.identifyCacheDAO.CreateOrUpdate(cache); err != nil {
-		logger.Warnf("OrganizeService[saveIdentifyCacheToDB] 保存数据库失败: %v", err)
 	}
 }
 

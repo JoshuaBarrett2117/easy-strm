@@ -110,7 +110,17 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 	if len(matches) < 2 {
 		return false, fmt.Errorf("本地记录的115分享地址无效")
 	}
-	entry := domain.ShareStrmEntry{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte(matches[1]+":path:"+filePath)).String(), ShareCode: matches[1], Password: source.Password, FileID: source.RemoteFileID, FileName: file.Name, FilePath: filePath}
+	entry := domain.ShareStrmEntry{
+		ID:         uuid.NewSHA1(uuid.NameSpaceURL, []byte(matches[1]+":path:"+filePath)).String(),
+		ShareCode:  matches[1],
+		Password:   source.Password,
+		FileID:     source.RemoteFileID,
+		FileName:   file.Name,
+		FilePath:   filePath,
+		MediaID:    source.MediaID,
+		Title:      source.Result.Title,
+		PosterPath: source.Result.PosterPath,
+	}
 	if entry.Password == "" {
 		entry.Password = extractSharePassword(source.URL)
 	}

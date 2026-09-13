@@ -56,6 +56,10 @@ func TestShareStrmController(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &strmActionsStub{err: tt.err}
 			c := &ShareStrmController{s: stub}
+			var recordedID, recordedURL, recordedMethod string
+			c.SetRecordPlayback(func(id, directURL, _, method string) {
+				recordedID, recordedURL, recordedMethod = id, directURL, method
+			})
 			r := gin.New()
 			r.GET("/settings", c.Settings)
 			r.PUT("/settings", c.SaveSettings)
@@ -74,8 +78,13 @@ func TestShareStrmController(t *testing.T) {
 				if w.Header().Get("Location") != "https://cdn.example/video" || stub.ua != "Player/1" || w.Header().Get("Cache-Control") != "no-store" {
 					t.Fatal("重定向契约错误")
 				}
+				if recordedID != "56c94081-7619-4824-9e6f-ea13141599e1" || recordedURL != "https://cdn.example/video" || recordedMethod != tt.method {
+					t.Fatal("成功重定向未记录分享STRM播放")
+				}
 			} else if w.Header().Get("Location") != "" {
 				t.Fatal("失败不能重定向")
+			} else if recordedID != "" {
+				t.Fatal("失败请求不能写入播放记录")
 			}
 			if tt.name == "export" && (stub.query.MediaType != "tv" || stub.query.Genres != "18") {
 				t.Fatal("筛选条件丢失")

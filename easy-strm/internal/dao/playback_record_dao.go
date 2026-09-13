@@ -57,8 +57,15 @@ func (d *PlaybackRecordDAO) Metadata(ctx context.Context, account int, pickcode,
 	if fileName != "" {
 		name = fileName
 	}
-	var title, poster string
-	err = DB.QueryRowContext(ctx, `SELECT title, COALESCE(poster_path,'') FROM t_identify_cache WHERE file_hash=$1`, FileHash(name)).Scan(&title, &poster)
+	var title, poster, mediaType string
+	var tmdbID sql.NullInt64
+	autoHash := FileHash(name)
+	tmdbHash := FileHash(domain.MetadataSourceTMDB + ":" + name)
+	metaTubeHash := FileHash(domain.MetadataSourceMetaTube + ":" + name)
+	err = DB.QueryRowContext(ctx, `SELECT i.title,COALESCE(i.poster_path,''),i.tmdb_id,i.media_type
+		FROM t_identify_cache i LEFT JOIN t_media_source s ON s.id=i.source_id
+		WHERE i.file_hash IN ($1,$2,$3) OR lower(i.file_name)=lower($4)
+		ORDER BY (s.cloud115_id=$5) DESC,(i.file_hash=$1) DESC,i.is_manual DESC,i.updated_at DESC,i.id DESC LIMIT 1`, autoHash, tmdbHash, metaTubeHash, name, account).Scan(&title, &poster, &tmdbID, &mediaType)
 	if err == sql.ErrNoRows {
 		return name, "", nil
 	}
@@ -68,7 +75,45 @@ func (d *PlaybackRecordDAO) Metadata(ctx context.Context, account int, pickcode,
 	if title != "" {
 		name = title
 	}
+	// 兼容旧版本识别缓存漏存海报的记录，使用已缓存的 TMDB 身份回查，不发起网络请求。
+	if poster == "" && tmdbID.Valid && tmdbID.Int64 > 0 {
+		var cachedTitle, cachedPoster string
+		cacheErr := DB.QueryRowContext(ctx, `SELECT COALESCE(NULLIF(title,''),$3),COALESCE(poster_path,'') FROM t_tmdb_cache
+			WHERE tmdb_id=$1 AND media_type=$2 AND COALESCE(poster_path,'')<>'' ORDER BY update_time DESC,id DESC LIMIT 1`, tmdbID.Int64, mediaType, name).Scan(&cachedTitle, &cachedPoster)
+		if cacheErr != nil && cacheErr != sql.ErrNoRows {
+			return name, "", cacheErr
+		}
+		if cacheErr == nil {
+			name, poster = cachedTitle, cachedPoster
+		}
+	}
 	return name, poster, nil
+}
+
+// ShareMetadata 优先读取导出映射快照，并兼容从历史映射关联分享媒体主数据。
+func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (string, string, error) {
+	if DB == nil {
+		return entryID, "", fmt.Errorf("数据库未初始化")
+	}
+	var title, poster string
+	err := DB.QueryRowContext(ctx, `SELECT
+		COALESCE(NULLIF(e.payload->>'title',''), NULLIF(metadata.title,''), NULLIF(e.payload->>'file_name',''), e.id::text),
+		COALESCE(NULLIF(e.payload->>'poster_path',''), NULLIF(metadata.poster_path,''), '')
+	FROM t_share_strm e
+	LEFT JOIN LATERAL (
+		SELECT m.title,m.poster_path
+		FROM t_share_media_file f
+		JOIN t_share_media m ON m.id=f.media_id
+		LEFT JOIN t_share_record s ON s.id=f.share_id
+		WHERE (COALESCE(e.payload->>'media_id','') ~ '^[1-9][0-9]*$' AND m.id=(e.payload->>'media_id')::integer)
+		   OR (COALESCE(e.payload->>'share_code','')<>'' AND POSITION(e.payload->>'share_code' IN COALESCE(s.url,''))>0
+		       AND ((COALESCE(e.payload->>'file_id','')<>'' AND f.file_id=e.payload->>'file_id')
+		            OR f.file_name IN (e.payload->>'file_path',e.payload->>'file_name')))
+		ORDER BY CASE WHEN COALESCE(e.payload->>'media_id','') ~ '^[1-9][0-9]*$' AND m.id=(e.payload->>'media_id')::integer THEN 0 ELSE 1 END, f.id DESC
+		LIMIT 1
+	) metadata ON TRUE
+	WHERE e.id=$1`, entryID).Scan(&title, &poster)
+	return title, poster, err
 }
 
 // GetLocation 读取 IP 归属地缓存。

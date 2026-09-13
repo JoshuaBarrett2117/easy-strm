@@ -20,11 +20,19 @@ type shareStrmActions interface {
 }
 
 // ShareStrmController 提供配置、导出任务及媒体服务器播放入口。
-type ShareStrmController struct{ s shareStrmActions }
+type ShareStrmController struct {
+	s              shareStrmActions
+	recordPlayback func(string, string, string, string)
+}
 
 // NewShareStrmController 注入资料库STRM服务。
 func NewShareStrmController(s *service.ShareStrmService) *ShareStrmController {
 	return &ShareStrmController{s: s}
+}
+
+// SetRecordPlayback 注入分享 STRM 成功解析后的播放记录能力。
+func (c *ShareStrmController) SetRecordPlayback(fn func(string, string, string, string)) {
+	c.recordPlayback = fn
 }
 
 // Settings 返回导出配置。
@@ -84,4 +92,7 @@ func (c *ShareStrmController) Playback(x *gin.Context) {
 	}
 	x.Header("Cache-Control", "no-store")
 	x.Redirect(http.StatusFound, link)
+	if c.recordPlayback != nil && x.Writer.Status() == http.StatusFound {
+		c.recordPlayback(id.String(), link, x.ClientIP(), x.Request.Method)
+	}
 }

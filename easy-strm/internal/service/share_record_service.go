@@ -316,9 +316,68 @@ func (s *ShareRecordService) StartRecordSync(ctx context.Context, recordID int) 
 	return taskID, nil
 }
 
+// StartBatchSync 创建选中分享的串行文件同步任务，避免并发访问同一分享账号。
+func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int) (string, error) {
+	if len(recordIDs) == 0 {
+		return "", fmt.Errorf("请至少选择一个分享")
+	}
+	if s.tasks == nil {
+		return "", fmt.Errorf("任务服务未初始化")
+	}
+	if !s.identifyMu.TryLock() {
+		return "", fmt.Errorf("已有分享同步或识别任务运行，请等待结束后再发起")
+	}
+	settings, err := s.GetTaskSettings()
+	if err != nil {
+		s.identifyMu.Unlock()
+		return "", err
+	}
+	taskID := fmt.Sprintf("share_sync_%d", time.Now().UnixNano())
+	if err := s.tasks.Create(taskID, "share_sync", "批量同步分享文件"); err != nil {
+		s.identifyMu.Unlock()
+		return "", err
+	}
+	go func() {
+		defer s.identifyMu.Unlock()
+		taskCtx, cancel := newShareTaskContext(context.Background(), settings.TimeoutMinutes)
+		defer cancel()
+		defer s.tasks.RemoveCancel(taskID)
+		s.tasks.RegisterCancel(taskID, cancel)
+		_ = s.tasks.UpdateStatus(taskID, "running")
+		success, failed, files := 0, 0, 0
+		syncedRecordIDs := make([]int, 0, len(recordIDs))
+		for index, recordID := range recordIDs {
+			if taskCtx.Err() != nil {
+				s.finishShareTaskContext(taskID, taskCtx.Err(), settings.TimeoutMinutes)
+				return
+			}
+			if s.tasks.IsCancelled(taskID) {
+				return
+			}
+			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": index + 1, "total_shares": len(recordIDs)})
+			count, _, syncErr := s.SyncShareFiles(taskCtx, recordID)
+			if syncErr != nil {
+				failed++
+			} else {
+				success++
+				files += count
+				syncedRecordIDs = append(syncedRecordIDs, recordID)
+			}
+			_ = s.tasks.UpdateProgress(taskID, len(recordIDs), index+1, success, failed)
+		}
+		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步完成", "total_shares": len(recordIDs), "synced_shares": success, "synced_share_ids": syncedRecordIDs, "failed_shares": failed, "file_count": files})
+		if failed > 0 {
+			_ = s.tasks.SetError(taskID, fmt.Sprintf("同步完成，但有 %d 个分享失败", failed))
+			return
+		}
+		_ = s.tasks.UpdateStatus(taskID, "completed")
+	}()
+	return taskID, nil
+}
+
 // StartBatchIdentify 创建后台识别任务并立即返回任务 ID。
-func (s *ShareRecordService) StartBatchIdentify(ctx context.Context, ids []int, retry bool, pendingOnly ...bool) (string, error) {
-	return s.startIdentifyTask(ctx, ids, retry, nil, pendingOnly...)
+func (s *ShareRecordService) StartBatchIdentify(ctx context.Context, ids []int, retry bool, recordIDs []int, pendingOnly ...bool) (string, error) {
+	return s.startIdentifyTask(ctx, ids, retry, recordIDs, pendingOnly...)
 }
 
 // StartRecordIdentify 为单条分享创建识别任务，并只处理该分享下的全部媒体。

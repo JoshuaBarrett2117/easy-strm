@@ -87,10 +87,12 @@ export const deleteShareRecord = (id) => api.delete(`/media/share-records/${id}`
 // 清空媒体候选及识别内容，保留分享链接配置。
 export const clearShareMedia = (id) => api.delete(`/media/share-records/${id}/media`)
 export const clearAllShareMedia = () => api.delete('/media/share-records/media')
+export const clearSelectedShareMedia = (shareIds) => api.post('/media/share-records/batch-clear', { share_ids: shareIds })
 export const identifyShareMedia = (id, data) => api.post(`/media/share-records/media/${id}/identify`, data)
 export const manualIdentifyShareMedia = (id, data) => api.post(`/media/share-records/media/${id}/manual-identify`, data)
 export const deleteShareMedia = (shareId, mediaId) => api.delete(`/media/share-records/${shareId}/media/${mediaId}`)
 export const batchIdentifyShareRecords = (data) => api.post('/media/share-records/batch-identify', data)
+export const batchSyncShareRecords = (shareIds) => api.post('/media/share-records/batch-sync', { share_ids: shareIds })
 export const identifyShareRecord = (id, pendingOnly = false, failedOnly = false) => api.post(`/media/share-records/${id}/identify`, null, {params: {pending_only: pendingOnly, failed_only: failedOnly}})
 export const syncShareRecord = (id) => api.post(`/media/share-records/${id}/sync`)
 export const getShareFiles = (id, params) => api.get(`/media/share-records/${id}/files`, { params })

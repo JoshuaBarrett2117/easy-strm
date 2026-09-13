@@ -143,6 +143,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		return link.Url.Url, nil
 	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
+	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
+	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
 	shareStrmService.SetExportDatabase(dao.DB)
 	scheduler.Register(service.CronHandler{Key: "share_strm_incremental_export", Name: "分享库 STRM 增量导出", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
 		return "分享库增量检查完成", shareStrmService.RunScheduledExport(ctx, id)
@@ -995,6 +997,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/share-records", shareRecordController.Create)
 		auth.POST("/media/share-records/parse", shareRecordController.ParseImport)
 		auth.DELETE("/media/share-records/media", shareRecordController.ClearAllMedia)
+		auth.POST("/media/share-records/batch-clear", shareRecordController.ClearSelectedMedia)
 		auth.PUT("/media/share-records/:id", shareRecordController.Update)
 		auth.DELETE("/media/share-records/:id", shareRecordController.Delete)
 		auth.GET("/media/share-records/:id/media", shareRecordController.ListMedia)
@@ -1007,6 +1010,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.POST("/media/share-records/media/:mediaId/identify", shareRecordController.Identify)
 		auth.POST("/media/share-records/media/:mediaId/manual-identify", shareRecordController.ManualIdentify)
 		auth.POST("/media/share-records/batch-identify", shareRecordController.Batch)
+		auth.POST("/media/share-records/batch-sync", shareRecordController.BatchSync)
 		auth.GET("/media/tmdb/movie/:id", tmdbController.GetMovieDetail)
 		auth.GET("/media/tmdb/tv/:id", tmdbController.GetTVDetail)
 		auth.GET("/media/tmdb/config", tmdbController.GetConfig)
@@ -1098,7 +1102,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 		// ========== 日志查看 ==========
 		auth.GET("/logs", logController.GetFileList)
-		auth.GET("/playback-records", controller.NewPlaybackRecordController(service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))).List)
+		auth.GET("/playback-records", controller.NewPlaybackRecordController(playbackRecordService).List)
 		auth.GET("/logs/:filename", logController.GetFileContent)
 		auth.GET("/logs/config", logController.GetConfig)
 		auth.PUT("/logs/config", logController.UpdateConfig)
