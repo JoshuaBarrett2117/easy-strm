@@ -183,7 +183,7 @@ func selectVerifiedShareCandidate(q ShareMediaQuery, candidates []domain.TmdbSea
 			continue
 		}
 		// 年份差异过大意味着同名重拍片，不能直接接受搜索首项。
-		if q.Year > 0 && candidate.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
+		if q.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
 			continue
 		}
 		match := false
@@ -197,7 +197,7 @@ func selectVerifiedShareCandidate(q ShareMediaQuery, candidates []domain.TmdbSea
 		if !match {
 			continue
 		}
-		if best != nil && (best.TmdbID != candidate.TmdbID || best.MediaType != candidate.MediaType || best.MetadataID != candidate.MetadataID) {
+		if best != nil && (best.TmdbID != candidate.TmdbID || best.MediaType != candidate.MediaType || best.MetadataID != candidate.MetadataID || best.MetadataSource != candidate.MetadataSource || best.MetadataProvider != candidate.MetadataProvider) {
 			return nil
 		}
 		best = candidate
@@ -206,6 +206,19 @@ func selectVerifiedShareCandidate(q ShareMediaQuery, candidates []domain.TmdbSea
 }
 
 func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, source string) (*domain.TmdbSearchResult, error) {
+	source = normalizeMetadataSourcePolicy(source)
+	if source == domain.MetadataSourceAuto {
+		best, err := s.searchShareQuery(ctx, q, domain.MetadataSourceTMDB)
+		if err != nil || best != nil {
+			return best, err
+		}
+		if q.MediaType == "tv" || !s.adultContentEnabled || !s.metatubeDefaultEnabled || !s.MetaTubeEnabled() {
+			return nil, nil
+		}
+		movieQuery := q
+		movieQuery.MediaType = "movie"
+		return s.searchShareQuery(ctx, movieQuery, domain.MetadataSourceMetaTube)
+	}
 	candidates := []domain.TmdbSearchResult{}
 	types := []string{q.MediaType}
 	if q.MediaType == "unknown" {
@@ -219,9 +232,14 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 			var found []domain.TmdbSearchResult
 			var err error
 			if kind == "tv" {
-				found, err = s.SearchTV(title, q.Year)
+				found, err = s.searchTVContext(ctx, title, q.Year)
+			} else if source == domain.MetadataSourceTMDB {
+				found, err = s.searchMovieTMDBContext(ctx, title, q.Year)
 			} else {
-				found, err = s.SearchMovieBySource(title, q.Year, source)
+				if !s.adultContentEnabled || !s.MetaTubeEnabled() {
+					return nil, fmt.Errorf("成人内容识别或MetaTube未启用")
+				}
+				found, err = s.searchMetaTubeContext(ctx, title, q.Year)
 			}
 			if err != nil {
 				return nil, err
@@ -240,11 +258,11 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 	seen := map[string]bool{}
 	for _, candidate := range candidates {
 		key := fmt.Sprintf("%s:%d", candidate.MediaType, candidate.TmdbID)
-		if candidate.TmdbID <= 0 || seen[key] {
+		if candidate.MetadataSource == domain.MetadataSourceMetaTube || candidate.MetadataProvider != "" || candidate.TmdbID <= 0 || seen[key] {
 			continue
 		}
 		seen[key] = true
-		if q.Year > 0 && candidate.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
+		if q.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
 			continue
 		}
 		req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/%s/%d/alternative_titles?api_key=%s", s.baseURL, candidate.MediaType, candidate.TmdbID, s.apiKey), nil)
@@ -290,7 +308,7 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			found, err := s.SearchTV(title, 0)
+			found, err := s.searchTVContext(ctx, title, 0)
 			if err != nil {
 				return nil, err
 			}
@@ -307,8 +325,14 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 // IdentifyShareFile 使用单条媒体的清洗查询，绕过旧文件匹配缓存，不回退到合集目录。
 // AI最多调用一次，AI建议仍必须经过实际元数据检索和标题/年份核验。
 func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
+	return s.IdentifyWithAssist(ctx, filename, IdentifyAssistOptions{
+		MediaType: forcedType, MetadataSource: source, AllowAI: true, UseCache: false, ShareMode: true,
+	})
+}
+
+func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
 	q := AnalyzeShareFilename(filename)
-	result := &domain.TmdbIdentifyResult{Filename: filename, MediaType: q.MediaType}
+	result := &domain.TmdbIdentifyResult{Filename: filename, MediaType: q.MediaType, RecognitionMethod: "rule"}
 	if q.Container {
 		result.Message = "集合目录不是单部媒体，已跳过"
 		return result, nil
@@ -350,10 +374,12 @@ func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, f
 		result.MediaType = q.MediaType
 		result.MetadataSource = "tmdb"
 		result.Success = true
+		result.RecognitionMethod = "source"
 		result.Message = "通过文件名中的TMDB ID获取详情"
 		return result, nil
 	}
 	usedAI := false
+	aiScene := ""
 	aiMessage := ""
 	assist := func(scene string) {
 		if s.aiRecognition == nil || usedAI {
@@ -361,15 +387,18 @@ func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, f
 		}
 		hint, called, err := s.aiRecognition.Assist(ctx, filename, scene)
 		usedAI = usedAI || called
+		if called {
+			aiScene = scene
+		}
 		if err != nil {
-			aiMessage = "；AI辅助失败：" + err.Error()
+			aiMessage = "；ai_request_failed：" + err.Error()
 			return
 		}
 		if hint != nil {
 			q.Titles = []string{}
 			q.Titles = appendImportCandidate(q.Titles, hint.Title)
 			q.Titles = appendImportCandidate(q.Titles, hint.OriginalTitle)
-			if hint.Year > 0 {
+			if q.Year == 0 && hint.Year > 0 {
 				q.Year = hint.Year
 			}
 			if forcedType != "movie" && forcedType != "tv" {
@@ -400,6 +429,9 @@ func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, f
 	}
 	if best == nil {
 		result.Message = "未找到可确认的媒体匹配，请手动核对" + aiMessage
+		result.AIUsed = usedAI
+		result.AIScene = aiScene
+		result.FailureReason = result.Message
 		return result, nil
 	}
 	result.Success = true
@@ -413,8 +445,12 @@ func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, f
 	result.MetadataID = best.MetadataID
 	result.MetadataProvider = best.MetadataProvider
 	result.Message = "标题和年份核验通过"
+	result.RecognitionMethod = "source"
+	result.AIUsed = usedAI
+	result.AIScene = aiScene
 	if usedAI {
 		result.Message += "（AI辅助）"
+		result.RecognitionMethod = "ai"
 	}
 	return result, nil
 }

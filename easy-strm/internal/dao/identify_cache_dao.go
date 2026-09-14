@@ -23,21 +23,28 @@ func NewIdentifyCacheDAO() *IdentifyCacheDAO {
 
 // IdentifyCache 文件识别缓存模型
 type IdentifyCache struct {
-	ID            int       `json:"id"`
-	FileHash      string    `json:"file_hash"`
-	FileName      string    `json:"file_name"`
-	MediaType     string    `json:"media_type"`
-	TmdbID        int       `json:"tmdb_id"`
-	Title         string    `json:"title"`
-	OriginalTitle string    `json:"original_title"`
-	Year          int       `json:"year"`
-	SeasonNumber  int       `json:"season_number"`
-	EpisodeNumber int       `json:"episode_number"`
-	PosterPath    string    `json:"poster_path"`
-	IsManual      bool      `json:"is_manual"`
-	SourceID      int       `json:"source_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID                int       `json:"id"`
+	FileHash          string    `json:"file_hash"`
+	FileName          string    `json:"file_name"`
+	MediaType         string    `json:"media_type"`
+	TmdbID            int       `json:"tmdb_id"`
+	Title             string    `json:"title"`
+	OriginalTitle     string    `json:"original_title"`
+	Year              int       `json:"year"`
+	SeasonNumber      int       `json:"season_number"`
+	EpisodeNumber     int       `json:"episode_number"`
+	PosterPath        string    `json:"poster_path"`
+	IsManual          bool      `json:"is_manual"`
+	SourceID          int       `json:"source_id"`
+	RecognitionMethod string    `json:"recognition_method"`
+	MetadataSource    string    `json:"metadata_source"`
+	MetadataID        string    `json:"metadata_id"`
+	MetadataProvider  string    `json:"metadata_provider"`
+	AIUsed            bool      `json:"ai_used"`
+	AIScene           string    `json:"ai_scene"`
+	FailureReason     string    `json:"failure_reason"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // FileHash 生成文件名的MD5哈希
@@ -62,14 +69,16 @@ func (d *IdentifyCacheDAO) GetByFileHash(fileHash string) (*IdentifyCache, error
 
 	err := DB.QueryRow(
 		`SELECT id, file_hash, file_name, media_type, tmdb_id, title, original_title, year,
-		        season_number, episode_number, poster_path, is_manual, source_id, created_at, updated_at
+		        season_number, episode_number, poster_path, is_manual, source_id, recognition_method,
+		        metadata_source, metadata_id, metadata_provider, ai_used, ai_scene, failure_reason, created_at, updated_at
 		 FROM t_identify_cache
 		 WHERE file_hash = $1`,
 		fileHash,
 	).Scan(
 		&cache.ID, &cache.FileHash, &cache.FileName, &cache.MediaType, &tmdbID,
 		&cache.Title, &originalTitle, &year, &seasonNumber, &episodeNumber,
-		&posterPath, &cache.IsManual, &sourceID, &cache.CreatedAt, &cache.UpdatedAt,
+		&posterPath, &cache.IsManual, &sourceID, &cache.RecognitionMethod, &cache.MetadataSource,
+		&cache.MetadataID, &cache.MetadataProvider, &cache.AIUsed, &cache.AIScene, &cache.FailureReason, &cache.CreatedAt, &cache.UpdatedAt,
 	)
 
 	if err != nil {
@@ -128,7 +137,8 @@ func (d *IdentifyCacheDAO) GetByFileHashes(fileHashes []string) (map[string]*Ide
 
 	query := fmt.Sprintf(
 		`SELECT id, file_hash, file_name, media_type, tmdb_id, title, original_title, year,
-		        season_number, episode_number, poster_path, is_manual, source_id, created_at, updated_at
+		        season_number, episode_number, poster_path, is_manual, source_id, recognition_method,
+		        metadata_source, metadata_id, metadata_provider, ai_used, ai_scene, failure_reason, created_at, updated_at
 		 FROM t_identify_cache
 		 WHERE file_hash IN (%s)`,
 		placeholders,
@@ -151,7 +161,8 @@ func (d *IdentifyCacheDAO) GetByFileHashes(fileHashes []string) (map[string]*Ide
 		err := rows.Scan(
 			&cache.ID, &cache.FileHash, &cache.FileName, &cache.MediaType, &tmdbID,
 			&cache.Title, &originalTitle, &year, &seasonNumber, &episodeNumber,
-			&posterPath, &cache.IsManual, &sourceID, &cache.CreatedAt, &cache.UpdatedAt,
+			&posterPath, &cache.IsManual, &sourceID, &cache.RecognitionMethod, &cache.MetadataSource,
+			&cache.MetadataID, &cache.MetadataProvider, &cache.AIUsed, &cache.AIScene, &cache.FailureReason, &cache.CreatedAt, &cache.UpdatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("IdentifyCacheDAO[GetByFileHashes] 扫描失败: %v", err)
@@ -194,13 +205,15 @@ func (d *IdentifyCacheDAO) GetByFileHashes(fileHashes []string) (map[string]*Ide
 func (d *IdentifyCacheDAO) Create(cache *IdentifyCache) error {
 	err := DB.QueryRow(
 		`INSERT INTO t_identify_cache (file_hash, file_name, media_type, tmdb_id, title, original_title, year,
-		        season_number, episode_number, poster_path, is_manual, source_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		        season_number, episode_number, poster_path, is_manual, source_id, recognition_method,
+		        metadata_source, metadata_id, metadata_provider, ai_used, ai_scene, failure_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		 RETURNING id, created_at, updated_at`,
 		cache.FileHash, cache.FileName, cache.MediaType, nullInt(cache.TmdbID),
 		cache.Title, nullString(cache.OriginalTitle), nullInt(cache.Year),
 		nullInt(cache.SeasonNumber), nullInt(cache.EpisodeNumber), nullString(cache.PosterPath),
-		cache.IsManual, nullInt(cache.SourceID),
+		cache.IsManual, nullInt(cache.SourceID), cache.RecognitionMethod, cache.MetadataSource, cache.MetadataID,
+		cache.MetadataProvider, cache.AIUsed, cache.AIScene, cache.FailureReason,
 	).Scan(&cache.ID, &cache.CreatedAt, &cache.UpdatedAt)
 
 	if err != nil {
@@ -218,8 +231,9 @@ func (d *IdentifyCacheDAO) Create(cache *IdentifyCache) error {
 func (d *IdentifyCacheDAO) CreateOrUpdate(cache *IdentifyCache) error {
 	err := DB.QueryRow(
 		`INSERT INTO t_identify_cache (file_hash, file_name, media_type, tmdb_id, title, original_title, year,
-		        season_number, episode_number, poster_path, is_manual, source_id)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		        season_number, episode_number, poster_path, is_manual, source_id, recognition_method,
+		        metadata_source, metadata_id, metadata_provider, ai_used, ai_scene, failure_reason)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		 ON CONFLICT (file_hash) DO UPDATE SET
 		        file_name = EXCLUDED.file_name,
 		        media_type = EXCLUDED.media_type,
@@ -232,12 +246,21 @@ func (d *IdentifyCacheDAO) CreateOrUpdate(cache *IdentifyCache) error {
 		        poster_path = EXCLUDED.poster_path,
 		        is_manual = EXCLUDED.is_manual,
 		        source_id = COALESCE(t_identify_cache.source_id, EXCLUDED.source_id),
+		        recognition_method = EXCLUDED.recognition_method,
+		        metadata_source = EXCLUDED.metadata_source,
+		        metadata_id = EXCLUDED.metadata_id,
+		        metadata_provider = EXCLUDED.metadata_provider,
+		        ai_used = EXCLUDED.ai_used,
+		        ai_scene = EXCLUDED.ai_scene,
+		        failure_reason = EXCLUDED.failure_reason,
 		        updated_at = NOW()
+		 WHERE NOT t_identify_cache.is_manual OR EXCLUDED.is_manual
 		 RETURNING id, created_at, updated_at`,
 		cache.FileHash, cache.FileName, cache.MediaType, nullInt(cache.TmdbID),
 		cache.Title, nullString(cache.OriginalTitle), nullInt(cache.Year),
 		nullInt(cache.SeasonNumber), nullInt(cache.EpisodeNumber), nullString(cache.PosterPath),
-		cache.IsManual, nullInt(cache.SourceID),
+		cache.IsManual, nullInt(cache.SourceID), cache.RecognitionMethod, cache.MetadataSource, cache.MetadataID,
+		cache.MetadataProvider, cache.AIUsed, cache.AIScene, cache.FailureReason,
 	).Scan(&cache.ID, &cache.CreatedAt, &cache.UpdatedAt)
 
 	if err != nil {

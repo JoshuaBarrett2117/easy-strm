@@ -18,8 +18,9 @@
         <div class="flex flex-wrap gap-2">
           <n-button :loading="parseLoading" @click="runLocalParse">仅解析规则</n-button>
           <n-button type="primary" :loading="identifyLoading" @click="runFullRecognition">
-            解析并查询 TMDB
+            解析并查询数据源
           </n-button>
+          <n-button type="warning" :loading="aiLoading" @click="runAIRecognition">AI辅助分析</n-button>
         </div>
       </div>
 
@@ -94,6 +95,19 @@
         </div>
       </PageCard>
     </div>
+
+    <PageCard v-if="aiResult" title="AI辅助核验" subtitle="Suggestion → Verified Source">
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <ResultField label="AI建议标题" :value="aiResult.ai_hint?.title || aiResult.ai_hint?.original_title || '-'" />
+        <ResultField label="AI建议年份/类型" :value="`${aiResult.ai_hint?.year || '-'} · ${mediaTypeText(aiResult.ai_hint?.media_type)}`" />
+        <ResultField label="AI前查询词" :value="aiResult.query_before_ai?.join(' / ') || '-'" />
+        <ResultField label="AI后查询词" :value="aiResult.query_after_ai?.join(' / ') || '-'" />
+        <ResultField label="数据源" :value="aiResult.metadata_source || '-'" />
+        <ResultField label="触发场景" :value="aiResult.ai_scene || '-'" />
+        <ResultField label="最终候选" :value="aiResult.success ? `${aiResult.title} (${aiResult.year || '-'})` : '-'" />
+        <ResultField label="核验结论" :value="aiResult.success ? '严格核验通过' : (aiResult.failure_reason || aiResult.message || '仍无法确认')" />
+      </div>
+    </PageCard>
 
     <PageCard title="文件名识别规则" subtitle="Shared Organize Rules">
       <template #action>
@@ -177,6 +191,7 @@ import {
 } from 'naive-ui'
 import PageCard from '../components/common/PageCard.vue'
 import {
+	assistIdentifyFile,
   autoIdentifyFile,
   getFilenameRecognitionRules,
   parseMediaFilename,
@@ -216,6 +231,8 @@ const identifyMessage = ref('')
 const identifyAttempted = ref(false)
 const parseLoading = ref(false)
 const identifyLoading = ref(false)
+const aiLoading = ref(false)
+const aiResult = ref(null)
 const rulesLoading = ref(false)
 const saveLoading = ref(false)
 const resetLoading = ref(false)
@@ -275,6 +292,25 @@ const runFullRecognition = async () => {
     identifyMessage.value = error.response?.data?.error || error.message || 'TMDB 识别失败'
   } finally {
     identifyLoading.value = false
+  }
+}
+
+const runAIRecognition = async () => {
+  if (!requireFilename()) return
+  aiLoading.value = true
+  aiResult.value = null
+  try {
+    if (!parsedResult.value) await runLocalParse()
+    const response = await assistIdentifyFile({ filename: filename.value })
+    aiResult.value = responseData(response) || {}
+    if (aiResult.value.success) {
+      tmdbCandidates.value = aiResult.value.candidates || []
+      identifyMessage.value = `核验通过：${aiResult.value.title}`
+    }
+  } catch (error) {
+    message.error(error.response?.data?.error || error.message || 'AI辅助分析失败')
+  } finally {
+    aiLoading.value = false
   }
 }
 

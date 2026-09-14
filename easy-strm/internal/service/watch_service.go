@@ -85,10 +85,15 @@ type cloud115WatchFile struct {
 }
 
 type watchFailureItem struct {
-	FileID   string `json:"file_id"`
-	FileName string `json:"file_name"`
-	Category string `json:"category,omitempty"`
-	Reason   string `json:"reason"`
+	FileID            string `json:"file_id"`
+	FileName          string `json:"file_name"`
+	Category          string `json:"category,omitempty"`
+	Reason            string `json:"reason"`
+	RecognitionMethod string `json:"recognition_method,omitempty"`
+	MetadataSource    string `json:"metadata_source,omitempty"`
+	AIUsed            bool   `json:"ai_used,omitempty"`
+	AIScene           string `json:"ai_scene,omitempty"`
+	FailureReason     string `json:"failure_reason,omitempty"`
 }
 
 func resolveWatchPath(source *domain.MediaSource) string {
@@ -884,9 +889,9 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 		return fmt.Errorf("任务缺少来源媒体源信息")
 	}
 
-	fileIDs := parseRetryFileIDs(metadata["file_ids"])
+	fileIDs := parseIdentifyFailureFileIDs(metadata["failed_items"])
 	if len(fileIDs) == 0 {
-		return fmt.Errorf("任务缺少可重试的文件列表")
+		return fmt.Errorf("任务中没有可执行AI辅助重试的识别失败项")
 	}
 
 	source, err := ws.mediaSourceService.GetByID(sourceID)
@@ -896,14 +901,6 @@ func (ws *WatchService) RetryAutoOrganizeTask(taskID string) error {
 	if source == nil {
 		return fmt.Errorf("媒体源不存在")
 	}
-	if source.SourceType == domain.SourceTypeCloud115 {
-		currentFiles, fetchErr := ws.fetchCloud115FileSet(source)
-		if fetchErr != nil {
-			return fmt.Errorf("恢复任务前解析 115 文件失败: %v", fetchErr)
-		}
-		fileIDs = resolveCloud115WatchFileIDs(fileIDs, currentFiles)
-	}
-
 	sourcePath := resolveRetrySourcePath(metadata, source, fileIDs)
 	if source.OrganizeTargetPath == "" {
 		return fmt.Errorf("媒体源未配置整理目标路径")

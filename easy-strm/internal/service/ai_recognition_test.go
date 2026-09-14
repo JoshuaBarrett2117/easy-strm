@@ -68,6 +68,7 @@ func TestAIConfigAndProtocol(t *testing.T) {
 	cfg.Model = "model-a"
 	cfg.Prompt = "自定义提示"
 	cfg.Enabled = true
+	cfg.Scenes = []string{"no_match"}
 	if err := s.Save(cfg); err != nil {
 		t.Fatal(err)
 	}

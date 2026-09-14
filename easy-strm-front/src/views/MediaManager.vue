@@ -284,6 +284,7 @@ const handleTmdbSelect = async ({ item, mode, searchType, metadataSource }) => {
   if (mode === 'organize') {
     organizeIdentifyForm.value = {
       ...organizeIdentifyForm.value,
+      source_candidate_selected: true,
       media_type: searchType,
       tmdb_id: item.tmdb_id || item.id || 0,
       title: item.title || item.name || '',

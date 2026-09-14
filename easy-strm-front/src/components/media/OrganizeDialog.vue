@@ -786,7 +786,10 @@ const previewColumns = [
       h('span', row.title || '-'),
       row.manual_override
         ? h(NTag, { type: 'warning', size: 'small' }, { default: () => '已手动修正' })
-        : null
+		: null,
+	  row.ai_used
+		? h(NTag, { type: 'info', size: 'small' }, { default: () => 'AI辅助' })
+		: null
     ])
   },
   {

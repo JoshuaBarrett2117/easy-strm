@@ -87,34 +87,47 @@ func NewOrganizeService(
 
 // OrganizePreview 整理预览结果
 type OrganizePreview struct {
-	FileID        string `json:"file_id"`
-	CloudID       string `json:"cloud_id"` // 115 内部 CID / PickCode
-	FileName      string `json:"file_name"`
-	FilePath      string `json:"file_path"`
-	MediaType     string `json:"media_type"`
-	TmdbID        int    `json:"tmdb_id"`
-	Title         string `json:"title"`
-	Year          int    `json:"year"`
-	Season        int    `json:"season"`
-	Episode       int    `json:"episode"`
-	NewName       string `json:"new_name"`
-	NewPath       string `json:"new_path"`
-	TargetPath    string `json:"target_path"`
-	SourcePath    string `json:"source_path"`
-	Conflict      bool   `json:"conflict"`
-	ConflictPath  string `json:"conflict_path,omitempty"`
-	IdentifyError string `json:"identify_error,omitempty"`
+	FileID            string `json:"file_id"`
+	CloudID           string `json:"cloud_id"` // 115 内部 CID / PickCode
+	FileName          string `json:"file_name"`
+	FilePath          string `json:"file_path"`
+	MediaType         string `json:"media_type"`
+	TmdbID            int    `json:"tmdb_id"`
+	Title             string `json:"title"`
+	OriginalTitle     string `json:"original_title,omitempty"`
+	Year              int    `json:"year"`
+	Season            int    `json:"season"`
+	Episode           int    `json:"episode"`
+	NewName           string `json:"new_name"`
+	NewPath           string `json:"new_path"`
+	TargetPath        string `json:"target_path"`
+	SourcePath        string `json:"source_path"`
+	Conflict          bool   `json:"conflict"`
+	ConflictPath      string `json:"conflict_path,omitempty"`
+	IdentifyError     string `json:"identify_error,omitempty"`
+	RecognitionMethod string `json:"recognition_method,omitempty"`
+	MetadataSource    string `json:"metadata_source,omitempty"`
+	MetadataID        string `json:"metadata_id,omitempty"`
+	MetadataProvider  string `json:"metadata_provider,omitempty"`
+	AIUsed            bool   `json:"ai_used,omitempty"`
+	AIScene           string `json:"ai_scene,omitempty"`
+	FailureReason     string `json:"failure_reason,omitempty"`
 }
 
 // OrganizeResult 整理执行结果
 type OrganizeResult struct {
-	FileID   string `json:"file_id"`
-	FileName string `json:"file_name"`
-	Success  bool   `json:"success"`
-	Skipped  bool   `json:"skipped"`
-	Message  string `json:"message"`
-	OldPath  string `json:"old_path"`
-	NewPath  string `json:"new_path"`
+	FileID            string `json:"file_id"`
+	FileName          string `json:"file_name"`
+	Success           bool   `json:"success"`
+	Skipped           bool   `json:"skipped"`
+	Message           string `json:"message"`
+	OldPath           string `json:"old_path"`
+	NewPath           string `json:"new_path"`
+	RecognitionMethod string `json:"recognition_method,omitempty"`
+	MetadataSource    string `json:"metadata_source,omitempty"`
+	AIUsed            bool   `json:"ai_used,omitempty"`
+	AIScene           string `json:"ai_scene,omitempty"`
+	FailureReason     string `json:"failure_reason,omitempty"`
 }
 
 // OrganizeCandidate 整理候选文件
@@ -175,6 +188,14 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 // previewOrganizeForSource 预览整理（直接消费已构造的 *MediaSource，不调用 GetByID）。
 // 供 PreviewOrganize 与 OrganizeDirectoryForSource 复用，避免无 DB 媒体源时重复查询。
 func (s *OrganizeService) previewOrganizeForSource(source *domain.MediaSource, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
+	return s.previewOrganizeForSourceContext(context.Background(), source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+}
+
+func (s *OrganizeService) previewOrganizeForSourceContext(ctx context.Context, source *domain.MediaSource, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
+	ctx = WithRecognitionRound(ctx)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_type=%s, source_path=%s, target_path=%s", source.SourceType, sourcePath, targetPath)
 
 	// 获取文件列表 (传入想要整理的 ID 以进行扫描剪枝)
@@ -210,14 +231,22 @@ func (s *OrganizeService) previewOrganizeForSource(source *domain.MediaSource, s
 	sem := make(chan struct{}, defaultPreviewConcurrency)
 
 	for _, file := range files {
+		if ctx.Err() != nil {
+			break
+		}
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return nil, ctx.Err()
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 
 		go func(f domain.MediaFile) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			preview, err := s.previewFile(source, f, targetPath, template, categories, overrideMap)
+			preview, err := s.previewFile(ctx, source, f, targetPath, mediaType, template, categories, overrideMap)
 			mu.Lock()
 			defer mu.Unlock()
 			if err != nil {
@@ -229,6 +258,9 @@ func (s *OrganizeService) previewOrganizeForSource(source *domain.MediaSource, s
 		}(file)
 	}
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	previews = s.appendMissingFilePreviews(previews, files, fileIDs)
 
@@ -254,7 +286,7 @@ func (s *OrganizeService) OrganizeDirectory(sourceID int, sourcePath, targetPath
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
-	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, nil, nil)
+	return s.organizeDirectoryInternal(context.Background(), source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, nil, nil)
 }
 
 func (s *OrganizeService) OrganizeDirectoryWithProgress(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress)) ([]OrganizeResult, error) {
@@ -265,7 +297,7 @@ func (s *OrganizeService) OrganizeDirectoryWithProgress(sourceID int, sourcePath
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
-	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, nil)
+	return s.organizeDirectoryInternal(context.Background(), source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, nil)
 }
 
 func (s *OrganizeService) OrganizeDirectoryWithCallbacks(sourceID int, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
@@ -276,7 +308,7 @@ func (s *OrganizeService) OrganizeDirectoryWithCallbacks(sourceID int, sourcePat
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
-	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
+	return s.organizeDirectoryInternal(context.Background(), source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
 }
 
 // OrganizeDirectoryForSource 接受已构造的 *MediaSource（支持临时源 / ad-hoc 转存场景），
@@ -290,12 +322,20 @@ func (s *OrganizeService) OrganizeDirectoryForSource(
 	manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride,
 	progress func(OrganizeExecutionProgress), shouldStop func() bool,
 ) ([]OrganizeResult, error) {
-	return s.organizeDirectoryInternal(source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return s.organizeDirectoryInternal(ctx, source, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode, fileIDs, useCategory, manualItems, renameItems, progress, shouldStop)
 }
 
 // organizeDirectoryInternal 整理执行核心。直接消费 *domain.MediaSource，供 OrganizeDirectory（按 ID 查源）
 // 与 OrganizeDirectoryForSource（直接传源）共用，避免重复查询媒体源。
-func (s *OrganizeService) organizeDirectoryInternal(source *domain.MediaSource, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
+func (s *OrganizeService) organizeDirectoryInternal(ctx context.Context, source *domain.MediaSource, sourcePath, targetPath, mediaType, template, conflictPolicy, operationMode string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride, renameItems []domain.OrganizeRenameOverride, progress func(OrganizeExecutionProgress), shouldStop func() bool) ([]OrganizeResult, error) {
+	ctx, cancel := organizeCancellationContext(ctx, shouldStop)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	operationMode = normalizeOrganizeOperationMode(operationMode)
 	if operationMode == "" {
 		return nil, fmt.Errorf("unsupported organize mode")
@@ -304,7 +344,7 @@ func (s *OrganizeService) organizeDirectoryInternal(source *domain.MediaSource, 
 	logger.Infof("OrganizeService[OrganizeDirectory] start: source_id=%d, source_path=%s, target_path=%s, operation_mode=%s",
 		source.ID, sourcePath, targetPath, operationMode)
 
-	previews, err := s.previewOrganizeForSource(source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	previews, err := s.previewOrganizeForSourceContext(ctx, source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 	if err != nil {
 		return nil, err
 	}
@@ -335,16 +375,24 @@ func (s *OrganizeService) organizeDirectoryInternal(source *domain.MediaSource, 
 	}
 
 	for _, preview := range previews {
+		if err := ctx.Err(); err != nil {
+			return results, err
+		}
 		if shouldStop != nil && shouldStop() {
 			return results, fmt.Errorf("任务已取消")
 		}
 
 		if preview.IdentifyError != "" {
 			result := OrganizeResult{
-				FileID:   preview.FileID,
-				FileName: preview.FileName,
-				Success:  false,
-				Message:  preview.IdentifyError,
+				FileID:            preview.FileID,
+				FileName:          preview.FileName,
+				Success:           false,
+				Message:           preview.IdentifyError,
+				RecognitionMethod: preview.RecognitionMethod,
+				MetadataSource:    preview.MetadataSource,
+				AIUsed:            preview.AIUsed,
+				AIScene:           preview.AIScene,
+				FailureReason:     preview.FailureReason,
 			}
 			results = append(results, result)
 			processed++
@@ -369,6 +417,11 @@ func (s *OrganizeService) organizeDirectoryInternal(source *domain.MediaSource, 
 			reportProgress(&failedResult)
 			continue
 		}
+		result.RecognitionMethod = preview.RecognitionMethod
+		result.MetadataSource = preview.MetadataSource
+		result.AIUsed = preview.AIUsed
+		result.AIScene = preview.AIScene
+		result.FailureReason = preview.FailureReason
 
 		// 仅对持久化媒体源（ID>0）触发内置刮削；临时/ad-hoc 源（如转存整理临时源）跳过，
 		// 避免对 115 路径误触发以及无谓的 DB 查询，真实刮削由 ShareTransferService 编排负责。
@@ -539,7 +592,7 @@ func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domai
 		fileName := filepath.Base(fileID)
 
 		// TMDB 识别
-		identifyResult, err := s.tmdbService.IdentifyFileWithPathBySource(fileID, source.MetadataSource)
+		identifyResult, err := s.tmdbService.IdentifyWithAssist(context.Background(), fileID, IdentifyAssistOptions{MetadataSource: source.MetadataSource, AllowAI: true, UseCache: true})
 		if err != nil {
 			logger.Warnf("OrganizeService[BatchIdentify] 识别失败: %s, error: %v", fileName, err)
 			results = append(results, domain.TmdbIdentifyResult{

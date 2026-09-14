@@ -25,24 +25,30 @@ type PlaybackRecordStore interface {
 	ShareMetadata(context.Context, string) (domain.PlaybackMetadata, error)
 	GetLocation(context.Context, string) string
 	SetLocation(context.Context, string, string) error
+	UpdatePoster(context.Context, string, string) error
 }
 
 // PlaybackRecordService 编排播放会话记录、重复解析合并及按需归属地补全。
 type PlaybackRecordService struct {
-	store     PlaybackRecordStore
-	client    *http.Client
-	now       func() time.Time
-	sessionMu sync.Mutex
-	sessions  map[string]time.Time
+	store          PlaybackRecordStore
+	client         *http.Client
+	now            func() time.Time
+	sessionMu      sync.Mutex
+	sessions       map[string]time.Time
+	posterResolver func(context.Context, string) (string, error)
+	posterSlots    chan struct{}
+	posterRetry    map[string]time.Time
 }
 
 // NewPlaybackRecordService 创建播放记录服务。
 func NewPlaybackRecordService(store PlaybackRecordStore) *PlaybackRecordService {
 	return &PlaybackRecordService{
-		store:    store,
-		client:   &http.Client{Timeout: 2 * time.Second},
-		now:      time.Now,
-		sessions: make(map[string]time.Time),
+		store:       store,
+		client:      &http.Client{Timeout: 2 * time.Second},
+		now:         time.Now,
+		sessions:    make(map[string]time.Time),
+		posterSlots: make(chan struct{}, 2),
+		posterRetry: make(map[string]time.Time),
 	}
 }
 
@@ -159,6 +165,7 @@ func (s *PlaybackRecordService) List(ctx context.Context, offset, limit int) ([]
 	geoCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	for i := range records {
+		s.completePoster(records[i])
 		records[i].Location = s.location(geoCtx, records[i].IP)
 	}
 	return records, total, nil

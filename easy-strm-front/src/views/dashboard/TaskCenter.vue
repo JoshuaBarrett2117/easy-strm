@@ -138,9 +138,11 @@
                       <n-tag v-if="item.category" :type="taskDetailFailureTagType(item.category)" size="small">
                         {{ taskDetailFailureTagLabel(item.category) }}
                       </n-tag>
+					  <n-tag v-if="item.ai_used" type="info" size="small">AI辅助 · {{ item.ai_scene || '未知场景' }}</n-tag>
+					  <n-tag v-if="item.metadata_source" size="small">{{ item.metadata_source }}</n-tag>
                     </div>
                     <div class="break-words text-xs leading-relaxed text-red-500 dark:text-red-400">
-                      {{ item.reason || '未提供失败原因' }}
+					  {{ item.failure_reason || item.reason || '未提供失败原因' }}
                     </div>
                   </div>
                 </div>
@@ -348,7 +350,11 @@ const taskDetailFailedItems = computed(() => {
       file_id: item?.file_id || item?.fileID || '',
       file_name: item?.file_name || item?.fileName || item?.file_id || '',
       category: item?.category || '',
-      reason: item?.reason || ''
+	  reason: item?.reason || '',
+	  ai_used: Boolean(item?.ai_used),
+	  ai_scene: item?.ai_scene || '',
+	  metadata_source: item?.metadata_source || '',
+	  failure_reason: item?.failure_reason || ''
     }))
     .filter(item => item.file_id || item.file_name)
 })

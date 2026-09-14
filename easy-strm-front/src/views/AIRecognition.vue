@@ -1,7 +1,7 @@
 <template>
   <div class="ai-settings">
     <n-card title="AI 辅助识别" :bordered="false">
-      <n-alert type="info" class="mb-4">用于分享媒体识别。AI只提供片名、年份和类型建议，仍由媒体数据库核验。原始路径不会修改；启用后所选场景的路径会发送到配置的端点。</n-alert>
+      <n-alert type="info" class="mb-4">用于分享、整理、监控和刮削缺失识别的辅助查询。AI只提供片名、原名、年份和类型建议，仍由媒体数据库核验；播放请求不会调用AI。启用后所选场景的路径会发送到配置的端点。</n-alert>
       <n-spin :show="loading">
         <n-form label-placement="top">
           <n-form-item label="启用 AI 辅助"><n-switch v-model:value="form.enabled" /></n-form-item>
@@ -59,7 +59,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { NAlert,NButton,NCard,NCheckbox,NCheckboxGroup,NDescriptions,NDescriptionsItem,NForm,NFormItem,NInput,NInputNumber,NSelect,NSpace,NSpin,NSwitch,useMessage } from 'naive-ui'
 import { getAIConfig,saveAIConfig,getAIModels,testAIRecognition } from '../utils/api/ai'
 const message=useMessage()
-const form=reactive({enabled:false,base_url:'https://api.openai.com/v1',api_key:'',has_api_key:false,clear_api_key:false,model:'',timeout_seconds:30,scenes:['no_match'],prompt:''})
+const form=reactive({enabled:false,base_url:'https://api.openai.com/v1',api_key:'',has_api_key:false,clear_api_key:false,model:'',timeout_seconds:30,scenes:['complex_title','no_match'],prompt:''})
 const loading=ref(false),saving=ref(false),fetchingModels=ref(false),testing=ref(false)
 const models=ref([]),testResult=ref(null),testError=ref('')
 const testFilename=ref('七龙珠[国粤日语 153集全]Dragonball.1986/Dragonball.1986.D11.Blu-ray.iso')

@@ -28,13 +28,14 @@ func TestAIRecognitionConfigEndpoints(t *testing.T) {
 	r.PUT("/ai", c.Save)
 	r.POST("/models", c.Models)
 	r.POST("/test", c.Test)
+	r.POST("/assist", c.Assist)
 	for _, tt := range []struct {
 		method, path, body string
 		code               int
 	}{
 		{"GET", "/ai", "", 200}, {"PUT", "/ai", "{", 400}, {"PUT", "/ai", `{"enabled":true,"base_url":"https://example.com/v1"}`, 400},
 		{"PUT", "/ai", `{"base_url":"https://example.com/v1","api_key":"test-secret","model":"sample","prompt":"提示词","scenes":["no_match"]}`, 200},
-		{"GET", "/ai", "", 200}, {"POST", "/models", "{", 400}, {"POST", "/test", "{", 400},
+		{"GET", "/ai", "", 200}, {"POST", "/models", "{", 400}, {"POST", "/test", "{", 400}, {"POST", "/assist", "{", 400}, {"POST", "/assist", `{"filename":" "}`, 400},
 	} {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(tt.method, tt.path, bytes.NewBufferString(tt.body))

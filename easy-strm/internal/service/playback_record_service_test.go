@@ -19,6 +19,17 @@ type playbackStoreStub struct {
 	location string
 }
 
+func (s *playbackStoreStub) UpdatePoster(_ context.Context, id, poster string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.records {
+		if s.records[i].ID == id {
+			s.records[i].Poster = poster
+		}
+	}
+	return nil
+}
+
 func (s *playbackStoreStub) Save(_ context.Context, r domain.PlaybackRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

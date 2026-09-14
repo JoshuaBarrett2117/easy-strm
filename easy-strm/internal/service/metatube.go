@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/crc32"
@@ -19,6 +20,10 @@ type metaTubeRef struct {
 
 // searchMetaTube 使用 MetaTube 官方电影搜索接口，并适配为现有识别候选结构。
 func (s *TmdbService) searchMetaTube(query string, year int, _ string) ([]domain.TmdbSearchResult, error) {
+	return s.searchMetaTubeContext(context.Background(), query, year)
+}
+
+func (s *TmdbService) searchMetaTubeContext(ctx context.Context, query string, year int) ([]domain.TmdbSearchResult, error) {
 	endpoint := s.metatubeURL + "/v1/movies/search?q=" + url.QueryEscape(query) + "&fallback=true"
 	var payload struct {
 		Data []struct {
@@ -37,7 +42,7 @@ func (s *TmdbService) searchMetaTube(query string, year int, _ string) ([]domain
 			Message string `json:"message"`
 		} `json:"error"`
 	}
-	if err := s.metaTubeJSON(endpoint, &payload); err != nil {
+	if err := s.metaTubeJSONContext(ctx, endpoint, &payload); err != nil {
 		return nil, fmt.Errorf("MetaTube 搜索失败: %v", err)
 	}
 	if payload.Error != nil {
@@ -88,7 +93,11 @@ func (s *TmdbService) metaTubeDetail(ref metaTubeRef) (map[string]interface{}, e
 }
 
 func (s *TmdbService) metaTubeJSON(endpoint string, target interface{}) error {
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	return s.metaTubeJSONContext(context.Background(), endpoint, target)
+}
+
+func (s *TmdbService) metaTubeJSONContext(ctx context.Context, endpoint string, target interface{}) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}

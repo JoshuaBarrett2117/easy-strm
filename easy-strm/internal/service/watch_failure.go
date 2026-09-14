@@ -131,13 +131,40 @@ func buildWatchFailureItems(results []OrganizeResult) []watchFailureItem {
 			reason = "整理失败"
 		}
 		items = append(items, watchFailureItem{
-			FileID:   result.FileID,
-			FileName: result.FileName,
-			Category: classifyWatchFailureCategory(reason),
-			Reason:   reason,
+			FileID: result.FileID, FileName: result.FileName,
+			Category: classifyWatchFailureCategory(reason), Reason: reason,
+			RecognitionMethod: result.RecognitionMethod, MetadataSource: result.MetadataSource,
+			AIUsed: result.AIUsed, AIScene: result.AIScene, FailureReason: result.FailureReason,
 		})
 	}
 	return items
+}
+
+func parseIdentifyFailureFileIDs(raw interface{}) []string {
+	if typed, ok := raw.([]watchFailureItem); ok {
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if item.Category == "identify_failed" && item.FileID != "" {
+				result = append(result, item.FileID)
+			}
+		}
+		return result
+	}
+	items, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	result := make([]string, 0, len(items))
+	for _, rawItem := range items {
+		item, ok := rawItem.(map[string]interface{})
+		if !ok || item["category"] != "identify_failed" {
+			continue
+		}
+		if id, ok := item["file_id"].(string); ok && id != "" {
+			result = append(result, id)
+		}
+	}
+	return result
 }
 
 func buildWatchFailureItemsFromIDs(fileIDs []string, reason, category string) []watchFailureItem {

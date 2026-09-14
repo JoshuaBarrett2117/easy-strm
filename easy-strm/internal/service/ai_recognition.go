@@ -36,13 +36,13 @@ type AIRecognitionService struct {
 // NewAIRecognitionService 创建AI辅助服务；HTTP客户端由现有代理配置装配。
 func NewAIRecognitionService(store AIRecognitionStore, client *http.Client) *AIRecognitionService {
 	if client == nil {
-		client = &http.Client{Timeout: 45 * time.Second}
+		client = &http.Client{}
 	}
 	return &AIRecognitionService{store: store, client: client}
 }
 
 func defaultAIConfig() domain.AIRecognitionConfig {
-	return domain.AIRecognitionConfig{BaseURL: "https://api.openai.com/v1", TimeoutSeconds: 30, Scenes: []string{"no_match"}, Prompt: defaultAIPrompt}
+	return domain.AIRecognitionConfig{BaseURL: "https://api.openai.com/v1", TimeoutSeconds: 30, Scenes: []string{"complex_title", "no_match"}, Prompt: defaultAIPrompt}
 }
 
 func (s *AIRecognitionService) config() (domain.AIRecognitionConfig, error) {
@@ -268,8 +268,33 @@ func (s *AIRecognitionService) Assist(ctx context.Context, filename, scene strin
 	if !selected {
 		return nil, false, nil
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if round, ok := ctx.Value(recognitionRoundKey{}).(*recognitionRound); ok {
+		return round.infer(ctx, filename, func() (*domain.AIRecognitionHint, error) {
+			return s.infer(ctx, cfg, filename, scene)
+		})
+	}
 	hint, err := s.infer(ctx, cfg, filename, scene)
 	return hint, true, err
+}
+
+// AssistManual 使用已保存且已启用的配置响应用户显式的“AI解析文件名”操作。
+// 手动解析不受自动场景开关影响，返回值仍然只是待数据源核验的表单建议。
+func (s *AIRecognitionService) AssistManual(ctx context.Context, filename string) (*domain.AIRecognitionHint, error) {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return nil, fmt.Errorf("请输入要解析的文件名")
+	}
+	cfg, err := s.config()
+	if err != nil {
+		return nil, err
+	}
+	if !cfg.Enabled {
+		return nil, fmt.Errorf("AI辅助识别未启用")
+	}
+	return s.infer(ctx, cfg, filename, "no_match")
 }
 
 // Test 使用未保存的表单配置发送一次识别建议请求，不写入媒体数据。

@@ -80,8 +80,33 @@ func compactSearchTitle(title string) string {
 // 返回:
 //   - *ParsedFilename: 解析结果
 func (s *TmdbService) parseFilename(filename string) *ParsedFilename {
-	segments := splitPathSegments(filename)
 	rules := s.compiledRulesForFilenameParsing()
+	return parseFilenameWithRules(filename, rules)
+}
+
+// parseFilenameForMediaType 按调用方明确指定的媒体类型解析文件名。
+// 电影模式不应用剧集规则，避免“字母番号 + 数字”被动漫纯集数规则截断为剧名和集数。
+func (s *TmdbService) parseFilenameForMediaType(filename, mediaType string) *ParsedFilename {
+	if mediaType != "movie" && mediaType != "tv" {
+		return s.parseFilename(filename)
+	}
+
+	var rules []compiledFilenameRecognitionRule
+	if mediaType == "tv" {
+		rules = s.compiledRulesForFilenameParsing()
+	}
+	result := parseFilenameWithRules(filename, rules)
+	result.MediaType = mediaType
+	if mediaType == "movie" {
+		result.Season = 0
+		result.Episode = 0
+		result.Episodes = nil
+	}
+	return result
+}
+
+func parseFilenameWithRules(filename string, rules []compiledFilenameRecognitionRule) *ParsedFilename {
+	segments := splitPathSegments(filename)
 	result := parseMediaNameSegment(lastPathSegment(segments), true, rules)
 	searchTitles := make([]string, 0, 3)
 	searchTitles = appendUniqueNonEmpty(searchTitles, result.Title)

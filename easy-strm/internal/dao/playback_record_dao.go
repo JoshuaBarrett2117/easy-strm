@@ -147,6 +147,15 @@ func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (
 	return metadata, err
 }
 
+// UpdatePoster 仅补齐指定播放记录的空海报，保留已有人工或识别结果。
+func (d *PlaybackRecordDAO) UpdatePoster(ctx context.Context, id, poster string) error {
+	if DB == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	_, err := DB.ExecContext(ctx, `UPDATE t_strm_playback_record SET poster=$2 WHERE record_id=$1 AND COALESCE(poster,'')=''`, id, poster)
+	return err
+}
+
 // GetLocation 读取 IP 归属地缓存。
 func (d *PlaybackRecordDAO) GetLocation(ctx context.Context, ip string) string {
 	value, _ := d.client.Get(ctx, "easy_strm:playback:geo:"+ip).Result()

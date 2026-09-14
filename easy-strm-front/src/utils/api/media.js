@@ -60,6 +60,7 @@ export const identifyFile = (data) => api.post('/media/tmdb/identify', data)
 
 // 自动识别文件（返回 Top 3 候选，不写入缓存）
 export const autoIdentifyFile = (data) => api.post('/media/tmdb/auto-identify', data)
+export const assistIdentifyFile = (data) => api.post('/media/tmdb/assist-identify', data, { timeout: 125000 })
 
 // 使用当前整理规则在本地解析文件名
 export const parseMediaFilename = (data) => api.post('/media/tmdb/parse-filename', data)

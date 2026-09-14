@@ -1082,6 +1082,10 @@ END $$;
 		Error("Failed to migrate STRM playback records: %v", err)
 		return err
 	}
+	if err = migrateIdentifyTrace(); err != nil {
+		Error("Failed to migrate identify trace fields: %v", err)
+		return err
+	}
 	Info("Database initialized successfully")
 	return nil
 }

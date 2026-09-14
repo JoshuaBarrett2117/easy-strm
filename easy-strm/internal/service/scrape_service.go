@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -187,8 +188,9 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath, metadataSource s
 		return fileCache.MediaType, fileCache.TmdbData, fileCache.SeasonNumber, fileCache.EpisodeNumber, nil
 	}
 
-	filename := filepath.Base(filePath)
-	identifyResult, identifyErr := s.tmdbService.IdentifyFileWithPathBySource(filePath, metadataSource)
+	identifyResult, identifyErr := s.tmdbService.IdentifyWithAssist(context.Background(), filePath, IdentifyAssistOptions{
+		MetadataSource: metadataSource, AllowAI: true, UseCache: true,
+	})
 	if identifyErr != nil {
 		return "", nil, 0, 0, fmt.Errorf("文件未识别且自动识别失败: %v", identifyErr)
 	}
@@ -196,18 +198,27 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath, metadataSource s
 		return "", nil, 0, 0, fmt.Errorf("文件未识别: %s", identifyResult.Message)
 	}
 
-	cacheKey := s.tmdbService.buildCacheKeyForSource(filename, identifyResult.MediaType, metadataSource)
-	cache, cacheErr := s.tmdbCacheDAO.GetByQueryKey(cacheKey, identifyResult.MediaType)
-	if cacheErr == nil && cache != nil && len(cache.RawData) > 0 {
-		return identifyResult.MediaType, cache.RawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
+	// 搜索缓存只包含摘要；刮削必须回源读取详情，不能用AI建议或搜索摘要拼装半成品NFO。
+	var detail map[string]interface{}
+	var detailErr error
+	if identifyResult.MediaType == "tv" {
+		detail, detailErr = s.tmdbService.GetTVDetail(identifyResult.TmdbID)
+	} else {
+		detail, detailErr = s.tmdbService.GetMovieDetailBySource(identifyResult.TmdbID, identifyResult.MetadataSource, identifyResult.MetadataID, identifyResult.MetadataProvider)
 	}
-
-	fallbackRawData, buildErr := buildFallbackRawData(identifyResult)
-	if buildErr != nil || len(fallbackRawData) == 0 {
-		return "", nil, 0, 0, fmt.Errorf("TMDB缓存数据为空，且无法基于识别结果生成刮削数据")
+	if detailErr != nil {
+		return "", nil, 0, 0, fmt.Errorf("获取已核验媒体详情失败: %v", detailErr)
 	}
-
-	return identifyResult.MediaType, fallbackRawData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
+	if identifyResult.MetadataSource == domain.MetadataSourceMetaTube {
+		detail["metadata_source"] = domain.MetadataSourceMetaTube
+		detail["metadata_id"] = identifyResult.MetadataID
+		detail["metadata_provider"] = identifyResult.MetadataProvider
+	}
+	detailData, marshalErr := json.Marshal(detail)
+	if marshalErr != nil || len(detailData) == 0 {
+		return "", nil, 0, 0, fmt.Errorf("已核验媒体详情序列化失败")
+	}
+	return identifyResult.MediaType, detailData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
 }
 
 func metadataPayloadMatchesPolicy(rawData json.RawMessage, metadataSource string) bool {

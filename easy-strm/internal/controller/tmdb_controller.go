@@ -280,7 +280,13 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 
 	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", identifyInput)
 
-	result, err := c.tmdbService.GetCandidatesWithPathBySource(identifyInput, req.MetadataSource)
+	var result *domain.TmdbIdentifyResult
+	var err error
+	if req.MediaType == "movie" || req.MediaType == "tv" {
+		result, err = c.tmdbService.GetCandidatesWithPathBySourceAndType(identifyInput, req.MetadataSource, req.MediaType)
+	} else {
+		result, err = c.tmdbService.GetCandidatesWithPathBySource(identifyInput, req.MetadataSource)
+	}
 	if err != nil {
 		logger.Errorf("TmdbController[AutoIdentify] 获取候选失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取候选失败: "+err.Error())
@@ -288,6 +294,27 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 	}
 
 	logger.Infof("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", identifyInput, len(result.Candidates))
+	SuccessResp(ctx, result)
+}
+
+// AssistIdentify 运行不写缓存的统一AI辅助识别，供文件名测试页解释查询与核验过程。
+func (c *TmdbController) AssistIdentify(ctx *gin.Context) {
+	var req struct {
+		Filename       string `json:"filename" binding:"required"`
+		MediaType      string `json:"media_type"`
+		MetadataSource string `json:"metadata_source"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	result, err := c.tmdbService.IdentifyWithAssist(ctx.Request.Context(), req.Filename, service.IdentifyAssistOptions{
+		MediaType: req.MediaType, MetadataSource: req.MetadataSource, AllowAI: true, UseCache: false,
+	})
+	if err != nil {
+		ErrorResp(ctx, http.StatusBadGateway, err.Error())
+		return
+	}
 	SuccessResp(ctx, result)
 }
 

@@ -23,7 +23,7 @@
       <div class="flex flex-wrap items-center gap-2">
         <n-button type="primary" size="small" secondary @click="handleDetail">详情</n-button>
         <n-button v-if="canCancel" type="error" size="small" secondary @click="handleCancel">取消任务</n-button>
-        <n-button v-if="canResume" type="warning" size="small" secondary @click="handleResume">恢复任务</n-button>
+        <n-button v-if="canResume" type="warning" size="small" secondary @click="handleResume">{{ resumeButtonText }}</n-button>
         <span class="text-xs text-slate-400 dark:text-slate-500">{{ task.create_time || '' }}</span>
       </div>
     </div>
@@ -107,9 +107,11 @@
               <n-tag v-if="item.category" :type="watchFailureTagType(item.category)" size="small">
                 {{ watchFailureTagLabel(item.category) }}
               </n-tag>
+			  <n-tag v-if="item.ai_used" type="info" size="small">AI辅助 · {{ item.ai_scene || '未知场景' }}</n-tag>
+			  <n-tag v-if="item.metadata_source" size="small">{{ item.metadata_source }}</n-tag>
             </div>
             <div class="break-words text-xs leading-relaxed text-red-500 dark:text-red-400">
-              {{ item.reason || '未提供失败原因' }}
+			  {{ item.failure_reason || item.reason || '未提供失败原因' }}
             </div>
           </div>
         </div>
@@ -366,7 +368,7 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
   const t = task.value
-  return !!t && t.task_type === 'watch_auto_organize' && (t.status === 'cancelled' || t.status === 'failed')
+  return !!t && t.task_type === 'watch_auto_organize' && (t.status === 'cancelled' || t.status === 'failed' || t.status === 'partial_success')
 })
 
 const showProgress = computed(() => {
@@ -432,7 +434,11 @@ const watchFailedItems = computed(() => {
       file_id: item?.file_id || item?.fileID || '',
       file_name: item?.file_name || item?.fileName || item?.file_id || '',
       category: item?.category || '',
-      reason: item?.reason || ''
+	  reason: item?.reason || '',
+	  ai_used: Boolean(item?.ai_used),
+	  ai_scene: item?.ai_scene || '',
+	  metadata_source: item?.metadata_source || '',
+	  failure_reason: item?.failure_reason || ''
     }))
     .filter(item => item.file_id || item.file_name)
 })
@@ -602,6 +608,8 @@ const taskSummaryItems = computed(() => {
 
   return items
 })
+
+const resumeButtonText = computed(() => task.value?.task_type === 'watch_auto_organize' ? 'AI辅助重试' : '恢复任务')
 
 const crossAccountSteps = computed(() => {
   const t = task.value

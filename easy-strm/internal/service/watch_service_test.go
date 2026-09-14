@@ -739,7 +739,7 @@ func TestResolveWatchOrganizeDefaults(t *testing.T) {
 
 func TestBuildWatchFailureItems(t *testing.T) {
 	results := []OrganizeResult{
-		{FileID: "fid-1", FileName: "a.mkv", Success: false, Message: "identify failed: no match found"},
+		{FileID: "fid-1", FileName: "a.mkv", Success: false, Message: "identify failed: no match found", AIUsed: true, AIScene: "no_match", FailureReason: "AI建议未通过核验"},
 		{FileID: "fid-2", FileName: "b.mkv", Success: true, Message: "ok"},
 	}
 
@@ -752,6 +752,20 @@ func TestBuildWatchFailureItems(t *testing.T) {
 	}
 	if items[0].Category != "identify_failed" {
 		t.Fatalf("unexpected item category: %#v", items[0].Category)
+	}
+	if !items[0].AIUsed || items[0].AIScene != "no_match" || items[0].FailureReason == "" {
+		t.Fatalf("AI trace was not preserved: %#v", items[0])
+	}
+}
+
+func TestParseIdentifyFailureFileIDsSkipsNonIdentifyFailures(t *testing.T) {
+	raw := []interface{}{
+		map[string]interface{}{"file_id": "movie-a.mkv", "category": "identify_failed"},
+		map[string]interface{}{"file_id": "movie-b.mkv", "category": "cloud115_auth_failed"},
+	}
+	ids := parseIdentifyFailureFileIDs(raw)
+	if len(ids) != 1 || ids[0] != "movie-a.mkv" {
+		t.Fatalf("unexpected retry ids: %#v", ids)
 	}
 }
 

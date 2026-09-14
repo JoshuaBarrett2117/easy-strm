@@ -27,6 +27,24 @@ func TestPlaybackMetadataAccountScope(t *testing.T) {
 	}
 }
 
+func TestPlaybackUpdatePosterOnlyFillsEmptyRecord(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	previous := DB
+	DB = db
+	defer func() { DB = previous }()
+	mock.ExpectExec("UPDATE t_strm_playback_record SET poster=\\$2 WHERE record_id=\\$1 AND COALESCE\\(poster,''\\)=''").WithArgs("record-1", "/movie.jpg").WillReturnResult(sqlmock.NewResult(0, 1))
+	if err = NewPlaybackRecordDAO(nil).UpdatePoster(context.Background(), "record-1", "/movie.jpg"); err != nil {
+		t.Fatal(err)
+	}
+	if err = mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlaybackMetadataFallsBackToTmdbCacheForLegacyEmptyPoster(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

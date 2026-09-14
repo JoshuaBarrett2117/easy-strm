@@ -12,18 +12,19 @@ import (
 )
 
 type OrganizePreviewTask struct {
-	TaskID     string        `json:"task_id"`
-	SourceID   int           `json:"source_id"`
-	SourcePath string        `json:"source_path"`
-	TargetPath string        `json:"target_path"`
-	MediaType  string        `json:"media_type"`
-	FileIDs    []string      `json:"file_ids"`
-	Status     string        `json:"status"` // pending, processing, completed, failed
-	Progress   *TaskProgress `json:"progress,omitempty"`
-	Result     *TaskResult   `json:"result,omitempty"`
-	Error      string        `json:"error,omitempty"`
-	CreatedAt  time.Time     `json:"created_at"`
-	UpdatedAt  time.Time     `json:"updated_at"`
+	Selection  *OrganizeSnapshotSelection `json:"selection,omitempty"`
+	TaskID     string                     `json:"task_id"`
+	SourceID   int                        `json:"source_id"`
+	SourcePath string                     `json:"source_path"`
+	TargetPath string                     `json:"target_path"`
+	MediaType  string                     `json:"media_type"`
+	FileIDs    []string                   `json:"file_ids"`
+	Status     string                     `json:"status"` // pending, processing, completed, failed
+	Progress   *TaskProgress              `json:"progress,omitempty"`
+	Result     *TaskResult                `json:"result,omitempty"`
+	Error      string                     `json:"error,omitempty"`
+	CreatedAt  time.Time                  `json:"created_at"`
+	UpdatedAt  time.Time                  `json:"updated_at"`
 }
 
 type OrganizeCandidateTask struct {
@@ -251,6 +252,7 @@ func (s *OrganizeService) StartPreviewTask(sourceID int, sourcePath, targetPath,
 	taskKey := fmt.Sprintf("organize:task:%s", taskID)
 
 	task := OrganizePreviewTask{
+		Selection:  cloneSnapshotSelection(OrganizeSnapshotSelection{SourceID: sourceID, SourcePath: sourcePath, TargetPath: targetPath, MediaType: mediaType, Template: template, FileIDs: fileIDs, UseCategory: useCategory, ManualItems: manualItems}),
 		TaskID:     taskID,
 		SourceID:   sourceID,
 		SourcePath: sourcePath,

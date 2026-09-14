@@ -145,6 +145,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
 	shareRecordService.SetAutoStrmExport(shareStrmService.StartAutoExport)
 	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
+	playbackRecordService.SetPosterResolver(tmdbService.ResolvePlaybackMoviePoster)
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
 	shareStrmService.SetExportDatabase(dao.DB)
 	scheduler.Register(service.CronHandler{Key: "share_strm_incremental_export", Name: "分享库 STRM 增量导出", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
@@ -783,6 +784,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.PUT("/settings/ai-recognition", aiRecognitionController.Save)
 		auth.POST("/settings/ai-recognition/models", aiRecognitionController.Models)
 		auth.POST("/settings/ai-recognition/test", aiRecognitionController.Test)
+		auth.POST("/settings/ai-recognition/assist", aiRecognitionController.Assist)
 
 		// ========== 网络测试 ==========
 		auth.GET("/network/test", networkController.NetworkTest)
@@ -980,6 +982,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/media/tmdb/search", tmdbController.Search)
 		auth.POST("/media/tmdb/identify", tmdbController.Identify)
 		auth.POST("/media/tmdb/auto-identify", tmdbController.AutoIdentify)
+		auth.POST("/media/tmdb/assist-identify", tmdbController.AssistIdentify)
 		auth.POST("/media/tmdb/parse-filename", tmdbController.ParseFilename)
 		auth.GET("/media/tmdb/filename-rules", tmdbController.GetFilenameRecognitionRules)
 		auth.PUT("/media/tmdb/filename-rules", tmdbController.UpdateFilenameRecognitionRules)

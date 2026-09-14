@@ -198,28 +198,35 @@ type TmdbSearchResult struct {
 
 // TmdbIdentifyResult TMDB 识别结果
 type TmdbIdentifyResult struct {
-	VoteAverage      *float64           `json:"vote_average"`
-	Success          bool               `json:"success"`
-	Message          string             `json:"message"`
-	Filename         string             `json:"filename"`
-	MediaType        string             `json:"media_type"` // movie | tv | unknown
-	TmdbID           int                `json:"tmdb_id"`
-	Title            string             `json:"title"`
-	OriginalTitle    string             `json:"original_title"`
-	Year             int                `json:"year"`
-	PosterPath       string             `json:"poster_path"`
-	SeasonNumber     int                `json:"season_number"`
-	EpisodeNumber    int                `json:"episode_number"`
-	Quality          string             `json:"quality"`
-	Source           string             `json:"source"`
-	Codec            string             `json:"codec"`
-	GenreIDs         []int              `json:"genre_ids"`
-	Countries        []string           `json:"countries"`
-	Language         string             `json:"language"`
-	Candidates       []TmdbSearchResult `json:"candidates"` // Top 3 候选
-	MetadataSource   string             `json:"metadata_source,omitempty"`
-	MetadataID       string             `json:"metadata_id,omitempty"`
-	MetadataProvider string             `json:"metadata_provider,omitempty"`
+	VoteAverage       *float64           `json:"vote_average"`
+	Success           bool               `json:"success"`
+	Message           string             `json:"message"`
+	Filename          string             `json:"filename"`
+	MediaType         string             `json:"media_type"` // movie | tv | unknown
+	TmdbID            int                `json:"tmdb_id"`
+	Title             string             `json:"title"`
+	OriginalTitle     string             `json:"original_title"`
+	Year              int                `json:"year"`
+	PosterPath        string             `json:"poster_path"`
+	SeasonNumber      int                `json:"season_number"`
+	EpisodeNumber     int                `json:"episode_number"`
+	Quality           string             `json:"quality"`
+	Source            string             `json:"source"`
+	Codec             string             `json:"codec"`
+	GenreIDs          []int              `json:"genre_ids"`
+	Countries         []string           `json:"countries"`
+	Language          string             `json:"language"`
+	Candidates        []TmdbSearchResult `json:"candidates"` // Top 3 候选
+	MetadataSource    string             `json:"metadata_source,omitempty"`
+	MetadataID        string             `json:"metadata_id,omitempty"`
+	MetadataProvider  string             `json:"metadata_provider,omitempty"`
+	RecognitionMethod string             `json:"recognition_method,omitempty"` // rule | source | ai | manual
+	AIUsed            bool               `json:"ai_used,omitempty"`
+	AIScene           string             `json:"ai_scene,omitempty"`
+	FailureReason     string             `json:"failure_reason,omitempty"`
+	AIHint            *AIRecognitionHint `json:"ai_hint,omitempty"`
+	QueryBeforeAI     []string           `json:"query_before_ai,omitempty"`
+	QueryAfterAI      []string           `json:"query_after_ai,omitempty"`
 }
 
 // TmdbSearchRequest TMDB 搜索请求

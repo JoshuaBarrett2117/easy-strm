@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -141,7 +142,7 @@ func (s *TmdbService) SearchMovie(query string, year int) ([]domain.TmdbSearchRe
 // SearchMovieBySource 按指定元数据来源搜索电影。
 func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource string) ([]domain.TmdbSearchResult, error) {
 	metadataSource = normalizeMetadataSourcePolicy(metadataSource)
-	if metadataSource == domain.MetadataSourceMetaTube || (metadataSource == domain.MetadataSourceAuto && s.metatubeDefaultEnabled && s.MetaTubeEnabled()) {
+	if metadataSource == domain.MetadataSourceMetaTube {
 		if !s.adultContentEnabled {
 			return nil, fmt.Errorf("成人内容识别未启用，请先在系统设置中二次确认开启")
 		}
@@ -150,7 +151,24 @@ func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource
 		}
 		return s.searchMetaTube(query, year, "movie")
 	}
-	return s.searchMovieTMDB(query, year)
+
+	results, tmdbErr := s.searchMovieTMDB(query, year)
+	if tmdbErr != nil {
+		return nil, tmdbErr
+	}
+	if metadataSource == domain.MetadataSourceTMDB || len(results) > 0 {
+		return results, nil
+	}
+
+	// 自动策略固定优先 TMDB；仅在 TMDB 没有可用结果且成人模式与 MetaTube 均启用时回退。
+	if !s.adultContentEnabled || !s.metatubeDefaultEnabled || !s.MetaTubeEnabled() {
+		return results, nil
+	}
+	metaTubeResults, metaTubeErr := s.searchMetaTube(query, year, "movie")
+	if metaTubeErr != nil {
+		return nil, metaTubeErr
+	}
+	return metaTubeResults, nil
 }
 
 // GetMovieDetailBySource 按识别结果携带的来源获取电影详情。
@@ -172,6 +190,10 @@ func (s *TmdbService) GetMovieDetailBySource(tmdbID int, metadataSource, metadat
 }
 
 func (s *TmdbService) searchMovieTMDB(query string, year int) ([]domain.TmdbSearchResult, error) {
+	return s.searchMovieTMDBContext(context.Background(), query, year)
+}
+
+func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, year int) ([]domain.TmdbSearchResult, error) {
 	if !s.HasUsableAPIKey() {
 		return nil, fmt.Errorf("TMDB API Key 未配置或已失效，请重新填写真实的 API Key")
 	}
@@ -191,7 +213,11 @@ func (s *TmdbService) searchMovieTMDB(query string, year int) ([]domain.TmdbSear
 	}
 
 	// 发送请求
-	resp, err := s.httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		logger.Errorf("TmdbService[SearchMovie] 请求失败: %v", err)
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
@@ -264,6 +290,10 @@ func (s *TmdbService) searchMovieTMDB(query string, year int) ([]domain.TmdbSear
 //   - []domain.TmdbSearchResult: 搜索结果列表
 //   - error: 错误信息
 func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResult, error) {
+	return s.searchTVContext(context.Background(), query, year)
+}
+
+func (s *TmdbService) searchTVContext(ctx context.Context, query string, year int) ([]domain.TmdbSearchResult, error) {
 	if !s.HasUsableAPIKey() {
 		return nil, fmt.Errorf("TMDB API Key 未配置或已失效，请重新填写真实的 API Key")
 	}
@@ -283,7 +313,11 @@ func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResul
 	}
 
 	// 发送请求
-	resp, err := s.httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		logger.Errorf("TmdbService[SearchTV] 请求失败: %v", err)
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
@@ -427,6 +461,34 @@ func (s *TmdbService) GetCandidatesWithPathBySource(filePath, metadataSource str
 	return s.getCandidates(filePath, metadataSource)
 }
 
+// GetCandidatesWithPathBySourceAndType 按调用方明确的媒体类型解析并查询候选，不写识别缓存。
+func (s *TmdbService) GetCandidatesWithPathBySourceAndType(filePath, metadataSource, mediaType string) (*domain.TmdbIdentifyResult, error) {
+	parsed := s.parseFilenameForMediaType(filePath, mediaType)
+	result := &domain.TmdbIdentifyResult{
+		Filename: filePath, MediaType: parsed.MediaType, Quality: parsed.Quality, Source: parsed.Source,
+		Codec: parsed.Codec, SeasonNumber: parsed.Season, EpisodeNumber: parsed.Episode,
+	}
+	if parsed.Title == "" {
+		result.Message = "无法从文件名中解析出标题"
+		return result, nil
+	}
+	candidates, err := s.searchCandidatesWithFallback(parsed, metadataSource)
+	if err != nil {
+		result.Message = err.Error()
+		return result, nil
+	}
+	if len(candidates) == 0 {
+		result.Message = "未找到匹配的媒体信息"
+		return result, nil
+	}
+	best := candidates[0]
+	result.Success, result.Candidates = true, candidates
+	result.TmdbID, result.Title, result.OriginalTitle, result.Year = best.TmdbID, best.Title, best.OriginalTitle, best.Year
+	result.PosterPath = best.PosterPath
+	result.MetadataSource, result.MetadataID, result.MetadataProvider = best.MetadataSource, best.MetadataID, best.MetadataProvider
+	return result, nil
+}
+
 // IdentifyFile 识别文件，自动判断是电影还是剧集
 // 参数:
 //   - filename: 文件名
@@ -445,7 +507,7 @@ func (s *TmdbService) identifyFile(filename, metadataSource string, mediaTypes .
 	// 解析文件名
 	parsed := s.parseFilename(filename)
 	if len(mediaTypes) > 0 && (mediaTypes[0] == "movie" || mediaTypes[0] == "tv") {
-		parsed.MediaType = mediaTypes[0]
+		parsed = s.parseFilenameForMediaType(filename, mediaTypes[0])
 	}
 
 	result := &domain.TmdbIdentifyResult{
@@ -532,6 +594,11 @@ func (s *TmdbService) IdentifyFileWithPath(filePath string) (*domain.TmdbIdentif
 // IdentifyFileWithPathBySource 按媒体源策略识别文件。
 func (s *TmdbService) IdentifyFileWithPathBySource(filePath, metadataSource string) (*domain.TmdbIdentifyResult, error) {
 	return s.identifyFile(filePath, metadataSource)
+}
+
+// IdentifyFileWithPathBySourceAndType 按元数据策略及调用方明确的媒体类型识别文件。
+func (s *TmdbService) IdentifyFileWithPathBySourceAndType(filePath, metadataSource, mediaType string) (*domain.TmdbIdentifyResult, error) {
+	return s.identifyFile(filePath, metadataSource, mediaType)
 }
 
 // searchCandidatesWithFallback 按多个标题变体搜索 TMDB，提升中文标题和标点差异的命中率。

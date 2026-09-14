@@ -4,6 +4,7 @@ import (
 	"easy-strm/internal/domain"
 	"easy-strm/internal/service"
 	"github.com/gin-gonic/gin"
+	"strings"
 )
 
 // AIRecognitionController 提供AI配置、模型发现及连接试验接口。
@@ -64,6 +65,27 @@ func (c *AIRecognitionController) Test(x *gin.Context) {
 		return
 	}
 	hint, err := c.service.Test(x, input.Config, input.Filename)
+	if err != nil {
+		ErrorResp(x, 502, err.Error())
+		return
+	}
+	SuccessResp(x, hint)
+}
+
+// Assist 使用已保存配置解析文件名，只返回需要用户继续核验的查询建议。
+func (c *AIRecognitionController) Assist(x *gin.Context) {
+	var input struct {
+		Filename string `json:"filename"`
+	}
+	if x.ShouldBindJSON(&input) != nil {
+		ErrorResp(x, 400, "AI解析参数无效")
+		return
+	}
+	if strings.TrimSpace(input.Filename) == "" {
+		ErrorResp(x, 400, "请输入要解析的文件名")
+		return
+	}
+	hint, err := c.service.AssistManual(x.Request.Context(), input.Filename)
 	if err != nil {
 		ErrorResp(x, 502, err.Error())
 		return
