@@ -41,6 +41,32 @@ func (c *EmbyManagementController) ListServers(ctx *gin.Context) {
 	SuccessResp(ctx, gin.H{"data": servers, "total": len(servers)})
 }
 
+// PlaybackLinks 查询指定剧集分集在 Emby 中的播放入口。
+func (c *EmbyManagementController) PlaybackLinks(ctx *gin.Context) {
+	tmdbID, _ := strconv.Atoi(ctx.Query("tmdb_id"))
+	season, _ := strconv.Atoi(ctx.Query("season_number"))
+	episode, _ := strconv.Atoi(ctx.Query("episode_number"))
+	if strings.EqualFold(ctx.Query("media_type"), "movie") {
+		links, err := c.service.MoviePlaybackLinks(ctx.Query("title"), tmdbID)
+		if err != nil {
+			ErrorResp(ctx, http.StatusBadGateway, err.Error())
+			return
+		}
+		SuccessResp(ctx, gin.H{"data": links, "total": len(links)})
+		return
+	}
+	if season < 0 || episode <= 0 || strings.TrimSpace(ctx.Query("title")) == "" {
+		ErrorResp(ctx, http.StatusBadRequest, "剧集、季号和集号不能为空")
+		return
+	}
+	links, err := c.service.PlaybackLinks(ctx.Query("title"), tmdbID, season, episode)
+	if err != nil {
+		ErrorResp(ctx, http.StatusBadGateway, err.Error())
+		return
+	}
+	SuccessResp(ctx, gin.H{"data": links, "total": len(links)})
+}
+
 // CreateServer 新增实例。
 func (c *EmbyManagementController) CreateServer(ctx *gin.Context) {
 	var req struct {

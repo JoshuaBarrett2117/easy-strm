@@ -996,6 +996,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/media/share-library/sources", shareRecordController.LibrarySources)
 		auth.GET("/media/share-library/tv-detail", shareRecordController.LibraryTVDetail)
 		auth.GET("/media/share-library/tv-seasons", shareRecordController.LibraryTVSeason)
+		auth.GET("/emby/playback-links", embyManagementController.PlaybackLinks)
 		auth.POST("/media/share-library/enrich", shareRecordController.EnrichLibrary)
 		auth.GET("/media/share-library/strm/settings", shareStrmController.Settings)
 		auth.PUT("/media/share-library/strm/settings", shareStrmController.SaveSettings)

@@ -793,6 +793,7 @@ END $$;
 			('动画电影', 'movie', '/电影/动画电影', '{"genre_ids":[16]}'::jsonb, true),
 			('华语电影', 'movie', '/电影/华语电影', '{"languages":["zh","cn"]}'::jsonb, true),
 			('外语电影', 'movie', '/电影/外语电影', '{"languages":["en","ja","ko","fr","de","es","it","ru","nl","pt","th","hi"]}'::jsonb, true),
+			('其他电影', 'movie', '/电影/其他电影', '{"default":true}'::jsonb, true),
 			('未分类', 'movie', '/电影/未分类', '{"default":true}'::jsonb, true),
 			('国漫', 'tv', '/电视剧/国漫', '{"genre_ids":[16],"countries":["CN","TW","HK"]}'::jsonb, true),
 			('日番', 'tv', '/电视剧/日番', '{"genre_ids":[16],"countries":["JP"]}'::jsonb, true),
@@ -802,6 +803,7 @@ END $$;
 			('国产剧', 'tv', '/电视剧/国产剧', '{"countries":["CN","TW","HK"]}'::jsonb, true),
 			('欧美剧', 'tv', '/电视剧/欧美剧', '{"countries":["US","FR","GB","UK","DE","ES","IT","NL","PT","RU"]}'::jsonb, true),
 			('日韩剧', 'tv', '/电视剧/日韩剧', '{"countries":["JP","KP","KR","TH","IN","SG"]}'::jsonb, true),
+			('其他剧集', 'tv', '/电视剧/其他剧集', '{"default":true}'::jsonb, true),
 			('未分类', 'tv', '/电视剧/未分类', '{"default":true}'::jsonb, true)
 		),
 		updated AS (
@@ -1084,6 +1086,10 @@ END $$;
 	}
 	if err = migrateIdentifyTrace(); err != nil {
 		Error("Failed to migrate identify trace fields: %v", err)
+		return err
+	}
+	if err = migrateOtherMediaCategories(); err != nil {
+		Error("Failed to migrate other media categories: %v", err)
 		return err
 	}
 	Info("Database initialized successfully")

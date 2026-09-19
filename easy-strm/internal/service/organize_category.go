@@ -20,7 +20,9 @@ func (s *OrganizeService) matchCategoryPath(identifyResult *domain.TmdbIdentifyR
 
 		rule := cat.GetMatchRule()
 		if rule.Default {
-			if defaultPath == "" {
+			// “其他”是已识别媒体的通用兜底；兼容历史数据库中“未分类”
+			// 记录 ID 更早、但应当排在“其他”之后的情况。
+			if defaultPath == "" || (cat.Name != "未分类" && strings.HasSuffix(defaultPath, "/未分类")) {
 				defaultPath = cat.TargetPath
 			}
 			continue

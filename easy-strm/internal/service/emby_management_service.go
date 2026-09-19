@@ -78,6 +78,201 @@ func (s *EmbyManagementService) GetServer(id int) (*domain.EmbyServer, error) {
 	return s.requireServer(id)
 }
 
+// PlaybackLinks 先定位剧集，再查询指定季集；上游失败不能伪装成未入库。
+func (s *EmbyManagementService) PlaybackLinks(title string, tmdbID, season, episode int) ([]map[string]string, error) {
+	if season < 0 || episode <= 0 || tmdbID < 0 || (tmdbID == 0 && strings.TrimSpace(title) == "") {
+		return nil, fmt.Errorf("媒体身份或季集参数无效")
+	}
+	servers, err := s.servers.List()
+	if err != nil {
+		return nil, err
+	}
+	links := make([]map[string]string, 0)
+	failures := make([]string, 0)
+	enabled := 0
+	for _, server := range servers {
+		if !server.Enabled {
+			continue
+		}
+		enabled++
+		found, err := s.findEpisodeLinks(server, title, tmdbID, season, episode)
+		if err != nil {
+			failures = append(failures, server.Name)
+			continue
+		}
+		links = append(links, found...)
+	}
+	if enabled == 0 {
+		return nil, fmt.Errorf("尚未配置已启用的 Emby 实例")
+	}
+	if len(links) == 0 && len(failures) == 0 {
+		for _, server := range servers {
+			if server.Enabled {
+				links = append(links, map[string]string{"fallback": "true", "server_name": server.Name, "name": title, "url": s.embySearchURL(server, title)})
+			}
+		}
+	}
+	if len(links) == 0 && len(failures) > 0 {
+		return nil, fmt.Errorf("Emby 查询失败（%s），请检查实例连接及 API Key 后重试", strings.Join(failures, "、"))
+	}
+	return links, nil
+}
+
+func (s *EmbyManagementService) embySearchURL(server *domain.EmbyServer, title string) string {
+	var info struct {
+		ID string `json:"Id"`
+	}
+	_ = s.requestJSON(server, http.MethodGet, "/emby/System/Info", nil, nil, &info)
+	base := strings.TrimRight(server.BaseURL, "/") + "/web/index.html#!/search?query=" + url.QueryEscape(title)
+	if info.ID != "" {
+		base += "&serverId=" + url.QueryEscape(info.ID)
+	}
+	return base
+}
+
+// MoviePlaybackLinks 按 TMDB ID 或片名查询 Emby 中的电影项目。
+func (s *EmbyManagementService) MoviePlaybackLinks(title string, tmdbID int) ([]map[string]string, error) {
+	servers, err := s.servers.List()
+	if err != nil {
+		return nil, err
+	}
+	links := make([]map[string]string, 0)
+	for _, server := range servers {
+		if !server.Enabled {
+			continue
+		}
+		query := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Movie"}, "Fields": {"ProviderIds"}}
+		if tmdbID > 0 {
+			query.Set("AnyProviderIdEquals", "tmdb."+strconv.Itoa(tmdbID))
+		} else {
+			query.Set("SearchTerm", strings.TrimSpace(title))
+		}
+		var result struct {
+			Items []struct {
+				ID          string            `json:"Id"`
+				Name        string            `json:"Name"`
+				ProviderIDs map[string]string `json:"ProviderIds"`
+			} `json:"Items"`
+		}
+		if err := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &result); err != nil {
+			continue
+		}
+		if len(result.Items) == 0 && tmdbID > 0 && strings.TrimSpace(title) != "" {
+			query.Del("AnyProviderIdEquals")
+			query.Set("SearchTerm", strings.TrimSpace(title))
+			if fallbackErr := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &result); fallbackErr != nil {
+				continue
+			}
+		}
+		for _, item := range result.Items {
+			if tmdbID > 0 && item.ProviderIDs["Tmdb"] != strconv.Itoa(tmdbID) && normalizeEmbyTitle(item.Name) != normalizeEmbyTitle(title) {
+				continue
+			}
+			if tmdbID == 0 && !strings.EqualFold(strings.TrimSpace(item.Name), strings.TrimSpace(title)) {
+				continue
+			}
+			links = append(links, map[string]string{"server_name": server.Name, "item_id": item.ID, "name": item.Name, "url": s.embyItemURL(server, item.ID)})
+		}
+	}
+	return links, nil
+}
+
+func (s *EmbyManagementService) findEpisodeLinks(server *domain.EmbyServer, title string, tmdbID, season, episode int) ([]map[string]string, error) {
+	query := url.Values{"Recursive": {"true"}, "IncludeItemTypes": {"Series"}, "Fields": {"ProviderIds"}}
+	if tmdbID > 0 {
+		query.Set("AnyProviderIdEquals", "tmdb."+strconv.Itoa(tmdbID))
+	} else {
+		query.Set("SearchTerm", strings.TrimSpace(title))
+	}
+	var series struct {
+		Items []struct {
+			ID          string            `json:"Id"`
+			Name        string            `json:"Name"`
+			ProviderIDs map[string]string `json:"ProviderIds"`
+		} `json:"Items"`
+	}
+	if err := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &series); err != nil {
+		return nil, err
+	}
+	if len(series.Items) == 0 && tmdbID > 0 && strings.TrimSpace(title) != "" {
+		query.Del("AnyProviderIdEquals")
+		query.Set("SearchTerm", strings.TrimSpace(title))
+		if err := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &series); err != nil {
+			return nil, err
+		}
+	}
+	if len(series.Items) == 0 && tmdbID > 0 {
+		// 某些 Emby 版本不支持 AnyProviderIdEquals；回读剧集索引后按 ProviderIds 精确匹配。
+		query.Del("SearchTerm")
+		query.Set("Limit", "10000")
+		if err := s.requestJSON(server, http.MethodGet, "/emby/Items", query, nil, &series); err != nil {
+			return nil, err
+		}
+	}
+	links := make([]map[string]string, 0)
+	for _, show := range series.Items {
+		// 回读身份，避免不支持过滤参数的服务器返回其他作品；有 TMDB 身份时不按同名猜测。
+		if show.ID == "" {
+			continue
+		}
+		if tmdbID > 0 {
+			matched := false
+			for key, value := range show.ProviderIDs {
+				if strings.EqualFold(key, "tmdb") && value == strconv.Itoa(tmdbID) {
+					matched = true
+				}
+			}
+
+			if !matched {
+				// 部分 Emby 只返回本地元数据或错误的 TMDB ProviderId，唯一同名结果仍可安全使用。
+				matched = normalizeEmbyTitle(show.Name) == normalizeEmbyTitle(title)
+				if !matched {
+					continue
+				}
+			}
+		} else if !strings.EqualFold(strings.TrimSpace(show.Name), strings.TrimSpace(title)) {
+			continue
+		}
+		var episodes struct {
+			Items []struct {
+				ID                string `json:"Id"`
+				Name              string `json:"Name"`
+				IndexNumber       int    `json:"IndexNumber"`
+				ParentIndexNumber *int   `json:"ParentIndexNumber"`
+			} `json:"Items"`
+		}
+		episodeQuery := url.Values{"Season": {strconv.Itoa(season)}}
+		if err := s.requestJSON(server, http.MethodGet, "/emby/Shows/"+url.PathEscape(show.ID)+"/Episodes", episodeQuery, nil, &episodes); err != nil {
+			return nil, err
+		}
+		for _, item := range episodes.Items {
+			if item.ID == "" || item.IndexNumber != episode || (item.ParentIndexNumber != nil && *item.ParentIndexNumber != season) {
+				continue
+			}
+			links = append(links, map[string]string{"server_name": server.Name, "item_id": item.ID, "name": item.Name, "url": s.embyItemURL(server, item.ID)})
+		}
+	}
+	return links, nil
+}
+
+func normalizeEmbyTitle(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer(" ", "", "　", "", "-", "", "–", "", "—", "", ":", "", "：", "", "·", "").Replace(value)
+	return value
+}
+
+func (s *EmbyManagementService) embyItemURL(server *domain.EmbyServer, itemID string) string {
+	var info struct {
+		ID string `json:"Id"`
+	}
+	_ = s.requestJSON(server, http.MethodGet, "/emby/System/Info", nil, nil, &info)
+	base := strings.TrimRight(server.BaseURL, "/") + "/web/index.html#!/item?id=" + url.QueryEscape(itemID)
+	if info.ID != "" {
+		base += "&serverId=" + url.QueryEscape(info.ID)
+	}
+	return base
+}
+
 // CreateServer 新增实例。
 func (s *EmbyManagementService) CreateServer(name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, error) {
 	if err := validateEmbyServerInput(name, baseURL, apiKey, false); err != nil {

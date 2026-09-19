@@ -241,6 +241,7 @@
                                 >进入分享管理 →</n-button
                               >
                             </div>
+                            <n-button size="small" type="primary" secondary :loading="Boolean(embyLoading[episode.episode_number])" @click="openEmby(episode)">打开 Emby 播放</n-button>
                           </div>
                         </div>
                       </article>
@@ -318,6 +319,7 @@
                       >进入分享管理 →</n-button
                     >
                   </div>
+                  <n-button size="small" type="primary" secondary :loading="movieEmbyLoading" @click="openMovieEmby">打开 Emby 播放</n-button>
                 </article>
               </div>
               <n-empty v-if="!sourceLoading && !sources.length && !sourceError" description="暂无来源" />
@@ -363,12 +365,49 @@ import {
   getLibrarySources,
   getLibraryTVDetail,
   getLibraryTVSeason,
+  getEmbyPlaybackLinks,
   enrichLibrary,
 } from '../utils/api/share-library'
 const router = useRouter(),
   message = useMessage()
 const showExport = ref(false),
   exportFilters = ref({})
+const embyLoading = reactive({})
+const movieEmbyLoading = ref(false)
+const openMovieEmby = async () => {
+  if (!selected.value || movieEmbyLoading.value) return
+  movieEmbyLoading.value = true
+  const playbackWindow = window.open('about:blank', '_blank')
+  if (!playbackWindow) { movieEmbyLoading.value = false; message.warning('浏览器拦截了播放窗口，请允许本站弹出窗口后重试'); return }
+  playbackWindow.opener = null
+  try {
+    const response = await getEmbyPlaybackLinks({ media_type: 'movie', title: selected.value.title, tmdb_id: selected.value.tmdb_id })
+    const links = response.data?.data?.data || response.data?.data || []
+    if (!links.length) { playbackWindow.close(); message.warning('Emby 中未找到对应电影，请确认电影已入库并正确识别'); return }
+    playbackWindow.location.replace(new URL(links[0].url).href)
+  } catch (error) { playbackWindow.close(); message.error(error.response?.data?.message || error.response?.data?.error || '查询 Emby 播放地址失败') }
+  finally { movieEmbyLoading.value = false }
+}
+const openEmby = async episode => {
+  const number = Number(episode?.episode_number)
+  if (!selected.value || !Number.isInteger(number) || activeSeason.value == null) return
+  if (embyLoading[number]) return
+  // 在点击事件内打开窗口，避免异步查询完成后被浏览器拦截。
+  const playbackWindow = window.open('about:blank', '_blank')
+  if (!playbackWindow) { message.warning('浏览器拦截了播放窗口，请允许本站弹出窗口后重试'); return }
+  playbackWindow.opener = null
+  embyLoading[number] = true
+  try {
+    const response = await getEmbyPlaybackLinks({ title: selected.value.title, tmdb_id: selected.value.tmdb_id, season_number: activeSeason.value, episode_number: number })
+    const links = response.data?.data?.data || response.data?.data || []
+    if (!links.length) { playbackWindow.close(); message.warning(`Emby 中未找到对应分集，请确认该剧集和分集已入库并正确识别`); return }
+    const target = new URL(links[0].url)
+    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('无效的 Emby 地址')
+    playbackWindow.location.replace(target.href)
+    if (links[0].fallback === 'true' || links[0].fallback === true) message.info('Emby 中未找到精确分集，已打开剧集搜索结果')
+  } catch (error) { playbackWindow.close(); message.error(error.response?.data?.message || error.response?.data?.error || '查询 Emby 播放地址失败') }
+  finally { embyLoading[number] = false }
+}
 const openExport = () => {
   exportFilters.value = { ...active }
   showExport.value = true
@@ -792,6 +831,15 @@ onBeforeUnmount(() => {
   z-index: 1;
   max-width: 72%;
 }
+.emby-play-button {
+  position: absolute;
+  right: 26px;
+  top: 20px;
+  z-index: 2;
+  color: #fff !important;
+  border-color: #ffffff55 !important;
+  background: #ffffff22 !important;
+}
 .tv-kicker {
   color: #bdc6ff;
   font-size: 12px;
@@ -856,7 +904,7 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 235px minmax(0, 1fr);
   min-height: 560px;
-  max-height: calc(90vh - 190px);
+  height: calc(90vh - 190px);
 }
 .season-sidebar {
   padding: 18px 14px;
@@ -916,6 +964,8 @@ onBeforeUnmount(() => {
 .season-content {
   padding: 18px 22px;
   overflow: auto;
+  min-height: 0;
+  scrollbar-gutter: stable;
 }
 .season-content-header {
   display: flex;
@@ -1152,7 +1202,7 @@ onBeforeUnmount(() => {
   }
   .tv-detail-body {
     display: block;
-    max-height: calc(90vh - 255px);
+    height: calc(90vh - 255px);
     overflow: auto;
   }
   .season-sidebar {
