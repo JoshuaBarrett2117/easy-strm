@@ -106,3 +106,14 @@ func TestMCPControllerAuthAndProtocol(t *testing.T) {
 		t.Fatalf("expected unauthorized, got %d", response.Code)
 	}
 }
+
+func TestMCPRegistryRejectsUnknownArguments(t *testing.T) {
+	registry := NewMCPRegistry(MCPTool{
+		Name:        "strict_tool",
+		InputSchema: objectSchema(map[string]interface{}{"value": stringProperty("value")}),
+		Handler:     func(context.Context, map[string]json.RawMessage) (interface{}, error) { return nil, nil },
+	})
+	if _, err := registry.Call(context.Background(), "strict_tool", json.RawMessage(`{"value":"ok","secret":"no"}`)); err == nil || !strings.Contains(err.Error(), "unknown argument: secret") {
+		t.Fatalf("expected unknown argument rejection, got %v", err)
+	}
+}

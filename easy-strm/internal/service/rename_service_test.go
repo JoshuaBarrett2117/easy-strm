@@ -888,3 +888,13 @@ func TestRenameServiceCleanTitleCollapsesDanglingSeparators(t *testing.T) {
 		t.Fatalf("unexpected cleaned title: %q", got)
 	}
 }
+
+func TestRenameServiceValidateTemplateRejectsInvalidJinja(t *testing.T) {
+	service := &RenameService{}
+	if err := service.ValidateTemplate("{{ title"); err == nil {
+		t.Fatal("expected invalid Jinja template to be rejected")
+	}
+	if err := service.ValidateTemplate("{{ title }}"); err != nil {
+		t.Fatalf("expected valid Jinja template, got %v", err)
+	}
+}

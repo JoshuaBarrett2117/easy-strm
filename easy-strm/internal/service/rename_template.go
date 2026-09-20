@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 
 	minijinja "github.com/mitsuhiko/minijinja/minijinja-go/v2"
@@ -14,6 +15,70 @@ func (s *RenameService) GetPresets(mediaType string) ([]*dao.RenamePreset, error
 		return s.renamePresetDAO.GetByMediaType(mediaType)
 	}
 	return s.renamePresetDAO.GetAll()
+}
+
+// GetPreset 获取指定更名预设。
+func (s *RenameService) GetPreset(id int) (*dao.RenamePreset, error) {
+	if id <= 0 {
+		return nil, fmt.Errorf("预设 ID 必须为正数")
+	}
+	return s.renamePresetDAO.GetByID(id)
+}
+
+// CreatePreset 创建并校验更名预设。
+func (s *RenameService) CreatePreset(preset *dao.RenamePreset) error {
+	if err := validateRenamePreset(preset); err != nil {
+		return err
+	}
+	return s.renamePresetDAO.Create(preset)
+}
+
+// UpdatePreset 更新并校验更名预设。
+func (s *RenameService) UpdatePreset(preset *dao.RenamePreset) error {
+	if err := validateRenamePreset(preset); err != nil {
+		return err
+	}
+	if preset.ID <= 0 {
+		return fmt.Errorf("预设 ID 必须为正数")
+	}
+	return s.renamePresetDAO.Update(preset)
+}
+
+// DeletePreset 删除指定更名预设。
+func (s *RenameService) DeletePreset(id int) error {
+	if id <= 0 {
+		return fmt.Errorf("预设 ID 必须为正数")
+	}
+	return s.renamePresetDAO.Delete(id)
+}
+
+// ValidateTemplate 校验 Jinja 更名模板语法。
+func (s *RenameService) ValidateTemplate(template string) error {
+	if strings.TrimSpace(template) == "" {
+		return fmt.Errorf("模板不能为空")
+	}
+	env := minijinja.NewEnvironment()
+	if _, err := env.TemplateFromNamedString("rename-template", template); err != nil {
+		return fmt.Errorf("Jinja 模板无效: %v", err)
+	}
+	return nil
+}
+
+func validateRenamePreset(preset *dao.RenamePreset) error {
+	if preset == nil {
+		return fmt.Errorf("预设不能为空")
+	}
+	if strings.TrimSpace(preset.Name) == "" {
+		return fmt.Errorf("预设名称不能为空")
+	}
+	if preset.MediaType != "movie" && preset.MediaType != "tv" {
+		return fmt.Errorf("媒体类型必须为 movie 或 tv")
+	}
+	env := minijinja.NewEnvironment()
+	if _, err := env.TemplateFromNamedString("rename-template", preset.Template); err != nil {
+		return fmt.Errorf("Jinja 模板无效: %v", err)
+	}
+	return nil
 }
 
 // getDefaultTemplate 获取默认模板。

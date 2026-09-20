@@ -34,6 +34,13 @@ type compiledFilenameRecognitionRule struct {
 // FilenameRecognitionRuleSet 是领域层规则集结构的服务层别名。
 type FilenameRecognitionRuleSet = domain.FilenameRecognitionRuleSet
 
+// FilenameRecognitionSampleResult 是文件名识别规则样例校验结果。
+type FilenameRecognitionSampleResult struct {
+	Filename string          `json:"filename"`
+	Parsed   *ParsedFilename `json:"parsed,omitempty"`
+	Matched  bool            `json:"matched"`
+}
+
 // SetFilenameRecognitionRuleStore 注入规则配置存储，并清空旧缓存。
 func (s *TmdbService) SetFilenameRecognitionRuleStore(store FilenameRecognitionRuleStore) {
 	s.filenameRuleMu.Lock()
@@ -84,6 +91,22 @@ func (s *TmdbService) SaveFilenameRecognitionRules(rules []FilenameRecognitionRu
 // ResetFilenameRecognitionRules 恢复并保存内置常用模板。
 func (s *TmdbService) ResetFilenameRecognitionRules() (FilenameRecognitionRuleSet, error) {
 	return s.SaveFilenameRecognitionRules(DefaultFilenameRecognitionRules())
+}
+
+// ValidateFilenameRecognitionSamples 使用当前生效规则校验文件名样例。
+func (s *TmdbService) ValidateFilenameRecognitionSamples(samples []string) ([]FilenameRecognitionSampleResult, error) {
+	if len(samples) == 0 {
+		return nil, fmt.Errorf("至少提供一个文件名样例")
+	}
+	results := make([]FilenameRecognitionSampleResult, 0, len(samples))
+	for _, sample := range samples {
+		if strings.TrimSpace(sample) == "" {
+			return nil, fmt.Errorf("文件名样例不能为空")
+		}
+		parsed := s.ParseFilename(sample)
+		results = append(results, FilenameRecognitionSampleResult{Filename: sample, Parsed: parsed, Matched: parsed != nil && parsed.MatchedRuleID != ""})
+	}
+	return results, nil
 }
 
 // DefaultFilenameRecognitionRules 返回参考常见媒体命名约定的内置模板。

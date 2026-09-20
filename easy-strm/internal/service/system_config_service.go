@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -11,6 +12,68 @@ import (
 // 负责配置读取、批量更新与日志保留天数配置解析。
 type SystemConfigService struct {
 	systemConfigDAO *dao.SystemConfigDAO
+}
+
+var mcpRuleSettingDefaults = map[string]map[string]bool{
+	"organize": {
+		"scrape_enabled_on_organize": true,
+	},
+	"scrape": {
+		"scrape_write_nfo":    true,
+		"scrape_write_poster": true,
+		"scrape_write_fanart": true,
+		"scrape_write_thumb":  true,
+	},
+}
+
+// GetRuleSettings 返回 MCP 允许读取的整理或刮削规则设置。
+func (s *SystemConfigService) GetRuleSettings(group string) (map[string]bool, error) {
+	defaults, ok := mcpRuleSettingDefaults[group]
+	if !ok {
+		return nil, fmt.Errorf("不支持的规则设置分组: %s", group)
+	}
+	result := make(map[string]bool, len(defaults))
+	for key, defaultValue := range defaults {
+		result[key] = defaultValue
+		config, err := s.systemConfigDAO.GetByKey(key)
+		if err != nil {
+			return nil, err
+		}
+		if config != nil {
+			result[key] = parseBoolConfig(config.ConfigVal, defaultValue)
+		}
+	}
+	return result, nil
+}
+
+// UpdateRuleSettings 更新 MCP 允许写入的整理或刮削规则设置。
+func (s *SystemConfigService) UpdateRuleSettings(group string, values map[string]bool) (map[string]bool, error) {
+	defaults, ok := mcpRuleSettingDefaults[group]
+	if !ok {
+		return nil, fmt.Errorf("不支持的规则设置分组: %s", group)
+	}
+	for key := range values {
+		if _, allowed := defaults[key]; !allowed {
+			return nil, fmt.Errorf("不允许更新系统配置: %s", key)
+		}
+	}
+	for key, value := range values {
+		if err := s.systemConfigDAO.Upsert(key, fmt.Sprintf("%t", value)); err != nil {
+			return nil, err
+		}
+	}
+	return s.GetRuleSettings(group)
+}
+
+func parseBoolConfig(value string, defaultValue bool) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
 }
 
 // NewSystemConfigService 创建系统配置服务实例。

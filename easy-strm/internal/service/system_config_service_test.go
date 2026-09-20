@@ -54,3 +54,13 @@ func TestSystemConfigServiceRejectsRemovedAlistSettings(t *testing.T) {
 		t.Fatal("已停用配置不应允许写入")
 	}
 }
+
+func TestSystemConfigServiceRejectsUnknownRuleSettings(t *testing.T) {
+	service := NewSystemConfigService(nil)
+	if _, err := service.UpdateRuleSettings("scrape", map[string]bool{"tmdb_api_key": true}); err == nil {
+		t.Fatal("expected unknown rule setting to be rejected")
+	}
+	if _, err := service.GetRuleSettings("unknown"); err == nil {
+		t.Fatal("expected unknown rule setting group to be rejected")
+	}
+}
