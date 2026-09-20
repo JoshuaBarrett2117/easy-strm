@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"easy-strm/internal/service"
 	"github.com/gin-gonic/gin"
@@ -11,12 +12,18 @@ import (
 
 // MCPController 提供面向第三方 AI Agent 的 MCP JSON-RPC 接口。
 type MCPController struct {
-	api   *service.GlobalAPIService
-	tasks *service.TaskService
+	api      MCPAuthenticator
+	registry *MCPRegistry
 }
 
-func NewMCPController(api *service.GlobalAPIService, tasks *service.TaskService) *MCPController {
-	return &MCPController{api: api, tasks: tasks}
+// NewMCPController 保留旧构造函数，便于已有装配代码和测试兼容。
+func NewMCPController(api MCPAuthenticator, tasks *service.TaskService) *MCPController {
+	return NewMCPControllerWithDependencies(MCPDependencies{API: api, Tasks: tasks})
+}
+
+// NewMCPControllerWithDependencies 创建带核心业务工具的 MCP Controller。
+func NewMCPControllerWithDependencies(deps MCPDependencies) *MCPController {
+	return &MCPController{api: deps.API, registry: NewCoreMCPRegistry(deps)}
 }
 
 type mcpRequest struct {
@@ -35,12 +42,10 @@ func mcpError(id interface{}, code int, msg string) gin.H {
 
 // HandleMCP 处理 MCP Streamable HTTP 的 JSON 请求（单请求/单响应模式）。
 func (c *MCPController) HandleMCP(ctx *gin.Context) {
-	key := ctx.GetHeader("X-API-Key")
-	if key == "" {
-		key = ctx.GetHeader("Authorization")
-		if len(key) > 7 && key[:7] == "ApiKey " {
-			key = key[7:]
-		}
+	key := extractMCPAPIKey(ctx.GetHeader("X-API-Key"), ctx.GetHeader("Authorization"))
+	if c.api == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "mcp authentication is not configured"})
+		return
 	}
 	ok, err := c.api.ValidateAPIKey(key)
 	if err != nil || !ok {
@@ -52,18 +57,17 @@ func (c *MCPController) HandleMCP(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, mcpError(nil, -32700, "invalid json"))
 		return
 	}
+	if req.JSONRPC != "2.0" || strings.TrimSpace(req.Method) == "" {
+		ctx.JSON(http.StatusOK, mcpError(req.ID, -32600, "invalid request"))
+		return
+	}
 	switch req.Method {
 	case "initialize":
 		ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"protocolVersion": "2024-11-05", "capabilities": gin.H{"tools": gin.H{}}, "serverInfo": gin.H{"name": "easy-strm", "version": "1.0"}}))
 	case "notifications/initialized":
 		ctx.Status(http.StatusAccepted)
 	case "tools/list":
-		ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"tools": []gin.H{
-			{"name": "system_status", "description": "获取系统任务概览", "inputSchema": gin.H{"type": "object", "properties": gin.H{}}},
-			{"name": "tasks_recent", "description": "获取最近任务列表", "inputSchema": gin.H{"type": "object", "properties": gin.H{}}},
-			{"name": "task_get", "description": "获取指定任务详情", "inputSchema": gin.H{"type": "object", "properties": gin.H{"task_id": gin.H{"type": "string"}}, "required": []string{"task_id"}}},
-			{"name": "task_cancel", "description": "取消运行中的任务", "inputSchema": gin.H{"type": "object", "properties": gin.H{"task_id": gin.H{"type": "string"}}, "required": []string{"task_id"}}},
-		}}))
+		ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"tools": c.registry.Tools()}))
 	case "tools/call":
 		c.callTool(ctx, req)
 	default:
@@ -71,43 +75,43 @@ func (c *MCPController) HandleMCP(ctx *gin.Context) {
 	}
 }
 
-func (c *MCPController) callTool(ctx *gin.Context, req mcpRequest) {
-	var p struct {
-		Name      string                 `json:"name"`
-		Arguments map[string]interface{} `json:"arguments"`
+// extractMCPAPIKey 支持 X-API-Key 和兼容性的 Authorization: ApiKey 头。
+func extractMCPAPIKey(xAPIKey, authorization string) string {
+	if strings.TrimSpace(xAPIKey) != "" {
+		return strings.TrimSpace(xAPIKey)
 	}
-	if err := json.Unmarshal(req.Params, &p); err != nil {
+	const prefix = "ApiKey "
+	if strings.HasPrefix(authorization, prefix) {
+		return strings.TrimSpace(strings.TrimPrefix(authorization, prefix))
+	}
+	return ""
+}
+
+func (c *MCPController) callTool(ctx *gin.Context, req mcpRequest) {
+	var params struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil || strings.TrimSpace(params.Name) == "" {
 		ctx.JSON(http.StatusOK, mcpError(req.ID, -32602, "invalid params"))
 		return
 	}
-	var data interface{}
-	var err error
-	switch p.Name {
-	case "system_status", "tasks_recent":
-		data, err = c.tasks.GetUnified()
-	case "task_get":
-		id, _ := p.Arguments["task_id"].(string)
-		if id == "" {
-			err = context.Canceled
-		} else {
-			data, err = c.tasks.Get(id)
-		}
-	case "task_cancel":
-		id, _ := p.Arguments["task_id"].(string)
-		if id == "" {
-			err = context.Canceled
-		} else {
-			err = c.tasks.Cancel(id)
-			data = gin.H{"task_id": id, "cancelled": err == nil}
-		}
-	default:
-		ctx.JSON(http.StatusOK, mcpError(req.ID, -32601, "tool not found"))
-		return
-	}
+	data, err := c.registry.Call(context.Background(), params.Name, params.Arguments)
 	if err != nil {
-		ctx.JSON(http.StatusOK, mcpError(req.ID, -32000, err.Error()))
+		code := -32000
+		if strings.HasPrefix(err.Error(), "tool not found") {
+			code = -32601
+		}
+		if strings.HasPrefix(err.Error(), "invalid arguments") || strings.HasPrefix(err.Error(), "missing required argument") {
+			code = -32602
+		}
+		ctx.JSON(http.StatusOK, mcpError(req.ID, code, err.Error()))
 		return
 	}
-	b, _ := json.Marshal(data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		ctx.JSON(http.StatusOK, mcpError(req.ID, -32000, "serialize tool result failed"))
+		return
+	}
 	ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"content": []gin.H{{"type": "text", "text": string(b)}}, "isError": false}))
 }

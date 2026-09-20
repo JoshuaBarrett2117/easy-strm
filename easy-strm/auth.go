@@ -95,7 +95,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	aiRecognitionService := service.NewAIRecognitionService(systemConfigDAO, NewProxyAwareHTTPClient(45*time.Second))
 	tmdbService.SetAIRecognitionService(aiRecognitionService)
 	globalAPIService := service.NewGlobalAPIService(systemConfigDAO)
-	mcpController := controller.NewMCPController(globalAPIService, taskService)
+	mcpController := controller.NewMCPControllerWithDependencies(controller.MCPDependencies{API: globalAPIService, Tasks: taskService, Dashboard: dashboardService, MediaSources: mediaSourceService, FileManager: fileManagerService, TMDB: tmdbService, Rename: renameService, Organize: organizeService, STRM: strmService, Cloud115: cloud115Service, Cron: cronService, Emby: embyService})
 	telegramBotService := service.NewTelegramBotService(notificationConfigService, dashboardService, taskService, cronService, embyService, notificationHTTPClient)
 	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient())
 
