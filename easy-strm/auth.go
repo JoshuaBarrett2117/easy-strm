@@ -675,6 +675,13 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		}
 		return claims.UserID, nil
 	})
+	authController.SetGetUserByName(func(name string) (*controller.UserInfo, error) {
+		user, err := GetUserByName(name)
+		if err != nil || user == nil {
+			return nil, err
+		}
+		return &controller.UserInfo{ID: user.ID, Name: user.Name, Password: user.Password, CreateTime: user.CreateTime, UpdateTime: user.UpdateTime}, nil
+	})
 	authController.SetGetToken(func(userID int) (string, error) {
 		return GetToken(userID)
 	})
@@ -1157,4 +1164,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 			}
 		}
 	}()
+
+	// 将正式注册的业务路由同步暴露为 MCP 工具，调用时仍经过原路由鉴权、参数校验和 Service。
+	mcpController.RegisterBusinessRoutes(r, nil)
 }

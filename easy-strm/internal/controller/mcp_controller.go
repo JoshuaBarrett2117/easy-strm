@@ -96,7 +96,8 @@ func (c *MCPController) callTool(ctx *gin.Context, req mcpRequest) {
 		ctx.JSON(http.StatusOK, mcpError(req.ID, -32602, "invalid params"))
 		return
 	}
-	data, err := c.registry.Call(context.Background(), params.Name, params.Arguments)
+	requestContext := context.WithValue(ctx.Request.Context(), mcpHTTPRequestKey{}, ctx.Request)
+	data, err := c.registry.Call(requestContext, params.Name, params.Arguments)
 	if err != nil {
 		code := -32000
 		if strings.HasPrefix(err.Error(), "tool not found") {
@@ -108,10 +109,15 @@ func (c *MCPController) callTool(ctx *gin.Context, req mcpRequest) {
 		ctx.JSON(http.StatusOK, mcpError(req.ID, code, err.Error()))
 		return
 	}
+	isError := false
+	if routeResult, ok := data.(mcpRouteResult); ok {
+		data = routeResult.Data
+		isError = routeResult.Failed
+	}
 	b, err := json.Marshal(data)
 	if err != nil {
 		ctx.JSON(http.StatusOK, mcpError(req.ID, -32000, "serialize tool result failed"))
 		return
 	}
-	ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"content": []gin.H{{"type": "text", "text": string(b)}}, "isError": false}))
+	ctx.JSON(http.StatusOK, mcpResult(req.ID, gin.H{"content": []gin.H{{"type": "text", "text": string(b)}}, "isError": isError}))
 }
