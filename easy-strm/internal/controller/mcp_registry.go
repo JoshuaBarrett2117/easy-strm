@@ -579,6 +579,27 @@ func NewCoreMCPRegistry(d MCPDependencies) *MCPRegistry {
 		})
 	}
 	if d.ShareRecordService != nil {
+		// 分享识别批量工具名称：share_records_identify_batch、share_records_retry_failed、
+		// share_records_identify_pending、share_records_process_all。
+		intArray := func(description string) map[string]interface{} {
+			return map[string]interface{}{"type": "array", "description": description, "items": map[string]interface{}{"type": "integer"}}
+		}
+		identifyBatchProps := map[string]interface{}{"media_ids": intArray("媒体 ID；为空表示全部媒体"), "share_ids": intArray("分享记录 ID；为空表示全部分享"), "confirm": boolProperty("确认启动识别任务", false)}
+		startIdentify := func(name, description string, schema map[string]interface{}, retry, pending, failed bool) {
+			add(name, description, schema, false, true, false, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+				var mediaIDs, shareIDs []int
+				if err := decodeArg(a, "media_ids", &mediaIDs, false); err != nil { return nil, err }
+				if err := decodeArg(a, "share_ids", &shareIDs, false); err != nil { return nil, err }
+				if pending && failed { return nil, fmt.Errorf("待识别与失败筛选不能同时启用") }
+				taskID, err := d.ShareRecordService.StartBatchIdentify(ctx, mediaIDs, retry, shareIDs, pending, failed)
+				if err != nil { return nil, err }
+				return map[string]interface{}{"task_id": taskID, "selected_by_media_ids": len(mediaIDs) > 0, "selected_by_share_ids": len(shareIDs) > 0, "retry_failed": retry, "pending_only": pending, "failed_only": failed}, nil
+			})
+		}
+		startIdentify("share_records_identify_batch", "批量触发选中或全部分享媒体识别；必须显式 confirm=true", objectSchema(identifyBatchProps, "confirm"), false, false, false)
+		startIdentify("share_records_retry_failed", "批量重试失败的分享媒体识别；必须显式 confirm=true", objectSchema(map[string]interface{}{"share_ids": intArray("分享记录 ID；为空表示全部分享"), "confirm": boolProperty("确认启动重试任务", false)}, "confirm"), true, false, true)
+		startIdentify("share_records_identify_pending", "继续识别待处理的分享媒体；必须显式 confirm=true", objectSchema(map[string]interface{}{"share_ids": intArray("分享记录 ID；为空表示全部分享"), "confirm": boolProperty("确认启动任务", false)}, "confirm"), false, true, false)
+		startIdentify("share_records_process_all", "一键处理全部分享媒体识别；必须显式 confirm=true", objectSchema(map[string]interface{}{"confirm": boolProperty("确认处理全部分享", false)}, "confirm"), true, false, false)
 		shareProps := map[string]interface{}{"share_id": intProperty("分享记录 ID"), "keyword": stringProperty("按名称或链接搜索"), "status": stringProperty("媒体状态过滤"), "page": intProperty("页码，默认 1"), "page_size": intProperty("页大小，默认 20")}
 		add("share_records_list", "列出分享记录（不返回密码）", objectSchema(shareProps), true, false, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
 			var q domain.ShareRecordQuery

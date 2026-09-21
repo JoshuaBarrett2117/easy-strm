@@ -24,9 +24,22 @@ func newMCPShareRegistry(t *testing.T) (*MCPRegistry, sqlmock.Sqlmock) {
 
 func TestMCPShareRecordToolsRegistered(t *testing.T) {
 	r, _ := newMCPShareRegistry(t)
-	for _, name := range []string{"share_records_list", "share_record_get", "share_record_create", "share_record_update", "share_record_delete"} {
+	for _, name := range []string{"share_records_list", "share_record_get", "share_record_create", "share_record_update", "share_record_delete", "share_records_identify_batch", "share_records_retry_failed", "share_records_identify_pending", "share_records_process_all"} {
 		if _, ok := r.tools[name]; !ok {
 			t.Fatalf("tool not registered: %s", name)
+		}
+	}
+}
+
+func TestMCPShareRecognitionToolsValidateAndRequireConfirmation(t *testing.T) {
+	r, _ := newMCPShareRegistry(t)
+	if _, err := r.Call(context.Background(), "share_records_identify_batch", json.RawMessage(`{"unexpected":true}`)); err == nil {
+		t.Fatal("expected unknown argument error")
+	}
+	for _, name := range []string{"share_records_identify_batch", "share_records_retry_failed", "share_records_identify_pending", "share_records_process_all"} {
+		result, err := r.Call(context.Background(), name, json.RawMessage(`{}`))
+		if err != nil || result.(map[string]interface{})["confirmation_required"] != true {
+			t.Fatalf("%s did not require confirmation: %#v %v", name, result, err)
 		}
 	}
 }
