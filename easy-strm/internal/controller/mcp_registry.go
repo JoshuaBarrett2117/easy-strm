@@ -212,20 +212,21 @@ func decodeMediaCategory(args map[string]json.RawMessage, id int) (*domain.Media
 type MCPAuthenticator interface{ ValidateAPIKey(string) (bool, error) }
 
 type MCPDependencies struct {
-	API          MCPAuthenticator
-	Tasks        *service.TaskService
-	Dashboard    *service.DashboardService
-	MediaSources *service.MediaSourceService
-	FileManager  *service.FileManagerService
-	TMDB         *service.TmdbService
-	Rename       *service.RenameService
-	Organize     *service.OrganizeService
-	STRM         *service.StrmService
-	Cloud115     *service.Cloud115Service
-	Cron         *service.CronService
-	Emby         *service.EmbyService
-	Categories   *service.MediaCategoryService
-	Settings     *service.SystemConfigService
+	API                MCPAuthenticator
+	Tasks              *service.TaskService
+	Dashboard          *service.DashboardService
+	MediaSources       *service.MediaSourceService
+	FileManager        *service.FileManagerService
+	TMDB               *service.TmdbService
+	Rename             *service.RenameService
+	Organize           *service.OrganizeService
+	STRM               *service.StrmService
+	Cloud115           *service.Cloud115Service
+	Cron               *service.CronService
+	Emby               *service.EmbyService
+	Categories         *service.MediaCategoryService
+	Settings           *service.SystemConfigService
+	ShareRecordService *service.ShareRecordService
 }
 
 // NewCoreMCPRegistry 创建核心 Easy Stream MCP 工具集合。
@@ -577,6 +578,79 @@ func NewCoreMCPRegistry(d MCPDependencies) *MCPRegistry {
 			return sanitizeCloud115Account(account), nil
 		})
 	}
+	if d.ShareRecordService != nil {
+		shareProps := map[string]interface{}{"share_id": intProperty("分享记录 ID"), "keyword": stringProperty("按名称或链接搜索"), "status": stringProperty("媒体状态过滤"), "page": intProperty("页码，默认 1"), "page_size": intProperty("页大小，默认 20")}
+		add("share_records_list", "列出分享记录（不返回密码）", objectSchema(shareProps), true, false, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+			var q domain.ShareRecordQuery
+			if err := decodeArg(a, "share_id", &q.ShareID, false); err != nil {
+				return nil, err
+			}
+			if err := decodeArg(a, "keyword", &q.Keyword, false); err != nil {
+				return nil, err
+			}
+			if err := decodeArg(a, "status", &q.Status, false); err != nil {
+				return nil, err
+			}
+			if err := decodeArg(a, "page", &q.Page, false); err != nil {
+				return nil, err
+			}
+			if err := decodeArg(a, "page_size", &q.PageSize, false); err != nil {
+				return nil, err
+			}
+			q.Summary = true
+			page, err := d.ShareRecordService.List(ctx, q)
+			return sanitizeShareRecordPage(page), err
+		})
+		add("share_record_get", "获取分享记录详情（不返回密码）", objectSchema(shareProps, "share_id"), true, false, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+			id, err := requiredInt(a, "share_id")
+			if err != nil {
+				return nil, err
+			}
+			page, err := d.ShareRecordService.List(ctx, domain.ShareRecordQuery{ShareID: id, Summary: false, Page: 1, PageSize: 1})
+			if err != nil {
+				return nil, err
+			}
+			if len(page.Data) == 0 {
+				return nil, fmt.Errorf("分享记录不存在: %d", id)
+			}
+			return sanitizeShareRecord(page.Data[0]), nil
+		})
+		createProps := map[string]interface{}{"name": stringProperty("分享名称"), "url": stringProperty("115 分享链接"), "password": stringProperty("访问密码"), "note": stringProperty("备注"), "media_type": stringProperty("媒体类型：auto、movie 或 tv")}
+		add("share_record_create", "创建分享记录；必须显式 confirm=true", objectSchema(withConfirm(createProps), "url", "confirm"), false, true, false, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+			var record domain.ShareRecord
+			if err := jsonArgs(a, &record); err != nil {
+				return nil, err
+			}
+			if err := d.ShareRecordService.Create(ctx, &record); err != nil {
+				return nil, err
+			}
+			return sanitizeShareRecord(record), nil
+		})
+		updateProps := map[string]interface{}{"share_id": intProperty("分享记录 ID"), "name": stringProperty("分享名称"), "url": stringProperty("115 分享链接"), "password": stringProperty("访问密码"), "note": stringProperty("备注"), "media_type": stringProperty("媒体类型：auto、movie 或 tv"), "version": intProperty("版本号")}
+		add("share_record_update", "更新分享记录；必须显式 confirm=true", objectSchema(withConfirm(updateProps), "share_id", "name", "url", "media_type", "version", "confirm"), false, true, false, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+			var record domain.ShareRecord
+			if err := jsonArgs(a, &record); err != nil {
+				return nil, err
+			}
+			if err := decodeArg(a, "share_id", &record.ID, true); err != nil {
+				return nil, err
+			}
+			if err := d.ShareRecordService.Update(ctx, &record); err != nil {
+				return nil, err
+			}
+			return sanitizeShareRecord(record), nil
+		})
+		add("share_record_delete", "删除分享记录；必须显式 confirm=true", objectSchema(withConfirm(map[string]interface{}{"share_id": intProperty("分享记录 ID")}), "share_id", "confirm"), false, true, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+			id, err := requiredInt(a, "share_id")
+			if err != nil {
+				return nil, err
+			}
+			if err = d.ShareRecordService.Delete(ctx, id); err != nil {
+				return nil, err
+			}
+			return map[string]interface{}{"share_id": id, "deleted": true}, nil
+		})
+	}
 	if d.Cron != nil {
 		add("cron_tasks_list", "列出定时任务", empty, true, false, true, func(context.Context, map[string]json.RawMessage) (interface{}, error) { return d.Cron.GetAll() })
 		add("cron_task_get", "获取定时任务详情", objectSchema(map[string]interface{}{"task_id": intProperty("定时任务 ID")}, "task_id"), true, false, true, func(_ context.Context, a map[string]json.RawMessage) (interface{}, error) {
@@ -618,6 +692,19 @@ func sanitizeCloud115Account(account *domain.Cloud115) map[string]interface{} {
 		return nil
 	}
 	return map[string]interface{}{"id": account.ID, "name": account.Name, "cookie_source": account.CookieSource, "expires_in": account.ExpiresIn, "transfer_account_id": account.TransferAccountID, "transfer_directory": account.TransferDirectory, "account_type": account.AccountType, "quota_used": account.QuotaUsed, "priority": account.Priority, "status": account.Status, "cooling_start_time": account.CoolingStartTime, "transfer_method": account.TransferMethod, "alist_configured": account.AlistUrl != ""}
+}
+
+func sanitizeShareRecordPage(page domain.ShareRecordPage) map[string]interface{} {
+	data := make([]domain.ShareRecord, len(page.Data))
+	for i := range page.Data {
+		data[i] = sanitizeShareRecord(page.Data[i])
+	}
+	return map[string]interface{}{"data": data, "total": page.Total}
+}
+
+func sanitizeShareRecord(record domain.ShareRecord) domain.ShareRecord {
+	record.Password = ""
+	return record
 }
 
 func jsonArgs[T any](args map[string]json.RawMessage, target *T) error {

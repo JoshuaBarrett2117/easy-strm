@@ -17,7 +17,8 @@ var (
 	shareYearRE       = regexp.MustCompile(`(?:^|[ ._（(\[])(19[0-9]{2}|20[0-9]{2})(?:[ ._）)\]]|$)`)
 	shareIDRE         = regexp.MustCompile(`(?i)[\[{]tmdb(?:id)?[ =:-]+([0-9]+)[\]}]`)
 	shareParentYearRE = regexp.MustCompile(`[（(](19[0-9]{2}|20[0-9]{2})[）)]`)
-	shareSeriesRE     = regexp.MustCompile(`(?i)s[0-9]{1,2}e[0-9]{1,3}|\bseason[ ._-]*[0-9]+|第[一二三四五六七八九十百0-9]+季|全[一二三四五六七八九十0-9]+季|[0-9]+集全|complete[ ._-]*series|tv[ ._-]*series`)
+	shareSeasonRE     = regexp.MustCompile(`(?i)\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季`)
+	shareSeriesRE     = regexp.MustCompile(`(?i)s[0-9]{1,2}e[0-9]{1,3}|\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季|全[一二三四五六七八九十0-9]+季|[0-9]+集全|complete[ ._-]*series|tv[ ._-]*series`)
 	shareDiscRE       = regexp.MustCompile(`(?i)(?:^|[ ._-])(?:d|disc|disk|cd)[ ._-]*[0-9]{1,3}(?:[ ._-]|$)`)
 	shareBracketRE    = regexp.MustCompile(`\[([^\]]+)\]|【([^】]+)】`)
 	shareReleaseRE    = regexp.MustCompile(`(?i)\b(?:ULTRAHD|UHD|Blu[ .-]?ray|WEB[ .-]?DL|BDRip|DVD|REMUX|2160p|1080p|720p|HEVC|AVC|H26[45]|DTS|AAC|HDTV)\b|原盘DIY|蓝光原盘|DIY|简繁|国粤|国语|特效字幕|次世代|菜单修改`)
@@ -57,7 +58,12 @@ func cleanShareTitles(name string) ([]string, int) {
 	}
 	titles := []string{}
 	add := func(value string) {
+		value = shareSeasonRE.ReplaceAllString(value, " ")
+		value = shareDiscRE.ReplaceAllString(value, " ")
 		value = strings.NewReplacer(".", " ", "_", " ").Replace(value)
+		if idx := yearRE.FindStringIndex(value); idx != nil {
+			value = value[:idx[0]]
+		}
 		value = strings.Trim(value, " .-[]【】()（）:：")
 		value = shareEditionRE.ReplaceAllString(value, "")
 		value = strings.Join(strings.Fields(value), " ")

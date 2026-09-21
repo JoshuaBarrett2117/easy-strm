@@ -26,10 +26,7 @@ func (s *TmdbService) IdentifyWithAssist(ctx context.Context, input string, opti
 		return nil, err
 	}
 	if options.ShareMode {
-		query := AnalyzeShareFilename(input)
-		if query.Container || query.TmdbID > 0 {
-			return s.identifyShareWithAssist(ctx, input, options.MetadataSource, options.MediaType)
-		}
+		return s.identifyShareWithAssist(ctx, input, options.MetadataSource, options.MediaType)
 	}
 	mediaType := strings.ToLower(strings.TrimSpace(options.MediaType))
 	if mediaType != "movie" && mediaType != "tv" {

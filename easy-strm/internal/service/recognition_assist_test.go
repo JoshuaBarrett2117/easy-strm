@@ -41,6 +41,30 @@ func TestIdentifyWithAssistRejectsUnrelatedFirstCandidate(t *testing.T) {
 	}
 }
 
+func TestIdentifyWithAssistShareModeParsesOrdinaryISO(t *testing.T) {
+	const dexterID = 1405
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/search/tv" {
+			t.Fatalf("share recognition should use TV search, got %s", r.URL.Path)
+		}
+		called = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": []any{
+			map[string]any{"id": dexterID, "name": "Dexter", "original_name": "Dexter", "first_air_date": "2006-10-01"},
+		}})
+	}))
+	defer server.Close()
+	svc := NewTmdbService("key", nil)
+	svc.baseURL, svc.httpClient = server.URL, server.Client()
+	result, err := svc.IdentifyWithAssist(context.Background(), "Dexter S06 Disc02.iso", IdentifyAssistOptions{MetadataSource: "tmdb", ShareMode: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !called || !result.Success || result.MediaType != "tv" || result.TmdbID != dexterID {
+		t.Fatalf("unexpected share result: called=%v result=%+v", called, result)
+	}
+}
+
 func TestIdentifyWithAssistRequeriesAndVerifiesAIHintOnce(t *testing.T) {
 	aiCalls := 0
 	aiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

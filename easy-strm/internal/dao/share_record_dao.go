@@ -53,6 +53,15 @@ func (d *ShareRecordDAO) List(ctx context.Context, q domain.ShareRecordQuery) (d
 		args = append(args, q.ShareID)
 		where += fmt.Sprintf("s.id=$%d", len(args))
 	}
+	if q.Status != "" {
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		args = append(args, q.Status)
+		where += fmt.Sprintf("EXISTS (SELECT 1 FROM t_share_media_file sf WHERE sf.share_id=s.id AND sf.status=$%d)", len(args))
+	}
 	if q.Page < 1 {
 		q.Page = 1
 	}

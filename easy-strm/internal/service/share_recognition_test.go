@@ -70,6 +70,39 @@ func TestShareRawDiscQueries(t *testing.T) {
 	}
 }
 
+func TestShareDiscFilenameRecognition(t *testing.T) {
+	tests := []struct {
+		name, title string
+		year        int
+	}{
+		{"Dexter S06 Disc02.iso", "Dexter", 0},
+		{"Banshee.S02.2014.Disc2.1080p.GBR.Blu-ray.AVC.DTS-HD.MA.5.1@blucook#162.iso", "Banshee", 2014},
+		{"[黑道家族 第三季 The Sopranos Season 3 2001]...Disc2.iso", "黑道家族", 2001},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := AnalyzeShareFilename(tt.name)
+			if q.MediaType != "tv" || q.Year != tt.year {
+				t.Fatalf("got=%+v", q)
+			}
+			for _, title := range q.Titles {
+				if strings.Contains(strings.ToLower(title), "disc") || strings.Contains(title, "S06") || strings.Contains(title, "Season") || strings.Contains(title, "第三季") {
+					t.Fatalf("marker leaked into title: %+v", q)
+				}
+			}
+			found := false
+			for _, title := range q.Titles {
+				if title == tt.title {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("want title %q got=%+v", tt.title, q)
+			}
+		})
+	}
+}
+
 func TestShareCandidateVerification(t *testing.T) {
 	q := ShareMediaQuery{Titles: []string{"一代宗师", "The Grandmaster"}, Year: 2013, MediaType: "unknown"}
 	wrong := domain.TmdbSearchResult{Title: "海贼王：强者天下", Year: 2009, TmdbID: 1, MediaType: "movie"}

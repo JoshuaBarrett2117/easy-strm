@@ -96,7 +96,6 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	tmdbService.SetAIRecognitionService(aiRecognitionService)
 	globalAPIService := service.NewGlobalAPIService(systemConfigDAO)
 	tmdbService.SetFilenameRecognitionRuleStore(systemConfigDAO)
-	mcpController := controller.NewMCPControllerWithDependencies(controller.MCPDependencies{API: globalAPIService, Tasks: taskService, Dashboard: dashboardService, MediaSources: mediaSourceService, FileManager: fileManagerService, TMDB: tmdbService, Rename: renameService, Organize: organizeService, STRM: strmService, Cloud115: cloud115Service, Cron: cronService, Emby: embyService, Categories: mediaCategoryService, Settings: systemConfigService})
 	telegramBotService := service.NewTelegramBotService(notificationConfigService, dashboardService, taskService, cronService, embyService, notificationHTTPClient)
 	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient())
 
@@ -132,6 +131,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	tmdbController := controller.NewTmdbController(tmdbService)
 	shareRecordService := service.NewShareRecordService(dao.NewShareRecordDAO(dao.DB), tmdbService, taskService, shareTransferService)
 	shareRecordService.SetTaskSettingsStore(systemConfigDAO)
+	mcpController := controller.NewMCPControllerWithDependencies(controller.MCPDependencies{API: globalAPIService, Tasks: taskService, Dashboard: dashboardService, MediaSources: mediaSourceService, FileManager: fileManagerService, TMDB: tmdbService, Rename: renameService, Organize: organizeService, STRM: strmService, Cloud115: cloud115Service, Cron: cronService, Emby: embyService, Categories: mediaCategoryService, Settings: systemConfigService, ShareRecordService: shareRecordService})
 	shareRecordController := controller.NewShareRecordController(shareRecordService)
 	shareStrmService := service.NewShareStrmService(dao.NewShareRecordDAO(dao.DB), systemConfigDAO, client, tmdbService, organizeService, taskService, mediaCategoryDAO.GetAll, cloud115DAO.GetByID, func(pick string, accountID int, cookie, ua string) (string, error) {
 		link, err := client.GetFileDirectLink(0, pick, accountID, cookie, ua)
