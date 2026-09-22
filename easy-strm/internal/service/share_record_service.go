@@ -8,6 +8,7 @@ import (
 	"fmt"
 	neturl "net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,9 @@ var (
 
 type ShareRecordService struct {
 	enrichMu          sync.Mutex
+	syncMu            sync.Mutex // 保护同步任务登记及清空操作；识别使用独立锁
+	activeSyncID      string
+	activeSyncKey     string
 	taskSettingsStore ShareTaskSettingsStore
 	identifyMu        sync.RWMutex // 清空与后台识别互斥，避免旧任务重新写入刚清空的内容
 	dao               *dao.ShareRecordDAO
@@ -283,43 +287,7 @@ func (s *ShareRecordService) SyncShareFiles(ctx context.Context, recordID int) (
 
 // StartRecordSync 创建单分享文件同步任务；识别任务不会隐式调用本流程。
 func (s *ShareRecordService) StartRecordSync(ctx context.Context, recordID int) (string, error) {
-	if s.tasks == nil {
-		return "", fmt.Errorf("任务服务未初始化")
-	}
-	if !s.identifyMu.TryLock() {
-		return "", fmt.Errorf("已有分享同步或识别任务运行，请等待结束后再发起")
-	}
-	settings, err := s.GetTaskSettings()
-	if err != nil {
-		s.identifyMu.Unlock()
-		return "", err
-	}
-	taskID := fmt.Sprintf("share_sync_%d", time.Now().UnixNano())
-	if err := s.tasks.Create(taskID, "share_sync", "同步分享文件"); err != nil {
-		s.identifyMu.Unlock()
-		return "", err
-	}
-	go func() {
-		defer s.identifyMu.Unlock()
-		taskCtx, cancel := newShareTaskContext(context.Background(), settings.TimeoutMinutes)
-		defer cancel()
-		defer s.tasks.RemoveCancel(taskID)
-		s.tasks.RegisterCancel(taskID, cancel)
-		_ = s.tasks.UpdateStatus(taskID, "running")
-		count, masked, err := s.SyncShareFiles(taskCtx, recordID)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"share_id": recordID, "file_count": count, "masked_directories": masked})
-		if err != nil {
-			if taskCtx.Err() != nil {
-				s.finishShareTaskContext(taskID, taskCtx.Err(), settings.TimeoutMinutes)
-				return
-			}
-			_ = s.tasks.SetError(taskID, err.Error())
-			return
-		}
-		_ = s.tasks.UpdateProgress(taskID, count, count, count, 0)
-		_ = s.tasks.UpdateStatus(taskID, "completed")
-	}()
-	return taskID, nil
+	return s.StartBatchSync(ctx, []int{recordID})
 }
 
 // StartBatchSync 创建选中分享的串行文件同步任务，避免并发访问同一分享账号。
@@ -330,21 +298,47 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 	if s.tasks == nil {
 		return "", fmt.Errorf("任务服务未初始化")
 	}
-	if !s.identifyMu.TryLock() {
-		return "", fmt.Errorf("已有分享同步或识别任务运行，请等待结束后再发起")
+	// 规范化集合，让单条、批量、乱序及重复 ID 的同一请求复用活动任务。
+	recordIDs = append([]int(nil), recordIDs...)
+	sort.Ints(recordIDs)
+	unique := recordIDs[:0]
+	for _, id := range recordIDs {
+		if id <= 0 {
+			return "", fmt.Errorf("分享ID无效")
+		}
+		if len(unique) == 0 || unique[len(unique)-1] != id {
+			unique = append(unique, id)
+		}
+	}
+	recordIDs = unique
+	key := fmt.Sprint(recordIDs)
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	if s.activeSyncID != "" {
+		if s.activeSyncKey == key {
+			return s.activeSyncID, nil
+		}
+		return "", fmt.Errorf("已有分享同步任务运行，请等待结束后再发起")
 	}
 	settings, err := s.GetTaskSettings()
 	if err != nil {
-		s.identifyMu.Unlock()
 		return "", err
 	}
 	taskID := fmt.Sprintf("share_sync_%d", time.Now().UnixNano())
-	if err := s.tasks.Create(taskID, "share_sync", "批量同步分享文件"); err != nil {
-		s.identifyMu.Unlock()
+	title := "批量同步分享文件"
+	if len(recordIDs) == 1 {
+		title = "同步分享文件"
+	}
+	if err := s.tasks.Create(taskID, "share_sync", title); err != nil {
 		return "", err
 	}
+	s.activeSyncID, s.activeSyncKey = taskID, key
 	go func() {
-		defer s.identifyMu.Unlock()
+		defer func() {
+			s.syncMu.Lock()
+			s.activeSyncID, s.activeSyncKey = "", ""
+			s.syncMu.Unlock()
+		}()
 		taskCtx, cancel := newShareTaskContext(context.Background(), settings.TimeoutMinutes)
 		defer cancel()
 		defer s.tasks.RemoveCancel(taskID)
@@ -361,8 +355,20 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 				return
 			}
 			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": index + 1, "total_shares": len(recordIDs)})
-			count, _, syncErr := s.SyncShareFiles(taskCtx, recordID)
+			count, masked, syncErr := s.SyncShareFiles(taskCtx, recordID)
+			if len(recordIDs) == 1 {
+				_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"share_id": recordID, "file_count": count, "masked_directories": masked})
+			}
+			if taskCtx.Err() != nil {
+				s.finishShareTaskContext(taskID, taskCtx.Err(), settings.TimeoutMinutes)
+				return
+			}
 			if syncErr != nil {
+				logger.Errorf("[ShareSync] task=%s share=%d error=%v", taskID, recordID, syncErr)
+				if len(recordIDs) == 1 {
+					_ = s.tasks.SetError(taskID, syncErr.Error())
+					return
+				}
 				failed++
 			} else {
 				success++
