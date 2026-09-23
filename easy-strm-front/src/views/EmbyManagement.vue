@@ -167,7 +167,7 @@
       <n-form label-placement="top">
         <n-form-item label="实例名称"><n-input v-model:value="serverForm.name" /></n-form-item>
         <n-form-item label="服务地址"><n-input v-model:value="serverForm.base_url" placeholder="http://emby:8096" /></n-form-item>
-        <n-form-item label="API Key"><n-input v-model:value="serverForm.api_key" type="password" show-password-on="click" :placeholder="serverForm.api_key_mask ? `已配置 ${serverForm.api_key_mask}，留空保持不变` : '请输入 API Key'" /></n-form-item>
+        <n-form-item label="API Key"><SecretConfigInput v-model:value="serverForm.api_key" secret-key="emby_server_api_key" :server-id="serverForm.id || 0" :has-saved="!!serverForm.api_key_mask" :reset-key="serverDialog" :placeholder="serverForm.api_key_mask ? `已配置 ${serverForm.api_key_mask}，留空保持不变` : '请输入 API Key'" /></n-form-item>
         <div class="flex gap-6"><n-checkbox v-model:checked="serverForm.enabled">启用</n-checkbox><n-checkbox v-model:checked="serverForm.is_default">默认实例</n-checkbox></div>
       </n-form>
       <template #footer><div class="flex justify-end gap-2"><n-button @click="serverDialog=false">取消</n-button><n-button type="primary" :loading="saving" @click="saveServer">保存</n-button></div></template>
@@ -231,13 +231,14 @@
         <div class="grid gap-3 md:grid-cols-2"><n-button :loading="coverLoading" @click="generateCover('collage')">生成海报拼图</n-button><n-button :loading="coverLoading" @click="generateCover('ai')">AI 生成封面</n-button></div>
         <n-input v-model:value="coverDescription" type="textarea" placeholder="AI 封面补充描述（可选）" />
         <div v-if="coverPreviewURL" class="space-y-3"><img :src="coverPreviewURL" alt="封面预览" class="mx-auto max-h-96 rounded-xl object-contain" /><n-button type="primary" block :loading="coverLoading" @click="applyCover">确认应用到 Emby</n-button></div>
-        <n-collapse><n-collapse-item title="AI 图片接口配置" name="ai"><div class="grid gap-3 md:grid-cols-2"><n-select v-model:value="aiForm.provider" :options="aiProviderOptions" /><n-input v-model:value="aiForm.model" placeholder="模型" /><n-input v-model:value="aiForm.base_url" placeholder="Base URL" /><n-input v-model:value="aiForm.api_key" type="password" show-password-on="click" :placeholder="aiForm.api_key_mask ? `已配置 ${aiForm.api_key_mask}` : 'API Key'" /></div><n-button class="mt-3" @click="saveAIConfig">保存 AI 配置</n-button></n-collapse-item></n-collapse>
+        <n-collapse><n-collapse-item title="AI 图片接口配置" name="ai"><div class="grid gap-3 md:grid-cols-2"><n-select v-model:value="aiForm.provider" :options="aiProviderOptions" /><n-input v-model:value="aiForm.model" placeholder="模型" /><n-input v-model:value="aiForm.base_url" placeholder="Base URL" /><SecretConfigInput v-model:value="aiForm.api_key" secret-key="emby_cover_ai_api_key" :has-saved="!!aiForm.api_key_mask" :reset-key="`${coverDialog}:${aiSecretReset}`" :placeholder="aiForm.api_key_mask ? `已配置 ${aiForm.api_key_mask}` : 'API Key'" /></div><n-button class="mt-3" @click="saveAIConfig">保存 AI 配置</n-button></n-collapse-item></n-collapse>
       </div>
     </n-modal>
   </div>
 </template>
 
 <script setup>
+import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import EmbyScheduledTasks from '../components/EmbyScheduledTasks.vue'
@@ -280,6 +281,7 @@ let userDialogRequest = 0
 const passwordForm = reactive({ id: '', password: '', reset: false })
 const libraryForm = reactive({ id: '', original_name: '', name: '', collection_type: 'movies', pathsText: '', metadata_language: 'zh-CN', metadata_country: 'CN', enable_realtime_monitor: true })
 const pluginLibrary = reactive({ strm_scan_capture: null, media_info: null, subtitle_scan: null, metadata_refresh: null })
+const aiSecretReset = ref(0)
 const aiForm = reactive({ provider: 'openai', base_url: 'https://api.openai.com/v1', api_key: '', api_key_mask: '', model: 'gpt-image-1' })
 const bindingForm = reactive({ sourceId: null, libraryId: null })
 
@@ -435,7 +437,7 @@ const selectManualCover = event => { const file = event.target.files?.[0]; if (!
 const generateCover = async mode => { coverLoading.value = true; manualCoverFile.value = null; revokePreview(); try { const data = payload(await generateEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, { mode, library_name: activeCoverLibrary.value.Name, description: coverDescription.value })); coverTaskId.value = data.task_id; pollCoverTask() } catch { coverLoading.value = false } }
 const pollCoverTask = async () => { clearTimeout(coverPollTimer); if (!coverTaskId.value) return; try { const task = payload(await getTaskDetail(coverTaskId.value)); if (task.metadata?.awaiting_confirmation) { const response = await getEmbyCoverPreview(coverTaskId.value); revokePreview(); coverPreviewURL.value = URL.createObjectURL(response.data); coverLoading.value = false; return } if (task.status === 'failed') { coverLoading.value = false; message.error(task.error_message || '封面生成失败'); return } } catch { coverLoading.value = false; return } coverPollTimer = setTimeout(pollCoverTask, 1500) }
 const applyCover = async () => { coverLoading.value = true; try { if (manualCoverFile.value) await uploadEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, manualCoverFile.value); else await applyEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, coverTaskId.value); message.success('封面已应用到 Emby'); manualCoverFile.value = null; revokePreview(); coverDialog.value = false; await Promise.all([loadLibraries(), loadRecentTasks()]) } finally { coverLoading.value = false } }
-const saveAIConfig = async () => { await updateEmbyCoverAIConfig(aiForm); const config = payload(await getEmbyCoverAIConfig()); Object.assign(aiForm, { ...config, api_key: '' }); message.success('AI 图片接口配置已保存') }
+const saveAIConfig = async () => { await updateEmbyCoverAIConfig(aiForm); const config = payload(await getEmbyCoverAIConfig()); Object.assign(aiForm, { ...config, api_key: '' }); aiSecretReset.value++; message.success('AI 图片接口配置已保存') }
 
 const taskStatusText = status => ({ pending: '待执行/待确认', running: '执行中', success: '成功', partial_success: '部分成功', failed: '失败', cancelled: '已取消', unknown: '结果未知', completed: '已完成' })[status] || status
 const taskTagType = status => ({ success: 'success', completed: 'success', partial_success: 'warning', failed: 'error', unknown: 'warning', running: 'info' })[status] || 'default'

@@ -66,17 +66,15 @@
           <n-form :model="tmdbForm" label-placement="top" class="max-w-2xl">
             <n-form-item label="TMDB API Key">
               <div class="w-full">
-                <n-input
+                <SecretConfigInput
                   v-model:value="tmdbForm.api_key"
-                  type="password"
-                  show-password-on="click"
                   :placeholder="
                     tmdbMaskedKey
                       ? `当前已配置:${tmdbMaskedKey},留空则保持不变`
                       : '请输入 TMDB API Key'
                   "
                   clearable
-                />
+                secret-key="tmdb_api_key" :has-saved="hasTmdbKey" :reset-key="tmdbForm" />
                 <p class="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-400 dark:text-slate-500">
                   <template v-if="hasTmdbKey">
                     <n-tag type="success" size="small">已配置</n-tag>
@@ -266,7 +264,7 @@
             </n-form-item>
             <n-form-item label="API Key">
               <div class="w-full">
-                <n-input v-model:value="globalApiForm.api_key" type="password" show-password-on="click" :placeholder="globalApiForm.has_api_key ? '已配置，留空保持不变' : '保存时自动生成'" clearable />
+                <SecretConfigInput v-model:value="globalApiForm.api_key" :placeholder="globalApiForm.has_api_key ? '已配置，留空保持不变' : '保存时自动生成'" clearable secret-key="global_api_key" :has-saved="globalApiForm.has_api_key" :reset-key="globalApiForm" />
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">第三方请求请使用 X-API-Key 请求头访问现有 API。</p>
               </div>
             </n-form-item>
@@ -311,13 +309,11 @@
 
             <n-form-item label="Bot Token">
               <div class="w-full">
-                <n-input
+                <SecretConfigInput
                   v-model:value="telegramForm.bot_token"
-                  type="password"
-                  show-password-on="click"
                   clearable
                   :placeholder="telegramForm.has_bot_token ? '已配置，留空则保持不变' : '请输入 BotFather 提供的 Bot Token'"
-                />
+                secret-key="telegram_bot_token" :has-saved="telegramForm.has_bot_token" :reset-key="telegramForm" />
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
                   Token 不会通过配置读取接口返回；保存时留空会保留原值。
                 </p>
@@ -402,13 +398,11 @@
 
             <n-form-item label="应用 Secret">
               <div class="w-full">
-                <n-input
+                <SecretConfigInput
                   v-model:value="weComForm.secret"
-                  type="password"
-                  show-password-on="click"
                   clearable
                   :placeholder="weComForm.has_secret ? '已配置，留空则保持不变' : '请输入企业微信应用 Secret'"
-                />
+                secret-key="wecom_secret" :has-saved="weComForm.has_secret" :reset-key="weComForm" />
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
                   Secret 不会通过配置读取接口返回；保存时留空会保留原值。
                 </p>
@@ -476,13 +470,11 @@
             <n-form-item label="回调 Token">
               <div class="w-full">
                 <n-input-group>
-                  <n-input
+                  <SecretConfigInput
                     v-model:value="weComForm.callback_token"
-                    type="password"
-                    show-password-on="click"
                     clearable
                     :placeholder="weComForm.has_callback_token ? '已配置，留空则保持不变' : '填写企业微信 API 接收消息页面中的 Token'"
-                  />
+                  secret-key="wecom_callback_token" :has-saved="weComForm.has_callback_token" :reset-key="weComForm" />
                   <n-button @click="generateWeComCallbackToken">随机生成</n-button>
                 </n-input-group>
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
@@ -493,13 +485,11 @@
             <n-form-item label="EncodingAESKey">
               <div class="w-full">
                 <n-input-group>
-                  <n-input
+                  <SecretConfigInput
                     v-model:value="weComForm.encoding_aes_key"
-                    type="password"
-                    show-password-on="click"
                     clearable
                     :placeholder="weComForm.has_encoding_aes_key ? '已配置，留空则保持不变' : '请输入 43 位 EncodingAESKey'"
-                  />
+                  secret-key="wecom_encoding_aes_key" :has-saved="weComForm.has_encoding_aes_key" :reset-key="weComForm" />
                   <n-button @click="generateWeComEncodingAESKey">随机生成</n-button>
                 </n-input-group>
                 <p class="mt-1 text-xs text-slate-400 dark:text-slate-500">
@@ -666,6 +656,7 @@
 </template>
 
 <script setup>
+import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { ref, computed, onMounted } from 'vue'
 import {
   NTabs,
@@ -812,7 +803,7 @@ const fetchGlobalApiConfig = async () => {
 }
 const saveGlobalApi = async () => {
   globalApiLoading.value = true
-  try { const response = await updateGlobalApiConfig(globalApiForm.value, { skipGlobalErrorMessage: true }); const data = response.data.data || {}; globalApiForm.value.has_api_key = !!data.has_api_key; globalApiForm.value.api_key = ''; message.success('全局 API 配置已保存') } catch (error) { message.error(error?.response?.data?.error || '保存失败') } finally { globalApiLoading.value = false }
+  try { const response = await updateGlobalApiConfig(globalApiForm.value, { skipGlobalErrorMessage: true }); const data = response.data.data || {}; globalApiForm.value = { ...globalApiForm.value, has_api_key: !!data.has_api_key, api_key: '' }; message.success('全局 API 配置已保存') } catch (error) { message.error(error?.response?.data?.error || '保存失败') } finally { globalApiLoading.value = false }
 }
 
 const fetchWeComConfig = async () => {

@@ -66,4 +66,5 @@ export const getEmbyMonitorRecentItems = (serverId, params) => api.get(`/emby/se
 export const getEmbyMonitorItemImage = (serverId, itemId) => api.get(`/emby/servers/${serverId}/monitor/items/${itemId}/image`, { responseType: 'blob', skipGlobalErrorMessage: true })
 
 export const getEmbyScheduledTasks = serverId => api.get(`/emby/servers/${serverId}/scheduled-tasks`)
+export const updateEmbyScheduledTaskTriggers = (serverId, taskId, triggers) => api.put(`/emby/servers/${serverId}/scheduled-tasks/${encodeURIComponent(taskId)}/triggers`, { triggers })
 export const startEmbyScheduledTask = (serverId, taskId) => api.post(`/emby/servers/${serverId}/scheduled-tasks/${encodeURIComponent(taskId)}/run`)

@@ -9,7 +9,7 @@
             <n-input v-model:value="form.base_url" placeholder="https://api.openai.com/v1" @update:value="models=[]" />
           </n-form-item>
           <n-form-item label="API Key">
-            <n-input v-model:value="form.api_key" type="password" show-password-on="click"
+            <SecretConfigInput v-model:value="form.api_key" secret-key="ai_recognition_api_key" :has-saved="form.has_api_key" :reset-key="secretReset"
               :placeholder="form.has_api_key ? '已保存，留空保留（更换地址后请重新填写）' : '填写端点密钥，无需认证的本地服务可留空'" />
           </n-form-item>
           <n-checkbox v-model:checked="form.clear_api_key">清除已保存密钥</n-checkbox>
@@ -55,10 +55,12 @@
   </div>
 </template>
 <script setup>
+import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { onMounted, reactive, ref } from 'vue'
 import { NAlert,NButton,NCard,NCheckbox,NCheckboxGroup,NDescriptions,NDescriptionsItem,NForm,NFormItem,NInput,NInputNumber,NSelect,NSpace,NSpin,NSwitch,useMessage } from 'naive-ui'
 import { getAIConfig,saveAIConfig,getAIModels,testAIRecognition } from '../utils/api/ai'
 const message=useMessage()
+const secretReset=ref(0)
 const form=reactive({enabled:false,base_url:'https://api.openai.com/v1',api_key:'',has_api_key:false,clear_api_key:false,model:'',timeout_seconds:30,scenes:['complex_title','no_match'],prompt:''})
 const loading=ref(false),saving=ref(false),fetchingModels=ref(false),testing=ref(false)
 const models=ref([]),testResult=ref(null),testError=ref('')
@@ -70,7 +72,7 @@ const load=async()=>{
 const save=async()=>{
   if(saving.value)return
   saving.value=true
-  try{Object.assign(form,(await saveAIConfig({...form})).data.data);form.clear_api_key=false;message.success('AI配置已保存')}catch{}finally{saving.value=false}
+  try{Object.assign(form,(await saveAIConfig({...form})).data.data);form.clear_api_key=false;secretReset.value++;message.success('AI配置已保存')}catch{}finally{saving.value=false}
 }
 const fetchModels=async()=>{
   if(fetchingModels.value)return

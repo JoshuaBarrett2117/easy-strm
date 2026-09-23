@@ -98,7 +98,7 @@ easy-strm 通过 Emby 插件列表和计划任务接口检测 StrmAssistant，�
 
 ## 媒体库编辑与定时任务
 
-媒体库编辑使用路由中的 ItemId，在 `/Library/VirtualFolders/LibraryOptions` 请求体中传递 `Id` 和合并后的 `LibraryOptions`，保留页面未编辑的配置。名称通过 `/Library/VirtualFolders/Name` 修改，目录通过 `/Library/VirtualFolders/Paths` 添加或移除。编辑已有媒体库时不能修改内容类型。多步骤操作失败时返回具体的部分完成信息，刷新后可继续处理。
+媒体库编辑使用路由中的 ItemId，在 `/Library/VirtualFolders/LibraryOptions` 请求体中传递 `Id` 和合并后的 `LibraryOptions`，保留页面未编辑的配置。名称通过 `/Library/VirtualFolders/Name` 修改，目录通过 `/Library/VirtualFolders/Paths` 的 `pathInfo` 查询参数添加或移除；不要把 `PathInfo` 作为 JSON 请求体传递，否则部分 Emby 版本会返回 `Unrecognized Guid format`。编辑已有媒体库时不能修改内容类型。多步骤操作失败时返回具体的部分完成信息，刷新后可继续处理。
 
 “定时任务管理”按当前实例展示 Emby `/ScheduledTasks` 返回的任务、分类、状态、进度、触发规则与最近执行结果。点击“立即触发”调用 `/ScheduledTasks/Running/{Id}`；运行中和取消中的任务禁止重复触发。页签每 5 秒刷新，切换实例、离开页签和卸载组件时停止旧轮询并丢弃过期响应。
 

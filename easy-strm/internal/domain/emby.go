@@ -2,6 +2,11 @@ package domain
 
 import "time"
 
+// EmbyTaskTriggersRequest 替换任务的完整触发规则列表；空数组表示关闭自动触发。
+type EmbyTaskTriggersRequest struct {
+	Triggers []map[string]interface{} `json:"triggers"`
+}
+
 // EmbyScheduledTask 保留 Emby 的任务状态、触发规则与最近执行结果。
 type EmbyScheduledTask struct {
 	ID                        string                   `json:"Id"`

@@ -28,6 +28,11 @@ func TestUpdateLibraryIncludesIDAndPreservesOptions(t *testing.T) {
 			}
 			saved = true
 			w.WriteHeader(204)
+		case "/emby/Library/VirtualFolders/Paths":
+			if r.Method == http.MethodPost && (r.URL.Query().Get("pathInfo") != "/media2" || r.Body != http.NoBody) {
+				t.Errorf("目录参数错误: query=%s", r.URL.RawQuery)
+			}
+			w.WriteHeader(204)
 		default:
 			t.Errorf("意外请求: %s", r.URL)
 			http.NotFound(w, r)
@@ -37,7 +42,7 @@ func TestUpdateLibraryIncludesIDAndPreservesOptions(t *testing.T) {
 	svc, mock, _, cleanup := newEmbyManagementTestService(t, func(http.ResponseWriter, *http.Request) {})
 	defer cleanup()
 	expectEmbyServer(t, mock, remote.URL)
-	_, err := svc.UpdateLibrary(1, id, domain.EmbyLibraryInput{Name: "电影", CollectionType: "movies", Paths: []domain.EmbyMediaPath{{Path: "/media"}}, MetadataLanguage: "zh-CN"})
+	_, err := svc.UpdateLibrary(1, id, domain.EmbyLibraryInput{Name: "电影", CollectionType: "movies", Paths: []domain.EmbyMediaPath{{Path: "/media2"}}, MetadataLanguage: "zh-CN"})
 	if err != nil || !saved {
 		t.Fatalf("保存失败: %v", err)
 	}

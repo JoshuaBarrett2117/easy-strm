@@ -723,7 +723,9 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	// 需要验证token的路由组
 	auth := r.Group("/")
 	auth.Use(authController.JWTMiddleware())
+	configSecretController := controller.NewConfigSecretController(service.NewConfigSecretService(systemConfigDAO, notificationConfigService, embyServerDAO, tmdbService.GetAPIKey, aiRecognitionService))
 	{
+		auth.GET("/settings/secrets/:key", configSecretController.Get)
 		// ========== Dashboard 数据概览 ==========
 		auth.GET("/dashboard/stats", dashboardController.GetStats)
 		auth.GET("/dashboard/overview", dashboardController.GetOverview)
@@ -1080,6 +1082,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		// ========== Emby 多实例管理 ==========
 		embyAdmin := auth.Group("/emby")
 		embyAdmin.Use(requireAdmin)
+		embyAdmin.GET("/secrets/:key", configSecretController.GetEmby)
 		embyAdmin.GET("/servers", embyManagementController.ListServers)
 		embyAdmin.POST("/servers", embyManagementController.CreateServer)
 		embyAdmin.PUT("/servers/:server_id", embyManagementController.UpdateServer)
@@ -1095,6 +1098,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		embyAdmin.DELETE("/servers/:server_id/users/:user_id", embyManagementController.DeleteUser)
 		embyAdmin.GET("/servers/:server_id/libraries", embyManagementController.ListLibraries)
 		embyAdmin.GET("/servers/:server_id/scheduled-tasks", embyManagementController.ListScheduledTasks)
+		embyAdmin.PUT("/servers/:server_id/scheduled-tasks/:task_id/triggers", embyManagementController.UpdateScheduledTaskTriggers)
 		embyAdmin.POST("/servers/:server_id/scheduled-tasks/:task_id/run", embyManagementController.StartScheduledTask)
 		embyAdmin.GET("/servers/:server_id/libraries/:library_id/cover", embyManagementController.GetLibraryCover)
 		embyAdmin.POST("/servers/:server_id/libraries", embyManagementController.CreateLibrary)

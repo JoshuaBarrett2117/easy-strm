@@ -643,13 +643,13 @@ func (s *EmbyManagementService) UpdateLibrary(serverID int, libraryID string, in
 		if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/LibraryOptions", nil, body, nil); err != nil {
 			return err
 		}
-		// Emby 的名称和目录有独立接口；先添加目录再移除旧目录，避免出现空媒体库。
+		// Emby 的名称和目录有独立接口。Paths 接口通过 pathInfo 查询参数接收目录，不能把 PathInfo 当 JSON 请求体传递，否则部分版本会将其误解析为 Guid。
 		for _, path := range input.Paths {
 			if containsString(library.Locations, path.Path) {
 				continue
 			}
-			query := url.Values{"name": {library.Name}, "refreshLibrary": {"false"}}
-			if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/Paths", query, map[string]interface{}{"Name": library.Name, "PathInfo": path}, nil); err != nil {
+			query := url.Values{"name": {library.Name}, "pathInfo": {path.Path}, "refreshLibrary": {"false"}}
+			if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/Paths", query, nil, nil); err != nil {
 				return fmt.Errorf("配置已保存，添加目录失败，请刷新后重试: %w", err)
 			}
 		}
