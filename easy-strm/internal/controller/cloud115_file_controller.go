@@ -58,6 +58,7 @@ func (c *Cloud115Controller) GetFileList(ctx *gin.Context) {
 // GetDirectLink 获取115云文件直链
 // Route: GET /115/direct-link
 func (c *Cloud115Controller) GetDirectLink(ctx *gin.Context) {
+	defer beginDirectLinkRequest(ctx, "cloud115_api")()
 	logger.Debug("Cloud115Controller[GetDirectLink] 获取文件直链")
 
 	fid := ctx.Query("fid")
@@ -82,6 +83,7 @@ func (c *Cloud115Controller) GetDirectLink(ctx *gin.Context) {
 	// 115 CDN 签名依赖 UA，生成直链时必须使用实际客户端 UA。
 	clientUA := ctx.GetHeader("User-Agent")
 
+	logger.Infof("[DirectLink] event=resolve request_id=%s source=cloud115_api cloud115_id=%d pickcode=%q effective_ua=%q", logger.RequestID(ctx.Request.Context()), acc.ID, fid, clientUA)
 	result, err := c.getFileDirectLink(0, fid, acc.ID, acc.Cookie, clientUA)
 	if err != nil {
 		logger.Errorf("Cloud115Controller[GetDirectLink] 获取直链失败: %v", err)

@@ -142,6 +142,7 @@ const (
 	TaskTypeEmbyLibrary     TaskType = "emby_library"
 	TaskTypeEmbyCover       TaskType = "emby_cover"
 	TaskTypeEmbyPlugin      TaskType = "emby_plugin"
+	TaskTypeEmbyScheduled   TaskType = "emby_scheduled"
 	TaskTypeOfflineDownload TaskType = "offline_download"
 	TaskTypeFileTransfer    TaskType = "file_transfer"
 	TaskTypeShareIdentify   TaskType = "share_identify"
@@ -163,6 +164,7 @@ var TaskTypeNames = map[TaskType]string{
 	TaskTypeEmbyLibrary:     "Emby媒体库管理",
 	TaskTypeEmbyCover:       "Emby媒体库封面",
 	TaskTypeEmbyPlugin:      "神医助手任务",
+	TaskTypeEmbyScheduled:   "Emby定时任务触发",
 	TaskTypeOfflineDownload: "115云下载",
 	TaskTypeFileTransfer:    "文件传输",
 	TaskTypeShareIdentify:   "分享媒体识别",

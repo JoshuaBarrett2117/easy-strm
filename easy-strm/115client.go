@@ -184,7 +184,7 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 }
 
 func (c *Client) GetFileDirectLink(cid int, pickCode string, cloud115ID int, cookie string, ua string) (*driver.DownloadInfo, error) {
-	Info("[DirectLink] Getting 115 cloud file direct link, cloud115_id: %d, pickcode: %s", cloud115ID, pickCode)
+	Debug("[DirectLink] Getting 115 cloud file direct link, cloud115_id: %d, pickcode: %s", cloud115ID, pickCode)
 
 	d, err := getOrCreateDriver(cloud115ID, cookie)
 	if err != nil {
@@ -199,7 +199,7 @@ func (c *Client) GetFileDirectLink(cid int, pickCode string, cloud115ID int, coo
 		return nil, fmt.Errorf("get download info failed: %v", err)
 	}
 
-	Info("[DirectLink] Got download info for file: %s", downloadInfo.FileName)
+	Debug("[DirectLink] Got download info for file: %s", downloadInfo.FileName)
 	return downloadInfo, nil
 }
 

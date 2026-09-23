@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	pathpkg "path"
 	"path/filepath"
 	"regexp"
@@ -144,6 +145,9 @@ func parseMediaNameSegment(input string, trimExt bool, rules []compiledFilenameR
 
 	name := normalizeFilenameRecognitionInput(input, trimExt)
 	metadataName := name
+	if title, season, episode, ok := parseRomanSeasonEpisode(input); ok && len(rules) > 0 {
+		name = fmt.Sprintf("%s S%02dE%02d", title, season, episode)
+	}
 	if matched, ok := matchFilenameRecognitionRule(name, rules); ok {
 		result = matched
 		name = matched.Title

@@ -73,6 +73,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 				"easy_strm:tmdb:id:*",
 				"easy_strm:tmdb:search:*",
 				"easy_strm:tmdb:detail:*",
+				"easy_strm:share:work:*",
 			},
 		},
 		{

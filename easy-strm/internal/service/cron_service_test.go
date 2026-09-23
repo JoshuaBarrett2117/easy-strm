@@ -25,6 +25,48 @@ func TestParseCronSupportsFiveAndSixFields(t *testing.T) {
 	}
 }
 
+func TestCronLoadStartsScheduledExecution(t *testing.T) {
+	s, mock := cronTestService(t)
+	entered, finish := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(finish) })
+	s.Register(CronHandler{Key: "log_cleanup", Execute: func(context.Context, *domain.CronTask, string) (string, error) {
+		close(entered)
+		<-finish
+		return "完成", nil
+	}})
+	mock.ExpectExec(`WITH interrupted AS`).WillReturnResult(sqlmock.NewResult(0, 0))
+	now := time.Now()
+	mock.ExpectQuery(`SELECT id, task_name, task_type, COALESCE`).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "type", "cloud", "config", "cron", "status", "last", "next", "result", "message", "created", "updated"}).AddRow(9, "测试任务", "log_cleanup", 0, 0, "* * * * * *", "enabled", nil, nil, "", "", now, now))
+	for i := 0; i < 2; i++ {
+		mock.ExpectQuery(`SELECT COALESCE\(task_key`).WithArgs(9).WillReturnRows(sqlmock.NewRows([]string{"key", "handler", "params", "timezone", "builtin"}).AddRow("test", "log_cleanup", `{}`, "Local", true))
+	}
+	mock.ExpectExec(`UPDATE t_cron_task SET next_run_time`).WithArgs(sqlmock.AnyArg(), 9).WillReturnResult(sqlmock.NewResult(0, 1))
+	expectCronRead(mock, 9, 0, "log_cleanup", "enabled", true)
+	mock.ExpectExec(`INSERT INTO t_cron_task_run`).WithArgs(9, sqlmock.AnyArg(), "scheduled", "pending").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec(`UPDATE t_cron_task_run SET status='running'`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "running", "", 9).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE t_cron_task_run SET status=\$1`).WithArgs("success", "完成", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "success", "完成", 9).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := s.LoadTasksFromDB(); err != nil {
+		t.Fatal(err)
+	}
+	if next := s.GetNextRunTime(9); next == nil || next.IsZero() {
+		t.Fatal("装载后应有下次执行时间")
+	}
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("调度引擎未自动触发处理器")
+	}
+	s.Stop()
+	once.Do(func() { close(finish) })
+	waitCronIdle(t, s)
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func cronTestService(t *testing.T) (*CronService, sqlmock.Sqlmock) {
 	t.Helper()
 	database, mock, err := sqlmock.New()

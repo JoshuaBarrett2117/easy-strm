@@ -89,6 +89,7 @@ func (c *DirectLinkController) SetGetDefaultUA(fn func() string) {
 // NOTE: 此处理器逻辑复杂，涉及秒传、转存等业务，
 // 通过回调注入 main 包的 Client 方法和 Redis 操作
 func (c *DirectLinkController) GetDirectLink(ctx *gin.Context) {
+	defer beginDirectLinkRequest(ctx, "strm_playback")()
 	logger.Debugf("DirectLinkController[GetDirectLink] 获取直链 from %s", ctx.ClientIP())
 
 	// 获取查询参数
@@ -244,6 +245,7 @@ func (c *DirectLinkController) handleTransferAndRedirect(ctx *gin.Context, cloud
 // NOTE: 返回值类型为 interface{}，由回调函数负责返回具体的直链数据结构
 // 回调函数应返回包含 Url.Url 字段的结构体，或直接返回 gin.H 格式
 func (c *DirectLinkController) getDirectLinkAndRedirect(ctx *gin.Context, cloud115ID int, cookie, pickcode, clientUA string) {
+	logger.Infof("[DirectLink] event=resolve request_id=%s source=strm_playback cloud115_id=%d pickcode=%q effective_ua=%q", logger.RequestID(ctx.Request.Context()), cloud115ID, pickcode, clientUA)
 	result, err := c.getFileDirectLink(0, pickcode, cloud115ID, cookie, clientUA)
 	if err != nil {
 		logger.Errorf("DirectLinkController[getDirectLink] 获取直链失败: %v", err)

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -69,17 +70,25 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 //   - map[string]interface{}: 剧集详情
 //   - error: 错误信息
 func (s *TmdbService) GetTVDetail(tmdbID int) (map[string]interface{}, error) {
+	return s.getTVDetailContext(context.Background(), tmdbID)
+}
+
+func (s *TmdbService) getTVDetailContext(ctx context.Context, tmdbID int) (map[string]interface{}, error) {
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	if detail, ok := s.loadDetailCache("tv", tmdbID, 0, 0); ok {
+	if detail, ok := s.loadDetailCache("tv", tmdbID, 0, 0); ok && !bypassShareRecognitionCache(ctx) {
 		return detail, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/tv/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, s.apiKey, s.language)
 
-	resp, err := s.httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
 	}

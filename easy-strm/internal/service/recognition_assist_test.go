@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -45,6 +46,10 @@ func TestIdentifyWithAssistShareModeParsesOrdinaryISO(t *testing.T) {
 	const dexterID = 1405
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tv/1405" {
+			fmt.Fprint(w, `{"id":1405,"name":"Dexter","seasons":[{"season_number":6}]}`)
+			return
+		}
 		if r.URL.Path != "/search/tv" {
 			t.Fatalf("share recognition should use TV search, got %s", r.URL.Path)
 		}

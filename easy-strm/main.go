@@ -106,6 +106,12 @@ func main() {
 	// 设置需要认证的路由（所有业务API）
 	SetupAuthProtectedRoutes(r, config, client)
 
+	// 业务处理器全部注册后再装载，避免任务未注册或调度引擎未启动。
+	if err := LoadCronTasksFromDB(); err != nil {
+		Error("定时任务装载异常，请检查任务配置及数据库: %v", err)
+	}
+	defer StopScheduler()
+
 	// 使用RouterSetup注册需要认证的路由（包含正确的transfer实现和所有业务API）
 	// rs := router.NewRouterSetup(r)
 	// rs.InitDAO(GetDB(), GetRedisClient())

@@ -18,9 +18,15 @@ type recognitionAttempt struct {
 }
 
 type recognitionRound struct {
-	mu       sync.Mutex
-	attempts map[string]*recognitionAttempt
-	slots    chan struct{}
+	mu              sync.Mutex
+	attempts        map[string]*recognitionAttempt
+	slots           chan struct{}
+	works           map[string]*shareWorkAttempt
+	seeds           map[string]*domain.TmdbIdentifyResult
+	workConflicts   map[string]bool
+	inputs          map[string]string
+	details         map[string]*shareDetailAttempt
+	bypassWorkCache bool
 }
 
 // WithRecognitionRound 为一轮任务建立独立AI请求账本，默认最多3个并发请求。
@@ -31,6 +37,11 @@ func WithRecognitionRound(ctx context.Context) context.Context {
 	}
 	return context.WithValue(ctx, recognitionRoundKey{}, &recognitionRound{
 		attempts: make(map[string]*recognitionAttempt), slots: make(chan struct{}, 3),
+		works:         make(map[string]*shareWorkAttempt),
+		seeds:         make(map[string]*domain.TmdbIdentifyResult),
+		workConflicts: make(map[string]bool),
+		inputs:        make(map[string]string),
+		details:       make(map[string]*shareDetailAttempt),
 	})
 }
 

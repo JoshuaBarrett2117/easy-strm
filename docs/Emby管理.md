@@ -1,6 +1,6 @@
 # Emby 管理
 
-- 更新日期：2026-09-07
+- 更新日期：2026-09-23
 - 维护者：Codex
 
 ## 功能概览
@@ -95,3 +95,13 @@ easy-strm 通过 Emby 插件列表和计划任务接口检测 StrmAssistant，�
 迁移脚本：`easy-strm/migrations/migrate_v17_emby_management.sql` 和 `easy-strm/migrations/migrate_v19_emby_monitor.sql`。
 
 监控迁移新增播放事件、媒体首次发现和采集状态表，均按 `t_emby_server` 隔离；删除实例会级联清理 easy-strm 中对应的监控历史，但不会删除 Emby 服务器中的原始媒体文件。
+
+## 媒体库编辑与定时任务
+
+媒体库编辑使用路由中的 ItemId，在 `/Library/VirtualFolders/LibraryOptions` 请求体中传递 `Id` 和合并后的 `LibraryOptions`，保留页面未编辑的配置。名称通过 `/Library/VirtualFolders/Name` 修改，目录通过 `/Library/VirtualFolders/Paths` 添加或移除。编辑已有媒体库时不能修改内容类型。多步骤操作失败时返回具体的部分完成信息，刷新后可继续处理。
+
+“定时任务管理”按当前实例展示 Emby `/ScheduledTasks` 返回的任务、分类、状态、进度、触发规则与最近执行结果。点击“立即触发”调用 `/ScheduledTasks/Running/{Id}`；运行中和取消中的任务禁止重复触发。页签每 5 秒刷新，切换实例、离开页签和卸载组件时停止旧轮询并丢弃过期响应。
+
+对应 easy-strm 接口为 `GET /emby/servers/:server_id/scheduled-tasks` 与 `POST /emby/servers/:server_id/scheduled-tasks/:task_id/run`，复用管理权限。任务中心的“Emby定时任务触发”记录只表示请求提交结果，实际远端执行结果以定时任务列表为准，不修改 Emby 的定时配置。
+
+协议参考：https://dev.emby.media/reference/RestAPI/ScheduledTaskService.html 。本地验证覆盖缺失 Id 的编辑回归、配置保留、定时任务状态检查、上游错误及列表接口。

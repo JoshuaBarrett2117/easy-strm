@@ -603,7 +603,7 @@ func (s *EmbyManagementService) CreateLibrary(serverID int, input domain.EmbyLib
 }
 
 // UpdateLibrary 修改媒体库常用配置。
-func (s *EmbyManagementService) UpdateLibrary(serverID int, originalName string, input domain.EmbyLibraryInput) (string, error) {
+func (s *EmbyManagementService) UpdateLibrary(serverID int, libraryID string, input domain.EmbyLibraryInput) (string, error) {
 	server, err := s.requireServer(serverID)
 	if err != nil {
 		return "", err
@@ -611,13 +611,69 @@ func (s *EmbyManagementService) UpdateLibrary(serverID int, originalName string,
 	if err = validateLibraryInput(input); err != nil {
 		return "", err
 	}
-	body := map[string]interface{}{"Name": input.Name, "CollectionType": input.CollectionType, "Paths": input.Paths, "LibraryOptions": map[string]interface{}{"PreferredMetadataLanguage": input.MetadataLanguage, "MetadataCountryCode": input.MetadataCountry, "EnableRealtimeMonitor": input.EnableRealtimeMonitor}}
-	query := url.Values{"refreshLibrary": {"false"}}
-	if originalName != "" {
-		query.Set("name", originalName)
+	libraries, err := s.listLibrariesByServer(server)
+	if err != nil {
+		return "", err
 	}
+	var library *EmbyVirtualFolderInfo
+	for i := range libraries {
+		if libraryID != "" && (libraries[i].ItemID == libraryID || libraries[i].ID == libraryID) {
+			library = &libraries[i]
+			break
+		}
+	}
+	if library == nil {
+		return "", fmt.Errorf("媒体库不存在，请刷新列表后重试")
+	}
+	if library.ItemID == "" {
+		library.ItemID = library.ID
+	}
+	if input.CollectionType != library.CollectionType && !(input.CollectionType == "mixed" && library.CollectionType == "") {
+		return "", fmt.Errorf("已有媒体库不支持修改内容类型，请新建媒体库")
+	}
+	if library.LibraryOptions == nil {
+		return "", fmt.Errorf("无法读取媒体库原有配置")
+	}
+	options := library.LibraryOptions
+	options["PreferredMetadataLanguage"] = input.MetadataLanguage
+	options["MetadataCountryCode"] = input.MetadataCountry
+	options["EnableRealtimeMonitor"] = input.EnableRealtimeMonitor
+	body := map[string]interface{}{"Id": libraryID, "LibraryOptions": options}
 	return s.runShortTask(domain.TaskTypeEmbyLibrary, "修改 Emby 媒体库", taskMetadata(server, "update_library", input.Name), func() error {
-		return s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/LibraryOptions", query, body, nil)
+		if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/LibraryOptions", nil, body, nil); err != nil {
+			return err
+		}
+		// Emby 的名称和目录有独立接口；先添加目录再移除旧目录，避免出现空媒体库。
+		for _, path := range input.Paths {
+			if containsString(library.Locations, path.Path) {
+				continue
+			}
+			query := url.Values{"name": {library.Name}, "refreshLibrary": {"false"}}
+			if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/Paths", query, map[string]interface{}{"Name": library.Name, "PathInfo": path}, nil); err != nil {
+				return fmt.Errorf("配置已保存，添加目录失败，请刷新后重试: %w", err)
+			}
+		}
+		for _, old := range library.Locations {
+			keep := false
+			for _, path := range input.Paths {
+				if path.Path == old {
+					keep = true
+					break
+				}
+			}
+			if keep {
+				continue
+			}
+			if err := s.requestJSON(server, http.MethodDelete, "/emby/Library/VirtualFolders/Paths", url.Values{"name": {library.Name}, "path": {old}, "refreshLibrary": {"false"}}, nil, nil); err != nil {
+				return fmt.Errorf("配置已部分保存，移除目录失败，请刷新后重试: %w", err)
+			}
+		}
+		if library.Name != input.Name {
+			if err := s.requestJSON(server, http.MethodPost, "/emby/Library/VirtualFolders/Name", url.Values{"name": {library.Name}, "newName": {input.Name}, "refreshLibrary": {"false"}}, nil, nil); err != nil {
+				return fmt.Errorf("配置已保存，重命名失败: %w", err)
+			}
+		}
+		return nil
 	})
 }
 

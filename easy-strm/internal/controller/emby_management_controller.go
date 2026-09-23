@@ -343,7 +343,7 @@ func (c *EmbyManagementController) UpdateLibrary(ctx *gin.Context) {
 		ErrorResp(ctx, 400, "请求参数错误")
 		return
 	}
-	taskID, err := c.service.UpdateLibrary(id, req.OriginalName, req.EmbyLibraryInput)
+	taskID, err := c.service.UpdateLibrary(id, ctx.Param("library_id"), req.EmbyLibraryInput)
 	if err != nil {
 		respondTaskError(ctx, taskID, err)
 		return

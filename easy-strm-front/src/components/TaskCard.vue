@@ -229,6 +229,7 @@ const taskTypeNames = {
   emby_library: 'Emby 媒体库管理',
   emby_cover: 'Emby 媒体库封面',
   emby_plugin: '神医助手任务',
+  emby_scheduled: 'Emby定时任务触发',
   log_clean: '日志清理',
   sync_files: '文件同步',
   offline_download: '115 云下载',

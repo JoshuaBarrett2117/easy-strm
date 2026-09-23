@@ -15,6 +15,7 @@
           <div class="original-title" :title="item.result?.original_title">{{ item.result?.original_title || '—' }}</div>
           <div class="media-facts"><span>{{ item.result?.year || '年份未知' }}</span><span>{{ source(item) }}</span></div>
           <div class="directory">关联 {{ item.file_count || 1 }} 个有效文件</div>
+          <div v-if="item.result?.message?.includes('季信息待核对')" class="recognition-note">{{ item.result.message }}</div>
           <div class="card-actions">
             <n-button size="tiny" secondary type="primary" @click="$emit('identify', item)">重新识别</n-button>
             <n-button size="tiny" secondary @click="openManual(item)">手动识别</n-button>
@@ -175,7 +176,7 @@ const fileColumns = [
   {title:'路径', key:'file_name', ellipsis:{tooltip:true}},
   {title:'状态', key:'status', render:row => h(NTag, {size:'small', type:row.status==='identified'?'success':row.status==='failed'?'error':'default'}, {default:() => row.available===false?'失效':row.status})},
   {title:'季集', render:row => (row.episodes || []).map(value => `S${String(value.season_number).padStart(2,'0')}E${String(value.episode_number).padStart(2,'0')}`).join('、') || '—'},
-  {title:'错误', key:'error', ellipsis:{tooltip:true}},
+  {title:'识别说明', key:'error', render:row => row.error || row.result?.message || '—', ellipsis:{tooltip:true}},
   {title:'操作', render:row => h(NSpace, {}, {default:() => [h(NButton,{size:'tiny',onClick:()=>emit('identify',row)},{default:()=>'自动识别'}),h(NButton,{size:'tiny',onClick:()=>openManual(row)},{default:()=>'手动识别'})]})}
 ]
 const failedImages = reactive({})
@@ -205,6 +206,7 @@ const source = item => {
 .media-facts { display: flex; justify-content: space-between; margin: 8px 0; font-size: 12px; opacity: .75; }
 .card-actions { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 6px; padding-top: 10px; margin-top: 10px; border-top: 1px solid rgba(128, 138, 158, .15); }
 .manual-path { overflow-wrap: anywhere; opacity: .65; }
+.recognition-note { font-size: 12px; line-height: 18px; color: var(--n-text-color); overflow-wrap: anywhere; }
 .manual-result { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid #ddd; }
 .manual-result img { width: 48px; height: 72px; object-fit: cover; }
 .manual-result > div { flex: 1; min-width: 0; }

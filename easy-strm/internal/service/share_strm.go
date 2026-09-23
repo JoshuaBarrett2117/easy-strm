@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -378,6 +379,7 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
+	logger.Infof("[DirectLink] event=resolve request_id=%s source=share_strm_playback entry_id=%q cloud115_id=%d pickcode=%q effective_ua=%q", logger.RequestID(ctx), id, account.ID, pick, ua)
 	link, err := s.directLink(pick, account.ID, account.Cookie, ua)
 	if err != nil {
 		return "", fmt.Errorf("获取115直链失败：%w", err)

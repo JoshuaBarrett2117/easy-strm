@@ -234,7 +234,8 @@ const embyTaskTypeOptions = [
   { label: 'Emby 用户管理', value: 'emby_user' },
   { label: 'Emby 媒体库管理', value: 'emby_library' },
   { label: 'Emby 媒体库封面', value: 'emby_cover' },
-  { label: '神医助手任务', value: 'emby_plugin' }
+  { label: '神医助手任务', value: 'emby_plugin' },
+  { label: 'Emby定时任务触发', value: 'emby_scheduled' }
 ]
 const statusOptions = [
   { label: '待执行/待确认', value: 'pending' }, { label: '执行中', value: 'running' },

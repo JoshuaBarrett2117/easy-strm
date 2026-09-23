@@ -115,6 +115,10 @@
         </PageCard>
       </n-tab-pane>
 
+      <n-tab-pane name="scheduled" tab="定时任务管理">
+        <EmbyScheduledTasks :server-id="selectedServerId" :active="activeTab === 'scheduled'" @submitted="loadRecentTasks" />
+      </n-tab-pane>
+
       <n-tab-pane name="plugin" tab="神医助手">
         <PageCard title="神医助手（StrmAssistant）" subtitle="检测插件并触发常用计划任务">
           <template #action><n-button :loading="pluginLoading" @click="loadPluginStatus">重新检测</n-button></template>
@@ -212,7 +216,7 @@
       <n-form label-placement="top">
         <div class="grid gap-3 md:grid-cols-2">
           <n-form-item label="名称"><n-input v-model:value="libraryForm.name" /></n-form-item>
-          <n-form-item label="内容类型"><n-select v-model:value="libraryForm.collection_type" :options="collectionOptions" /></n-form-item>
+          <n-form-item label="内容类型"><n-select v-model:value="libraryForm.collection_type" :disabled="!!libraryForm.id" :options="collectionOptions" /></n-form-item>
         </div>
         <n-form-item label="媒体目录（每行一个）"><n-input v-model:value="libraryForm.pathsText" type="textarea" :rows="4" /></n-form-item>
         <div class="grid gap-3 md:grid-cols-2"><n-form-item label="元数据语言"><n-input v-model:value="libraryForm.metadata_language" placeholder="zh-CN" /></n-form-item><n-form-item label="国家/地区"><n-input v-model:value="libraryForm.metadata_country" placeholder="CN" /></n-form-item></div>
@@ -236,6 +240,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import EmbyScheduledTasks from '../components/EmbyScheduledTasks.vue'
 import { NAlert, NButton, NCheckbox, NCollapse, NCollapseItem, NForm, NFormItem, NInput, NModal, NSelect, NTabPane, NTabs, NTag } from 'naive-ui'
 import PageCard from '../components/common/PageCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
@@ -399,7 +404,7 @@ const openPasswordDialog = user => { Object.assign(passwordForm, { id: user.Id, 
 const savePassword = async () => { saving.value = true; try { await setEmbyUserPassword(selectedServerId.value, passwordForm.id, { password: passwordForm.password, reset: passwordForm.reset }); passwordDialog.value = false; await loadRecentTasks(); message.success('密码操作已完成') } finally { saving.value = false } }
 const removeUser = async user => { try { await showConfirmDialog(`确认删除 Emby 用户“${user.Name}”？`, '删除用户'); await deleteEmbyUser(selectedServerId.value, user.Id); await Promise.all([loadUsers(), loadRecentTasks()]); message.success('用户已删除') } catch {} }
 
-const openLibraryDialog = library => { const locations = library?.Locations || (library?.Path ? [library.Path] : []); Object.assign(libraryForm, library ? { id: library.ItemId, original_name: library.Name, name: library.Name, collection_type: library.CollectionType || 'mixed', pathsText: locations.join('\n'), metadata_language: 'zh-CN', metadata_country: 'CN', enable_realtime_monitor: true } : { id: '', original_name: '', name: '', collection_type: 'movies', pathsText: '', metadata_language: 'zh-CN', metadata_country: 'CN', enable_realtime_monitor: true }); libraryDialog.value = true }
+const openLibraryDialog = library => { const locations = library?.Locations || (library?.Path ? [library.Path] : []); Object.assign(libraryForm, library ? { id: libraryId(library), original_name: library.Name, name: library.Name, collection_type: library.CollectionType || 'mixed', pathsText: locations.join('\n'), metadata_language: library.LibraryOptions?.PreferredMetadataLanguage ?? '', metadata_country: library.LibraryOptions?.MetadataCountryCode ?? '', enable_realtime_monitor: library.LibraryOptions?.EnableRealtimeMonitor ?? false } : { id: '', original_name: '', name: '', collection_type: 'movies', pathsText: '', metadata_language: 'zh-CN', metadata_country: 'CN', enable_realtime_monitor: true }); libraryDialog.value = true }
 const libraryRequest = () => ({ original_name: libraryForm.original_name, name: libraryForm.name, collection_type: libraryForm.collection_type, paths: libraryForm.pathsText.split(/\r?\n/).map(Path => ({ Path: Path.trim() })).filter(item => item.Path), metadata_language: libraryForm.metadata_language, metadata_country: libraryForm.metadata_country, enable_realtime_monitor: libraryForm.enable_realtime_monitor })
 const saveLibrary = async () => { saving.value = true; try { const data = libraryRequest(); if (libraryForm.id) await updateEmbyLibrary(selectedServerId.value, libraryForm.id, data); else await createEmbyLibrary(selectedServerId.value, data); libraryDialog.value = false; await Promise.all([loadLibraries(), loadRecentTasks()]); message.success('媒体库操作已完成') } finally { saving.value = false } }
 const removeLibrary = async library => { try { await showConfirmDialog(`只从 Emby 移除媒体库“${library.Name}”，不会删除原始媒体文件。`, '删除媒体库'); await deleteEmbyLibrary(selectedServerId.value, library.ItemId, library.Name); await Promise.all([loadLibraries(), loadRecentTasks()]); message.success('媒体库配置已删除') } catch {} }

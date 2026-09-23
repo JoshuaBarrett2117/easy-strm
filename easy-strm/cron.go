@@ -21,6 +21,10 @@ var scheduler *CronScheduler
 func InitCronScheduler() error {
 	scheduler = service.NewCronService(dao.NewCronTaskDAO())
 	scheduler.SetTaskService(service.NewTaskService(dao.NewTaskRedisDAOWithGlobal()))
+	cloud115Service := service.NewCloud115Service(dao.NewCloud115DAO())
+	scheduler.Register(service.CronHandler{Key: "cooling_recovery", Name: "账号冷却恢复", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+		return "账号冷却检查完成", cloud115Service.CheckAndRecoverCoolingAccounts()
+	}})
 	params := []service.CronParameter{{Key: "cloud115_id", Label: "115账号ID"}, {Key: "strm_config_id", Label: "STRM配置ID"}}
 	for _, kind := range []string{"full_generate", "incremental_sync"} {
 		handlerParams := append([]service.CronParameter(nil), params...)

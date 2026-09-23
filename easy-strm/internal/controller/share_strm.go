@@ -76,6 +76,7 @@ func (c *ShareStrmController) Export(x *gin.Context) {
 
 // Playback 保持播放器UA并返回302；错误不生成重定向。
 func (c *ShareStrmController) Playback(x *gin.Context) {
+	defer beginDirectLinkRequest(x, "share_strm_playback")()
 	id, err := uuid.Parse(x.Param("id"))
 	if err != nil {
 		ErrorResp(x, 400, "播放标识无效")

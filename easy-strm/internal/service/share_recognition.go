@@ -148,6 +148,10 @@ func AnalyzeShareFilename(filename string) ShareMediaQuery {
 		q.TmdbID, _ = strconv.Atoi(m[1])
 	}
 	q.Titles, q.Year = cleanShareTitles(name)
+	if title, _, _, ok := parseRomanSeasonEpisode(name); ok {
+		q.Titles, q.Year = cleanShareTitles(title)
+		q.MediaType = "tv"
+	}
 	fileYear := q.Year
 	for i := len(segments) - 1; i >= 0 && i >= len(segments)-3; i-- {
 		if shareSeriesRE.MatchString(segments[i]) {
@@ -289,8 +293,11 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 		}
 		decodeErr := json.NewDecoder(resp.Body).Decode(&aliases)
 		resp.Body.Close()
-		if resp.StatusCode != 200 || decodeErr != nil {
-			continue
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("获取TMDB别名失败: HTTP %d", resp.StatusCode)
+		}
+		if decodeErr != nil {
+			return nil, fmt.Errorf("解析TMDB别名失败: %w", decodeErr)
 		}
 		for _, alias := range append(aliases.Results, aliases.Titles...) {
 			match := candidate
@@ -331,13 +338,18 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 // IdentifyShareFile 使用单条媒体的清洗查询，绕过旧文件匹配缓存，不回退到合集目录。
 // AI最多调用一次，AI建议仍必须经过实际元数据检索和标题/年份核验。
 func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
-	return s.IdentifyWithAssist(ctx, filename, IdentifyAssistOptions{
+	input := shareEpisodeInput(ctx, filename, forcedType)
+	result, err := s.IdentifyWithAssist(ctx, input, IdentifyAssistOptions{
 		MediaType: forcedType, MetadataSource: source, AllowAI: true, UseCache: false, ShareMode: true,
 	})
+	if result != nil {
+		result.Filename = filename
+	}
+	return result, err
 }
 
-func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
-	q := AnalyzeShareFilename(filename)
+func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
+	q := s.analyzeShareQuery(filename, forcedType)
 	result := &domain.TmdbIdentifyResult{Filename: filename, MediaType: q.MediaType, RecognitionMethod: "rule"}
 	if q.Container {
 		result.Message = "集合目录不是单部媒体，已跳过"
@@ -350,7 +362,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 		var detail map[string]interface{}
 		var err error
 		if q.MediaType == "tv" {
-			detail, err = s.GetTVDetail(q.TmdbID)
+			detail, err = s.shareTVDetail(ctx, q.TmdbID)
 		} else {
 			detail, err = s.GetMovieDetail(q.TmdbID)
 		}
@@ -401,13 +413,16 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 			return
 		}
 		if hint != nil {
+			result.QueryBeforeAI = append([]string(nil), q.Titles...)
+			result.AIHint = cloneRecognitionHint(hint)
 			q.Titles = []string{}
 			q.Titles = appendImportCandidate(q.Titles, hint.Title)
 			q.Titles = appendImportCandidate(q.Titles, hint.OriginalTitle)
+			result.QueryAfterAI = append([]string(nil), q.Titles...)
 			if q.Year == 0 && hint.Year > 0 {
 				q.Year = hint.Year
 			}
-			if forcedType != "movie" && forcedType != "tv" {
+			if q.MediaType == "unknown" && forcedType != "movie" && forcedType != "tv" {
 				q.MediaType = hint.MediaType
 			}
 		}

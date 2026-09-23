@@ -158,6 +158,7 @@ func (s *ShareRecordService) DeleteMedia(ctx context.Context, id int) error {
 	return s.dao.DeleteMedia(ctx, id)
 }
 func (s *ShareRecordService) Identify(ctx context.Context, m domain.ShareMedia, retry bool) error {
+	ctx = withShareWorkRound(ctx, retry)
 	mediaType, err := s.dao.MediaType(ctx, m.ID)
 	if err != nil {
 		return err
@@ -185,7 +186,13 @@ func (s *ShareRecordService) ManualIdentify(ctx context.Context, m domain.ShareM
 	if err != nil {
 		return err
 	}
-	return s.dao.Identify(ctx, m, "identified", m.Result, "", episodes...)
+	if err := s.dao.Identify(ctx, m, "identified", m.Result, "", episodes...); err != nil {
+		return err
+	}
+	if s.tmdb != nil {
+		s.tmdb.invalidateShareWork(ctx, m)
+	}
+	return nil
 }
 
 func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedia, retry bool) (bool, error) {
@@ -198,17 +205,20 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 	if s.tmdb == nil {
 		return false, fmt.Errorf("元数据识别服务未初始化")
 	}
+	ctx = context.WithValue(ctx, shareWorkScopeKey{}, m.ShareID)
 	r, e := s.tmdb.IdentifyShareFile(ctx, m.FileName, m.MetadataSource, m.MediaType)
 	if e != nil {
 		logger.Errorf("[ShareIdentify] 元数据识别异常 | file=%q | source=%s | error=%v", m.FileName, m.MetadataSource, e)
 		return false, s.dao.RecordIdentifyError(ctx, m, e.Error())
 	}
-	// 分享识别复用整理/识别测试链路的详情补全规则，保证中文名、海报及分类元数据一致。
-	s.tmdb.EnsureIdentifyMetadata(r)
+	// 作品识别内部按作品补全详情；失败结果不能进入详情补全。
 	if !r.Success {
 		return false, s.dao.Identify(ctx, m, "failed", r, r.Message)
 	}
 	parsed := s.tmdb.ParseFilename(m.FileName)
+	if parsed.Episode == 0 && r.EpisodeNumber > 0 {
+		parsed.Season, parsed.Episode = r.SeasonNumber, r.EpisodeNumber
+	}
 	episodes, episodeErr := normalizeShareEpisodes(r.MediaType, nil, parsed.Season, parsed.Episode, parsed.Episodes...)
 	if episodeErr != nil {
 		return false, s.dao.Identify(ctx, m, "failed", r, episodeErr.Error())
@@ -431,6 +441,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		return
 	}
 	ctx, cancel := newShareTaskContext(ctx, settings.TimeoutMinutes)
+	ctx = withShareWorkRound(ctx, retry)
 	defer cancel()
 	defer s.tasks.RemoveCancel(taskID)
 	defer func() {
@@ -461,6 +472,10 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		page.Data = append(page.Data, next.Data...)
 	}
 	cancelledShares := make(map[int]bool)
+	prepareShareEpisodeInputs(ctx, page.Data)
+	if s.tmdb != nil {
+		s.tmdb.seedShareWorks(ctx, page.Data)
+	}
 	items := make([]domain.ShareMedia, 0)
 	maskedTotal := 0
 	for _, record := range page.Data {
@@ -472,6 +487,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			continue
 		}
 		for _, media := range record.Media {
+			media.ShareID = record.ID
 			if !media.Available || media.Status == "ignored" {
 				continue
 			}
@@ -536,13 +552,19 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
 }
 func (s *ShareRecordService) BatchIdentify(ctx context.Context, ids []int, retry bool) (domain.ShareIdentifySummary, error) {
+	ctx = withShareWorkRound(ctx, retry)
 	p, e := s.List(ctx, domain.ShareRecordQuery{Page: 1, PageSize: 200})
 	if e != nil {
 		return domain.ShareIdentifySummary{}, e
 	}
 	sum := domain.ShareIdentifySummary{}
+	prepareShareEpisodeInputs(ctx, p.Data)
+	if s.tmdb != nil {
+		s.tmdb.seedShareWorks(ctx, p.Data)
+	}
 	for _, r := range p.Data {
 		for _, m := range r.Media {
+			m.ShareID = r.ID
 			if len(ids) > 0 && !contains(ids, m.ID) {
 				continue
 			}

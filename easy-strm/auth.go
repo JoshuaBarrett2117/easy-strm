@@ -69,7 +69,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	scrapeService := service.NewScrapeService(tmdbCacheDAO, mediaFileCacheDAO, mediaSourceDAO, systemConfigDAO, tmdbService)
 	organizeService := service.NewOrganizeService(mediaSourceService, tmdbService, renameService, fileOperationService, mediaCategoryDAO, cloud115DAO, systemConfigDAO, scrapeService, client, dao.GetGlobalRedisClient())
 	strmService := service.NewStrmService(strmConfigDAO, strmFileDAO, cronTaskDAO)
-	cronService := service.NewCronService(cronTaskDAO)
+	cronService := scheduler
 	taskService := service.NewTaskService(dao.NewTaskRedisDAOWithGlobal())
 	taskService.RecoverInterruptedTasks()
 	fileManagerService := service.NewFileManagerService(mediaSourceDAO, cloud115DAO, client, taskService)
@@ -1094,6 +1094,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		embyAdmin.POST("/servers/:server_id/users/:user_id/avatar", embyManagementController.UploadUserAvatar)
 		embyAdmin.DELETE("/servers/:server_id/users/:user_id", embyManagementController.DeleteUser)
 		embyAdmin.GET("/servers/:server_id/libraries", embyManagementController.ListLibraries)
+		embyAdmin.GET("/servers/:server_id/scheduled-tasks", embyManagementController.ListScheduledTasks)
+		embyAdmin.POST("/servers/:server_id/scheduled-tasks/:task_id/run", embyManagementController.StartScheduledTask)
 		embyAdmin.GET("/servers/:server_id/libraries/:library_id/cover", embyManagementController.GetLibraryCover)
 		embyAdmin.POST("/servers/:server_id/libraries", embyManagementController.CreateLibrary)
 		embyAdmin.PUT("/servers/:server_id/libraries/:library_id", embyManagementController.UpdateLibrary)

@@ -2,6 +2,18 @@ package domain
 
 import "time"
 
+// EmbyScheduledTask 保留 Emby 的任务状态、触发规则与最近执行结果。
+type EmbyScheduledTask struct {
+	ID                        string                   `json:"Id"`
+	Name                      string                   `json:"Name"`
+	Description               string                   `json:"Description"`
+	Category                  string                   `json:"Category"`
+	State                     string                   `json:"State"`
+	CurrentProgressPercentage *float64                 `json:"CurrentProgressPercentage"`
+	Triggers                  []map[string]interface{} `json:"Triggers"`
+	LastExecutionResult       map[string]interface{}   `json:"LastExecutionResult"`
+}
+
 // EmbyServer 表示一个可管理的 Emby 服务实例。
 type EmbyServer struct {
 	ID         int       `json:"id"`

@@ -200,7 +200,7 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	if results, ok := s.loadSearchCache("movie", query, year); ok {
+	if results, ok := s.loadSearchCache("movie", query, year); ok && !bypassShareRecognitionCache(ctx) {
 		return results, nil
 	}
 
@@ -300,7 +300,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	if results, ok := s.loadSearchCache("tv", query, year); ok {
+	if results, ok := s.loadSearchCache("tv", query, year); ok && !bypassShareRecognitionCache(ctx) {
 		return results, nil
 	}
 
