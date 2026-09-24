@@ -6,6 +6,7 @@ import (
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lib/pq"
 )
@@ -254,14 +255,8 @@ func (d *ShareRecordDAO) Identify(ctx context.Context, m domain.ShareMedia, stat
 		if err == nil {
 			_, err = tx.ExecContext(ctx, "DELETE FROM t_share_media_file_episode WHERE file_id=$1", m.ID)
 		}
-		for _, episode := range episodes {
-			if err != nil {
-				break
-			}
-			if episode.SeasonNumber < 0 || episode.EpisodeNumber <= 0 {
-				return fmt.Errorf("季集信息无效")
-			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO t_share_media_file_episode(file_id,season_number,episode_number) VALUES($1,$2,$3)", m.ID, episode.SeasonNumber, episode.EpisodeNumber)
+		if err == nil {
+			err = insertShareEpisodes(ctx, tx, m.ID, episodes)
 		}
 	} else if mediaID.Valid {
 		_, err = tx.ExecContext(ctx, "UPDATE t_share_media_file SET media_id=NULL WHERE id=$1", m.ID)
@@ -375,4 +370,28 @@ func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken s
 		return 0, err
 	}
 	return len(files), nil
+}
+
+// insertShareEpisodes 将季集映射分块批量写入调用方事务，任何分块失败均由调用方整体回滚。
+func insertShareEpisodes(ctx context.Context, tx *sql.Tx, fileID int, episodes []domain.ShareEpisode) error {
+	for _, episode := range episodes {
+		if episode.SeasonNumber < 0 || episode.EpisodeNumber <= 0 {
+			return fmt.Errorf("季集信息无效")
+		}
+	}
+	const batchSize = 1000
+	for start := 0; start < len(episodes); start += batchSize {
+		end := min(start+batchSize, len(episodes))
+		values := make([]string, 0, end-start)
+		args := make([]interface{}, 0, (end-start)*3)
+		for _, episode := range episodes[start:end] {
+			n := len(args)
+			values = append(values, fmt.Sprintf("($%d,$%d,$%d)", n+1, n+2, n+3))
+			args = append(args, fileID, episode.SeasonNumber, episode.EpisodeNumber)
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO t_share_media_file_episode(file_id,season_number,episode_number) VALUES"+strings.Join(values, ","), args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }
