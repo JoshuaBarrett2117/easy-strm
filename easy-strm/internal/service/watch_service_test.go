@@ -453,30 +453,34 @@ func TestCreateAutoOrganizeTaskForLocalSource(t *testing.T) {
 }
 
 func TestBuildLocalWatchOrganizeTarget(t *testing.T) {
+	root := filepath.Join("C:", "media")
+	watchPath := filepath.Join(root, "incoming")
+	filePath := filepath.Join(watchPath, "Movie.2024.mkv")
 	source := &domain.MediaSource{
-		Path:      `C:\media`,
-		WatchPath: `C:\media\incoming`,
+		Path:      root,
+		WatchPath: watchPath,
 	}
 
-	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, `C:\media\incoming\Movie.2024.mkv`)
+	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, filePath)
 	if err != nil {
 		t.Fatalf("expected local watch organize target to build successfully: %v", err)
 	}
 	if sourcePath != `incoming` {
 		t.Fatalf("unexpected sourcePath: got %q", sourcePath)
 	}
-	if fileID != `incoming\Movie.2024.mkv` {
+	if fileID != filepath.Join("incoming", "Movie.2024.mkv") {
 		t.Fatalf("unexpected fileID: got %q", fileID)
 	}
 }
 
 func TestBuildLocalWatchOrganizeTargetForRootWatchPath(t *testing.T) {
+	root := filepath.Join("C:", "media")
 	source := &domain.MediaSource{
-		Path:      `C:\media`,
-		WatchPath: `C:\media`,
+		Path:      root,
+		WatchPath: root,
 	}
 
-	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, `C:\media\Movie.2024.mkv`)
+	sourcePath, fileID, err := buildLocalWatchOrganizeTarget(source, filepath.Join(root, "Movie.2024.mkv"))
 	if err != nil {
 		t.Fatalf("expected root watch path to build successfully: %v", err)
 	}
@@ -518,13 +522,14 @@ func TestResolveRetrySourcePathPreservesEmptyRootForLocalWatch(t *testing.T) {
 }
 
 func TestResolveRetrySourcePathFallsBackToRelativeDirForLocalFile(t *testing.T) {
+	root := filepath.Join("C:", "media")
 	source := &domain.MediaSource{
 		SourceType: domain.SourceTypeLocal,
-		Path:       `C:\media`,
-		WatchPath:  `C:\media\incoming`,
+		Path:       root,
+		WatchPath:  filepath.Join(root, "incoming"),
 	}
 
-	actual := resolveRetrySourcePath(nil, source, []string{`incoming\Inception.2010.1080p.mkv`})
+	actual := resolveRetrySourcePath(nil, source, []string{filepath.Join("incoming", "Inception.2010.1080p.mkv")})
 	if actual != `incoming` {
 		t.Fatalf("expected retry source path to use file directory, got %q", actual)
 	}

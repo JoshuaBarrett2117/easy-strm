@@ -859,7 +859,7 @@ func TestExecuteRename_LocalSourceIgnoresDirectorySegmentsInNewName(t *testing.T
 	req := &domain.RenameExecuteRequest{
 		SourceID: 1,
 		FileID:   "Rename.Target.2024.1080p.mkv",
-		NewName:  `Season 01\Rename Target (2024).mkv`,
+		NewName:  filepath.Join("Season 01", "Rename Target (2024).mkv"),
 	}
 
 	result, err := renameSvc.ExecuteRename(req)
