@@ -157,8 +157,8 @@ func (s *ShareRecordService) AddMedia(ctx context.Context, m *domain.ShareMedia)
 func (s *ShareRecordService) DeleteMedia(ctx context.Context, id int) error {
 	return s.dao.DeleteMedia(ctx, id)
 }
-func (s *ShareRecordService) Identify(ctx context.Context, m domain.ShareMedia, retry bool) error {
-	ctx = withShareWorkRound(ctx, retry)
+func (s *ShareRecordService) Identify(ctx context.Context, m domain.ShareMedia, retry bool, forceRefresh ...bool) error {
+	ctx = withShareWorkRound(ctx, len(forceRefresh) > 0 && forceRefresh[0])
 	mediaType, err := s.dao.MediaType(ctx, m.ID)
 	if err != nil {
 		return err
@@ -409,7 +409,8 @@ func (s *ShareRecordService) StartRecordIdentify(ctx context.Context, recordID i
 	if onlyPending && onlyFailed {
 		return "", fmt.Errorf("待识别与失败筛选不能同时启用")
 	}
-	return s.startIdentifyTask(ctx, nil, !onlyPending, []int{recordID}, onlyPending, onlyFailed)
+	forceRefresh := len(pendingOnly) > 2 && pendingOnly[2]
+	return s.startIdentifyTask(ctx, nil, onlyFailed, []int{recordID}, onlyPending, onlyFailed, forceRefresh)
 }
 
 func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, retry bool, recordIDs []int, pendingOnly ...bool) (string, error) {
@@ -441,7 +442,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		return
 	}
 	ctx, cancel := newShareTaskContext(ctx, settings.TimeoutMinutes)
-	ctx = withShareWorkRound(ctx, retry)
+	ctx = withShareWorkRound(ctx, len(pendingOnly) > 2 && pendingOnly[2])
 	defer cancel()
 	defer s.tasks.RemoveCancel(taskID)
 	defer func() {
@@ -496,7 +497,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 				logger.Infof("[ShareIdentify] 跳过已有脱敏媒体 | task=%s | directory=%q", taskID, media.FileName)
 				continue
 			}
-			if (len(ids) == 0 || contains(ids, media.ID)) && shouldIdentifyShareMedia(media, record.MediaType, retry, onlyPending, onlyFailed) {
+			if (len(ids) == 0 || contains(ids, media.ID)) && (bypassShareRecognitionCache(ctx) || shouldIdentifyShareMedia(media, record.MediaType, retry, onlyPending, onlyFailed)) {
 				media.MediaType = record.MediaType
 				items = append(items, media)
 			}
@@ -519,7 +520,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		if s.tasks.IsCancelled(taskID) {
 			return
 		}
-		ok, identifyErr := s.identifyOne(ctx, media, retry)
+		ok, identifyErr := s.identifyOne(ctx, media, bypassShareRecognitionCache(ctx))
 		if ctx.Err() != nil {
 			s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
 			return
@@ -552,7 +553,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
 }
 func (s *ShareRecordService) BatchIdentify(ctx context.Context, ids []int, retry bool) (domain.ShareIdentifySummary, error) {
-	ctx = withShareWorkRound(ctx, retry)
+	ctx = withShareWorkRound(ctx, false)
 	p, e := s.List(ctx, domain.ShareRecordQuery{Page: 1, PageSize: 200})
 	if e != nil {
 		return domain.ShareIdentifySummary{}, e
@@ -602,11 +603,11 @@ func (s *ShareRecordService) ListFiles(ctx context.Context, id, page, size int) 
 
 // shouldIdentifyShareMedia 继续任务仅处理未尝试候选，不重试失败或覆盖已识别记录。
 func shouldIdentifyShareMedia(media domain.ShareMedia, mediaType string, retry, pendingOnly bool, failedOnly ...bool) bool {
-	if len(failedOnly) > 0 && failedOnly[0] {
+	if retry || (len(failedOnly) > 0 && failedOnly[0]) {
 		return media.Status == "failed"
 	}
 	if pendingOnly {
 		return media.Status == "pending" || media.Status == ""
 	}
-	return retry || media.Status != "identified" || media.Result == nil || (mediaType != "auto" && media.Result.MediaType != mediaType)
+	return media.Status != "identified" || media.Result == nil || (mediaType != "auto" && media.Result.MediaType != mediaType)
 }

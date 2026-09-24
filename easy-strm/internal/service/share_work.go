@@ -34,12 +34,12 @@ func bypassShareRecognitionCache(ctx context.Context) bool {
 	return ok && round.bypassWorkCache
 }
 
-func withShareWorkRound(ctx context.Context, retry bool) context.Context {
+func withShareWorkRound(ctx context.Context, forceRefresh bool) context.Context {
 	if _, ok := ctx.Value(recognitionRoundKey{}).(*recognitionRound); ok {
 		return ctx
 	}
 	ctx = WithRecognitionRound(ctx)
-	ctx.Value(recognitionRoundKey{}).(*recognitionRound).bypassWorkCache = retry
+	ctx.Value(recognitionRoundKey{}).(*recognitionRound).bypassWorkCache = forceRefresh
 	return ctx
 }
 

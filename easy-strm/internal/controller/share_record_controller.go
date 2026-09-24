@@ -196,16 +196,17 @@ func (c *ShareRecordController) Identify(x *gin.Context) {
 }
 func (c *ShareRecordController) Batch(x *gin.Context) {
 	var r struct {
-		IDs         []int `json:"ids"` // 兼容历史按媒体ID筛选的调用。
-		ShareIDs    []int `json:"share_ids"`
-		Retry       bool  `json:"retry_failed"`
-		PendingOnly bool  `json:"pending_only"`
+		IDs          []int `json:"ids"` // 兼容历史按媒体ID筛选的调用。
+		ShareIDs     []int `json:"share_ids"`
+		Retry        bool  `json:"retry_failed"`
+		PendingOnly  bool  `json:"pending_only"`
+		ForceRefresh bool  `json:"force_refresh"`
 	}
-	if x.ShouldBindJSON(&r) != nil || (r.Retry && r.PendingOnly) {
+	if x.ShouldBindJSON(&r) != nil || (r.Retry && r.PendingOnly) || (r.ForceRefresh && (r.Retry || r.PendingOnly)) {
 		ErrorResp(x, 400, "识别任务参数无效")
 		return
 	}
-	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry, r.ShareIDs, r.PendingOnly)
+	taskID, e := c.s.StartBatchIdentify(x, r.IDs, r.Retry, r.ShareIDs, r.PendingOnly, false, r.ForceRefresh)
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
@@ -235,11 +236,12 @@ func (c *ShareRecordController) IdentifyRecord(x *gin.Context) {
 	id, err := strconv.Atoi(x.Param("id"))
 	pendingOnly, parseErr := strconv.ParseBool(x.DefaultQuery("pending_only", "false"))
 	failedOnly, failedErr := strconv.ParseBool(x.DefaultQuery("failed_only", "false"))
-	if err != nil || id < 1 || parseErr != nil || failedErr != nil || (pendingOnly && failedOnly) {
+	forceRefresh, forceErr := strconv.ParseBool(x.DefaultQuery("force_refresh", "false"))
+	if err != nil || id < 1 || parseErr != nil || failedErr != nil || (pendingOnly && failedOnly) || forceErr != nil || (forceRefresh && (pendingOnly || failedOnly)) {
 		ErrorResp(x, 400, "分享ID或识别参数无效")
 		return
 	}
-	taskID, e := c.s.StartRecordIdentify(x, id, pendingOnly, failedOnly)
+	taskID, e := c.s.StartRecordIdentify(x, id, pendingOnly, failedOnly, forceRefresh)
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return

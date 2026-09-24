@@ -94,7 +94,7 @@ export const manualIdentifyShareMedia = (id, data) => api.post(`/media/share-rec
 export const deleteShareMedia = (shareId, mediaId) => api.delete(`/media/share-records/${shareId}/media/${mediaId}`)
 export const batchIdentifyShareRecords = (data) => api.post('/media/share-records/batch-identify', data)
 export const batchSyncShareRecords = (shareIds) => api.post('/media/share-records/batch-sync', { share_ids: shareIds })
-export const identifyShareRecord = (id, pendingOnly = false, failedOnly = false) => api.post(`/media/share-records/${id}/identify`, null, {params: {pending_only: pendingOnly, failed_only: failedOnly}})
+export const identifyShareRecord = (id, pendingOnly = false, failedOnly = false, forceRefresh = false) => api.post(`/media/share-records/${id}/identify`, null, {params: {pending_only: pendingOnly, failed_only: failedOnly, force_refresh: forceRefresh}})
 export const syncShareRecord = (id) => api.post(`/media/share-records/${id}/sync`)
 export const getShareFiles = (id, params) => api.get(`/media/share-records/${id}/files`, { params })
 export const getShareIdentifyTask = (taskId) => api.get(`/tasks/${taskId}`)
