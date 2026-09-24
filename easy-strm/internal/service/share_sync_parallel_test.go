@@ -71,8 +71,7 @@ func TestShareSyncParallelAndDuplicate(t *testing.T) {
 	if _, err := s.ClearMedia(context.Background(), 1); err == nil {
 		t.Fatal("同步时不允许清空")
 	}
-	mock.ExpectQuery("SELECT count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery(`FROM \(SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}))
+	mock.ExpectQuery("SELECT s.id,s.media_type,f.id,f.file_name").WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "fid", "name", "source", "status", "result", "version"}))
 	identifyID, err := s.StartRecordIdentify(context.Background(), 1)
 	if err != nil {
 		t.Fatal("同步运行时应允许启动识别:", err)

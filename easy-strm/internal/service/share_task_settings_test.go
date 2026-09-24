@@ -7,13 +7,17 @@ import (
 	"time"
 )
 
-type shareSettingsMemory struct{ values map[string]*domain.SystemConfig }
+type shareSettingsMemory struct {
+	values map[string]*domain.SystemConfig
+}
 
 func (s *shareSettingsMemory) GetByKey(key string) (*domain.SystemConfig, error) {
 	return s.values[key], nil
 }
 func (s *shareSettingsMemory) Upsert(key, value string) error {
-	if s.values == nil { s.values = map[string]*domain.SystemConfig{} }
+	if s.values == nil {
+		s.values = map[string]*domain.SystemConfig{}
+	}
 	s.values[key] = &domain.SystemConfig{ConfigVal: value}
 	return nil
 }
@@ -85,9 +89,13 @@ func TestShareTaskSettingsWorkerCountValidation(t *testing.T) {
 	if got, err := s.GetTaskSettings(); err != nil || got.WorkerCount != 4 {
 		t.Fatalf("worker count round trip: got=%+v err=%v", got, err)
 	}
-	for _, n := range []int{0, 33} {
-		if err := s.SaveTaskSettings(ShareTaskSettings{WorkerCount: n}); err == nil {
-			t.Fatalf("worker count %d should be rejected", n)
-		}
+	if err := s.SaveTaskSettings(ShareTaskSettings{WorkerCount: 0}); err != nil {
+		t.Fatalf("zero worker count should use the default: %v", err)
+	}
+	if got, err := s.GetTaskSettings(); err != nil || got.WorkerCount != defaultShareWorkerCount {
+		t.Fatalf("zero worker count should normalize to default: got=%+v err=%v", got, err)
+	}
+	if err := s.SaveTaskSettings(ShareTaskSettings{WorkerCount: 33}); err == nil {
+		t.Fatal("worker count 33 should be rejected")
 	}
 }
