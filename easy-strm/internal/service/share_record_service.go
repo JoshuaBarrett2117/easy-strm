@@ -427,7 +427,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 	go func() {
 		defer s.identifyMu.Unlock()
-		s.runBatchIdentify(context.Background(), taskID, ids, retry, recordIDs, pendingOnly...)
+		s.runBatchIdentify(ctx, taskID, ids, retry, recordIDs, pendingOnly...)
 	}()
 	return taskID, nil
 }
@@ -503,7 +503,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		}
 	}
 	_ = s.tasks.UpdateProgress(taskID, len(items), 0, 0, 0)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "worker_count": settings.WorkerCount, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
 	if len(items) == 0 {
 		// 没有待识别媒体时任务仍是正常完成，进度应显示100%，避免出现“完成但0%”的误导状态。
 		_ = s.tasks.UpdateProgressPercent(taskID, 100)

@@ -7,11 +7,14 @@ import (
 	"time"
 )
 
-type shareSettingsMemory struct{ value *domain.SystemConfig }
+type shareSettingsMemory struct{ values map[string]*domain.SystemConfig }
 
-func (s *shareSettingsMemory) GetByKey(string) (*domain.SystemConfig, error) { return s.value, nil }
-func (s *shareSettingsMemory) Upsert(_ string, value string) error {
-	s.value = &domain.SystemConfig{ConfigVal: value}
+func (s *shareSettingsMemory) GetByKey(key string) (*domain.SystemConfig, error) {
+	return s.values[key], nil
+}
+func (s *shareSettingsMemory) Upsert(key, value string) error {
+	if s.values == nil { s.values = map[string]*domain.SystemConfig{} }
+	s.values[key] = &domain.SystemConfig{ConfigVal: value}
 	return nil
 }
 
@@ -50,7 +53,7 @@ func TestShareTaskSettingsRoundTrip(t *testing.T) {
 	store := &shareSettingsMemory{}
 	s := &ShareRecordService{taskSettingsStore: store}
 	value, err := s.GetTaskSettings()
-	if err != nil || value.TimeoutMinutes != 0 {
+	if err != nil || value.TimeoutMinutes != 0 || value.WorkerCount != defaultShareWorkerCount {
 		t.Fatal(value, err)
 	}
 	for _, minutes := range []int{60, 0, 43200} {
@@ -67,8 +70,24 @@ func TestShareTaskSettingsRoundTrip(t *testing.T) {
 			t.Fatal(minutes)
 		}
 	}
-	store.value.ConfigVal = "invalid"
+	store.values[shareTaskTimeoutKey].ConfigVal = "invalid"
 	if _, err = s.GetTaskSettings(); err == nil {
 		t.Fatal("损坏配置不得静默忽略")
+	}
+}
+
+func TestShareTaskSettingsWorkerCountValidation(t *testing.T) {
+	store := &shareSettingsMemory{}
+	s := &ShareRecordService{taskSettingsStore: store}
+	if err := s.SaveTaskSettings(ShareTaskSettings{TimeoutMinutes: 1, WorkerCount: 4}); err != nil {
+		t.Fatalf("default worker count should be accepted: %v", err)
+	}
+	if got, err := s.GetTaskSettings(); err != nil || got.WorkerCount != 4 {
+		t.Fatalf("worker count round trip: got=%+v err=%v", got, err)
+	}
+	for _, n := range []int{0, 33} {
+		if err := s.SaveTaskSettings(ShareTaskSettings{WorkerCount: n}); err == nil {
+			t.Fatalf("worker count %d should be rejected", n)
+		}
 	}
 }
