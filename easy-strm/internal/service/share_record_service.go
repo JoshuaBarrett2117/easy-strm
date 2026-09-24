@@ -196,6 +196,8 @@ func (s *ShareRecordService) ManualIdentify(ctx context.Context, m domain.ShareM
 }
 
 func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedia, retry bool) (bool, error) {
+	started := time.Now()
+	defer func() { observeShareFilePhase(ctx, m.ID, "file", time.Since(started)) }()
 	if isMaskedSharePath(m.FileName) {
 		return false, fmt.Errorf("目录名称已脱敏，已跳过识别")
 	}
@@ -206,29 +208,35 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 		return false, fmt.Errorf("元数据识别服务未初始化")
 	}
 	ctx = context.WithValue(ctx, shareWorkScopeKey{}, m.ShareID)
+	identifyStart := time.Now()
 	r, e := s.tmdb.IdentifyShareFile(ctx, m.FileName, m.MetadataSource, m.MediaType)
+	observeShareFilePhase(ctx, m.ID, "file_identify", time.Since(identifyStart))
 	if e != nil {
 		logger.Errorf("[ShareIdentify] 元数据识别异常 | file=%q | source=%s | error=%v", m.FileName, m.MetadataSource, e)
+		dbStart := time.Now()
+		defer func() { observeShareFilePhase(ctx, m.ID, "db_write", time.Since(dbStart)) }()
 		return false, s.dao.RecordIdentifyError(ctx, m, e.Error())
 	}
 	// 作品识别内部按作品补全详情；失败结果不能进入详情补全。
 	if !r.Success {
-		return false, s.dao.Identify(ctx, m, "failed", r, r.Message)
+		return false, s.saveShareIdentification(ctx, m, "failed", r, r.Message)
 	}
+	parseStart := time.Now()
 	parsed := s.tmdb.ParseFilename(m.FileName)
 	if parsed.Episode == 0 && r.EpisodeNumber > 0 {
 		parsed.Season, parsed.Episode = r.SeasonNumber, r.EpisodeNumber
 	}
 	episodes, episodeErr := normalizeShareEpisodes(r.MediaType, nil, parsed.Season, parsed.Episode, parsed.Episodes...)
+	observeShareFilePhase(ctx, m.ID, "file_episode", time.Since(parseStart))
 	if episodeErr != nil {
-		return false, s.dao.Identify(ctx, m, "failed", r, episodeErr.Error())
+		return false, s.saveShareIdentification(ctx, m, "failed", r, episodeErr.Error())
 	}
 	if len(episodes) > 0 {
 		r.SeasonNumber = episodes[0].SeasonNumber
 		r.EpisodeNumber = episodes[0].EpisodeNumber
 	}
 	logger.Infof("[ShareIdentify] 元数据识别结果 | file=%q | success=%v | media_type=%s | tmdb_id=%d | title=%q | year=%d | episodes=%d", m.FileName, r.Success, r.MediaType, r.TmdbID, r.Title, r.Year, len(episodes))
-	return true, s.dao.Identify(ctx, m, "identified", r, "", episodes...)
+	return true, s.saveShareIdentification(ctx, m, "identified", r, "", episodes...)
 }
 
 func normalizeShareEpisodes(mediaType string, explicit []domain.ShareEpisode, season, episode int, more ...int) ([]domain.ShareEpisode, error) {
@@ -443,6 +451,8 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	}
 	ctx, cancel := newShareTaskContext(ctx, settings.TimeoutMinutes)
 	ctx = withShareWorkRound(ctx, len(pendingOnly) > 2 && pendingOnly[2])
+	preparationStart := time.Now()
+	defer logShareMetrics(ctx, taskID)
 	defer cancel()
 	defer s.tasks.RemoveCancel(taskID)
 	defer func() {
@@ -455,6 +465,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	s.tasks.RegisterCancel(taskID, cancel)
 	_ = s.tasks.UpdateStatus(taskID, "running")
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s start records=%v media=%v retry=%v", taskID, recordIDs, ids, retry)
+	dbStart := time.Now()
 	records, err := s.dao.ListIdentifyMedia(ctx, dao.ShareIdentifyFilter{RecordIDs: recordIDs, MediaIDs: ids, PendingOnly: onlyPending, FailedOnly: retry || onlyFailed, ForceRefresh: bypassShareRecognitionCache(ctx)})
 	if err != nil {
 		_ = s.tasks.SetError(taskID, err.Error())
@@ -469,6 +480,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		_ = s.tasks.SetError(taskID, err.Error())
 		return
 	}
+	observeShareMetric(ctx, "db_prepare", time.Since(dbStart))
 	cancelledShares := make(map[int]bool)
 	prepareShareEpisodeInputs(ctx, evidence)
 	if s.tmdb != nil {
@@ -500,6 +512,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			}
 		}
 	}
+	observeShareMetric(ctx, "preparation", time.Since(preparationStart))
 	_ = s.tasks.UpdateProgress(taskID, len(items), 0, 0, 0)
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "worker_count": settings.WorkerCount, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
 	if len(items) == 0 {
@@ -527,15 +540,17 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			success++
 			identifiedFileIDs = append(identifiedFileIDs, media.ID)
 		}
+		progressStart := time.Now()
 		_ = s.tasks.UpdateProgress(taskID, len(items), completed, success, failed)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "识别媒体", "current_file": media.FileName})
+		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "识别媒体", "current_file": media.FileName, "worker_count": settings.WorkerCount})
+		observeShareMetric(ctx, "progress_update", time.Since(progressStart))
 	})
 	if ctx.Err() != nil {
 		s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
 		return
 	}
 
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "worker_count": settings.WorkerCount, "metrics": shareMetricsSnapshot(ctx), "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
 	if failed > 0 {
 		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
 		return
@@ -549,7 +564,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_task_id": exportID, "strm_export_file_count": len(identifiedFileIDs)})
 		}
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
+	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "worker_count": settings.WorkerCount, "metrics": shareMetricsSnapshot(ctx), "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
 	_ = s.tasks.UpdateStatus(taskID, "completed")
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
 }
@@ -622,4 +637,10 @@ func shouldIdentifyShareMedia(media domain.ShareMedia, mediaType string, retry, 
 		return media.Status == "pending" || media.Status == ""
 	}
 	return media.Status != "identified" || media.Result == nil || (mediaType != "auto" && media.Result.MediaType != mediaType)
+}
+
+func (s *ShareRecordService) saveShareIdentification(ctx context.Context, m domain.ShareMedia, status string, r *domain.TmdbIdentifyResult, message string, episodes ...domain.ShareEpisode) error {
+	start := time.Now()
+	defer func() { observeShareFilePhase(ctx, m.ID, "db_write", time.Since(start)) }()
+	return s.dao.Identify(ctx, m, status, r, message, episodes...)
 }

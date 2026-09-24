@@ -94,6 +94,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 	}
 	round.mu.Unlock()
 	if reused {
+		observeShareMetric(ctx, "work_round_hit", 0)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
@@ -149,6 +150,7 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 			return &dao.ShareWorkIdentity{Result: &domain.TmdbIdentifyResult{Filename: filename, MediaType: s.analyzeShareQuery(filename, forcedType).MediaType, Message: "同作品存在不同的已确认身份，请手动核对", FailureReason: "历史作品身份冲突"}}, nil
 		}
 		if seed != nil {
+			observeShareMetric(ctx, "work_seed_hit", 0)
 			value := &dao.ShareWorkIdentity{Result: cloneShareWorkResult(seed)}
 			s.enrichShareWork(ctx, value)
 			if err := cache.Save(ctx, key, value); err != nil {
@@ -162,6 +164,7 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 			logger.Warnf("[ShareIdentify] 作品缓存读取失败 | file=%q | error=%v", filename, err)
 		}
 		if value != nil {
+			observeShareMetric(ctx, "work_cache_hit", 0)
 			logger.Infof("[ShareIdentify] 作品身份缓存命中 | file=%q | tmdb_id=%d", filename, value.Result.TmdbID)
 			if !isIdentifyMetadataComplete(value.Result) || value.Result.MediaType == "tv" && !value.SeasonsKnown {
 				s.enrichShareWork(ctx, value)

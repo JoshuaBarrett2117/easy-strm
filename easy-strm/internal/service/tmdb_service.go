@@ -201,6 +201,7 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 	if results, ok := s.loadSearchCache("movie", query, year); ok && !bypassShareRecognitionCache(ctx) {
+		observeShareMetric(ctx, "tmdb_search_cache_hit", 0)
 		return results, nil
 	}
 
@@ -217,7 +218,7 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doShareTMDBRequest(req)
 	if err != nil {
 		logger.Errorf("TmdbService[SearchMovie] 请求失败: %v", err)
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
@@ -301,6 +302,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 	if results, ok := s.loadSearchCache("tv", query, year); ok && !bypassShareRecognitionCache(ctx) {
+		observeShareMetric(ctx, "tmdb_search_cache_hit", 0)
 		return results, nil
 	}
 
@@ -317,7 +319,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doShareTMDBRequest(req)
 	if err != nil {
 		logger.Errorf("TmdbService[SearchTV] 请求失败: %v", err)
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)

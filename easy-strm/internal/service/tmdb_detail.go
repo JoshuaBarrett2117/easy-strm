@@ -78,6 +78,7 @@ func (s *TmdbService) getTVDetailContext(ctx context.Context, tmdbID int) (map[s
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
 	if detail, ok := s.loadDetailCache("tv", tmdbID, 0, 0); ok && !bypassShareRecognitionCache(ctx) {
+		observeShareMetric(ctx, "tmdb_detail_cache_hit", 0)
 		return detail, nil
 	}
 
@@ -88,7 +89,7 @@ func (s *TmdbService) getTVDetailContext(ctx context.Context, tmdbID int) (map[s
 	if err != nil {
 		return nil, err
 	}
-	resp, err := s.httpClient.Do(req)
+	resp, err := s.doShareTMDBRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
 	}

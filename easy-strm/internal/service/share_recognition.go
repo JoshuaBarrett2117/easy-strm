@@ -279,7 +279,7 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 		if err != nil {
 			return nil, err
 		}
-		resp, err := s.httpClient.Do(req)
+		resp, err := s.doShareTMDBRequest(req)
 		if err != nil {
 			return nil, fmt.Errorf("获取TMDB别名失败")
 		}
