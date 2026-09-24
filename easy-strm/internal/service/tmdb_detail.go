@@ -28,6 +28,10 @@ func (s *TmdbService) getImageURL(path string) string {
 //   - map[string]interface{}: 电影详情
 //   - error: 错误信息
 func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error) {
+	return s.getMovieDetailContext(context.Background(), tmdbID)
+}
+
+func (s *TmdbService) getMovieDetailContext(ctx context.Context, tmdbID int) (map[string]interface{}, error) {
 	if s.MetaTubeEnabled() {
 		if ref, ok := s.metatubeRefs.Load(tmdbID); ok {
 			return s.metaTubeDetail(ref.(metaTubeRef))
@@ -36,14 +40,19 @@ func (s *TmdbService) GetMovieDetail(tmdbID int) (map[string]interface{}, error)
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	if detail, ok := s.loadDetailCache("movie", tmdbID, 0, 0); ok {
+	if detail, ok := s.loadDetailCache("movie", tmdbID, 0, 0); ok && !bypassShareRecognitionCache(ctx) {
+		observeShareMetric(ctx, "tmdb_detail_cache_hit", 0)
 		return detail, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/movie/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, s.apiKey, s.language)
 
-	resp, err := s.httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.doShareTMDBRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
 	}

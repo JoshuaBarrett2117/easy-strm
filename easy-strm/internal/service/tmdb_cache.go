@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -224,9 +225,9 @@ func (s *TmdbService) saveDetailCache(kind string, tmdbID, season, episode int, 
 }
 
 func (s *TmdbService) searchCacheKey(mediaType, query string, year int) string {
-	return fmt.Sprintf("%s%s:%s:%d:%s", tmdbSearchKeyPrefix, strings.ToLower(strings.TrimSpace(mediaType)), s.language, year, strings.ToLower(strings.TrimSpace(query)))
+	return fmt.Sprintf("%s%x:%s:%s:%d:%s", tmdbSearchKeyPrefix, sha256.Sum256([]byte(s.baseURL)), strings.ToLower(strings.TrimSpace(mediaType)), s.language, year, strings.ToLower(strings.TrimSpace(query)))
 }
 
 func (s *TmdbService) detailCacheKey(kind string, tmdbID, season, episode int) string {
-	return fmt.Sprintf("%s%s:%s:%d:%d:%d", tmdbDetailKeyPrefix, strings.ToLower(strings.TrimSpace(kind)), s.language, tmdbID, season, episode)
+	return fmt.Sprintf("%s%x:%s:%s:%d:%d:%d", tmdbDetailKeyPrefix, sha256.Sum256([]byte(s.baseURL)), strings.ToLower(strings.TrimSpace(kind)), s.language, tmdbID, season, episode)
 }

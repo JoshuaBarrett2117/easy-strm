@@ -234,7 +234,16 @@ func (s *TmdbService) seedShareWorks(ctx context.Context, records []domain.Share
 func (s *TmdbService) enrichShareWork(ctx context.Context, value *dao.ShareWorkIdentity) {
 	r := value.Result
 	if r.MediaType != "tv" {
-		s.EnsureIdentifyMetadata(r)
+		if r.MetadataSource == domain.MetadataSourceMetaTube || r.MetadataProvider != "" {
+			s.EnsureIdentifyMetadata(r)
+			return
+		}
+		if !isIdentifyMetadataComplete(r) {
+			detail, err := s.getMovieDetailContext(ctx, r.TmdbID)
+			if err == nil {
+				applyDetailMetadata(r, detail, "movie")
+			}
+		}
 		return
 	}
 	logger.Infof("[ShareIdentify] 作品详情补全 | media_type=tv | tmdb_id=%d | reason=补全元数据与季目录", r.TmdbID)

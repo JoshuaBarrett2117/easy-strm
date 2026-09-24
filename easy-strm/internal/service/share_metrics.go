@@ -54,7 +54,7 @@ func logShareMetrics(ctx context.Context, taskID string) {
 	logger.Infof("%s", payload)
 }
 
-func (s *TmdbService) doShareTMDBRequest(req *http.Request) (*http.Response, error) {
+func (s *TmdbService) performShareTMDBRequest(req *http.Request) (*http.Response, error) {
 	start := time.Now()
 	defer func() { observeShareMetric(req.Context(), "tmdb_request", time.Since(start)) }()
 	return s.httpClient.Do(req)

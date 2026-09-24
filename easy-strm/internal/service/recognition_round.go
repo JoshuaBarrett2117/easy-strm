@@ -20,6 +20,7 @@ type recognitionAttempt struct {
 type recognitionRound struct {
 	mu              sync.Mutex
 	metrics         map[string]shareMetric
+	requests        map[string]*shareRequestAttempt
 	attempts        map[string]*recognitionAttempt
 	slots           chan struct{}
 	works           map[string]*shareWorkAttempt

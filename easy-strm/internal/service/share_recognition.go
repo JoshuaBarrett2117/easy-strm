@@ -3,9 +3,7 @@ package service
 import (
 	"context"
 	"easy-strm/internal/domain"
-	"encoding/json"
 	"fmt"
-	"net/http"
 	"path"
 	"regexp"
 	"strconv"
@@ -230,11 +228,18 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 		return s.searchShareQuery(ctx, movieQuery, domain.MetadataSourceMetaTube)
 	}
 	candidates := []domain.TmdbSearchResult{}
+	seenCandidates := map[string]bool{}
+	seenQueries := map[string]bool{}
 	types := []string{q.MediaType}
 	if q.MediaType == "unknown" {
 		types = []string{"movie", "tv"}
 	}
 	for _, title := range q.Titles {
+		queryKey := strings.ToLower(strings.TrimSpace(title))
+		if seenQueries[queryKey] {
+			continue
+		}
+		seenQueries[queryKey] = true
 		for _, kind := range types {
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -257,7 +262,17 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 			for i := range found {
 				found[i].MediaType = kind
 			}
-			candidates = append(candidates, found...)
+			for _, candidate := range found {
+				key := fmt.Sprintf("%s:%s:%s:%s:%d:%d:%s:%s", candidate.MetadataSource, candidate.MetadataProvider, candidate.MetadataID, candidate.MediaType, candidate.TmdbID, candidate.Year, candidate.Title, candidate.OriginalTitle)
+				if !seenCandidates[key] {
+					seenCandidates[key] = true
+					candidates = append(candidates, candidate)
+				}
+			}
+			// 已发现两个严格匹配身份时，追加搜索无法恢复唯一性。
+			if ambiguousShareCandidates(q, candidates) {
+				return nil, nil
+			}
 		}
 	}
 	if best := selectVerifiedShareCandidate(q, candidates); best != nil {
@@ -275,35 +290,18 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 		if q.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
 			continue
 		}
-		req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/%s/%d/alternative_titles?api_key=%s", s.baseURL, candidate.MediaType, candidate.TmdbID, s.apiKey), nil)
+		aliases, err := s.shareAliases(ctx, candidate.MediaType, candidate.TmdbID)
 		if err != nil {
 			return nil, err
 		}
-		resp, err := s.doShareTMDBRequest(req)
-		if err != nil {
-			return nil, fmt.Errorf("获取TMDB别名失败")
-		}
-		var aliases struct {
-			Results []struct {
-				Title string `json:"title"`
-			} `json:"results"`
-			Titles []struct {
-				Title string `json:"title"`
-			} `json:"titles"`
-		}
-		decodeErr := json.NewDecoder(resp.Body).Decode(&aliases)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("获取TMDB别名失败: HTTP %d", resp.StatusCode)
-		}
-		if decodeErr != nil {
-			return nil, fmt.Errorf("解析TMDB别名失败: %w", decodeErr)
-		}
-		for _, alias := range append(aliases.Results, aliases.Titles...) {
+		for _, alias := range aliases {
 			match := candidate
-			match.Title = alias.Title
+			match.Title = alias
 			if selectVerifiedShareCandidate(q, []domain.TmdbSearchResult{match}) != nil {
 				verified = append(verified, candidate)
+				if len(verified) > 1 {
+					return nil, nil
+				}
 				break
 			}
 		}
@@ -364,7 +362,7 @@ func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filen
 		if q.MediaType == "tv" {
 			detail, err = s.shareTVDetail(ctx, q.TmdbID)
 		} else {
-			detail, err = s.GetMovieDetail(q.TmdbID)
+			detail, err = s.getMovieDetailContext(ctx, q.TmdbID)
 		}
 		if err != nil {
 			return nil, err
@@ -474,4 +472,18 @@ func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filen
 		result.RecognitionMethod = "ai"
 	}
 	return result, nil
+}
+
+func ambiguousShareCandidates(q ShareMediaQuery, candidates []domain.TmdbSearchResult) bool {
+	identities := map[string]bool{}
+	for _, candidate := range candidates {
+		if selectVerifiedShareCandidate(q, []domain.TmdbSearchResult{candidate}) != nil {
+			key := fmt.Sprintf("%s:%s:%s:%s:%d", candidate.MetadataSource, candidate.MetadataProvider, candidate.MetadataID, candidate.MediaType, candidate.TmdbID)
+			identities[key] = true
+			if len(identities) > 1 {
+				return true
+			}
+		}
+	}
+	return false
 }
