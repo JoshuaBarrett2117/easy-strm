@@ -40,11 +40,7 @@ func TestRecordPendingScope(t *testing.T) {
 	if err := tasks.Create("record-pending", "share_identify", "测试"); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery("SELECT count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
-	rows := sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"})
-	rows.AddRow(2, "auto", "其他分享", "other", "", "", 1, "now", "now", false, 22, "其他电影.mkv", "auto", "pending", nil, "", 1)
-	rows.AddRow(1, "auto", "当前分享", "current", "", "", 1, "now", "now", false, 11, "测试电影.mkv", "auto", "failed", nil, "失败", 1)
-	mock.ExpectQuery(`FROM \(SELECT`).WillReturnRows(rows)
+	mock.ExpectQuery(`SELECT s.id,s.media_type,f.id.*AND NOT s.share_cancelled.*s.id=ANY\(\$1\).*f.status IN \('pending',''\)`).WithArgs("{1}").WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "fid", "name", "source", "status", "result", "version"}))
 	parser := &cancelledBatchParser{}
 	s := &ShareRecordService{dao: dao.NewShareRecordDAO(db), tasks: tasks, parser: parser}
 	s.runBatchIdentify(context.Background(), "record-pending", nil, false, []int{1}, true)

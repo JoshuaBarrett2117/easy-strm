@@ -39,9 +39,7 @@ func TestCancelledShareDoesNotFailBatch(t *testing.T) {
 	if err := tasks.Create("skip-test", "share_identify", "测试"); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery("SELECT count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	rows := sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(1, "auto", "取消分享", "cancelled", "", "", 1, "now", "now", true, 11, "旧媒体.mkv", "auto", "pending", nil, "", 1)
-	mock.ExpectQuery("FROM \\(SELECT .* FROM t_share_record").WillReturnRows(rows)
+	mock.ExpectQuery(`SELECT s.id,s.media_type,f.id.*AND NOT s.share_cancelled`).WithArgs().WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "fid", "name", "source", "status", "result", "version"}))
 	parser := &cancelledBatchParser{}
 	s := &ShareRecordService{dao: dao.NewShareRecordDAO(db), tasks: tasks, parser: parser}
 	s.runBatchIdentify(context.Background(), "skip-test", nil, false, nil)

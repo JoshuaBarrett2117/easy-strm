@@ -455,31 +455,28 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	s.tasks.RegisterCancel(taskID, cancel)
 	_ = s.tasks.UpdateStatus(taskID, "running")
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s start records=%v media=%v retry=%v", taskID, recordIDs, ids, retry)
-	page, err := s.List(ctx, domain.ShareRecordQuery{Page: 1, PageSize: 200})
+	records, err := s.dao.ListIdentifyMedia(ctx, dao.ShareIdentifyFilter{RecordIDs: recordIDs, MediaIDs: ids, PendingOnly: onlyPending, FailedOnly: retry || onlyFailed, ForceRefresh: bypassShareRecognitionCache(ctx)})
 	if err != nil {
 		_ = s.tasks.SetError(taskID, err.Error())
 		return
 	}
-	// 识别阶段只读取已经同步落库的文件，绝不隐式解析分享链接。
-	for number := 2; len(page.Data) < page.Total; number++ {
-		next, loadErr := s.List(ctx, domain.ShareRecordQuery{Page: number, PageSize: 200})
-		if loadErr != nil {
-			_ = s.tasks.SetError(taskID, loadErr.Error())
-			return
-		}
-		if len(next.Data) == 0 {
-			break
-		}
-		page.Data = append(page.Data, next.Data...)
+	contextIDs := make([]int, 0, len(records))
+	for _, record := range records {
+		contextIDs = append(contextIDs, record.ID)
+	}
+	evidence, err := s.dao.ListIdentifyContext(ctx, contextIDs)
+	if err != nil {
+		_ = s.tasks.SetError(taskID, err.Error())
+		return
 	}
 	cancelledShares := make(map[int]bool)
-	prepareShareEpisodeInputs(ctx, page.Data)
+	prepareShareEpisodeInputs(ctx, evidence)
 	if s.tmdb != nil {
-		s.tmdb.seedShareWorks(ctx, page.Data)
+		s.tmdb.seedShareWorks(ctx, evidence)
 	}
 	items := make([]domain.ShareMedia, 0)
 	maskedTotal := 0
-	for _, record := range page.Data {
+	for _, record := range records {
 		if len(recordIDs) > 0 && !contains(recordIDs, record.ID) {
 			continue
 		}
@@ -512,28 +509,32 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
 	success, failed := 0, 0
 	identifiedFileIDs := make([]int, 0, len(items))
-	for index, media := range items {
-		if err := ctx.Err(); err != nil {
-			s.finishShareTaskContext(taskID, err, settings.TimeoutMinutes)
-			return
-		}
+	completed := 0
+	runShareIdentifyWorkers(ctx, items, settings.WorkerCount, func(workerCtx context.Context, media domain.ShareMedia) (bool, error) {
 		if s.tasks.IsCancelled(taskID) {
-			return
+			cancel()
+			return false, context.Canceled
 		}
-		ok, identifyErr := s.identifyOne(ctx, media, bypassShareRecognitionCache(ctx))
+		return s.identifyOne(workerCtx, media, bypassShareRecognitionCache(ctx))
+	}, func(media domain.ShareMedia, ok bool, identifyErr error) {
 		if ctx.Err() != nil {
-			s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
 			return
 		}
+		completed++
 		if identifyErr != nil || !ok {
 			failed++
 		} else {
 			success++
 			identifiedFileIDs = append(identifiedFileIDs, media.ID)
 		}
-		_ = s.tasks.UpdateProgress(taskID, len(items), index+1, success, failed)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": media.FileName, "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", index+1, len(items))}, {"name": "汇总结果", "status": "pending"}}})
+		_ = s.tasks.UpdateProgress(taskID, len(items), completed, success, failed)
+		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "识别媒体", "current_file": media.FileName})
+	})
+	if ctx.Err() != nil {
+		s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
+		return
 	}
+
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
 	if failed > 0 {
 		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
@@ -552,36 +553,47 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	_ = s.tasks.UpdateStatus(taskID, "completed")
 	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
 }
+
+// BatchIdentify 同步识别已落库候选，复用有界执行器及失败筛选。
 func (s *ShareRecordService) BatchIdentify(ctx context.Context, ids []int, retry bool) (domain.ShareIdentifySummary, error) {
 	ctx = withShareWorkRound(ctx, false)
-	p, e := s.List(ctx, domain.ShareRecordQuery{Page: 1, PageSize: 200})
-	if e != nil {
-		return domain.ShareIdentifySummary{}, e
+	settings, err := s.GetTaskSettings()
+	if err != nil {
+		return domain.ShareIdentifySummary{}, err
 	}
-	sum := domain.ShareIdentifySummary{}
-	prepareShareEpisodeInputs(ctx, p.Data)
-	if s.tmdb != nil {
-		s.tmdb.seedShareWorks(ctx, p.Data)
+	records, err := s.dao.ListIdentifyMedia(ctx, dao.ShareIdentifyFilter{MediaIDs: ids, FailedOnly: retry})
+	if err != nil {
+		return domain.ShareIdentifySummary{}, err
 	}
-	for _, r := range p.Data {
-		for _, m := range r.Media {
-			m.ShareID = r.ID
-			if len(ids) > 0 && !contains(ids, m.ID) {
-				continue
-			}
-			if isMaskedSharePath(m.FileName) || (!retry && m.Status == "identified") {
-				sum.Skipped++
-				continue
-			}
-			if e = s.Identify(ctx, m, retry); e != nil {
-				sum.Failed++
-			} else {
-				sum.Success++
+	recordIDs := []int{}
+	items := []domain.ShareMedia{}
+	for _, record := range records {
+		recordIDs = append(recordIDs, record.ID)
+		for _, media := range record.Media {
+			if !isMaskedSharePath(media.FileName) {
+				items = append(items, media)
 			}
 		}
 	}
-	return sum, nil
+	evidence, err := s.dao.ListIdentifyContext(ctx, recordIDs)
+	if err != nil {
+		return domain.ShareIdentifySummary{}, err
+	}
+	prepareShareEpisodeInputs(ctx, evidence)
+	if s.tmdb != nil {
+		s.tmdb.seedShareWorks(ctx, evidence)
+	}
+	sum := domain.ShareIdentifySummary{}
+	runShareIdentifyWorkers(ctx, items, settings.WorkerCount, func(ctx context.Context, m domain.ShareMedia) (bool, error) { return s.identifyOne(ctx, m, false) }, func(_ domain.ShareMedia, ok bool, err error) {
+		if err != nil || !ok {
+			sum.Failed++
+		} else {
+			sum.Success++
+		}
+	})
+	return sum, ctx.Err()
 }
+
 func contains(a []int, v int) bool {
 	for _, x := range a {
 		if x == v {
