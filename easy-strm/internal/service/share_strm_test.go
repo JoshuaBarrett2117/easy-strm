@@ -98,7 +98,7 @@ func strmFixture(t *testing.T) (*ShareStrmService, *strmMemory, *strmClient) {
 	raw, _ := json.Marshal(cfg)
 	store := &strmMemory{entries: map[string]domain.ShareStrmEntry{"entry": {ID: "entry", ShareCode: "share", FileID: "file-3", FileName: "Show.S02E03.mkv"}}}
 	client := &strmClient{}
-	svc := NewShareStrmService(store, &shareSettingsMemory{value: &domain.SystemConfig{ConfigVal: string(raw)}}, client, NewTmdbService("", nil), &OrganizeService{}, nil, func() ([]*domain.MediaCategory, error) { return nil, nil }, func(id int) (*domain.Cloud115, error) { return &domain.Cloud115{ID: id, Cookie: "fixture"}, nil }, func(pick string, id int, cookie, ua string) (string, error) {
+	svc := NewShareStrmService(store, &shareSettingsMemory{values: map[string]*domain.SystemConfig{shareStrmSettingsKey: {ConfigVal: string(raw)}}}, client, NewTmdbService("", nil), &OrganizeService{}, nil, func() ([]*domain.MediaCategory, error) { return nil, nil }, func(id int) (*domain.Cloud115, error) { return &domain.Cloud115{ID: id, Cookie: "fixture"}, nil }, func(pick string, id int, cookie, ua string) (string, error) {
 		if pick != "saved" || id != 7 || ua != "Player/1" {
 			return "", errors.New("直链参数错误")
 		}

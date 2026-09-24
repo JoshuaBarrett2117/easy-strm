@@ -16,7 +16,7 @@ func TestShareStrmAutoExportOnlyStartsWhenConfigured(t *testing.T) {
 
 	cfg := domain.ShareStrmSettings{OutputPath: t.TempDir(), BaseURL: "http://media.example", Cloud115ID: 7, TransferPath: "/播放"}
 	raw, _ := json.Marshal(cfg)
-	s.settings = &shareSettingsMemory{value: &domain.SystemConfig{ConfigVal: string(raw)}}
+	s.settings = &shareSettingsMemory{values: map[string]*domain.SystemConfig{shareStrmSettingsKey: {ConfigVal: string(raw)}}}
 	if _, started, err := s.StartAutoExport(nil); err != nil || started {
 		t.Fatalf("没有新识别文件时不应自动导出：started=%v err=%v", started, err)
 	}
