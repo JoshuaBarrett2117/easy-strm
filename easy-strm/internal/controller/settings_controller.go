@@ -188,6 +188,10 @@ func (sc *SettingsController) BatchUpdate(ctx *gin.Context) {
 		reqData["metatube_enabled"] = "false"
 		reqData["mdc_enabled"] = "false"
 	}
+	if err := service.ValidateShareWorkerSettings(reqData); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	updated := sc.systemConfigService.BatchUpsert(reqData)
 	if sc.tmdbService != nil {

@@ -187,7 +187,7 @@ func (d *TmdbCacheDAO) GetByTmdbID(tmdbID int, mediaType string) (*TmdbCache, er
 	return cache, nil
 }
 
-// Create 创建缓存
+// Create 保存缓存；查询键和媒体类型冲突时原子覆盖，包括已过期记录。
 // 参数:
 //   - cache: 缓存数据
 //
@@ -199,6 +199,21 @@ func (d *TmdbCacheDAO) Create(cache *TmdbCache) error {
 		        poster_path, overview, vote_average, release_date, first_air_date, season_number, 
 		        episode_number, raw_data, expire_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		 ON CONFLICT (query_key, media_type) DO UPDATE SET
+		        tmdb_id = EXCLUDED.tmdb_id,
+		        title = EXCLUDED.title,
+		        original_title = EXCLUDED.original_title,
+		        year = EXCLUDED.year,
+		        poster_path = EXCLUDED.poster_path,
+		        overview = EXCLUDED.overview,
+		        vote_average = EXCLUDED.vote_average,
+		        release_date = EXCLUDED.release_date,
+		        first_air_date = EXCLUDED.first_air_date,
+		        season_number = EXCLUDED.season_number,
+		        episode_number = EXCLUDED.episode_number,
+		        raw_data = EXCLUDED.raw_data,
+		        expire_at = EXCLUDED.expire_at,
+		        update_time = NOW()
 		 RETURNING id, create_time, update_time`,
 		cache.QueryKey, cache.MediaType, cache.TmdbID, cache.Title, cache.OriginalTitle, cache.Year,
 		nullString(cache.PosterPath), nullString(cache.Overview), cache.VoteAverage,

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -218,8 +219,24 @@ func (s *ScrapeService) resolveTmdbData(sourceID int, filePath, metadataSource s
 	if marshalErr != nil || len(detailData) == 0 {
 		return "", nil, 0, 0, fmt.Errorf("已核验媒体详情序列化失败")
 	}
+	if s.mediaFileCacheDAO != nil {
+		cache := &dao.MediaFileCache{
+			SourceID: sourceID, FilePath: filePath, FileName: filepath.Base(filepath.Clean(filePath)),
+			TmdbID: identifyResult.TmdbID, MediaType: identifyResult.MediaType,
+			SeasonNumber: identifyResult.SeasonNumber, EpisodeNumber: identifyResult.EpisodeNumber,
+			TmdbData: detailData, IdentifiedAt: timePtr(time.Now()),
+		}
+		if fileInfo, statErr := os.Stat(filePath); statErr == nil {
+			cache.FileSize = fileInfo.Size()
+		}
+		if cacheErr := s.mediaFileCacheDAO.CreateOrUpdate(cache); cacheErr != nil {
+			logger.Warnf("[ScrapeService] 写入媒体文件缓存失败: source_id=%d file=%s err=%v", sourceID, filePath, cacheErr)
+		}
+	}
 	return identifyResult.MediaType, detailData, identifyResult.SeasonNumber, identifyResult.EpisodeNumber, nil
 }
+
+func timePtr(value time.Time) *time.Time { return &value }
 
 func metadataPayloadMatchesPolicy(rawData json.RawMessage, metadataSource string) bool {
 	policy := normalizeMetadataSourcePolicy(metadataSource)

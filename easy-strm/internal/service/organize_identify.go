@@ -22,6 +22,7 @@ func (s *OrganizeService) previewFile(ctx context.Context, source *domain.MediaS
 			MediaType: identifyResult.MediaType, IdentifyError: identifyResult.Message,
 			RecognitionMethod: identifyResult.RecognitionMethod, MetadataSource: identifyResult.MetadataSource,
 			MetadataID: identifyResult.MetadataID, MetadataProvider: identifyResult.MetadataProvider,
+			PosterPath: identifyResult.PosterPath,
 			AIUsed: identifyResult.AIUsed, AIScene: identifyResult.AIScene, FailureReason: identifyResult.FailureReason,
 		}, nil
 	}
@@ -91,6 +92,7 @@ func (s *OrganizeService) previewFile(ctx context.Context, source *domain.MediaS
 		MetadataSource:    identifyResult.MetadataSource,
 		MetadataID:        identifyResult.MetadataID,
 		MetadataProvider:  identifyResult.MetadataProvider,
+		PosterPath:        identifyResult.PosterPath,
 		AIUsed:            identifyResult.AIUsed,
 		AIScene:           identifyResult.AIScene,
 		FailureReason:     identifyResult.FailureReason,

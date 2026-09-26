@@ -369,7 +369,9 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
   const t = task.value
-  return !!t && t.task_type === 'watch_auto_organize' && (t.status === 'cancelled' || t.status === 'failed' || t.status === 'partial_success')
+  if (!t || !['cancelled', 'failed', 'partial_success'].includes(t.status)) return false
+  if (t.task_type === 'watch_auto_organize' || t.task_type === 'share_sync' || t.task_type === 'strm_generate') return true
+  return false
 })
 
 const showProgress = computed(() => {
@@ -610,7 +612,11 @@ const taskSummaryItems = computed(() => {
   return items
 })
 
-const resumeButtonText = computed(() => task.value?.task_type === 'watch_auto_organize' ? 'AI辅助重试' : '恢复任务')
+const resumeButtonText = computed(() => {
+  if (task.value?.task_type === 'watch_auto_organize') return 'AI辅助重试'
+  if (String(task.value?.error_message || '').includes('服务重启导致任务中断')) return '继续任务'
+  return '恢复任务'
+})
 
 const crossAccountSteps = computed(() => {
   const t = task.value

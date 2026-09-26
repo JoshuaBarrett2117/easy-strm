@@ -26,20 +26,26 @@ const (
 // OrganizeService 自动整理服务
 // 负责媒体文件的扫描、识别、更名和移动
 type OrganizeService struct {
-	mediaSourceService   *MediaSourceService
-	tmdbService          *TmdbService
-	tmdbCacheDAO         *dao.TmdbCacheDAO
-	identifyCacheDAO     *dao.IdentifyCacheDAO
-	renameService        *RenameService
-	fileOperationService *FileOperationService
-	categoryDAO          *dao.MediaCategoryDAO
-	cloud115DAO          *dao.Cloud115DAO
-	systemConfigDAO      SystemConfigReader
-	scrapeService        *ScrapeService
-	client               Cloud115Client
-	redisClient          *redis.Client
-	cloud115ListCacheMu  sync.RWMutex
-	cloud115ListCache    map[string]cloud115ListCacheEntry
+	mediaSourceService      *MediaSourceService
+	tmdbService             *TmdbService
+	tmdbCacheDAO            *dao.TmdbCacheDAO
+	identifyCacheDAO        *dao.IdentifyCacheDAO
+	renameService           *RenameService
+	fileOperationService    *FileOperationService
+	categoryDAO             *dao.MediaCategoryDAO
+	cloud115DAO             *dao.Cloud115DAO
+	systemConfigDAO         SystemConfigReader
+	scrapeService           *ScrapeService
+	client                  Cloud115Client
+	redisClient             *redis.Client
+	cloud115ListCacheMu     sync.RWMutex
+	cloud115ListCache       map[string]cloud115ListCacheEntry
+	postOrganizeSuccessHook func(context.Context, *domain.MediaSource, []OrganizeResult)
+}
+
+// SetPostOrganizeSuccessHook 设置整理成功后的异步后处理回调。
+func (s *OrganizeService) SetPostOrganizeSuccessHook(hook func(context.Context, *domain.MediaSource, []OrganizeResult)) {
+	s.postOrganizeSuccessHook = hook
 }
 
 type cloud115ListCacheEntry struct {
@@ -109,6 +115,7 @@ type OrganizePreview struct {
 	MetadataSource    string `json:"metadata_source,omitempty"`
 	MetadataID        string `json:"metadata_id,omitempty"`
 	MetadataProvider  string `json:"metadata_provider,omitempty"`
+	PosterPath        string `json:"poster_path,omitempty"`
 	AIUsed            bool   `json:"ai_used,omitempty"`
 	AIScene           string `json:"ai_scene,omitempty"`
 	FailureReason     string `json:"failure_reason,omitempty"`
@@ -128,6 +135,7 @@ type OrganizeResult struct {
 	AIUsed            bool   `json:"ai_used,omitempty"`
 	AIScene           string `json:"ai_scene,omitempty"`
 	FailureReason     string `json:"failure_reason,omitempty"`
+	PosterPath        string `json:"poster_path,omitempty"`
 }
 
 // OrganizeCandidate 整理候选文件
@@ -422,6 +430,7 @@ func (s *OrganizeService) organizeDirectoryInternal(ctx context.Context, source 
 		result.AIUsed = preview.AIUsed
 		result.AIScene = preview.AIScene
 		result.FailureReason = preview.FailureReason
+		result.PosterPath = preview.PosterPath
 
 		// 仅对持久化媒体源（ID>0）触发内置刮削；临时/ad-hoc 源（如转存整理临时源）跳过，
 		// 避免对 115 路径误触发以及无谓的 DB 查询，真实刮削由 ShareTransferService 编排负责。
@@ -441,6 +450,11 @@ func (s *OrganizeService) organizeDirectoryInternal(ctx context.Context, source 
 	}
 
 	logger.Infof("OrganizeService[OrganizeDirectory] completed: total=%d", len(results))
+	if s.postOrganizeSuccessHook != nil && source != nil && source.SourceType == domain.SourceTypeCloud115 && successCount > 0 {
+		resultCopy := append([]OrganizeResult(nil), results...)
+		sourceCopy := *source
+		go s.postOrganizeSuccessHook(context.Background(), &sourceCopy, resultCopy)
+	}
 	return results, nil
 }
 

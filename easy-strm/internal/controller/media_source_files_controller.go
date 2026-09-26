@@ -95,7 +95,6 @@ func (c *MediaSourceController) getCloud115Files(ctx *gin.Context, source *domai
 	}
 
 	files := make([]domain.MediaFile, 0, len(fileList.Files))
-	fileIDs := make([]string, 0, len(fileList.Files))
 	for _, f := range fileList.Files {
 		isDir := f.FileID == "" || f.Type == "folder"
 
@@ -121,21 +120,9 @@ func (c *MediaSourceController) getCloud115Files(ctx *gin.Context, source *domai
 			SHA1:         f.Sha1,
 		}
 		files = append(files, file)
-		fileIDs = append(fileIDs, fileID)
 	}
 
-	if len(fileIDs) > 0 {
-		tmdbCacheMap, err := c.tmdbCacheDAO.GetByQueryKeys(fileIDs)
-		if err != nil {
-			logger.Warnf("MediaSourceController[getCloud115Files] 查询TMDB缓存失败: %v", err)
-		} else {
-			for i := range files {
-				if cache, ok := tmdbCacheMap[files[i].ID]; ok {
-					files[i].TmdbTitle = cache.Title
-				}
-			}
-		}
-	}
+	c.mediaSourceService.FillFileTmdbTitles(files)
 
 	if search != "" || filter != "" {
 		files = c.filterFiles(files, filter, search)

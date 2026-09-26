@@ -39,7 +39,7 @@
           :data="overview.groups"
           :loading="loading"
           :row-key="(row) => row.key"
-          :scroll-x="800"
+          :scroll-x="980"
         />
       </div>
     </PageCard>
@@ -92,6 +92,15 @@ const cacheColumns = [
     render: (row) => h('strong', { class: 'tabular-nums' }, formatCount(row.count))
   },
   {
+    title: '状态',
+    key: 'status',
+    width: 190,
+    render: (row) => h('div', { class: 'flex flex-col gap-1' }, [
+      h(NTag, { type: statusTagType(row.status), size: 'small' }, { default: () => row.status_text || '暂无有效缓存' }),
+      row.ttl_text ? h('span', { class: 'text-xs text-slate-400' }, `TTL ${row.ttl_text}`) : null
+    ])
+  },
+  {
     title: '操作',
     key: 'actions',
     width: 150,
@@ -101,7 +110,7 @@ const cacheColumns = [
         type: 'error',
         text: true,
         size: 'small',
-        disabled: row.count <= 0,
+        disabled: row.count <= 0 || ['disabled', 'unavailable'].includes(row.status),
         loading: clearingScope.value === row.key,
         onClick: () => handleClear(row.key, row.name)
       },
@@ -129,6 +138,16 @@ const storageTagType = (storage) => {
     postgres: 'success',
     mixed: 'warning'
   }[storage] || 'info'
+}
+
+const statusTagType = (status) => {
+  return {
+    active: 'success',
+    empty: 'default',
+    expired: 'warning',
+    disabled: 'default',
+    unavailable: 'error'
+  }[status] || 'default'
 }
 
 const loadOverview = async () => {

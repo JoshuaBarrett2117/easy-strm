@@ -109,12 +109,18 @@ func (s *SystemConfigService) Upsert(key, value string) error {
 	if isRemovedSystemConfigKey(key) {
 		return fmt.Errorf("系统配置 %s 已停用", key)
 	}
+	if err := ValidateShareWorkerSettings(map[string]string{key: value}); err != nil {
+		return err
+	}
 	return s.systemConfigDAO.Upsert(key, value)
 }
 
 // BatchUpsert 批量更新系统配置，返回成功写入的配置。
 func (s *SystemConfigService) BatchUpsert(configs map[string]string) map[string]string {
 	updated := make(map[string]string)
+	if err := ValidateShareWorkerSettings(configs); err != nil {
+		return updated
+	}
 	for key, value := range configs {
 		if isRemovedSystemConfigKey(key) {
 			continue

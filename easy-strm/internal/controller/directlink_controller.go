@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"easy-strm/internal/pkg/logger"
+	driver "github.com/SheltonZhu/115driver/pkg/driver"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,7 +33,8 @@ type DirectLinkController struct {
 	// redisGet: 从 Redis 获取值
 	redisGet func(key string) (string, error)
 	// redisSet: 设置 Redis 键值对（带过期时间，单位秒）
-	redisSet func(key string, value string, expirationSec int) error
+	redisSet    func(key string, value string, expirationSec int) error
+	getFileInfo func(pickCode string, cloud115ID int, cookie string) (*driver.File, error)
 	// getDefaultUA: 获取默认 User-Agent
 	getDefaultUA func() string
 }
@@ -78,6 +80,11 @@ func (c *DirectLinkController) SetRedisGet(fn func(key string) (string, error)) 
 
 func (c *DirectLinkController) SetRedisSet(fn func(key string, value string, expirationSec int) error) {
 	c.redisSet = fn
+}
+
+// SetGetFileInfo 设置获取115文件元数据的回调，用于成功转存后建立SHA1缓存。
+func (c *DirectLinkController) SetGetFileInfo(fn func(pickCode string, cloud115ID int, cookie string) (*driver.File, error)) {
+	c.getFileInfo = fn
 }
 
 func (c *DirectLinkController) SetGetDefaultUA(fn func() string) {
@@ -223,6 +230,14 @@ func (c *DirectLinkController) handleTransferAndRedirect(ctx *gin.Context, cloud
 			// 缓存新的pickcode（30分钟）
 			if newPickCode != "" {
 				c.redisSet(transferCacheKey, newPickCode, 1800)
+				if c.getFileInfo != nil && c.redisSet != nil {
+					if sourceFile, infoErr := c.getFileInfo(pickcode, cloud115.ID, cloud115.Cookie); infoErr == nil && sourceFile != nil && strings.TrimSpace(sourceFile.Sha1) != "" {
+						sha1Key := "easy_strm:sha1:cache:" + strings.ToLower(strings.TrimSpace(sourceFile.Sha1))
+						if cacheErr := c.redisSet(sha1Key, newPickCode, 7*24*60*60); cacheErr != nil {
+							logger.Warnf("DirectLinkController[handleTransfer] 写入SHA1缓存失败: %v", cacheErr)
+						}
+					}
+				}
 			}
 		}
 

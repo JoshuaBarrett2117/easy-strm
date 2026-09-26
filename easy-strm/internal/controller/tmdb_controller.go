@@ -228,23 +228,11 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 	// 设置过期时间（7天后）
 	cache.ExpireAt = time.Now().Add(7 * 24 * time.Hour)
 
-	// 检查是否已存在缓存
-	existing, _ := c.cacheDAO.GetByQueryKey(cacheKey, req.TmdbType)
-	if existing != nil {
-		// 更新逻辑
-		cache.ID = existing.ID
-		if err := c.cacheDAO.Update(cache); err != nil {
-			logger.Errorf("TmdbController[Identify] 更新缓存失败: %v", err)
-			ErrorResp(ctx, http.StatusInternalServerError, "更新识别结果失败")
-			return
-		}
-	} else {
-		// 保存到数据库
-		if err := c.cacheDAO.Create(cache); err != nil {
-			logger.Errorf("TmdbController[Identify] 保存缓存失败: %v", err)
-			ErrorResp(ctx, http.StatusInternalServerError, "保存识别结果失败")
-			return
-		}
+	// 原子保存，避免过期缓存或并发识别触发唯一键冲突。
+	if err := c.cacheDAO.Create(cache); err != nil {
+		logger.Errorf("TmdbController[Identify] 保存缓存失败: %v", err)
+		ErrorResp(ctx, http.StatusInternalServerError, "保存识别结果失败")
+		return
 	}
 
 	logger.Infof("TmdbController[Identify] 识别完成: file_id=%s, tmdb_id=%d", req.FileID, req.TmdbID)

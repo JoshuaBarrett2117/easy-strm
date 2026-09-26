@@ -115,6 +115,9 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 	directLinkController.SetRedisSet(func(key string, value string, expirationSec int) error {
 		return redisClient.Set(ctx, key, value, time.Duration(expirationSec)*time.Second).Err()
 	})
+	directLinkController.SetGetFileInfo(func(pickCode string, cloud115ID int, cookie string) (*driver.File, error) {
+		return client.GetFileInfo(pickCode, cloud115ID, cookie)
+	})
 	directLinkController.SetGetDefaultUA(func() string {
 		return driver.UA115Disk
 	})

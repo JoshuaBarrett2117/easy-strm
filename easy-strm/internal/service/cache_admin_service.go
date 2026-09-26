@@ -18,6 +18,9 @@ type CacheGroupOverview struct {
 	Storage     string `json:"storage"`
 	Description string `json:"description"`
 	Count       int64  `json:"count"`
+	Status      string `json:"status"`
+	StatusText  string `json:"status_text"`
+	TTLText     string `json:"ttl_text,omitempty"`
 }
 
 // CacheOverview 表示缓存总览信息。
@@ -36,6 +39,8 @@ type cacheGroupDefinition struct {
 	DBTable       string
 	DBWhere       string
 	RedisPatterns []string
+	TTLText       string
+	Enabled       bool
 }
 
 // CacheAdminService 提供缓存管理能力。
@@ -75,6 +80,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 				"easy_strm:tmdb:detail:*",
 				"easy_strm:share:work:*",
 			},
+			Enabled: true,
 		},
 		{
 			Key:           "identify_cache",
@@ -83,6 +89,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Description:   "保存文件识别结果，覆盖整理链路里的快速回填。",
 			DBTable:       "t_identify_cache",
 			RedisPatterns: []string{"identify:cache:*"},
+			Enabled:       true,
 		},
 		{
 			Key:         "media_file_cache",
@@ -93,6 +100,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			RedisPatterns: []string{
 				"easy_strm:media_file:cache:*",
 			},
+			Enabled: true,
 		},
 		{
 			Key:           "account_quota_cache",
@@ -100,6 +108,8 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存115账号已用容量与总容量，五分钟内优先复用。",
 			RedisPatterns: []string{"easy_strm:dashboard:account_quota:*"},
+			TTLText:       "5 分钟",
+			Enabled:       true,
 		},
 		{
 			Key:           "task_cache",
@@ -107,6 +117,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存任务状态、取消标记和恢复进度。",
 			RedisPatterns: []string{"easy_strm:task:*"},
+			Enabled:       true,
 		},
 		{
 			Key:           "pickcode_cache",
@@ -114,6 +125,8 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存路径到 PickCode 的映射，减少 115 查询。",
 			RedisPatterns: []string{"easy_strm:pickcode:*"},
+			TTLText:       "24 小时",
+			Enabled:       true,
 		},
 		{
 			Key:           "transfer_pickcode_cache",
@@ -121,6 +134,8 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存转存链路使用的 PickCode，减少重复探测。",
 			RedisPatterns: []string{"easy_strm:transfer_pickcode:*"},
+			TTLText:       "30 分钟",
+			Enabled:       true,
 		},
 		{
 			Key:           "sha1_cache",
@@ -128,6 +143,8 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存 SHA1 到云端目录映射，提升秒传判断速度。",
 			RedisPatterns: []string{"easy_strm:sha1:cache:*"},
+			TTLText:       "7 天",
+			Enabled:       true,
 		},
 	}
 }
@@ -160,16 +177,33 @@ func (s *CacheAdminService) GetOverview() (*CacheOverview, error) {
 		if err != nil {
 			return nil, err
 		}
+		status, statusText := cacheGroupStatus(group, count, overview.RedisConnected)
 		overview.Groups = append(overview.Groups, CacheGroupOverview{
 			Key:         group.Key,
 			Name:        group.Name,
 			Storage:     group.Storage,
 			Description: group.Description,
 			Count:       count,
+			Status:      status,
+			StatusText:  statusText,
+			TTLText:     group.TTLText,
 		})
 	}
 
 	return overview, nil
+}
+
+func cacheGroupStatus(group cacheGroupDefinition, count int64, redisConnected bool) (string, string) {
+	if !group.Enabled {
+		return "disabled", "未启用"
+	}
+	if count > 0 {
+		return "active", "已启用"
+	}
+	if (group.Storage == "redis" || group.Storage == "mixed") && !redisConnected {
+		return "unavailable", "Redis 不可用"
+	}
+	return "empty", "暂无有效缓存"
 }
 
 // ClearGroup 清理指定缓存分组。

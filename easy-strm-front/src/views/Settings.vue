@@ -7,6 +7,12 @@
           <n-form :model="form" label-placement="top" class="max-w-2xl">
             <h3 class="mb-3 text-sm font-bold text-slate-800 dark:text-white">日志配置</h3>
 
+            <h3 class="mb-3 mt-6 text-sm font-bold text-slate-800 dark:text-white">分享任务</h3>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <n-form-item label="同步 worker 数"><n-input-number v-model:value="form.share_sync_workers" :min="1" :max="16" :step="1" /></n-form-item>
+              <n-form-item label="识别 worker 数"><n-input-number v-model:value="form.share_identify_workers" :min="1" :max="16" :step="1" /></n-form-item>
+            </div>
+
             <n-form-item label="日志保留天数">
               <div class="w-full">
                 <n-input-number
@@ -875,6 +881,8 @@ const fetchSettings = async () => {
     const data = response.data.data || {}
     form.value = {
       log_save_day_limit: parseInt(data.log_save_day_limit, 10) || 1,
+      share_sync_workers: parseInt(data.share_sync_workers, 10) || 3,
+      share_identify_workers: parseInt(data.share_identify_workers, 10) || 3,
       proxy_url: data.proxy_url || '',
       proxy_domains: data.proxy_domains || '',
       scrape_enabled_on_organize: !(
@@ -908,6 +916,8 @@ const fetchSettings = async () => {
     if (error.response?.status === 404) {
       form.value = {
         log_save_day_limit: 1,
+        share_sync_workers: 3,
+        share_identify_workers: 3,
         proxy_url: '',
         proxy_domains: '',
         scrape_enabled_on_organize: true,
@@ -944,6 +954,8 @@ const handleSubmit = async () => {
   try {
     const settings = {
       log_save_day_limit: String(form.value.log_save_day_limit),
+      share_sync_workers: String(form.value.share_sync_workers),
+      share_identify_workers: String(form.value.share_identify_workers),
       proxy_url: form.value.proxy_url,
       proxy_domains: form.value.proxy_domains,
       scrape_enabled_on_organize: form.value.scrape_enabled_on_organize

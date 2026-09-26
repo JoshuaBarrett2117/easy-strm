@@ -65,6 +65,22 @@ func TestCacheAdminServiceIncludesAccountQuotaCache(t *testing.T) {
 	t.Fatal("缓存管理缺少账号容量缓存分组")
 }
 
+func TestCacheGroupStatusDistinguishesEmptyAndUnavailable(t *testing.T) {
+	group := cacheGroupDefinition{Storage: "redis", Enabled: true}
+	status, text := cacheGroupStatus(group, 0, false)
+	if status != "unavailable" || text != "Redis 不可用" {
+		t.Fatalf("Redis未连接状态错误: status=%s text=%s", status, text)
+	}
+	status, text = cacheGroupStatus(group, 0, true)
+	if status != "empty" || text != "暂无有效缓存" {
+		t.Fatalf("空缓存状态错误: status=%s text=%s", status, text)
+	}
+	status, text = cacheGroupStatus(group, 2, false)
+	if status != "active" || text != "已启用" {
+		t.Fatalf("有缓存状态错误: status=%s text=%s", status, text)
+	}
+}
+
 func TestCacheAdminServiceClearGroupDeletesDatabaseRows(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()

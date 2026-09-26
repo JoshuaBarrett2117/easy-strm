@@ -243,6 +243,9 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
+	taskController.SetRetryShareSyncTask(func(taskID string, task map[string]interface{}) (string, error) {
+		return shareRecordService.RetryBatchSyncTask(taskID, task)
+	})
 	telegramBotService.SetRetryTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})

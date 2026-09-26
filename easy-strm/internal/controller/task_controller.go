@@ -14,6 +14,7 @@ type TaskController struct {
 	taskService           *service.TaskService
 	getAllTasks           func() (interface{}, error)
 	retryAutoOrganizeTask func(taskID string) error
+	retryShareSyncTask    func(taskID string, task map[string]interface{}) (string, error)
 }
 
 // SetRetryStrmTask 注入可恢复的 STRM 执行入口。
@@ -33,6 +34,11 @@ func (c *TaskController) SetGetAllTasks(fn func() (interface{}, error)) {
 
 func (c *TaskController) SetRetryAutoOrganizeTask(fn func(taskID string) error) {
 	c.retryAutoOrganizeTask = fn
+}
+
+// SetRetryShareSyncTask 注入分享同步任务的重新派发入口。
+func (c *TaskController) SetRetryShareSyncTask(fn func(string, map[string]interface{}) (string, error)) {
+	c.retryShareSyncTask = fn
 }
 
 func (c *TaskController) GetAll(ctx *gin.Context) {
@@ -169,6 +175,15 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 			"message": "任务已重试执行",
 			"task_id": taskID,
 		})
+		return
+	}
+	if taskType == "share_sync" && c.retryShareSyncTask != nil {
+		newTaskID, err := c.retryShareSyncTask(taskID, task)
+		if err != nil {
+			ErrorResp(ctx, http.StatusBadRequest, err.Error())
+			return
+		}
+		SuccessResp(ctx, gin.H{"message": "任务已继续执行", "task_id": newTaskID, "source_task_id": taskID})
 		return
 	}
 

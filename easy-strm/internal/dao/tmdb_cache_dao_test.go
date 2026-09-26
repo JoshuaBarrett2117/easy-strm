@@ -2,12 +2,54 @@ package dao
 
 import (
 	"encoding/json"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestTmdbCacheDAOCreateReplacesConflictingCache(t *testing.T) {
+	mock, cleanup := setupMockDB(t)
+	defer cleanup()
+
+	// 过期记录仍占用唯一键；同一键连续保存必须由数据库原子覆盖。
+	query := `(?s)INSERT INTO t_tmdb_cache .*ON CONFLICT \(query_key, media_type\) DO UPDATE SET .*tmdb_id = EXCLUDED.tmdb_id,.*title = EXCLUDED.title,.*original_title = EXCLUDED.original_title,.*year = EXCLUDED.year,.*poster_path = EXCLUDED.poster_path,.*overview = EXCLUDED.overview,.*vote_average = EXCLUDED.vote_average,.*release_date = EXCLUDED.release_date,.*first_air_date = EXCLUDED.first_air_date,.*season_number = EXCLUDED.season_number,.*episode_number = EXCLUDED.episode_number,.*raw_data = EXCLUDED.raw_data,.*expire_at = EXCLUDED.expire_at,.*update_time = NOW\(\).*RETURNING id, create_time, update_time`
+	created := time.Now().Add(-8 * 24 * time.Hour)
+	for _, title := range []string{"首次选择", "再次修正"} {
+		now := time.Now()
+		cache := &TmdbCache{QueryKey: "metatube:file-1", MediaType: "movie", TmdbID: 123,
+			Title: title, OriginalTitle: "original", Year: 2026, PosterPath: "https://example.com/poster.jpg",
+			Overview: "overview", VoteAverage: 8, ReleaseDate: "2026-07-10",
+			RawData: json.RawMessage(`{"metadata_source":"metatube","metadata_id":"DSOD-028"}`), ExpireAt: now.Add(7 * 24 * time.Hour)}
+		mock.ExpectQuery(query).WithArgs(cache.QueryKey, cache.MediaType, cache.TmdbID, title,
+			cache.OriginalTitle, cache.Year, cache.PosterPath, cache.Overview, cache.VoteAverage,
+			cache.ReleaseDate, nil, nil, nil, cache.RawData, cache.ExpireAt).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "create_time", "update_time"}).AddRow(42, created, now))
+		if err := NewTmdbCacheDAO().Create(cache); err != nil {
+			t.Fatalf("save conflicting cache: %v", err)
+		}
+		if cache.ID != 42 || !cache.CreateTime.Equal(created) || !cache.UpdateTime.Equal(now) {
+			t.Fatalf("unexpected persisted identity/timestamps: %+v", cache)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTmdbCacheDAOCreateReturnsDatabaseError(t *testing.T) {
+	mock, cleanup := setupMockDB(t)
+	defer cleanup()
+	mock.ExpectQuery("INSERT INTO t_tmdb_cache").WillReturnError(errors.New("database unavailable"))
+	if err := NewTmdbCacheDAO().Create(&TmdbCache{}); err == nil {
+		t.Fatal("expected database failure to propagate")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestTmdbCacheDAOGetByTmdbID(t *testing.T) {
 	mock, cleanup := setupMockDB(t)

@@ -13,6 +13,27 @@ import (
 	"easy-strm/internal/domain"
 )
 
+func TestBrowseTitlesIncludeProviderCacheAndDirectories(t *testing.T) {
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{"id", "query_key", "media_type", "tmdb_id", "title", "original_title", "year", "poster_path", "overview", "vote_average", "release_date", "first_air_date", "season_number", "episode_number", "raw_data", "expire_at", "create_time", "update_time"})
+	rows.AddRow(1, "metatube:123", "movie", 123, "已识别目录", "original", 2026, nil, nil, nil, nil, nil, nil, nil, nil, now.Add(time.Hour), now, now)
+	rows.AddRow(2, "tmdb:movie.mkv", "movie", 456, "已识别文件", "original", 2026, nil, nil, nil, nil, nil, nil, nil, nil, now.Add(time.Hour), now, now)
+	rows.AddRow(3, "123", "movie", 789, "旧识别结果", "original", 2025, nil, nil, nil, nil, nil, nil, nil, nil, now.Add(time.Hour), now, now.Add(-time.Hour))
+	rows.AddRow(4, "metatube:dsod-028-c", "movie", 999, "同名缓存不应覆盖文件身份", "original", 2026, nil, nil, nil, nil, nil, nil, nil, nil, now.Add(time.Hour), now, now.Add(time.Minute))
+	mock.ExpectQuery(`SELECT .* FROM t_tmdb_cache\s+WHERE query_key IN`).WithArgs("123", "tmdb:123", "metatube:123", "DSOD-028-C", "dsod-028-c", "tmdb:dsod-028-c", "metatube:dsod-028-c", "Movie.mkv", "movie.mkv", "tmdb:movie.mkv", "metatube:movie.mkv", "Movie.mkv", "movie.mkv", "tmdb:movie.mkv", "metatube:movie.mkv").WillReturnRows(rows)
+	files := []domain.MediaFile{{ID: "123", Name: "DSOD-028-C", IsDirectory: true}, {ID: "Movie.mkv", Name: "Movie.mkv"}}
+	svc := NewMediaSourceService(nil, nil)
+	svc.FillFileTmdbTitles(files)
+	if files[0].TmdbTitle != "已识别目录" || files[1].TmdbTitle != "已识别文件" {
+		t.Fatalf("provider cache missing from browse results: %+v", files)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMediaSourceServiceGetFilesPagination(t *testing.T) {
 	mock, cleanup := setupServiceMockDB(t)
 	defer cleanup()
