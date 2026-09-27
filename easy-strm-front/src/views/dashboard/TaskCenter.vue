@@ -69,11 +69,11 @@
                 <n-descriptions-item label="任务ID">{{ taskDetailData.task_id || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="任务名称">{{ taskDetailData.task_name || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="任务类型">{{ taskDetailData.task_type || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="状态">{{ taskDetailData.status || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="状态">{{ taskDetailStatus === 'partial_success' ? '部分成功' : taskDetailStatus || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="创建时间">{{ taskDetailData.create_time || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="更新时间">{{ taskDetailData.update_time || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="进度">
-                  <n-progress type="line" :percentage="taskDetailProgress" :status="taskDetailData.status === 'failed' ? 'error' : taskDetailData.status === 'completed' ? 'success' : taskDetailData.status === 'cancelled' ? 'warning' : 'default'">{{ taskDetailProgress }}%</n-progress>
+                  <n-progress type="line" :percentage="taskDetailProgress" :status="taskDetailStatus === 'partial_success' ? 'warning' : taskDetailStatus === 'failed' ? 'error' : ['completed', 'success'].includes(taskDetailStatus) ? 'success' : taskDetailStatus === 'cancelled' ? 'warning' : 'default'">{{ taskDetailProgress }}%</n-progress>
                   <span>已处理 {{ taskDetailData.processed_files || 0 }} / {{ taskDetailData.total_files || 0 }}</span>
                 </n-descriptions-item>
                 <n-descriptions-item label="文件统计">
@@ -196,6 +196,7 @@ const autoRefresh = ref(true)
 const taskDetailVisible = ref(false)
 const taskDetailLoading = ref(false)
 const taskDetailData = ref(null)
+const taskDetailStatus = computed(() => taskDetailData.value?.display_status || taskDetailData.value?.status)
 const taskDetailProgress = computed(() => taskDetailData.value?.status === 'completed' ? 100 : Math.min(100, Math.max(0, Number(taskDetailData.value?.progress) || 0)))
 const taskDetailError = ref('')
 const activeTaskId = ref('')
@@ -213,7 +214,7 @@ const drawerWidth = computed(() => {
 
 const taskCounts = computed(() => {
   return taskList.value.reduce((acc, item) => {
-    const key = item.status || 'other'
+    const key = item.display_status || item.status || 'other'
     acc[key] = (acc[key] || 0) + 1
     if (key === 'success' || key === 'partial_success') acc.completed += 1
     return acc
@@ -247,7 +248,7 @@ const filteredTaskList = computed(() => taskList.value.filter(task => {
   const filter = filters.value
   if (filter.serverId && Number(task.metadata?.server_id) !== Number(filter.serverId)) return false
   if (filter.taskType && task.task_type !== filter.taskType) return false
-  if (filter.status && task.status !== filter.status) return false
+  if (filter.status && (task.display_status || task.status) !== filter.status) return false
   if (filter.origin && task.metadata?.origin !== filter.origin) return false
   if (Array.isArray(filter.timeRange) && filter.timeRange.length === 2) {
     const timestamp = Date.parse(String(task.create_time || '').replace(' ', 'T'))

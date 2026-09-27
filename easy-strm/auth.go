@@ -1022,6 +1022,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.DELETE("/media/share-records/:id", shareRecordController.Delete)
 		auth.GET("/media/share-records/:id/media", shareRecordController.ListMedia)
 		auth.GET("/media/share-records/:id/files", shareRecordController.ListFiles)
+		auth.GET("/media/share-review", shareRecordController.ListReviewItems)
 		auth.DELETE("/media/share-records/:id/media", shareRecordController.ClearMedia)
 		auth.POST("/media/share-records/:id/media", shareRecordController.AddMedia)
 		auth.POST("/media/share-records/:id/identify", shareRecordController.IdentifyRecord)

@@ -48,6 +48,7 @@ func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
 	if err != nil || task == nil {
 		return task, err
 	}
+	task["display_status"] = taskDisplayStatus(task)
 	return task, nil
 }
 
@@ -116,6 +117,9 @@ func (s *TaskService) GetUnified() ([]map[string]interface{}, error) {
 	tasks, err := s.taskRedisDAO.GetUnified()
 	if err != nil {
 		return nil, err
+	}
+	for _, task := range tasks {
+		task["display_status"] = taskDisplayStatus(task)
 	}
 	return tasks, nil
 }

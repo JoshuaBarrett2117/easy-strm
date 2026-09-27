@@ -77,6 +77,7 @@ export const resetFilenameRecognitionRules = () => api.post('/media/tmdb/filenam
 // 批量识别文件
 export const batchIdentifyTmdb = (data) => api.post('/media/tmdb/batch-identify', data)
 export const getShareRecords = (params) => api.get('/media/share-records', { params })
+export const getShareReviewItems = (params) => api.get('/media/share-review', { params })
 // 任务总时限配置，0代表无限制。
 export const getShareTaskSettings = () => api.get('/media/share-task-settings')
 export const saveShareTaskSettings = data => api.put('/media/share-task-settings', data)

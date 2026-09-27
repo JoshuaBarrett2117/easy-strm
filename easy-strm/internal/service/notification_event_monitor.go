@@ -237,6 +237,9 @@ func buildTaskEventCard(task map[string]interface{}, event string) NotificationC
 	}
 	card := buildTaskCard(task, true)
 	titlePrefix := map[string]string{"completed": "任务已完成 · ", "failed": "任务已失败 · ", "cancelled": "任务已取消 · "}[event]
+	if taskDisplayStatus(task) == "partial_success" {
+		titlePrefix = "任务部分成功 · "
+	}
 	card.Title = titlePrefix + card.Title
 	return card
 }

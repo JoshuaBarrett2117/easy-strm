@@ -244,7 +244,7 @@ func (s *WeComCallbackService) buildTasksCard() (NotificationCard, error) {
 		if name == "" || name == "<nil>" {
 			name = notificationTaskTypeName(fmt.Sprint(task["task_type"]))
 		}
-		fields = append(fields, [2]string{name, notificationTaskStatusName(fmt.Sprint(task["status"]))})
+		fields = append(fields, [2]string{name, notificationTaskStatusName(taskDisplayStatus(task))})
 	}
 	return NotificationCard{Title: "最近任务", Status: "📋", Fields: fields}, nil
 }
@@ -266,7 +266,7 @@ func notificationTaskStatusName(status string) string {
 	case "completed", "success":
 		return "成功"
 	case "partial_failed", "partial_success":
-		return "⚠️ 部分失败"
+		return "⚠️ 部分成功"
 	case "failed", "unknown":
 		return "失败"
 	case "cancelled", "canceled":

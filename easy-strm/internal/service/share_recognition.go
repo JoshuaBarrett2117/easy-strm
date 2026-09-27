@@ -27,13 +27,17 @@ var (
 
 // ShareMediaQuery 是原始路径派生的临时查询，绝不修改文件名或网盘数据。
 type ShareMediaQuery struct {
-	YearFromDirectory bool     `json:"year_from_directory"`
-	TmdbID            int      `json:"tmdb_id"`
-	Titles            []string `json:"titles"`
-	Year              int      `json:"year"`
-	MediaType         string   `json:"media_type"`
-	Complex           bool     `json:"complex"`
-	Container         bool     `json:"container"`
+	Season            int                       `json:"season,omitempty"`
+	YearFromDirectory bool                      `json:"year_from_directory"`
+	YearSource        string                    `json:"year_source,omitempty"`
+	SeasonYear        int                       `json:"season_year,omitempty"`
+	TmdbID            int                       `json:"tmdb_id"`
+	Titles            []string                  `json:"titles"`
+	Year              int                       `json:"year"`
+	MediaType         string                    `json:"media_type"`
+	Complex           bool                      `json:"complex"`
+	Container         bool                      `json:"container"`
+	Evidence          *shareRecognitionEvidence `json:"-"`
 }
 
 func shareContainerName(name string) bool {
@@ -45,22 +49,17 @@ func shareContainerName(name string) bool {
 func cleanShareTitles(name string) ([]string, int) {
 	name = shareIDRE.ReplaceAllString(name, "")
 	name = strings.ReplaceAll(name, "_", " ")
-	name = shareIndexRE.ReplaceAllString(name, "")
-	year := 0
-	yearRE := shareYearRE
-	if shareParentYearRE.MatchString(name) {
-		yearRE = shareParentYearRE
+	if !regexp.MustCompile(`^(?:19|20)[0-9]{2}[.]`).MatchString(name) {
+		name = shareIndexRE.ReplaceAllString(name, "")
 	}
-	if m := yearRE.FindStringSubmatch(name); m != nil {
-		fmt.Sscanf(m[1], "%d", &year)
-	}
+	year, _ := shareTitleYear(name)
 	titles := []string{}
 	add := func(value string) {
 		value = shareSeasonRE.ReplaceAllString(value, " ")
 		value = shareDiscRE.ReplaceAllString(value, " ")
 		value = strings.NewReplacer(".", " ", "_", " ").Replace(value)
-		if idx := yearRE.FindStringIndex(value); idx != nil {
-			value = value[:idx[0]]
+		if _, index := shareTitleYear(value); index >= 0 {
+			value = value[:index]
 		}
 		value = strings.Trim(value, " .-[]【】()（）:：")
 		value = shareEditionRE.ReplaceAllString(value, "")
@@ -75,11 +74,11 @@ func cleanShareTitles(name string) ([]string, int) {
 		if value == "" {
 			value = m[2]
 		}
-		if shareReleaseRE.MatchString(value) || strings.Contains(value, "GB") || strings.Contains(value, "TB") || strings.HasPrefix(value, "@") || !strings.ContainsFunc(value, unicode.IsLetter) {
+		if shareReleaseRE.MatchString(value) || shareNoiseTitle(value) || strings.Contains(value, "GB") || strings.Contains(value, "TB") || strings.HasPrefix(value, "@") || !strings.ContainsFunc(value, unicode.IsLetter) {
 			continue
 		}
-		if i := yearRE.FindStringIndex(value); i != nil {
-			value = value[:i[0]]
+		if _, index := shareTitleYear(value); index >= 0 {
+			value = value[:index]
 		}
 		add(value)
 		for i, r := range value {
@@ -99,8 +98,8 @@ func cleanShareTitles(name string) ([]string, int) {
 	if strings.HasPrefix(body, "[") || strings.HasPrefix(body, "【") {
 		body = shareBracketRE.ReplaceAllString(body, " ")
 	}
-	if idx := yearRE.FindStringIndex(body); idx != nil {
-		body = body[:idx[0]]
+	if _, index := shareTitleYear(body); index >= 0 {
+		body = body[:index]
 	}
 	if idx := shareSeriesRE.FindStringIndex(body); idx != nil {
 		body = body[:idx[0]]
@@ -146,11 +145,11 @@ func AnalyzeShareFilename(filename string) ShareMediaQuery {
 		q.TmdbID, _ = strconv.Atoi(m[1])
 	}
 	q.Titles, q.Year = cleanShareTitles(name)
+	fileYear := q.Year
 	if title, _, _, ok := parseRomanSeasonEpisode(name); ok {
 		q.Titles, q.Year = cleanShareTitles(title)
 		q.MediaType = "tv"
 	}
-	fileYear := q.Year
 	for i := len(segments) - 1; i >= 0 && i >= len(segments)-3; i-- {
 		if shareSeriesRE.MatchString(segments[i]) {
 			q.MediaType = "tv"
@@ -167,11 +166,33 @@ func AnalyzeShareFilename(filename string) ShareMediaQuery {
 				q.Titles = titles
 				if year > 0 {
 					q.Year = year
-					q.YearFromDirectory = fileYear == 0 || fileYear != year
+					q.YearFromDirectory = true
+					q.YearSource = "season_directory"
+					if fileYear > 0 && fileYear != year {
+						q.SeasonYear = fileYear
+					}
 				}
 				break
 			}
 		}
+	}
+	// 季目录年份可能只是该季首播年份；向上查找带年份的作品目录作为整剧年份。
+	if q.MediaType == "tv" && q.YearSource == "season_directory" {
+		for i := len(segments) - 3; i >= 0; i-- {
+			titles, year := cleanShareTitles(segments[i])
+			if year > 0 && len(titles) > 0 && len(q.Titles) > 0 && canonicalShareTitle(titles[0]) == canonicalShareTitle(q.Titles[0]) {
+				if year != q.Year {
+					q.SeasonYear = q.Year
+					q.Year = year
+				}
+				q.YearFromDirectory = true
+				q.YearSource = "work_directory"
+				break
+			}
+		}
+	}
+	if q.Year > 0 && q.YearSource == "" {
+		q.YearSource = "filename"
 	}
 	return q
 }
@@ -184,33 +205,7 @@ func canonicalShareTitle(title string) string {
 }
 
 func selectVerifiedShareCandidate(q ShareMediaQuery, candidates []domain.TmdbSearchResult) *domain.TmdbSearchResult {
-	var best *domain.TmdbSearchResult
-	for i := range candidates {
-		candidate := &candidates[i]
-		if q.MediaType != "unknown" && candidate.MediaType != q.MediaType {
-			continue
-		}
-		// 年份差异过大意味着同名重拍片，不能直接接受搜索首项。
-		if q.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
-			continue
-		}
-		match := false
-		for _, title := range q.Titles {
-			normalized := canonicalShareTitle(title)
-			if normalized != "" && (normalized == canonicalShareTitle(candidate.Title) || normalized == canonicalShareTitle(candidate.OriginalTitle)) {
-				match = true
-				break
-			}
-		}
-		if !match {
-			continue
-		}
-		if best != nil && (best.TmdbID != candidate.TmdbID || best.MediaType != candidate.MediaType || best.MetadataID != candidate.MetadataID || best.MetadataSource != candidate.MetadataSource || best.MetadataProvider != candidate.MetadataProvider) {
-			return nil
-		}
-		best = candidate
-	}
-	return best
+	return selectShareEvidenceCandidate(q, candidates, nil)
 }
 
 func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, source string) (*domain.TmdbSearchResult, error) {
@@ -246,21 +241,30 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 			}
 			var found []domain.TmdbSearchResult
 			var err error
+			searchYear := q.Year
+			if shareYearSearchExpanded(ctx) {
+				searchYear = 0
+			}
 			if kind == "tv" {
-				found, err = s.searchTVContext(ctx, title, q.Year)
+				found, err = s.searchTVContext(ctx, title, searchYear)
 			} else if source == domain.MetadataSourceTMDB {
-				found, err = s.searchMovieTMDBContext(ctx, title, q.Year)
+				found, err = s.searchMovieTMDBContext(ctx, title, searchYear)
 			} else {
 				if !s.adultContentEnabled || !s.MetaTubeEnabled() {
 					return nil, fmt.Errorf("成人内容识别或MetaTube未启用")
 				}
-				found, err = s.searchMetaTubeContext(ctx, title, q.Year)
+				found, err = s.searchMetaTubeContext(ctx, title, searchYear)
 			}
 			if err != nil {
 				return nil, err
 			}
 			for i := range found {
 				found[i].MediaType = kind
+			}
+			localQuery := q
+			localQuery.Titles = []string{title}
+			if best := selectVerifiedShareCandidate(localQuery, found); best != nil && q.SeasonYear == 0 && q.MediaType != "unknown" && q.MediaType != "" {
+				return best, nil
 			}
 			for _, candidate := range found {
 				key := fmt.Sprintf("%s:%s:%s:%s:%d:%d:%s:%s", candidate.MetadataSource, candidate.MetadataProvider, candidate.MetadataID, candidate.MediaType, candidate.TmdbID, candidate.Year, candidate.Title, candidate.OriginalTitle)
@@ -269,46 +273,61 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 					candidates = append(candidates, candidate)
 				}
 			}
-			// 已发现两个严格匹配身份时，追加搜索无法恢复唯一性。
-			if ambiguousShareCandidates(q, candidates) {
-				return nil, nil
-			}
+
 		}
 	}
-	if best := selectVerifiedShareCandidate(q, candidates); best != nil {
+	if q.Evidence != nil {
+		q.Evidence.record(q, candidates)
+	}
+	// 不因宽泛英文名引入的同名条目而丢弃同时匹配中文名和原名的候选。
+	if best := selectVerifiedShareCandidate(q, candidates); best != nil && q.SeasonYear == 0 {
 		return best, nil
 	}
-	// 仅在普通标题核验失败时检查TMDB官方别名，保持年份和唯一性要求。
-	verified := []domain.TmdbSearchResult{}
-	seen := map[string]bool{}
+	if best, err := s.selectShareSeasonCandidate(ctx, q, candidates, nil); err != nil || best != nil {
+		return best, err
+	}
+	// 已有多个完整同名匹配时保留歧义，不靠额外别名请求猜测身份。
+	directMatches := map[string]bool{}
 	for _, candidate := range candidates {
-		key := fmt.Sprintf("%s:%d", candidate.MediaType, candidate.TmdbID)
-		if candidate.MetadataSource == domain.MetadataSourceMetaTube || candidate.MetadataProvider != "" || candidate.TmdbID <= 0 || seen[key] {
+		if shareCandidateYearMatches(q, candidate) && shareCandidateTitleScore(q, candidate, nil) > 0 {
+			directMatches[shareCandidateIdentity(candidate)] = true
+		}
+	}
+	if len(directMatches) > 1 {
+		if q.Evidence != nil {
+			q.Evidence.recordMatches(q, candidates, nil)
+		}
+		return nil, nil
+	}
+	aliases := map[string][]string{}
+	for _, candidate := range candidates {
+		if candidate.MetadataSource == domain.MetadataSourceMetaTube || candidate.MetadataProvider != "" || candidate.TmdbID <= 0 || !shareCandidateYearMatches(q, candidate) {
 			continue
 		}
-		seen[key] = true
-		if q.Year > 0 && (candidate.Year < q.Year-1 || candidate.Year > q.Year+1) {
+		key := shareCandidateIdentity(candidate)
+		if _, exists := aliases[key]; exists {
 			continue
 		}
-		aliases, err := s.shareAliases(ctx, candidate.MediaType, candidate.TmdbID)
+		names, err := s.shareAliases(ctx, candidate.MediaType, candidate.TmdbID)
 		if err != nil {
 			return nil, err
 		}
-		for _, alias := range aliases {
-			match := candidate
-			match.Title = alias
-			if selectVerifiedShareCandidate(q, []domain.TmdbSearchResult{match}) != nil {
-				verified = append(verified, candidate)
-				if len(verified) > 1 {
-					return nil, nil
-				}
-				break
-			}
-		}
+		aliases[key] = names
 	}
-	if len(verified) == 1 {
-		return &verified[0], nil
+	if best := selectShareEvidenceCandidate(q, candidates, aliases); best != nil && q.SeasonYear == 0 {
+		return best, nil
 	}
+	if best, err := s.selectShareSeasonCandidate(ctx, q, candidates, aliases); err != nil || best != nil {
+		return best, err
+	}
+	if q.Evidence != nil {
+		q.Evidence.recordMatches(q, candidates, aliases)
+	}
+	// 电影年份过滤可能漏掉跨地区上映条目；无年份重查仍保留原年份核验约束。
+	if q.Year > 0 && q.MediaType != "tv" && !shareYearSearchExpanded(ctx) {
+		return s.searchShareQuery(context.WithValue(ctx, shareExpandedYearKey{}, true), q, source)
+	}
+
 	// 目录年份可能为整理年份或旧首播日期；只在唯一完整标题匹配时允许去掉该提示重查。
 	if q.YearFromDirectory && q.Year > 0 && q.MediaType == "tv" {
 		fallback := q
@@ -327,6 +346,15 @@ func (s *TmdbService) searchShareQuery(ctx context.Context, q ShareMediaQuery, s
 				found[i].MediaType = "tv"
 			}
 			matches = append(matches, found...)
+		}
+		if q.Evidence != nil {
+			q.Evidence.record(q, matches)
+		}
+		if best, err := s.selectShareSeasonCandidate(ctx, q, matches, nil); err != nil || best != nil {
+			return best, err
+		}
+		if q.SeasonYear > 0 {
+			return nil, nil
 		}
 		return selectVerifiedShareCandidate(fallback, matches), nil
 	}
@@ -348,6 +376,7 @@ func (s *TmdbService) IdentifyShareFile(ctx context.Context, filename, source, f
 
 func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filename, source, forcedType string) (*domain.TmdbIdentifyResult, error) {
 	q := s.analyzeShareQuery(filename, forcedType)
+	q.Evidence = &shareRecognitionEvidence{}
 	result := &domain.TmdbIdentifyResult{Filename: filename, MediaType: q.MediaType, RecognitionMethod: "rule"}
 	if q.Container {
 		result.Message = "集合目录不是单部媒体，已跳过"
@@ -413,12 +442,13 @@ func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filen
 		if hint != nil {
 			result.QueryBeforeAI = append([]string(nil), q.Titles...)
 			result.AIHint = cloneRecognitionHint(hint)
-			q.Titles = []string{}
 			q.Titles = appendImportCandidate(q.Titles, hint.Title)
 			q.Titles = appendImportCandidate(q.Titles, hint.OriginalTitle)
 			result.QueryAfterAI = append([]string(nil), q.Titles...)
-			if q.Year == 0 && hint.Year > 0 {
+			if q.SeasonYear == 0 && (q.Year == 0 || q.YearFromDirectory && q.YearSource != "work_directory" || q.YearSource == "season_directory") && hint.Year > 0 {
 				q.Year = hint.Year
+				q.YearSource = "ai"
+				q.YearFromDirectory = false
 			}
 			if q.MediaType == "unknown" && forcedType != "movie" && forcedType != "tv" {
 				q.MediaType = hint.MediaType
@@ -447,7 +477,9 @@ func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filen
 		}
 	}
 	if best == nil {
-		result.Message = "未找到可确认的媒体匹配，请手动核对" + aiMessage
+		result.MediaType = q.MediaType
+		result.Candidates = q.Evidence.candidates
+		result.Message = q.Evidence.reason() + aiMessage
 		result.AIUsed = usedAI
 		result.AIScene = aiScene
 		result.FailureReason = result.Message

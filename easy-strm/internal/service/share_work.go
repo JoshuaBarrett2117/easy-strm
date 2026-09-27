@@ -67,18 +67,35 @@ func (s *TmdbService) analyzeShareQuery(filename, forcedType string) ShareMediaQ
 	if forcedType == "tv" || forcedType == "movie" {
 		q.MediaType = forcedType
 	}
+	addShareMovieContext(&q, filename)
+	applyShareTVContext(&q, filename, parsed)
+	base := path.Base(strings.ReplaceAll(filename, "\\", "/"))
+	if q.MediaType == "tv" && shareOnlyEpisode.MatchString(strings.TrimSuffix(base, path.Ext(base))) {
+		filtered := make([]string, 0, len(q.Titles))
+		for _, title := range q.Titles {
+			if !shareNumericTitle.MatchString(title) {
+				filtered = append(filtered, title)
+			}
+		}
+		q.Titles = filtered
+	}
 	return q
 }
 
 func (s *TmdbService) shareWorkKey(ctx context.Context, filename, source, forcedType string) string {
 	q := s.analyzeShareQuery(filename, forcedType)
+	// 季目录年份只描述单季，不参与作品身份缓存键，避免同剧跨季重复检索。
+	keyYear := q.Year
+	if q.YearSource == "season_directory" {
+		keyYear = 0
+	}
 	parent := path.Dir(strings.ReplaceAll(filename, "\\", "/"))
 	// 季目录不构成作品边界，其他目录上下文仍保留，避免合集内同名作品串号。
 	if shareSeasonRE.ReplaceAllString(path.Base(parent), "") == "" {
 		parent = path.Dir(parent)
 	}
 	rules, _ := json.Marshal(s.GetFilenameRecognitionRules().Rules)
-	payload, _ := json.Marshal([]interface{}{"share-work-v1", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, q.Year, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
+	payload, _ := json.Marshal([]interface{}{"share-work-v3-tv-context", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, keyYear, q.SeasonYear, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
 	return string(payload)
 }
 
@@ -122,6 +139,30 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 	result.Filename = filename
 	parsed := s.parseFilenameForMediaType(filename, forcedType)
 	result.SeasonNumber, result.EpisodeNumber = parsed.Season, parsed.Episode
+	if result.Success && result.MediaType == "tv" && parsed.Episode > 0 {
+		q := s.analyzeShareQuery(filename, forcedType)
+		if q.TmdbID == 0 && (q.SeasonYear > 0 || shareCandidateTitleScore(q, domain.TmdbSearchResult{Title: result.Title, OriginalTitle: result.OriginalTitle}, nil) == 0) {
+			detail, err := s.shareTVDetail(ctx, result.TmdbID)
+			if err != nil {
+				return nil, err
+			}
+			candidate := domain.TmdbSearchResult{Title: result.Title, OriginalTitle: result.OriginalTitle, Year: result.Year}
+			var aliases []string
+			if shareCandidateTitleScore(q, candidate, nil) == 0 {
+				aliases, err = s.shareAliases(ctx, "tv", result.TmdbID)
+				if err != nil {
+					return nil, err
+				}
+			}
+			if mapped, ok := shareSeasonEvidence(q, candidate, detail, aliases); ok {
+				result.SeasonNumber = mapped
+			} else if q.SeasonYear > 0 {
+				result.Success = false
+				result.Message = "作品已找到，但季号和该季播出年份未通过核验，请手动核对"
+				result.FailureReason = result.Message
+			}
+		}
+	}
 	result.Quality, result.Source, result.Codec = parsed.Quality, parsed.Source, parsed.Codec
 	if result.MediaType == "tv" && parsed.Episode > 0 {
 		found := false
@@ -176,11 +217,12 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 		}
 	}
 	q := s.analyzeShareQuery(filename, forcedType)
-	logger.Infof("[ShareIdentify] 首次识别作品 | file=%q | titles=%q | media_type=%s | reason=作品身份未确认", filename, q.Titles, q.MediaType)
+	logger.Infof("[ShareIdentify] 开始作品识别 | file=%q | titles=%q | media_type=%s | year=%d | year_source=%s", filename, q.Titles, q.MediaType, q.Year, q.YearSource)
 	result, err := s.identifyShareWithAssistUncached(ctx, filename, source, forcedType)
 	if err != nil {
 		return nil, err
 	}
+	logger.Infof("[ShareIdentify] 作品识别完成 | file=%q | success=%v | title=%q | tmdb_id=%d | year=%d | year_source=%s | ai_used=%v | query_before_ai=%q | query_after_ai=%q | failure=%q", filename, result.Success, result.Title, result.TmdbID, result.Year, q.YearSource, result.AIUsed, result.QueryBeforeAI, result.QueryAfterAI, result.FailureReason)
 	value := &dao.ShareWorkIdentity{Result: result}
 	if result.Success {
 		s.enrichShareWork(ctx, value)

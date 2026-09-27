@@ -149,7 +149,11 @@ func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource
 		if !s.MetaTubeEnabled() {
 			return nil, fmt.Errorf("MetaTube 未启用或服务地址未配置")
 		}
-		return s.searchMetaTube(query, year, "movie")
+		results, err := s.searchMetaTube(query, year, "movie")
+		if len(results) > 3 {
+			results = results[:3]
+		}
+		return results, err
 	}
 
 	results, tmdbErr := s.searchMovieTMDB(query, year)
@@ -157,6 +161,9 @@ func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource
 		return nil, tmdbErr
 	}
 	if metadataSource == domain.MetadataSourceTMDB || len(results) > 0 {
+		if len(results) > 3 {
+			results = results[:3]
+		}
 		return results, nil
 	}
 
@@ -167,6 +174,9 @@ func (s *TmdbService) SearchMovieBySource(query string, year int, metadataSource
 	metaTubeResults, metaTubeErr := s.searchMetaTube(query, year, "movie")
 	if metaTubeErr != nil {
 		return nil, metaTubeErr
+	}
+	if len(metaTubeResults) > 3 {
+		metaTubeResults = metaTubeResults[:3]
 	}
 	return metaTubeResults, nil
 }
@@ -251,10 +261,10 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 		return nil, fmt.Errorf("解析 TMDB 响应失败: %v", err)
 	}
 
-	// 转换结果，最多返回 3 个
+	// 保留足够候选供标题、年份和类型核验；核验完成后再由调用方决定是否展示截断结果。
 	var results []domain.TmdbSearchResult
 	for i, movie := range result.Results {
-		if i >= 3 {
+		if i >= 20 {
 			break
 		}
 		year := 0
@@ -291,7 +301,11 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 //   - []domain.TmdbSearchResult: 搜索结果列表
 //   - error: 错误信息
 func (s *TmdbService) SearchTV(query string, year int) ([]domain.TmdbSearchResult, error) {
-	return s.searchTVContext(context.Background(), query, year)
+	results, err := s.searchTVContext(context.Background(), query, year)
+	if len(results) > 3 {
+		results = results[:3]
+	}
+	return results, err
 }
 
 func (s *TmdbService) searchTVContext(ctx context.Context, query string, year int) ([]domain.TmdbSearchResult, error) {
@@ -356,7 +370,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 	// 转换结果，最多返回 3 个
 	var results []domain.TmdbSearchResult
 	for i, tv := range result.Results {
-		if i >= 3 {
+		if i >= 20 {
 			break
 		}
 		year := 0
@@ -380,7 +394,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 		})
 	}
 
-	logger.Infof("TmdbService[SearchTV] 搜索完成: query=%s, results=%d", query, len(results))
+	logger.Infof("TmdbService[SearchTV] 搜索完成: query=%s, year=%d, results=%d", query, year, len(results))
 	s.saveSearchCache("tv", query, year, results)
 	return results, nil
 }

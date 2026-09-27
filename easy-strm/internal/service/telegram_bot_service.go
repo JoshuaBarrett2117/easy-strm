@@ -534,7 +534,8 @@ func sendTelegramCard(ctx context.Context, instance *telegram.Bot, chatID string
 }
 
 func buildTaskCard(task map[string]interface{}, detailed bool) NotificationCard {
-	status := fmt.Sprint(task["status"])
+	status := taskDisplayStatus(task)
+	rawStatus := fmt.Sprint(task["status"])
 	statusIcon := map[string]string{"completed": "✅", "success": "✅", "failed": "❌", "partial_failed": "⚠️", "partial_success": "⚠️", "unknown": "❔", "cancelled": "⏹", "running": "🔄", "pending": "⏳"}[status]
 	if statusIcon == "" {
 		statusIcon = "ℹ️"
@@ -556,7 +557,7 @@ func buildTaskCard(task map[string]interface{}, detailed bool) NotificationCard 
 	if (status == "pending" || status == "running") && len("task:cancel:"+taskID) <= 64 {
 		actions = append(actions, []NotificationAction{{Text: "取消任务", Data: "task:cancel:" + taskID}})
 	}
-	if taskType == "watch_auto_organize" && (status == "failed" || status == "cancelled") && len("task:retry:"+taskID) <= 64 {
+	if taskType == "watch_auto_organize" && (rawStatus == "failed" || rawStatus == "cancelled") && len("task:retry:"+taskID) <= 64 {
 		actions = append(actions, []NotificationAction{{Text: "重试自动整理", Data: "task:retry:" + taskID}})
 	}
 	return NotificationCard{

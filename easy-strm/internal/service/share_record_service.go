@@ -216,7 +216,7 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 		return false, s.dao.Identify(ctx, m, "failed", r, r.Message)
 	}
 	parsed := s.tmdb.ParseFilename(m.FileName)
-	if parsed.Episode == 0 && r.EpisodeNumber > 0 {
+	if r.EpisodeNumber > 0 {
 		parsed.Season, parsed.Episode = r.SeasonNumber, r.EpisodeNumber
 	}
 	episodes, episodeErr := normalizeShareEpisodes(r.MediaType, nil, parsed.Season, parsed.Episode, parsed.Episodes...)
@@ -721,6 +721,55 @@ func (s *ShareRecordService) ListMedia(ctx context.Context, id, page, size int, 
 // ListFiles 获取分享文件分页。
 func (s *ShareRecordService) ListFiles(ctx context.Context, id, page, size int) (domain.ShareMediaPage, error) {
 	return s.dao.ListFiles(ctx, id, page, size)
+}
+
+// ListReviewItems 查询手动核对队列，并统一校验筛选和分页参数。
+func (s *ShareRecordService) ListReviewItems(ctx context.Context, statuses, keyword string, shareID, mediaID, page, size int) (domain.ShareReviewPage, error) {
+	if page < 1 || page > 10000000 || shareID < 0 || mediaID < 0 || size < 1 || size > 100 {
+		return domain.ShareReviewPage{}, fmt.Errorf("分页参数无效")
+	}
+	allowed := map[string]bool{"failed": true, "pending": true}
+	parts := strings.Split(statuses, ",")
+	selected := make([]string, 0, 2)
+	seen := map[string]bool{}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[part] {
+			continue
+		}
+		if !allowed[part] {
+			return domain.ShareReviewPage{}, fmt.Errorf("核对状态无效")
+		}
+		seen[part] = true
+		selected = append(selected, part)
+	}
+	if len(selected) == 0 {
+		selected = []string{"failed", "pending"}
+	}
+	result, err := s.dao.ListReviewItems(ctx, selected, strings.TrimSpace(keyword), shareID, mediaID, page, size)
+	if err != nil {
+		return result, err
+	}
+	for i := range result.Data {
+		item := &result.Data[i]
+		if s.tmdb != nil {
+			parsed := s.tmdb.ParseFilename(item.FileName)
+			item.ParsedTitle, item.ParsedYear = parsed.Title, parsed.Year
+			if len(item.Episodes) == 0 && parsed.Episode > 0 {
+				numbers := parsed.Episodes
+				if len(numbers) == 0 {
+					numbers = []int{parsed.Episode}
+				}
+				for _, number := range numbers {
+					item.Episodes = append(item.Episodes, domain.ShareEpisode{SeasonNumber: parsed.Season, EpisodeNumber: number})
+				}
+			}
+			if item.MediaType == "" || item.MediaType == "auto" {
+				item.MediaType = parsed.MediaType
+			}
+		}
+	}
+	return result, nil
 }
 
 // shouldIdentifyShareMedia 继续任务仅处理未尝试候选，不重试失败或覆盖已识别记录。

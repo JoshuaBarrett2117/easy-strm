@@ -173,7 +173,7 @@
       <!-- 错误信息 -->
       <n-alert
         v-if="task.error_message"
-        type="error"
+        :type="effectiveStatus === 'partial_success' ? 'warning' : 'error'"
         :title="task.error_message"
         :closable="false"
         class="mt-3"
@@ -320,6 +320,7 @@ const taskTypeName = computed(() => {
 })
 const taskDisplayName = computed(() => task.value ? (task.value.task_name || taskTypeName.value) : '任务')
 const taskTypeTagType = computed(() => task.value ? (taskTypeTagTypes[task.value.task_type] || 'info') : 'info')
+const effectiveStatus = computed(() => task.value?.display_status || task.value?.status)
 
 const taskStatusType = computed(() => {
   const statusMap = {
@@ -333,7 +334,7 @@ const taskStatusType = computed(() => {
     cancelled: 'info',
     scheduled: 'default'
   }
-  return task.value ? (statusMap[task.value.status] || 'info') : 'info'
+  return task.value ? (statusMap[effectiveStatus.value] || 'info') : 'info'
 })
 
 const taskStatusText = computed(() => {
@@ -348,17 +349,18 @@ const taskStatusText = computed(() => {
     cancelled: '已取消',
     scheduled: '已调度'
   }
-  return task.value ? (textMap[task.value.status] || '未知') : '未知'
+  return task.value ? (textMap[effectiveStatus.value] || '未知') : '未知'
 })
 
 const taskStatusIcon = computed(() => {
   const t = task.value
   if (!t) return TimerOutline
-  if (t.status === 'running') return SyncOutline
-  if (t.status === 'completed' || t.status === 'success') return CheckmarkCircleOutline
-  if (t.status === 'partial_success' || t.status === 'partial_failed') return AlertCircleOutline
-  if (t.status === 'failed' || t.status === 'cancelled') return CloseCircleOutline
-  if (t.status === 'scheduled') return TimeOutline
+  const status = effectiveStatus.value
+  if (status === 'running') return SyncOutline
+  if (status === 'completed' || status === 'success') return CheckmarkCircleOutline
+  if (status === 'partial_success' || status === 'partial_failed') return AlertCircleOutline
+  if (status === 'failed' || status === 'cancelled') return CloseCircleOutline
+  if (status === 'scheduled') return TimeOutline
   return taskTypeIcons[t.task_type] || TimerOutline
 })
 
@@ -376,7 +378,7 @@ const canResume = computed(() => {
 
 const showProgress = computed(() => {
   const t = task.value
-  return !!t && ['pending', 'running', 'completed', 'success', 'partial_success', 'unknown', 'failed', 'cancelled'].includes(t.status)
+  return !!t && ['pending', 'running', 'completed', 'success', 'partial_success', 'unknown', 'failed', 'cancelled'].includes(effectiveStatus.value)
 })
 
 const showFileStats = computed(() => {
@@ -387,21 +389,23 @@ const showFileStats = computed(() => {
 const progressStatus = computed(() => {
   const t = task.value
   if (!t) return 'default'
-  if (t.status === 'completed' || t.status === 'success') return 'success'
-  if (t.status === 'partial_success' || t.status === 'unknown') return 'warning'
-  if (t.status === 'failed') return 'error'
-  if (t.status === 'cancelled') return 'warning'
+  const status = effectiveStatus.value
+  if (status === 'completed' || status === 'success') return 'success'
+  if (status === 'partial_success' || status === 'unknown') return 'warning'
+  if (status === 'failed') return 'error'
+  if (status === 'cancelled') return 'warning'
   return 'default'
 })
 
 const progressFormat = (percentage) => {
   const t = task.value
   if (!t) return ''
-  if (t.status === 'completed' || t.status === 'success') return '完成'
-  if (t.status === 'partial_success') return '部分成功'
-  if (t.status === 'unknown') return '结果未知'
-  if (t.status === 'cancelled') return '已取消'
-  if (t.status === 'running' && t.total_files === 0) return '准备中...'
+  const status = effectiveStatus.value
+  if (status === 'completed' || status === 'success') return '完成'
+  if (status === 'partial_success') return '部分成功'
+  if (status === 'unknown') return '结果未知'
+  if (status === 'cancelled') return '已取消'
+  if (status === 'running' && t.total_files === 0) return '准备中...'
   return `${percentage}%`
 }
 

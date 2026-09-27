@@ -81,3 +81,28 @@ type ShareMediaPage struct {
 	Total          int          `json:"total"`
 	DuplicateCount int          `json:"duplicate_count"`
 }
+
+// ShareReviewItem 是手动核对中心的一条待处理媒体记录。
+type ShareReviewItem struct {
+	ParsedTitle    string              `json:"parsed_title"`
+	ParsedYear     int                 `json:"parsed_year"`
+	ID             int                 `json:"id"`
+	ShareID        int                 `json:"share_id"`
+	ShareName      string              `json:"share_name"`
+	MediaType      string              `json:"media_type,omitempty"`
+	FileName       string              `json:"file_name"`
+	FileSize       int64               `json:"file_size"`
+	Available      bool                `json:"available"`
+	MetadataSource string              `json:"metadata_source"`
+	Status         string              `json:"status"`
+	Result         *TmdbIdentifyResult `json:"result,omitempty"`
+	Error          string              `json:"error"`
+	Version        int                 `json:"version"`
+	Episodes       []ShareEpisode      `json:"episodes,omitempty"`
+}
+
+// ShareReviewPage 是手动核对队列的分页结果。
+type ShareReviewPage struct {
+	Data  []ShareReviewItem `json:"data"`
+	Total int               `json:"total"`
+}

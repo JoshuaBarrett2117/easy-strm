@@ -73,6 +73,9 @@ func prepareShareEpisodeInputs(ctx context.Context, records []domain.ShareRecord
 }
 
 func shareEpisodeInput(ctx context.Context, filename, forcedType string) string {
+	if input := contextualShareTVInput(filename, forcedType); input != filename {
+		return input
+	}
 	if round, ok := ctx.Value(recognitionRoundKey{}).(*recognitionRound); ok {
 		if value := round.inputs[fmt.Sprintf("%v:%s", ctx.Value(shareWorkScopeKey{}), filename)]; value != "" && forcedType != "movie" {
 			return value

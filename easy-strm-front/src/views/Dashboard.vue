@@ -204,6 +204,7 @@ const allMenuSections = [
       { path: '/dashboard/media-manager', label: '文件工作台', icon: FolderOpenOutline },
       { path: '/dashboard/file-manager', label: '文件管理', icon: SwapHorizontalOutline },
       { path: '/dashboard/resources/transfer', label: '资源聚合', icon: LinkOutline },
+      { path: '/dashboard/share-review', label: '手动核对', icon: SearchOutline },
       { path: '/dashboard/share-records', label: '分享管理', icon: LinkOutline },
       { path: '/dashboard/share-library', label: '分享资源库', icon: LinkOutline },
       { path: '/dashboard/scheduled-tasks', label: '定时任务管理', icon: LinkOutline },

@@ -281,6 +281,25 @@ func (c *ShareRecordController) ListFiles(x *gin.Context) {
 	SuccessResp(x, result)
 }
 
+// ListReviewItems 返回手动核对中心的跨分享待处理媒体。
+func (c *ShareRecordController) ListReviewItems(x *gin.Context) {
+	page, e1 := strconv.Atoi(x.DefaultQuery("page", "1"))
+	size, e2 := strconv.Atoi(x.DefaultQuery("page_size", "20"))
+	shareID, e3 := strconv.Atoi(x.DefaultQuery("share_id", "0"))
+	mediaID, e4 := strconv.Atoi(x.DefaultQuery("media_id", "0"))
+	status := x.DefaultQuery("status", "failed,pending")
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || page < 1 || page > 10000000 || size < 1 || size > 100 || shareID < 0 || mediaID < 0 || (status != "failed,pending" && status != "failed" && status != "pending") {
+		ErrorResp(x, 400, "核对筛选或分页参数无效")
+		return
+	}
+	result, err := c.s.ListReviewItems(x, status, x.Query("keyword"), shareID, mediaID, page, size)
+	if err != nil {
+		ErrorResp(x, 500, "加载核对队列失败")
+		return
+	}
+	SuccessResp(x, result)
+}
+
 // ListMedia 按页读取已识别海报，默认每页十条。
 func (c *ShareRecordController) ListMedia(x *gin.Context) {
 	id, e1 := strconv.Atoi(x.Param("id"))

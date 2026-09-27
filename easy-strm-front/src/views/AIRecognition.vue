@@ -43,7 +43,7 @@
         <n-input v-model:value="testFilename" type="textarea" :autosize="{minRows:2,maxRows:5}" />
       </n-form-item>
       <n-button :loading="testing" @click="test">测试 AI 识别</n-button>
-      <p class="hint">测试使用当前未保存的表单，发送一次模型请求；不会创建媒体记录。</p>
+      <p class="hint">测试使用当前未保存的表单，发送一次模型请求；不会创建媒体记录，也不会确认 TMDB 身份。</p>
       <n-alert v-if="testError" type="error" class="mt-4">{{ testError }}</n-alert>
       <n-descriptions v-if="testResult" bordered :column="1" class="mt-4">
         <n-descriptions-item label="片名">{{ testResult.title || '未知' }}</n-descriptions-item>

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -52,11 +54,38 @@ func NewProxyAwareHTTPClient(timeout time.Duration) *http.Client {
 		}
 		return proxyURL, nil
 	}
+	// 部分本地代理对 TMDB 的 TLS/HTTP2 连接会返回 EOF；TMDB 请求失败时使用
+	// IPv4 直连兜底，其他站点仍严格沿用原有代理策略。
+	direct := http.DefaultTransport.(*http.Transport).Clone()
+	direct.Proxy = nil
+	direct.ForceAttemptHTTP2 = true
+	direct.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		return (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp4", address)
+	}
 
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: transport,
+		Transport: &tmdbFallbackTransport{primary: transport, direct: direct},
 	}
+}
+
+// tmdbFallbackTransport 只为 TMDB 的临时代理故障提供直连兜底。
+type tmdbFallbackTransport struct {
+	primary http.RoundTripper
+	direct  http.RoundTripper
+}
+
+func (t *tmdbFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.primary.RoundTrip(req)
+	if err == nil || !isTMDBHost(req.URL.Hostname()) {
+		return resp, err
+	}
+	return t.direct.RoundTrip(req)
+}
+
+func isTMDBHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	return host == "api.themoviedb.org" || strings.HasSuffix(host, ".themoviedb.org")
 }
 
 func RunNetworkProbe(sites []NetworkProbeSite, timeout time.Duration) []NetworkProbeResult {

@@ -5,6 +5,9 @@ import (
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
+	"strings"
+
+	"github.com/lib/pq"
 )
 
 func (d *ShareRecordDAO) listSummaries(ctx context.Context, q domain.ShareRecordQuery, where string, args []interface{}, total int) (domain.ShareRecordPage, error) {
@@ -73,4 +76,47 @@ func (d *ShareRecordDAO) ListFiles(ctx context.Context, id, page, size int) (dom
 		return out, err
 	}
 	return out, json.Unmarshal(data, &out.Data)
+}
+
+// ListReviewItems 返回跨分享的失败和待识别媒体，供手动核对中心分页使用。
+func (d *ShareRecordDAO) ListReviewItems(ctx context.Context, statuses []string, keyword string, shareID, mediaID, page, size int) (domain.ShareReviewPage, error) {
+	out := domain.ShareReviewPage{Data: []domain.ShareReviewItem{}}
+	where := []string{"f.available", "f.status = ANY($1::text[])"}
+	args := []interface{}{pq.Array(statuses)}
+	if shareID > 0 {
+		args = append(args, shareID)
+		where = append(where, fmt.Sprintf("f.share_id=$%d", len(args)))
+	}
+	if keyword != "" {
+		args = append(args, "%"+keyword+"%")
+		placeholder := fmt.Sprintf("$%d", len(args))
+		where = append(where, fmt.Sprintf("(s.name ILIKE %s OR f.file_name ILIKE %s OR COALESCE(f.error,'') ILIKE %s OR COALESCE(f.result->>'title','') ILIKE %s)", placeholder, placeholder, placeholder, placeholder))
+	}
+	if mediaID > 0 {
+		args = append(args, mediaID)
+		where = append(where, fmt.Sprintf("f.id=$%d", len(args)))
+	}
+	whereSQL := strings.Join(where, " AND ")
+	if err := d.db.QueryRowContext(ctx, "SELECT count(*) FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id WHERE "+whereSQL, args...).Scan(&out.Total); err != nil {
+		return out, err
+	}
+	dataArgs := append([]interface{}{}, args...)
+	dataArgs = append(dataArgs, size, (page-1)*size)
+	query := fmt.Sprintf(`SELECT COALESCE(json_agg(p),'[]'::json) FROM (
+	 SELECT f.id,f.share_id,s.name share_name,s.media_type,f.file_name,f.file_size,f.available,f.metadata_source,f.status,f.result,f.error,f.version,
+	  COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number)
+	   FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json) episodes
+	 FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id
+	 WHERE %s
+	 ORDER BY CASE WHEN f.status='failed' THEN 0 ELSE 1 END, f.updated_at DESC, f.id DESC
+	 LIMIT $%d OFFSET $%d
+	)p`, whereSQL, len(dataArgs)-1, len(dataArgs))
+	var data []byte
+	if err := d.db.QueryRowContext(ctx, query, dataArgs...).Scan(&data); err != nil {
+		return out, err
+	}
+	if err := json.Unmarshal(data, &out.Data); err != nil {
+		return out, err
+	}
+	return out, nil
 }

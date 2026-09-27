@@ -30,6 +30,7 @@
       <n-button :disabled="loading" @click="changePageSize">应用</n-button>
     </n-space>
     <n-modal v-model:show="manualShow" preset="card" title="手动识别" style="width: min(720px, 94vw)" :mask-closable="!saving" :closable="!saving">
+      <n-button :disabled="saving" @click="router.push({path:'/dashboard/share-review',query:{share_id:props.shareId,media_id:target.id}})">打开手动核对中心</n-button>
       <p class="manual-path">{{ target?.file_name }}</p>
       <n-space vertical>
         <n-input v-model:value="keyword" placeholder="输入正确的电影或剧集名称" @keyup.enter="search" />
@@ -59,10 +60,12 @@
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
 import { h, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, NDataTable, NTag, useMessage } from 'naive-ui'
 import { getShareMedia, getShareFiles, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
 
+const router = useRouter()
 const props = defineProps({ shareId: { type: Number, required: true }, revision: Number })
 const showDuplicates = ref(false), page = ref(1), total = ref(0)
 const duplicateCount = ref(0), visibleMedia = ref([]), loading = ref(false), loadError = ref(false)

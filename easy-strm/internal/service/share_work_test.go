@@ -37,6 +37,14 @@ func TestShareRomanSeasonParsing(t *testing.T) {
 	}
 }
 
+func TestShareSeasonYearDoesNotOverrideWorkYear(t *testing.T) {
+	raw := "剧集/绝命毒师 (2008)/绝命毒师 S04(2011) 4K/绝命毒师S04E01.2011.2160p.mkv"
+	q := AnalyzeShareFilename(raw)
+	if q.MediaType != "tv" || q.Year != 2008 || q.SeasonYear != 2011 || q.YearSource != "work_directory" || !q.YearFromDirectory {
+		t.Fatalf("unexpected query: %+v", q)
+	}
+}
+
 func TestShareWorkReusesIdentityAcrossSeasons(t *testing.T) {
 	var searches atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

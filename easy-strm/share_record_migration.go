@@ -38,6 +38,12 @@ var strmExportMigrationSQL string
 //go:embed migrations/migrate_v38_filename_recognition_share_disc.sql
 var shareDiscRecognitionMigrationSQL string
 
+//go:embed migrations/migrate_v39_filename_review_rules.sql
+var filenameReviewRulesMigrationSQL string
+
+//go:embed migrations/migrate_v40_numeric_episode_boundary.sql
+var numericEpisodeBoundaryMigrationSQL string
+
 // migrateShareRecords 原子迁移旧版单文件分享记录；脚本随二进制分发。
 func migrateShareRecords() error {
 	tx, err := db.Begin()
@@ -74,6 +80,12 @@ func migrateShareRecords() error {
 		return err
 	}
 	if _, err = tx.Exec(shareDiscRecognitionMigrationSQL); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(filenameReviewRulesMigrationSQL); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(numericEpisodeBoundaryMigrationSQL); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(shareStrmFileMigrationSQL); err != nil {

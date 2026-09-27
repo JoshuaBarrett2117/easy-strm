@@ -79,7 +79,11 @@ func (s *TmdbService) shareAliases(ctx context.Context, kind string, id int) ([]
 	if !bypassShareRecognitionCache(ctx) {
 		if detail, ok := s.loadDetailCache(cacheKind, id, 0, 0); ok {
 			observeShareMetric(ctx, "tmdb_alias_cache_hit", 0)
-			return shareAliasTitles(detail), nil
+			translations, err := s.shareTranslations(ctx, kind, id)
+			if err != nil {
+				return nil, err
+			}
+			return appendUniqueStrings(shareAliasTitles(detail), translations...), nil
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s/%d/alternative_titles?api_key=%s", s.baseURL, kind, id, s.apiKey), nil)
@@ -99,7 +103,73 @@ func (s *TmdbService) shareAliases(ctx context.Context, kind string, id int) ([]
 		return nil, fmt.Errorf("解析TMDB别名失败")
 	}
 	s.saveDetailCache(cacheKind, id, 0, 0, detail)
-	return shareAliasTitles(detail), nil
+	aliases := shareAliasTitles(detail)
+	translations, err := s.shareTranslations(ctx, kind, id)
+	if err != nil {
+		return nil, err
+	}
+	return appendUniqueStrings(aliases, translations...), nil
+}
+
+// shareTranslations 返回 TMDB 的地区译名；接口故障返回错误，避免把请求失败当作无译名。
+func (s *TmdbService) shareTranslations(ctx context.Context, kind string, id int) ([]string, error) {
+	cacheKind := kind + "_translations"
+	if !bypassShareRecognitionCache(ctx) {
+		if detail, ok := s.loadDetailCache(cacheKind, id, 0, 0); ok {
+			return shareTranslationTitles(detail), nil
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/%s/%d/translations?api_key=%s", s.baseURL, kind, id, s.apiKey), nil)
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.doShareTMDBRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotFound {
+		return nil, nil
+	}
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("获取TMDB译名失败: HTTP %d", response.StatusCode)
+	}
+	var detail map[string]interface{}
+	if err = json.NewDecoder(response.Body).Decode(&detail); err != nil {
+		return nil, err
+	}
+	s.saveDetailCache(cacheKind, id, 0, 0, detail)
+	return shareTranslationTitles(detail), nil
+}
+
+func shareTranslationTitles(detail map[string]interface{}) []string {
+	result := []string{}
+	list, _ := detail["translations"].([]interface{})
+	for _, raw := range list {
+		item, _ := raw.(map[string]interface{})
+		data, _ := item["data"].(map[string]interface{})
+		if title, _ := data["title"].(string); title != "" {
+			result = append(result, title)
+		}
+		if title, _ := data["name"].(string); title != "" {
+			result = append(result, title)
+		}
+	}
+	return result
+}
+
+func appendUniqueStrings(dst []string, values ...string) []string {
+	seen := map[string]bool{}
+	for _, v := range dst {
+		seen[v] = true
+	}
+	for _, v := range values {
+		if v != "" && !seen[v] {
+			dst = append(dst, v)
+			seen[v] = true
+		}
+	}
+	return dst
 }
 
 func shareAliasTitles(detail map[string]interface{}) []string {

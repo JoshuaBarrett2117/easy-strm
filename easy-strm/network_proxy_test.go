@@ -1,10 +1,38 @@
 package main
 
 import (
+	"errors"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 )
+
+type proxyRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f proxyRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestTMDBFallbackTransportOnlyFallsBackForTMDB(t *testing.T) {
+	fallback := &tmdbFallbackTransport{
+		primary: proxyRoundTripFunc(func(*http.Request) (*http.Response, error) { return nil, errors.New("proxy EOF") }),
+		direct: proxyRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Request: r}, nil
+		}),
+	}
+	for _, host := range []string{"api.themoviedb.org", "api.themoviedb.org."} {
+		req, _ := http.NewRequest(http.MethodGet, "https://"+host+"/3/search/tv", nil)
+		resp, err := fallback.RoundTrip(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("TMDB should fallback: host=%s resp=%v err=%v", host, resp, err)
+		}
+		resp.Body.Close()
+	}
+	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com", nil)
+	if _, err := fallback.RoundTrip(req); err == nil {
+		t.Fatal("non-TMDB should preserve proxy error")
+	}
+}
 
 func TestBuildProxyDomainsIncludesBuiltInSites(t *testing.T) {
 	domains := buildProxyDomains("")
