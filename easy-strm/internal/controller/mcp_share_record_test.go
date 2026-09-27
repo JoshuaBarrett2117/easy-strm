@@ -90,6 +90,8 @@ func TestMCPShareRecordWritesRequireConfirmationAndCRUD(t *testing.T) {
 	if err != nil || updated.(domain.ShareRecord).Password != "" || updated.(domain.ShareRecord).Version != 2 {
 		t.Fatalf("update failed: %#v %v", updated, err)
 	}
+	mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(8).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
+	mock.ExpectQuery("SELECT id FROM t_share_strm").WithArgs("abc").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectBegin()
 	mock.ExpectExec("DELETE FROM t_share_record").WithArgs(8).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media").WillReturnResult(sqlmock.NewResult(0, 0))

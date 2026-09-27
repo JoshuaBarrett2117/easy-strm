@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"easy-strm/internal/dao"
 
@@ -17,6 +19,7 @@ type CacheGroupOverview struct {
 	Name        string `json:"name"`
 	Storage     string `json:"storage"`
 	Description string `json:"description"`
+	Prefix      string `json:"prefix"`
 	Count       int64  `json:"count"`
 	Status      string `json:"status"`
 	StatusText  string `json:"status_text"`
@@ -41,6 +44,21 @@ type cacheGroupDefinition struct {
 	RedisPatterns []string
 	TTLText       string
 	Enabled       bool
+}
+
+// CacheDetail 表示 Redis 缓存条目的调试信息。
+type CacheDetail struct {
+	Key        string `json:"key"`
+	Value      string `json:"value"`
+	TTLSeconds int64  `json:"ttl_seconds"`
+}
+
+// CacheDetailsPage 表示缓存详情分页结果。
+type CacheDetailsPage struct {
+	Items    []CacheDetail `json:"items"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
 }
 
 // CacheAdminService 提供缓存管理能力。
@@ -134,7 +152,7 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 			Storage:       "redis",
 			Description:   "保存转存链路使用的 PickCode，减少重复探测。",
 			RedisPatterns: []string{"easy_strm:transfer_pickcode:*"},
-			TTLText:       "30 分钟",
+			TTLText:       "7 天",
 			Enabled:       true,
 		},
 		{
@@ -183,6 +201,7 @@ func (s *CacheAdminService) GetOverview() (*CacheOverview, error) {
 			Name:        group.Name,
 			Storage:     group.Storage,
 			Description: group.Description,
+			Prefix:      strings.Join(group.RedisPatterns, ", "),
 			Count:       count,
 			Status:      status,
 			StatusText:  statusText,
@@ -191,6 +210,78 @@ func (s *CacheAdminService) GetOverview() (*CacheOverview, error) {
 	}
 
 	return overview, nil
+}
+
+// GetDetails 查询指定缓存分组的 Redis 条目，支持关键词筛选和分页。
+func (s *CacheAdminService) GetDetails(scope, keyword string, page, pageSize int) (*CacheDetailsPage, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	var group *cacheGroupDefinition
+	for _, definition := range s.groupDefinitions() {
+		if definition.Key == strings.TrimSpace(scope) {
+			copy := definition
+			group = &copy
+			break
+		}
+	}
+	if group == nil {
+		return nil, fmt.Errorf("不支持的缓存范围: %s", scope)
+	}
+	result := &CacheDetailsPage{Items: []CacheDetail{}, Page: page, PageSize: pageSize}
+	if s.redisClient == nil || len(group.RedisPatterns) == 0 {
+		return result, nil
+	}
+	var keys []string
+	for _, pattern := range group.RedisPatterns {
+		batch, err := s.scanKeys(pattern)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, batch...)
+	}
+	seen := make(map[string]struct{}, len(keys))
+	filtered := make([]string, 0, len(keys))
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	ctx := context.Background()
+	for _, key := range keys {
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		value, err := s.redisClient.Get(ctx, key).Result()
+		if err == redis.Nil {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("CacheAdminService[GetDetails] 读取 Redis key 失败: %v", err)
+		}
+		if keyword == "" || strings.Contains(strings.ToLower(key), keyword) || strings.Contains(strings.ToLower(value), keyword) {
+			filtered = append(filtered, key)
+		}
+	}
+	sort.Strings(filtered)
+	result.Total = len(filtered)
+	start := (page - 1) * pageSize
+	if start >= len(filtered) {
+		return result, nil
+	}
+	end := start + pageSize
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	for _, key := range filtered[start:end] {
+		value, _ := s.redisClient.Get(ctx, key).Result()
+		ttl, _ := s.redisClient.TTL(ctx, key).Result()
+		result.Items = append(result.Items, CacheDetail{Key: key, Value: value, TTLSeconds: int64(ttl / time.Second)})
+	}
+	return result, nil
 }
 
 func cacheGroupStatus(group cacheGroupDefinition, count int64, redisConnected bool) (string, string) {

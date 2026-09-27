@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"strconv"
 
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
@@ -12,6 +13,18 @@ import (
 // CacheAdminController 缓存管理控制器。
 type CacheAdminController struct {
 	cacheAdminService *service.CacheAdminService
+}
+
+// GetDetails 获取缓存条目详情，支持分页和关键词筛选。
+func (c *CacheAdminController) GetDetails(ctx *gin.Context) {
+	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
+	pageSize, _ := strconv.Atoi(ctx.DefaultQuery("page_size", "20"))
+	details, err := c.cacheAdminService.GetDetails(ctx.Query("scope"), ctx.Query("keyword"), page, pageSize)
+	if err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"data": details})
 }
 
 // NewCacheAdminController 创建缓存管理控制器实例。

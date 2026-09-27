@@ -31,6 +31,7 @@ type ShareRecordService struct {
 	tasks             *TaskService
 	parser            ShareRecordParser
 	autoExport        func([]int) (string, bool, error)
+	strmExportMu      *sync.Mutex
 }
 
 // ShareRecordParser 获取分享中的文件列表。
@@ -144,7 +145,6 @@ func (s *ShareRecordService) Update(ctx context.Context, r *domain.ShareRecord) 
 	}
 	return s.dao.Update(ctx, r)
 }
-func (s *ShareRecordService) Delete(ctx context.Context, id int) error { return s.dao.Delete(ctx, id) }
 func (s *ShareRecordService) AddMedia(ctx context.Context, m *domain.ShareMedia) error {
 	if !isShareVideoFile(strings.TrimSpace(m.FileName)) {
 		return fmt.Errorf("分享文件必须是支持的视频文件")
@@ -227,7 +227,7 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 		r.SeasonNumber = episodes[0].SeasonNumber
 		r.EpisodeNumber = episodes[0].EpisodeNumber
 	}
-	logger.Infof("[ShareIdentify] 元数据识别结果 | file=%q | success=%v | media_type=%s | tmdb_id=%d | title=%q | year=%d | episodes=%d", m.FileName, r.Success, r.MediaType, r.TmdbID, r.Title, r.Year, len(episodes))
+	logger.Debugf("[ShareIdentify] 元数据识别结果 | file=%q | success=%v | media_type=%s | tmdb_id=%d | title=%q | year=%d | episodes=%d", m.FileName, r.Success, r.MediaType, r.TmdbID, r.Title, r.Year, len(episodes))
 	return true, s.dao.Identify(ctx, m, "identified", r, "", episodes...)
 }
 

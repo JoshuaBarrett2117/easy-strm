@@ -17,10 +17,16 @@ import (
 	"sync"
 	"time"
 
+	"easy-strm/internal/dao"
+	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
 
-const shareStrmSettingsKey = "share_strm_settings"
+const (
+	shareStrmSettingsKey      = "share_strm_settings"
+	transferPickCodeKeyPrefix = "easy_strm:transfer_pickcode:"
+	transferPickCodeCacheTTL  = 7 * 24 * time.Hour
+)
 
 // ShareStrmStore 封装导出来源、播放映射及跨进程转存锁。
 type ShareStrmStore interface {
@@ -333,10 +339,15 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 	if err != nil {
 		return "", fmt.Errorf("创建转存目录失败：%w", err)
 	}
-	// 每个映射独占目录，以列表查找精确文件名；网络错误不能被当成文件不存在。
-	pick, err := s.findTransferred(ctx, cid, entry.FileName, account)
-	if err != nil {
-		return "", err
+	// 转存完成后缓存 PickCode，后续播放优先命中缓存，避免重复查询115目录。
+	cacheKey := transferPickCodeKey(account.ID, id)
+	pick := s.getTransferPickCode(ctx, cacheKey)
+	if pick == "" {
+		// 每个映射独占目录，以列表查找精确文件名；网络错误不能被当成文件不存在。
+		pick, err = s.findTransferred(ctx, cid, entry.FileName, account)
+		if err != nil {
+			return "", err
+		}
 	}
 	if pick == "" {
 		// 等锁期间另一请求可能已经缓存文件ID，重新读取后再按需定位。
@@ -376,6 +387,9 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 			return "", fmt.Errorf("115已接受转存，但文件暂未可见，请稍后重试")
 		}
 	}
+	if pick != "" {
+		s.saveTransferPickCode(ctx, cacheKey, pick)
+	}
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
@@ -389,6 +403,45 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 		return "", fmt.Errorf("115返回无效直链")
 	}
 	return link, nil
+}
+
+// transferPickCodeKey 生成分享 STRM 转存 PickCode 缓存键。
+// 键同时绑定目标115账号和播放映射ID，避免不同账号或文件互相污染。
+func transferPickCodeKey(accountID int, shareRecordID string) string {
+	return fmt.Sprintf("%s%d:%s", transferPickCodeKeyPrefix, accountID, shareRecordID)
+}
+
+func (s *ShareStrmService) getTransferPickCode(ctx context.Context, key string) string {
+	client := dao.GetGlobalRedisClient()
+	if client == nil {
+		return ""
+	}
+	pick, err := client.Get(ctx, key).Result()
+	if err != nil && err != redis.Nil {
+		logger.Warnf("ShareStrmService[getTransferPickCode] 读取Redis失败: %v", err)
+	}
+	return strings.TrimSpace(pick)
+}
+
+func (s *ShareStrmService) saveTransferPickCode(ctx context.Context, key, pick string) {
+	client := dao.GetGlobalRedisClient()
+	if client == nil || strings.TrimSpace(pick) == "" {
+		return
+	}
+	if err := client.Set(ctx, key, pick, transferPickCodeCacheTTL).Err(); err != nil {
+		logger.Warnf("ShareStrmService[saveTransferPickCode] 保存Redis失败: %v", err)
+	}
+}
+
+func (s *ShareStrmService) saveSHA1Cache(ctx context.Context, sha1, pick string) {
+	client := dao.GetGlobalRedisClient()
+	sha1 = strings.ToLower(strings.TrimSpace(sha1))
+	if client == nil || sha1 == "" || strings.TrimSpace(pick) == "" {
+		return
+	}
+	if err := client.Set(ctx, sha1CachePrefix+sha1, pick, sha1CacheTTL).Err(); err != nil {
+		logger.Warnf("ShareStrmService[saveSHA1Cache] 保存Redis失败: %v", err)
+	}
 }
 
 func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string, account *domain.Cloud115) (string, error) {
@@ -412,6 +465,7 @@ func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string
 				if f.PickCode == "" {
 					return "", fmt.Errorf("视频已转存，但115未返回提取码，请稍后重试")
 				}
+				s.saveSHA1Cache(ctx, f.Sha1, f.PickCode)
 				return f.PickCode, nil
 			}
 		}

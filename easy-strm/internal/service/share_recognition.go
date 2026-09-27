@@ -16,10 +16,10 @@ var (
 	shareIDRE         = regexp.MustCompile(`(?i)[\[{]tmdb(?:id)?[ =:-]+([0-9]+)[\]}]`)
 	shareParentYearRE = regexp.MustCompile(`[（(](19[0-9]{2}|20[0-9]{2})[）)]`)
 	shareSeasonRE     = regexp.MustCompile(`(?i)\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季`)
-	shareSeriesRE     = regexp.MustCompile(`(?i)s[0-9]{1,2}e[0-9]{1,3}|\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季|全[一二三四五六七八九十0-9]+季|[0-9]+集全|complete[ ._-]*series|tv[ ._-]*series`)
+	shareSeriesRE     = regexp.MustCompile(`(?i)s[0-9]{1,2}e[0-9]{1,3}|\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季|全[一二三四五六七八九十0-9]+季|全[一二三四五六七八九十百0-9]+集|[0-9]+集全|\bEP?[ ._-]*[0-9]{1,3}[ ]*[-~～][ ]*[0-9]{1,3}\b|complete[ ._-]*series|tv[ ._-]*series`)
 	shareDiscRE       = regexp.MustCompile(`(?i)(?:^|[ ._-])(?:d|disc|disk|cd)[ ._-]*[0-9]{1,3}(?:[ ._-]|$)`)
 	shareBracketRE    = regexp.MustCompile(`\[([^\]]+)\]|【([^】]+)】`)
-	shareReleaseRE    = regexp.MustCompile(`(?i)\b(?:ULTRAHD|UHD|Blu[ .-]?ray|WEB[ .-]?DL|BDRip|DVD|REMUX|2160p|1080p|720p|HEVC|AVC|H26[45]|DTS|AAC|HDTV)\b|原盘DIY|蓝光原盘|DIY|简繁|国粤|国语|特效字幕|次世代|菜单修改`)
+	shareReleaseRE    = regexp.MustCompile(`(?i)\b(?:ULTRAHD|UHD|Blu[ .-]?ray|WEB[ .-]?(?:DL|MP4)|BDRip|DVD|REMUX|2160p|1080p|720p|HEVC|AVC|H26[45]|DTS|AAC|HDTV)\b|原盘DIY|蓝光原盘|DIY|简繁|国粤|国语|特效字幕|次世代|菜单修改`)
 	shareIndexRE      = regexp.MustCompile(`^[0-9]{1,4}[.、][ ]*`)
 	shareContainerRE  = regexp.MustCompile(`(?i)^(?:电影[ ]*)?iso[- _]?[0-9]*$|^(?:原盘电影合集|电影合集|原盘合集|整理好的圆盘|4k原盘|蓝光ISO原盘|IMDB[ ]*Top[ ]*250|CC版|BD[- ]ISO)(?:[ （(0-9]|$)`)
 	shareEditionRE    = regexp.MustCompile(`[ ]*(?:法版|西班牙版|美国豪华版|蓝光|全集|全套|三碟|双碟).*$`)
@@ -73,6 +73,9 @@ func cleanShareTitles(name string) ([]string, int) {
 		value := m[1]
 		if value == "" {
 			value = m[2]
+		}
+		if shareSeriesRE.MatchString(value) && shareSeriesRE.ReplaceAllString(value, "") == "" {
+			continue
 		}
 		if shareReleaseRE.MatchString(value) || shareNoiseTitle(value) || strings.Contains(value, "GB") || strings.Contains(value, "TB") || strings.HasPrefix(value, "@") || !strings.ContainsFunc(value, unicode.IsLetter) {
 			continue

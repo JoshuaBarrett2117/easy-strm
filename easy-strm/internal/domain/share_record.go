@@ -8,7 +8,7 @@ type ShareRecord struct {
 	IdentifiedCount  int          `json:"identified_count"`
 	FailedCount      int          `json:"failed_count"`
 	PendingCount     int          `json:"pending_count"`
-	ShareCancelled   bool         `json:"share_cancelled"` // 网盘明确返回分享已取消时标记；任务取消或超时不影响该字段
+	ShareCancelled   bool         `json:"share_cancelled"` // 兼容历史字段名：网盘明确返回取消、不存在、无效或过期时标记；任务取消或超时不影响该字段
 	MaskedCount      int          `json:"masked_count"`    // 脱敏媒体数，包含在媒体总数中
 	ID               int          `json:"id"`
 	MediaType        string       `json:"media_type"`

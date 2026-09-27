@@ -95,7 +95,7 @@ func (s *TmdbService) shareWorkKey(ctx context.Context, filename, source, forced
 		parent = path.Dir(parent)
 	}
 	rules, _ := json.Marshal(s.GetFilenameRecognitionRules().Rules)
-	payload, _ := json.Marshal([]interface{}{"share-work-v3-tv-context", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, keyYear, q.SeasonYear, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
+	payload, _ := json.Marshal([]interface{}{"share-work-v4-episode-context", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, keyYear, q.SeasonYear, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
 	return string(payload)
 }
 
@@ -174,7 +174,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 		}
 	}
 	if reused {
-		logger.Infof("[ShareIdentify] 作品身份复用 | file=%q | title=%q | media_type=%s | tmdb_id=%d | season=%d | episode=%d | success=%v", filename, result.Title, result.MediaType, result.TmdbID, result.SeasonNumber, result.EpisodeNumber, result.Success)
+		logger.Debugf("[ShareIdentify] 作品身份复用 | file=%q | title=%q | media_type=%s | tmdb_id=%d | season=%d | episode=%d | success=%v", filename, result.Title, result.MediaType, result.TmdbID, result.SeasonNumber, result.EpisodeNumber, result.Success)
 	}
 	return result, nil
 }
@@ -197,7 +197,7 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 			if err := cache.Save(ctx, key, value); err != nil {
 				logger.Warnf("作品缓存保存失败: %v", err)
 			}
-			logger.Infof("[ShareIdentify] 复用已保存作品身份 | file=%q | tmdb_id=%d", filename, value.Result.TmdbID)
+			logger.Debugf("[ShareIdentify] 复用已保存作品身份 | file=%q | tmdb_id=%d", filename, value.Result.TmdbID)
 			return value, nil
 		}
 		value, err := cache.Get(ctx, key)
@@ -206,7 +206,7 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 		}
 		if value != nil {
 			observeShareMetric(ctx, "work_cache_hit", 0)
-			logger.Infof("[ShareIdentify] 作品身份缓存命中 | file=%q | tmdb_id=%d", filename, value.Result.TmdbID)
+			logger.Debugf("[ShareIdentify] 作品身份缓存命中 | file=%q | tmdb_id=%d", filename, value.Result.TmdbID)
 			if !isIdentifyMetadataComplete(value.Result) || value.Result.MediaType == "tv" && !value.SeasonsKnown {
 				s.enrichShareWork(ctx, value)
 			}
@@ -217,12 +217,12 @@ func (s *TmdbService) resolveShareWork(ctx context.Context, filename, source, fo
 		}
 	}
 	q := s.analyzeShareQuery(filename, forcedType)
-	logger.Infof("[ShareIdentify] 开始作品识别 | file=%q | titles=%q | media_type=%s | year=%d | year_source=%s", filename, q.Titles, q.MediaType, q.Year, q.YearSource)
+	logger.Debugf("[ShareIdentify] 开始作品识别 | file=%q | titles=%q | media_type=%s | year=%d | year_source=%s", filename, q.Titles, q.MediaType, q.Year, q.YearSource)
 	result, err := s.identifyShareWithAssistUncached(ctx, filename, source, forcedType)
 	if err != nil {
 		return nil, err
 	}
-	logger.Infof("[ShareIdentify] 作品识别完成 | file=%q | success=%v | title=%q | tmdb_id=%d | year=%d | year_source=%s | ai_used=%v | query_before_ai=%q | query_after_ai=%q | failure=%q", filename, result.Success, result.Title, result.TmdbID, result.Year, q.YearSource, result.AIUsed, result.QueryBeforeAI, result.QueryAfterAI, result.FailureReason)
+	logger.Debugf("[ShareIdentify] 作品识别完成 | file=%q | success=%v | title=%q | tmdb_id=%d | year=%d | year_source=%s | ai_used=%v | query_before_ai=%q | query_after_ai=%q | failure=%q", filename, result.Success, result.Title, result.TmdbID, result.Year, q.YearSource, result.AIUsed, result.QueryBeforeAI, result.QueryAfterAI, result.FailureReason)
 	value := &dao.ShareWorkIdentity{Result: result}
 	if result.Success {
 		s.enrichShareWork(ctx, value)
@@ -288,7 +288,7 @@ func (s *TmdbService) enrichShareWork(ctx context.Context, value *dao.ShareWorkI
 		}
 		return
 	}
-	logger.Infof("[ShareIdentify] 作品详情补全 | media_type=tv | tmdb_id=%d | reason=补全元数据与季目录", r.TmdbID)
+	logger.Debugf("[ShareIdentify] 作品详情补全 | media_type=tv | tmdb_id=%d | reason=补全元数据与季目录", r.TmdbID)
 	detail, err := s.shareTVDetail(ctx, r.TmdbID)
 	if err != nil {
 		logger.Warnf("作品详情补全失败 | tmdb_id=%d | error=%v", r.TmdbID, err)

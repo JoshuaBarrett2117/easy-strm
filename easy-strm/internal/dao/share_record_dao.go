@@ -148,11 +148,19 @@ func (d *ShareRecordDAO) Update(ctx context.Context, r *domain.ShareRecord) erro
 	return tx.Commit()
 }
 func (d *ShareRecordDAO) Delete(ctx context.Context, id int) error {
+	return d.DeleteWithStrm(ctx, id, nil, nil)
+}
+
+// DeleteWithStrm 原子删除分享、关联播放映射及已完成磁盘清理的导出记录。
+func (d *ShareRecordDAO) DeleteWithStrm(ctx context.Context, id int, entries, paths []string) error {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err = deleteShareStrmRecords(ctx, tx, entries, paths); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_record WHERE id=$1", id); err != nil {
 		return err
 	}

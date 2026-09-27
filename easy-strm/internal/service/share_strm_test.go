@@ -131,6 +131,31 @@ func TestShareStrmPlaybackTransfersOnceAndPreservesUA(t *testing.T) {
 	}
 }
 
+func TestShareStrmPlaybackCachesTransferPickCode(t *testing.T) {
+	mini := miniredis.RunT(t)
+	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer rc.Close()
+	dao.InitTaskRedisDAO(rc)
+	defer dao.InitTaskRedisDAO(nil)
+
+	s, _, c := strmFixture(t)
+	if _, err := s.Playback(context.Background(), "entry", "Player/1"); err != nil {
+		t.Fatal(err)
+	}
+	key := transferPickCodeKey(7, "entry")
+	if got, err := rc.Get(context.Background(), key).Result(); err != nil || got != "saved" {
+		t.Fatalf("PickCode缓存未写入: %q %v", got, err)
+	}
+	// 第二次播放直接使用缓存，不再查询目标目录。
+	c.present = false
+	if _, err := s.Playback(context.Background(), "entry", "Player/1"); err != nil {
+		t.Fatalf("缓存命中播放失败: %v", err)
+	}
+	if c.receives != 1 {
+		t.Fatalf("缓存命中不应再次转存，次数=%d", c.receives)
+	}
+}
+
 func TestShareStrmPlaybackFailures(t *testing.T) {
 	for _, kind := range []string{"missing", "list", "receive", "link", "cancel"} {
 		t.Run(kind, func(t *testing.T) {

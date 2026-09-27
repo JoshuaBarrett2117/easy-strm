@@ -158,7 +158,11 @@ func (c *ShareRecordController) Update(x *gin.Context) {
 	SuccessResp(x, r)
 }
 func (c *ShareRecordController) Delete(x *gin.Context) {
-	id, _ := strconv.Atoi(x.Param("id"))
+	id, err := strconv.Atoi(x.Param("id"))
+	if err != nil || id <= 0 {
+		ErrorResp(x, 400, "分享ID无效")
+		return
+	}
 	if e := c.s.Delete(x, id); e != nil {
 		ErrorResp(x, 500, e.Error())
 		return

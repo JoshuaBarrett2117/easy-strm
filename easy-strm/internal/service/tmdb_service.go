@@ -287,7 +287,7 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 		})
 	}
 
-	logger.Infof("TmdbService[SearchMovie] 搜索完成: query=%s, results=%d", query, len(results))
+	logger.Debugf("TmdbService[SearchMovie] 搜索完成: query=%s, results=%d", query, len(results))
 	s.saveSearchCache("movie", query, year, results)
 	return results, nil
 }
@@ -394,7 +394,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 		})
 	}
 
-	logger.Infof("TmdbService[SearchTV] 搜索完成: query=%s, year=%d, results=%d", query, year, len(results))
+	logger.Debugf("TmdbService[SearchTV] 搜索完成: query=%s, year=%d, results=%d", query, year, len(results))
 	s.saveSearchCache("tv", query, year, results)
 	return results, nil
 }

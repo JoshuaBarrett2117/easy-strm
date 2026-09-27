@@ -107,6 +107,24 @@ func (d *PlaybackRecordDAO) ShareMetadata(ctx context.Context, entryID string) (
 	if DB == nil {
 		return metadata, fmt.Errorf("数据库未初始化")
 	}
+	var raw []byte
+	if err := DB.QueryRowContext(ctx, `SELECT payload FROM t_share_strm WHERE id=$1`, entryID).Scan(&raw); err != nil {
+		return metadata, err
+	}
+	var entry domain.ShareStrmEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return metadata, err
+	}
+	if entry.Title != "" {
+		metadata.Title = entry.Title
+	} else if entry.FileName != "" {
+		metadata.Title = entry.FileName
+	}
+	metadata.Poster, metadata.Episodes = entry.PosterPath, entry.Episodes
+	// 新导出的映射已保存展示信息，不再执行历史映射所需的全库关联查询。
+	if entry.Title != "" && entry.PosterPath != "" {
+		return metadata, nil
+	}
 	var episodes []byte
 	err := DB.QueryRowContext(ctx, `SELECT
 		COALESCE(NULLIF(e.payload->>'title',''), NULLIF(metadata.title,''), NULLIF(e.payload->>'file_name',''), e.id::text),

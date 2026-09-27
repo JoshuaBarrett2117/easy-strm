@@ -547,7 +547,7 @@ const formatSize = (size) => {
   return `${(value / 1024 ** index).toFixed(index > 1 ? 2 : 0)} ${units[index]}`
 }
 const fileStatus = (file) => {
-  if (file.share_cancelled) return { type: 'error', label: '分享已取消' }
+  if (file.share_cancelled) return { type: 'error', label: '分享已失效' }
   if (!file.available) return { type: 'warning', label: '文件已失效' }
   return { type: 'success', label: '可用' }
 }

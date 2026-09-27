@@ -36,7 +36,11 @@ func TestShareCancellationPersistence(t *testing.T) {
 		{"超时", false, context.DeadlineExceeded, false, false, false},
 		{"任务取消", false, context.Canceled, false, false, false},
 		{"密码错误", false, mapShareSnapError(fmt.Errorf("990011")), false, false, false},
-		{"失效原因不明", false, mapShareSnapError(fmt.Errorf("4100009")), false, false, false},
+		{"链接无效", false, mapShareSnapError(fmt.Errorf("4100009")), true, true, false},
+		{"分享不存在", false, mapShareSnapError(fmt.Errorf("4100026")), true, true, false},
+		{"分享过期", false, mapShareSnapError(fmt.Errorf(`{"errno":990009,"error":"分享已过期"}`)), true, true, false},
+		{"过期文案", false, mapShareSnapError(fmt.Errorf("分享已过期")), true, true, false},
+		{"需要密码", false, mapShareSnapError(fmt.Errorf("990010")), false, false, false},
 		{"网络错误保留旧状态", true, fmt.Errorf("network error"), false, true, false},
 		{"数据库失败", false, ErrShareCancelled, true, true, true},
 	} {
@@ -76,5 +80,28 @@ func TestShareCancellationClassification(t *testing.T) {
 	}
 	if isShareCancelledError(fmt.Errorf("分享已取消: %w", context.DeadlineExceeded)) {
 		t.Fatal("超时不能标记分享取消")
+	}
+}
+
+// TestExpiredShareParsing 验证过期响应经真实解析入口保留可持久化的失效类型。
+func TestExpiredShareParsing(t *testing.T) {
+	client := &fakeShareCloud115Client{
+		shareSnapErr: fmt.Errorf(`{"state":false,"errno":990009,"error":"分享已过期"}`),
+	}
+	svc := &ShareTransferService{client: client}
+	_, err := svc.ParseShareLink(context.Background(), "https://115.com/s/swwppmm3nqo", "")
+	if !isShareUnavailableError(err) {
+		t.Fatalf("过期分享未被分类为失效: %v", err)
+	}
+	for _, err := range []error{
+		context.Canceled, context.DeadlineExceeded,
+		fmt.Errorf("%w: %w", ErrShareUnavailable, context.DeadlineExceeded),
+		mapShareSnapError(fmt.Errorf("990010")),
+		mapShareSnapError(fmt.Errorf("990011")),
+		mapShareSnapError(fmt.Errorf("network timeout")),
+	} {
+		if isShareUnavailableError(err) {
+			t.Fatalf("普通错误被误标为分享失效: %v", err)
+		}
 	}
 }

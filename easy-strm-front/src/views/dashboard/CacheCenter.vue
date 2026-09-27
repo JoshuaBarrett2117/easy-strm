@@ -39,16 +39,28 @@
           :data="overview.groups"
           :loading="loading"
           :row-key="(row) => row.key"
-          :scroll-x="980"
+          :scroll-x="1600"
         />
       </div>
     </PageCard>
+
+    <n-modal v-model:show="details.visible" preset="card" style="width: min(1100px, 92vw)" :title="`缓存详情：${details.name}`">
+      <div class="mb-3 flex flex-wrap gap-2">
+        <n-input v-model:value="details.keyword" clearable placeholder="按 Key 或缓存值筛选" style="width: 280px" @keyup.enter="loadDetails" />
+        <n-select v-model:value="details.pageSize" :options="pageSizeOptions" style="width: 120px" @update:value="loadDetails" />
+        <n-button :loading="details.loading" @click="loadDetails">查询</n-button>
+      </div>
+      <n-data-table :columns="detailColumns" :data="details.items" :loading="details.loading" :pagination="false" :max-height="520" />
+      <div class="mt-3 flex justify-end">
+        <n-pagination v-model:page="details.page" :page-size="details.pageSize" :item-count="details.total" show-size-picker :page-sizes="[10, 20, 50, 100]" @update:page="loadDetails" @update:page-size="onDetailPageSizeChange" />
+      </div>
+    </n-modal>
   </div>
 </template>
 
 <script setup>
 import { h, reactive, ref } from 'vue'
-import { NButton, NDataTable, NIcon, NTag, useMessage } from 'naive-ui'
+import { NButton, NDataTable, NIcon, NInput, NModal, NPagination, NSelect, NTag, useMessage } from 'naive-ui'
 import {
   RefreshOutline,
   PulseOutline,
@@ -58,7 +70,7 @@ import {
 } from '@vicons/ionicons5'
 import PageCard from '../../components/common/PageCard.vue'
 import StatCard from '../../components/common/StatCard.vue'
-import { getCacheOverview, clearCacheGroup } from '../../utils/api/cache'
+import { getCacheOverview, getCacheDetails, clearCacheGroup } from '../../utils/api/cache'
 import { showConfirmDialog } from '../../utils/ui/messageBox'
 
 const message = useMessage()
@@ -71,10 +83,24 @@ const overview = reactive({
   redis_memory: '',
   groups: []
 })
+const details = reactive({ visible: false, loading: false, name: '', scope: '', keyword: '', page: 1, pageSize: 20, total: 0, items: [] })
+const pageSizeOptions = [10, 20, 50, 100].map((value) => ({ label: `${value} 条/页`, value }))
+const detailColumns = [
+  { title: 'Redis Key', key: 'key', minWidth: 320, ellipsis: { tooltip: true } },
+  { title: '缓存值', key: 'value', minWidth: 420, ellipsis: { tooltip: true } },
+  { title: '剩余 TTL', key: 'ttl_seconds', width: 120, render: (row) => row.ttl_seconds < 0 ? '永久' : `${row.ttl_seconds}s` }
+]
 
 const cacheColumns = [
   { title: '缓存名称', key: 'name', minWidth: 160 },
   { title: '说明', key: 'description', minWidth: 260 },
+  { title: '缓存前缀', key: 'prefix', minWidth: 260, ellipsis: { tooltip: true } },
+  {
+    title: '缓存详情',
+    key: 'details',
+    width: 110,
+    render: (row) => h(NButton, { text: true, size: 'small', disabled: !row.prefix, onClick: () => openDetails(row) }, { default: () => '查看' })
+  },
   {
     title: '存储位置',
     key: 'storage',
@@ -164,6 +190,37 @@ const loadOverview = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const openDetails = (row) => {
+  details.visible = true
+  details.name = row.name
+  details.scope = row.key
+  details.keyword = ''
+  details.page = 1
+  details.items = []
+  loadDetails()
+}
+
+const loadDetails = async () => {
+  if (!details.scope) return
+  details.loading = true
+  try {
+    const response = await getCacheDetails({ scope: details.scope, keyword: details.keyword, page: details.page, page_size: details.pageSize })
+    const payload = response?.data?.data || {}
+    details.items = Array.isArray(payload.items) ? payload.items : []
+    details.total = Number(payload.total || 0)
+  } catch (error) {
+    message.error(error?.response?.data?.error || '加载缓存详情失败')
+  } finally {
+    details.loading = false
+  }
+}
+
+const onDetailPageSizeChange = (value) => {
+  details.pageSize = value
+  details.page = 1
+  loadDetails()
 }
 
 const handleClear = async (scope, label) => {

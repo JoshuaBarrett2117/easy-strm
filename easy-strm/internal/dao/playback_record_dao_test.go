@@ -67,7 +67,7 @@ func TestPlaybackMetadataFallsBackToTmdbCacheForLegacyEmptyPoster(t *testing.T) 
 	}
 }
 
-func TestSharePlaybackMetadataUsesEntrySnapshot(t *testing.T) {
+func TestSharePlaybackMetadataLegacyFallback(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -76,6 +76,8 @@ func TestSharePlaybackMetadataUsesEntrySnapshot(t *testing.T) {
 	previous := DB
 	DB = db
 	defer func() { DB = previous }()
+	mock.ExpectQuery("SELECT payload FROM t_share_strm WHERE id=\\$1").WithArgs("entry-1").
+		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(`{"file_name":"episode.mkv"}`))
 	mock.ExpectQuery("SELECT\\s+COALESCE").WithArgs("entry-1").
 		WillReturnRows(sqlmock.NewRows([]string{"title", "poster_path", "episodes"}).AddRow("分享影片", "/share.jpg", `[{"season_number":2,"episode_number":3}]`))
 	metadata, err := NewPlaybackRecordDAO(nil).ShareMetadata(context.Background(), "entry-1")
@@ -85,6 +87,27 @@ func TestSharePlaybackMetadataUsesEntrySnapshot(t *testing.T) {
 	}
 	if err != nil || title != "分享影片" || poster != "/share.jpg" {
 		t.Fatalf("share metadata: %s %s %v", title, poster, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSharePlaybackMetadataUsesEntrySnapshot(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	previous := DB
+	DB = db
+	defer func() { DB = previous }()
+	// 完整快照只需主键查询，不应扫描整个分享资源库来关联元数据。
+	mock.ExpectQuery("SELECT payload FROM t_share_strm WHERE id=\\$1").WithArgs("entry-1").
+		WillReturnRows(sqlmock.NewRows([]string{"payload"}).AddRow(`{"title":"分享剧集","poster_path":"/share.jpg","episodes":[{"season_number":2,"episode_number":3}]}`))
+	metadata, err := NewPlaybackRecordDAO(nil).ShareMetadata(context.Background(), "entry-1")
+	if err != nil || metadata.Title != "分享剧集" || metadata.Poster != "/share.jpg" || len(metadata.Episodes) != 1 || metadata.Episodes[0].EpisodeNumber != 3 {
+		t.Fatalf("快照元数据错误: %+v, %v", metadata, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

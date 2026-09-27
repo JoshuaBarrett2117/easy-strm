@@ -86,6 +86,54 @@ func TestSharePlaybackRecordUsesExportMetadata(t *testing.T) {
 	}
 }
 
+type playbackMetadataTimeoutStore struct {
+	playbackStoreStub
+	metadata domain.PlaybackMetadata
+}
+
+func (s *playbackMetadataTimeoutStore) ShareMetadata(ctx context.Context, _ string) (domain.PlaybackMetadata, error) {
+	<-ctx.Done()
+	return s.metadata, ctx.Err()
+}
+
+func (s *playbackMetadataTimeoutStore) Metadata(ctx context.Context, _ int, _, _ string) (domain.PlaybackMetadata, error) {
+	<-ctx.Done()
+	return domain.PlaybackMetadata{}, ctx.Err()
+}
+
+func (s *playbackMetadataTimeoutStore) Save(ctx context.Context, record domain.PlaybackRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.playbackStoreStub.Save(ctx, record)
+}
+
+func TestPlaybackRecordSurvivesMetadataTimeout(t *testing.T) {
+	for _, source := range []string{"share", "share_partial", "direct"} {
+		t.Run(source, func(t *testing.T) {
+			store := &playbackMetadataTimeoutStore{}
+			s := NewPlaybackRecordService(store)
+			wantName := "entry-1"
+			if source == "share_partial" {
+				store.metadata = domain.PlaybackMetadata{Title: "分享剧集", Episodes: []domain.ShareEpisode{{SeasonNumber: 2, EpisodeNumber: 3}}}
+				wantName = "分享剧集 · 第 2 季 · 第 3 集"
+			}
+			if source != "direct" {
+				s.RecordShare("entry-1", "https://cdn.test/video", "127.0.0.1", "GET")
+			} else {
+				wantName = "video.mkv"
+				s.Record("/movies/video.mkv", "pick", 3, "https://cdn.test/video", "127.0.0.1", "GET")
+			}
+			if len(store.records) != 1 {
+				t.Fatalf("元数据超时后仍应保存播放记录，实际 %d 条", len(store.records))
+			}
+			if record := store.records[0]; record.Name != wantName || record.URL != "https://cdn.test/video" || record.IP != "127.0.0.1" || record.Method != "GET" {
+				t.Fatalf("降级播放记录错误: %+v", record)
+			}
+		})
+	}
+}
+
 func TestPlaybackRecordAndPagination(t *testing.T) {
 	store := &playbackStoreStub{}
 	s := NewPlaybackRecordService(store)

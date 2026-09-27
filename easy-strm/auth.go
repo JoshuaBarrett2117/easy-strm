@@ -145,6 +145,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
 	shareRecordService.SetAutoStrmExport(shareStrmService.StartAutoExport)
+	shareRecordService.SetStrmDeleteGuard(shareStrmService)
 	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
 	playbackRecordService.SetPosterResolver(tmdbService.ResolvePlaybackMoviePoster)
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
@@ -735,6 +736,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 		auth.GET("/dashboard/resource-monitor", dashboardController.GetResourceMonitor)
 		auth.GET("/dashboard/trends/:kind", dashboardController.GetTrend)
 		auth.GET("/cache/overview", cacheAdminController.GetOverview)
+		auth.GET("/cache/details", cacheAdminController.GetDetails)
 		auth.POST("/cache/clear", cacheAdminController.Clear)
 
 		// ========== 用户信息 ==========

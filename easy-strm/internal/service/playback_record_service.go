@@ -73,7 +73,7 @@ func (s *PlaybackRecordService) Record(filePath, pickcode string, account int, d
 		logger.Warnf("播放记录媒体信息读取失败: %v", err)
 		metadata.Title = name
 	}
-	if !s.save(ctx, playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
+	if !s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
 		s.releaseSessionCall(sessionKey)
 	}
 }
@@ -89,9 +89,11 @@ func (s *PlaybackRecordService) RecordShare(entryID, directURL, ip, method strin
 	metadata, err := s.store.ShareMetadata(ctx, entryID)
 	if err != nil {
 		logger.Warnf("分享STRM播放记录媒体信息读取失败: %v", err)
-		metadata.Title = entryID
+		if metadata.Title == "" {
+			metadata.Title = entryID
+		}
 	}
-	if !s.save(ctx, playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
+	if !s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
 		s.releaseSessionCall(sessionKey)
 	}
 }
@@ -110,7 +112,10 @@ func playbackDisplayName(metadata domain.PlaybackMetadata) string {
 	return strings.Join(parts, " · ")
 }
 
-func (s *PlaybackRecordService) save(ctx context.Context, name, poster, directURL, ip, method string) bool {
+func (s *PlaybackRecordService) save(name, poster, directURL, ip, method string) bool {
+	// 元数据只用于补全展示，超时后保存仍需独立预算，不能复用已失效的查询上下文。
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	record := domain.PlaybackRecord{ID: uuid.NewString(), Name: name, Poster: poster, URL: directURL, IP: ip, Method: method, Time: s.now().UTC(), Location: "未知"}
 	if strings.HasPrefix(record.Poster, "/") {
 		record.Poster = "https://image.tmdb.org/t/p/w342" + record.Poster

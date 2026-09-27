@@ -354,8 +354,9 @@ func mapShareSnapError(err error) error {
 	switch {
 	case strings.Contains(msg, "4100026"), strings.Contains(msg, "shared link not found"),
 		strings.Contains(msg, "4100009"), strings.Contains(msg, "shared link invalid"),
-		strings.Contains(msg, "990009"):
-		return fmt.Errorf("分享不存在或已过期")
+		strings.Contains(msg, "990009"), strings.Contains(msg, "分享已过期"),
+		strings.Contains(msg, "分享已失效"), strings.Contains(msg, "分享不存在或已过期"):
+		return ErrShareUnavailable
 	case strings.Contains(msg, "990010"):
 		return fmt.Errorf("分享需要访问密码")
 	case strings.Contains(msg, "990011"), strings.Contains(msg, "提取码"):

@@ -36,6 +36,42 @@ func TestShareContextEpisodeRegression(t *testing.T) {
 	}
 }
 
+func TestShareEpisodeMovieConfusion(t *testing.T) {
+	for _, tc := range []struct {
+		file, title string
+		episode     int
+	}{
+		{"剧集/新白发魔女传/15.mkv", "新白发魔女传", 15},
+		{"剧集/超能异族（2023）/第16集.mkv", "超能异族", 16},
+		{"合集1/HQC/大清盐商 2014[全34集][国语中字][WEB-MP4]/06.mp4", "大清盐商", 6},
+		{"合集1/HQC/家有喜妇 全42集.Happy.Wife.in.the.House.2014.1080p/09.mp4", "家有喜妇", 9},
+		{"合集1/HQC/苏染染追夫记.EP01-50.2016.WEB-DL/06.mp4", "苏染染追夫记", 6},
+		{"合集1/HQC/将夜.Ever.Night.EP00-60.2018.1080p/06.mp4", "将夜 Ever Night", 6},
+	} {
+		t.Run(tc.file, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/search/movie" {
+					t.Error("剧集不能进入电影搜索")
+					fmt.Fprintf(w, `{"results":[{"id":101230,"title":%q,"release_date":"1994-01-01"}]}`, r.URL.Query().Get("query"))
+					return
+				}
+				if r.URL.Path == "/search/tv" {
+					fmt.Fprintf(w, `{"results":[{"id":42,"name":%q,"first_air_date":"2014-01-01"}]}`, tc.title)
+					return
+				}
+				fmt.Fprint(w, `{"id":42,"results":[],"seasons":[],"translations":[]}`)
+			}))
+			defer server.Close()
+			s := NewTmdbService("fixture", nil)
+			s.baseURL, s.httpClient = server.URL, server.Client()
+			r, err := s.IdentifyShareFile(context.Background(), tc.file, "tmdb", "auto")
+			if err != nil || r == nil || !r.Success || r.MediaType != "tv" || r.TmdbID != 42 || r.EpisodeNumber != tc.episode || r.SeasonNumber != 1 {
+				t.Fatalf("result=%+v err=%v", r, err)
+			}
+		})
+	}
+}
+
 func TestShareSeasonSearchRegression(t *testing.T) {
 	for _, tc := range []struct {
 		name, file   string
