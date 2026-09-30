@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"easy-strm/internal/dao"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // StrmOutput 统一输出目录边界、文件归属和增量写入。
@@ -98,6 +100,28 @@ func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*S
 		}
 	}
 	return s, nil
+}
+
+// WaitStrmOutput 等待重叠目录释放；每次重试先释放已持有的锁，避免父子目录互相阻塞。
+// 调用方通过 ctx 限制等待时间，通过 cancelled 接入任务中心的取消标记。
+func WaitStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, cancelled func() bool) (*StrmOutput, error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if cancelled != nil && cancelled() {
+			return nil, context.Canceled
+		}
+		output, err := NewStrmOutput(ctx, db, root, owner, run)
+		if !errors.Is(err, dao.ErrStrmOutputBusy) {
+			return output, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 func (s *StrmOutput) contains(p string) bool {
 	r, e := filepath.Rel(s.Root, p)

@@ -7,6 +7,7 @@ import (
 	"easy-strm/internal/pkg/logger"
 	"fmt"
 	neturl "net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -170,11 +171,17 @@ func (s *ShareRecordService) Identify(ctx context.Context, m domain.ShareMedia, 
 
 // ManualIdentify 将用户选择的搜索结果保存为分享媒体的识别结果。
 func (s *ShareRecordService) ManualIdentify(ctx context.Context, m domain.ShareMedia) error {
+	_, err := s.ManualIdentifyWithCount(ctx, m)
+	return err
+}
+
+// ManualIdentifyWithCount 保存用户选择；明确勾选时将同目录且季集可解析的待核对文件一并关联。
+func (s *ShareRecordService) ManualIdentifyWithCount(ctx context.Context, m domain.ShareMedia) (int, error) {
 	if isMaskedSharePath(m.FileName) {
-		return fmt.Errorf("目录名称已脱敏，已跳过识别")
+		return 0, fmt.Errorf("目录名称已脱敏，已跳过识别")
 	}
 	if m.ID <= 0 || m.Version <= 0 || m.Result == nil || (m.Result.MediaType != "movie" && m.Result.MediaType != "tv") || strings.TrimSpace(m.Result.Title) == "" || (m.Result.TmdbID == 0 && m.Result.MetadataID == "") {
-		return fmt.Errorf("请选择有效的媒体搜索结果")
+		return 0, fmt.Errorf("请选择有效的媒体搜索结果")
 	}
 	m.Result.Success = true
 	m.Result.Message = "手动识别"
@@ -184,15 +191,84 @@ func (s *ShareRecordService) ManualIdentify(ctx context.Context, m domain.ShareM
 	}
 	episodes, err := normalizeShareEpisodes(m.Result.MediaType, m.Episodes, m.Result.SeasonNumber, m.Result.EpisodeNumber)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := s.dao.Identify(ctx, m, "identified", m.Result, "", episodes...); err != nil {
-		return err
+	if !m.ApplyToSeries || m.Result.MediaType != "tv" {
+		if err := s.dao.Identify(ctx, m, "identified", m.Result, "", episodes...); err != nil {
+			return 0, err
+		}
+	} else {
+		if s.tmdb == nil || m.ShareID <= 0 {
+			return 0, fmt.Errorf("缺少剧集批量核对信息")
+		}
+		records, err := s.dao.ListManualBatchContext(ctx, m.ShareID)
+		if err != nil {
+			return 0, err
+		}
+		batch, err := s.buildManualSeriesBatch(m, episodes, records)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.dao.IdentifyBatch(ctx, batch); err != nil {
+			return 0, err
+		}
+		if s.tmdb != nil {
+			for _, item := range batch {
+				s.tmdb.invalidateShareWork(ctx, item)
+			}
+		}
+		return len(batch), nil
 	}
 	if s.tmdb != nil {
 		s.tmdb.invalidateShareWork(ctx, m)
 	}
-	return nil
+	return 1, nil
+}
+
+func (s *ShareRecordService) buildManualSeriesBatch(target domain.ShareMedia, episodes []domain.ShareEpisode, records []domain.ShareRecord) ([]domain.ShareMedia, error) {
+	parent := path.Dir(strings.ReplaceAll(target.FileName, "\\", "/"))
+	batch := []domain.ShareMedia{}
+	found := false
+	for _, record := range records {
+		if record.ID != target.ShareID {
+			continue
+		}
+		for _, item := range record.Media {
+			if item.ID == target.ID {
+				if item.Version != target.Version || item.FileName != target.FileName {
+					return nil, fmt.Errorf("媒体已更新，请刷新后重试")
+				}
+				found = true
+				item.Result = target.Result
+				item.Episodes = episodes
+				batch = append(batch, item)
+				continue
+			}
+			if path.Dir(strings.ReplaceAll(item.FileName, "\\", "/")) != parent || isMaskedSharePath(item.FileName) {
+				continue
+			}
+			input := shareEpisodeInput(context.Background(), item.FileName, "tv")
+			query := s.tmdb.analyzeShareQuery(input, "tv")
+			candidate := domain.TmdbSearchResult{Title: target.Result.Title, OriginalTitle: target.Result.OriginalTitle, Year: target.Result.Year, MediaType: "tv"}
+			parsed := s.tmdb.parseFilenameForMediaType(input, "tv")
+			if parsed.Episode <= 0 || (canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.Title) && canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.OriginalTitle)) || selectVerifiedShareCandidate(query, []domain.TmdbSearchResult{candidate}) == nil {
+				continue
+			}
+			if len(episodes) == 0 || parsed.Season != episodes[0].SeasonNumber {
+				continue
+			}
+			item.Result = cloneShareWorkResult(target.Result)
+			item.Result.Filename = item.FileName
+			item.Result.SeasonNumber, item.Result.EpisodeNumber = parsed.Season, parsed.Episode
+			item.Result.Message = "同剧手动批量核对"
+			item.Episodes = []domain.ShareEpisode{{SeasonNumber: parsed.Season, EpisodeNumber: parsed.Episode}}
+			batch = append(batch, item)
+		}
+	}
+	if !found {
+		return nil, fmt.Errorf("目标文件已更新或不在待核对队列，请刷新后重试")
+	}
+	return batch, nil
 }
 
 func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedia, retry bool) (bool, error) {

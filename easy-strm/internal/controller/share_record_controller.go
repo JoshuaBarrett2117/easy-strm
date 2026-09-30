@@ -111,11 +111,12 @@ func (c *ShareRecordController) ManualIdentify(x *gin.Context) {
 		return
 	}
 	m.ID = id
-	if err := c.s.ManualIdentify(x, m); err != nil {
+	count, err := c.s.ManualIdentifyWithCount(x, m)
+	if err != nil {
 		ErrorResp(x, 409, err.Error())
 		return
 	}
-	SuccessResp(x, nil)
+	SuccessResp(x, gin.H{"identified_count": count})
 }
 
 func NewShareRecordController(s *service.ShareRecordService) *ShareRecordController {

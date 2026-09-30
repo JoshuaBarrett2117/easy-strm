@@ -294,7 +294,7 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 	}
 }
 
-func TestShareStrmExportAddsShareNameOnlyForDifferentSources(t *testing.T) {
+func TestShareStrmExportDistinguishesFilesWithinAndAcrossShares(t *testing.T) {
 	s, store, _ := strmFixture(t)
 	mini := miniredis.RunT(t)
 	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
@@ -317,13 +317,79 @@ func TestShareStrmExportAddsShareNameOnlyForDifferentSources(t *testing.T) {
 	waitShareTask(t, s.tasks, id)
 	cfg, _ := s.Settings()
 	files, err := filepath.Glob(filepath.Join(cfg.OutputPath, "movie", "*", "*.strm"))
-	if err != nil || len(files) != 2 {
-		t.Fatalf("应按两个不同分享来源各生成一个STRM：%v %v", files, err)
+	if err != nil || len(files) != 3 {
+		t.Fatalf("每条文件来源都应生成独立STRM：%v %v", files, err)
 	}
-	names := []string{filepath.Base(files[0]), filepath.Base(files[1])}
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		names = append(names, filepath.Base(file))
+	}
 	joined := strings.Join(names, "|")
-	if !strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-动画电影9.73TB.strm") || !strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-高码电影 合集.strm") {
-		t.Fatalf("分享来源名称未正确追加或清理：%v", names)
+	if !strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-动画电影9.73TB-文件1.strm") ||
+		!strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-动画电影9.73TB-文件2.strm") ||
+		!strings.Contains(joined, "名侦探柯南剧场版M13 (2009) {tmdb-10}-高码电影 合集.strm") {
+		t.Fatalf("分享及同分享内文件后缀不正确：%v", names)
+	}
+}
+
+func TestShareStrmExportDistinguishesSameShareOnly(t *testing.T) {
+	s, store, _ := strmFixture(t)
+	mini := miniredis.RunT(t)
+	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer rc.Close()
+	dao.InitTaskRedisDAO(rc)
+	s.tasks = NewTaskService(dao.NewTaskRedisDAO(rc))
+	base := domain.ShareStrmSource{ShareID: 7, ShareName: "同一分享", WorkKey: "tmdb:movie:10", URL: "https://115.com/s/first", Result: domain.TmdbIdentifyResult{Success: true, Title: "电影", Year: 2020, MediaType: "movie", TmdbID: 10}}
+	first, second := base, base
+	first.ID, first.MediaID, first.FileName = 11, 88, "Movie/first.mkv"
+	second.ID, second.MediaID, second.FileName = 12, 88, "Movie/second.mkv"
+	store.sources = []domain.ShareStrmSource{first, second}
+
+	id, err := s.StartExport(domain.ShareLibraryQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitShareTask(t, s.tasks, id)
+	cfg, _ := s.Settings()
+	files, err := filepath.Glob(filepath.Join(cfg.OutputPath, "movie", "*", "*.strm"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("同分享内每条来源应生成独立STRM：%v %v", files, err)
+	}
+	for _, want := range []string{"电影 (2020) {tmdb-10}-文件11.strm", "电影 (2020) {tmdb-10}-文件12.strm"} {
+		if !strings.Contains(strings.Join([]string{filepath.Base(files[0]), filepath.Base(files[1])}, "|"), want) {
+			t.Fatalf("缺少 %s：%v", want, files)
+		}
+	}
+}
+
+func TestShareStrmExportDistinguishesSameEpisodeWithinShare(t *testing.T) {
+	s, store, _ := strmFixture(t)
+	mini := miniredis.RunT(t)
+	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
+	defer rc.Close()
+	dao.InitTaskRedisDAO(rc)
+	s.tasks = NewTaskService(dao.NewTaskRedisDAO(rc))
+	base := domain.ShareStrmSource{ShareID: 7, ShareName: "同一分享", WorkKey: "tmdb:tv:10", URL: "https://115.com/s/first", Result: domain.TmdbIdentifyResult{Success: true, Title: "剧集", Year: 2020, MediaType: "tv", TmdbID: 10}, Episodes: []domain.ShareEpisode{{SeasonNumber: 1, EpisodeNumber: 2}}}
+	first, second := base, base
+	first.ID, first.MediaID, first.FileName = 21, 88, "Show/first.mkv"
+	second.ID, second.MediaID, second.FileName = 22, 88, "Show/second.mkv"
+	store.sources = []domain.ShareStrmSource{first, second}
+
+	id, err := s.StartExport(domain.ShareLibraryQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitShareTask(t, s.tasks, id)
+	cfg, _ := s.Settings()
+	files, err := filepath.Glob(filepath.Join(cfg.OutputPath, "tv", "*", "Season 01", "*.strm"))
+	if err != nil || len(files) != 2 {
+		t.Fatalf("同分享同一集的不同文件应保留两个入口：%v %v", files, err)
+	}
+	names := filepath.Base(files[0]) + "|" + filepath.Base(files[1])
+	for _, want := range []string{"剧集 - S01E02-文件21.strm", "剧集 - S01E02-文件22.strm"} {
+		if !strings.Contains(names, want) {
+			t.Fatalf("缺少 %s：%v", want, files)
+		}
 	}
 }
 

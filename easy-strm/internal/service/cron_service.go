@@ -342,6 +342,28 @@ func (s *CronService) AcquireStrmExecution(configID int, taskID string) (func(),
 	}, nil
 }
 
+// WaitStrmExecution 等待同一 STRM 配置的前序执行结束。
+// 定时任务允许在同一时刻触发多个实例，但同一配置仍必须串行写入。
+func (s *CronService) WaitStrmExecution(ctx context.Context, configID int, taskID string) (func(), error) {
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if s.tasks != nil && s.tasks.IsCancelled(taskID) {
+			return nil, context.Canceled
+		}
+		release, err := s.AcquireStrmExecution(configID, taskID)
+		if err == nil {
+			return release, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}
+
 // Run 统一手动和定时触发，返回任务中心执行ID。
 func (s *CronService) Run(id int, trigger string) (string, error) {
 	s.mu.Lock()

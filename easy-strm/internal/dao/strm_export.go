@@ -3,8 +3,12 @@ package dao
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
+
+// ErrStrmOutputBusy 表示输出目录与正在执行的任务重叠，可等待后重试。
+var ErrStrmOutputBusy = errors.New("输出目录或其父子目录正在执行任务")
 
 // StrmExportDAO 在专用连接上持有目录树的共享/独占锁。
 type StrmExportDAO struct{ Conn *sql.Conn }
@@ -27,7 +31,7 @@ func LockStrmOutput(ctx context.Context, db *sql.DB, paths []string) (*StrmExpor
 			if e != nil {
 				return nil, e
 			}
-			return nil, fmt.Errorf("输出目录或其父子目录正在执行任务")
+			return nil, ErrStrmOutputBusy
 		}
 	}
 	return d, nil

@@ -292,3 +292,96 @@ func TestDirectStrmGenerationUsesSameMutex(t *testing.T) {
 	}
 	next()
 }
+
+func TestStrmExecutionWaitAndIndependentConfig(t *testing.T) {
+	s, _ := cronTestService(t)
+	release, err := s.AcquireStrmExecution(9, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	other, err := s.WaitStrmExecution(ctx, 10, "parallel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other()
+	done := make(chan error, 1)
+	go func() {
+		next, err := s.WaitStrmExecution(ctx, 9, "second")
+		if err == nil {
+			next()
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("前序执行未结束，等待提前返回: %v", err)
+	case <-time.After(30 * time.Millisecond):
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStrmExecutionWaitCancelled(t *testing.T) {
+	s, _ := cronTestService(t)
+	release, _ := s.AcquireStrmExecution(9, "first")
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.WaitStrmExecution(ctx, 9, "second"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("取消无效: %v", err)
+	}
+	if err := s.tasks.Create("cancelled", "strm_generate", "等待任务"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.tasks.Cancel("cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.WaitStrmExecution(context.Background(), 10, "cancelled"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("已取消任务不应获取空闲锁: %v", err)
+	}
+}
+
+func TestScheduledStrmConfigsRunConcurrently(t *testing.T) {
+	s, mock := cronTestService(t)
+	entered, finish := make(chan int, 2), make(chan struct{})
+	var once sync.Once
+	defer once.Do(func() { close(finish) })
+	s.Register(CronHandler{Key: "full_generate", Execute: func(ctx context.Context, task *domain.CronTask, id string) (string, error) {
+		release, err := s.WaitStrmExecution(ctx, task.StrmConfigID, id)
+		if err != nil {
+			return "", err
+		}
+		defer release()
+		entered <- task.StrmConfigID
+		<-finish
+		return "成功", nil
+	}})
+	for _, id := range []int{1, 3} {
+		expectCronRead(mock, id, id, "full_generate", "enabled", false)
+		mock.ExpectExec(`INSERT INTO t_cron_task_run`).WithArgs(id, sqlmock.AnyArg(), "scheduled", "pending").WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectExec(`UPDATE t_cron_task_run SET status='running'`).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), nil, "running", "", id).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`UPDATE t_cron_task_run SET status=\$1`).WithArgs("success", "成功", sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
+		mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), nil, "success", "成功", id).WillReturnResult(sqlmock.NewResult(0, 1))
+		if _, err := s.Run(id, "scheduled"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			t.Fatal("不同配置必须在前一任务结束前同时进入处理器")
+		}
+	}
+	once.Do(func() { close(finish) })
+	waitCronIdle(t, s)
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

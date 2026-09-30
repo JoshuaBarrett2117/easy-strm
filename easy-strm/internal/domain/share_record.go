@@ -44,6 +44,7 @@ type ShareMedia struct {
 	SeasonNumber     *int                `json:"season_number,omitempty"`
 	EpisodeNumber    *int                `json:"episode_number,omitempty"`
 	Episodes         []ShareEpisode      `json:"episodes,omitempty"`
+	ApplyToSeries    bool                `json:"apply_to_series,omitempty"`
 }
 
 // ShareEpisode 表示一个分享文件对应的明确季集。

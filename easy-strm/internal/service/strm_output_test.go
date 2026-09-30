@@ -3,11 +3,83 @@ package service
 import (
 	"context"
 	"easy-strm/internal/dao"
+	"errors"
 	"github.com/DATA-DOG/go-sqlmock"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestWaitStrmOutputRetriesBusyDirectory(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	root, err := NormalizeStrmOutputPath(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain := []string{}
+	for p := root; ; p = filepath.Dir(p) {
+		chain = append([]string{p}, chain...)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	for _, busy := range []bool{true, false} {
+		for i, p := range chain {
+			query := "SELECT pg_try_advisory_lock_shared"
+			if i == len(chain)-1 {
+				query = `SELECT pg_try_advisory_lock\(`
+			}
+			mock.ExpectQuery(query).WithArgs(p).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(!busy || i != len(chain)-1))
+		}
+		if busy {
+			mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
+		}
+	}
+	mock.ExpectQuery("SELECT strm_config_id,local_strm_path").WillReturnRows(sqlmock.NewRows([]string{"id", "path"}))
+	mock.ExpectQuery("SELECT output_path FROM t_strm_export_state").WillReturnRows(sqlmock.NewRows([]string{"path"}))
+	mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	output, err := WaitStrmOutput(ctx, db, root, "cloud115:1", "run", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output.Store.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWaitStrmOutputCancellationAndDatabaseFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	root := t.TempDir()
+	if _, err := WaitStrmOutput(context.Background(), db, root, "owner", "run", func() bool { return true }); !errors.Is(err, context.Canceled) {
+		t.Fatalf("取消无效: %v", err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	if _, err := WaitStrmOutput(ctx, db, root, "owner", "run", nil); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("超时无效: %v", err)
+	}
+	failure := errors.New("database unavailable")
+	mock.ExpectQuery("SELECT pg_try_advisory_lock_shared").WillReturnError(failure)
+	mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
+	if _, err := WaitStrmOutput(context.Background(), db, root, "owner", "run", nil); !errors.Is(err, failure) {
+		t.Fatalf("数据库错误必须直接返回: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestStrmOutputPreservesUnchangedAndForeignFiles(t *testing.T) {
 	for _, scenario := range []string{"unchanged", "foreign", "unregistered", "missing"} {

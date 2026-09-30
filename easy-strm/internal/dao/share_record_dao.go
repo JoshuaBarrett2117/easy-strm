@@ -218,15 +218,37 @@ func (d *ShareRecordDAO) DeleteMedia(ctx context.Context, id int) error {
 	return tx.Commit()
 }
 func (d *ShareRecordDAO) Identify(ctx context.Context, m domain.ShareMedia, status string, r *domain.TmdbIdentifyResult, msg string, episodes ...domain.ShareEpisode) error {
-	b, marshalErr := json.Marshal(r)
-	if marshalErr != nil {
-		return marshalErr
-	}
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := identifyShareMediaTx(ctx, tx, m, status, r, msg, episodes); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// IdentifyBatch 原子保存同一作品的多集手动核对结果，任一版本冲突会回滚全部文件。
+func (d *ShareRecordDAO) IdentifyBatch(ctx context.Context, media []domain.ShareMedia) error {
+	tx, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, m := range media {
+		if err := identifyShareMediaTx(ctx, tx, m, "identified", m.Result, "", m.Episodes); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func identifyShareMediaTx(ctx context.Context, tx *sql.Tx, m domain.ShareMedia, status string, r *domain.TmdbIdentifyResult, msg string, episodes []domain.ShareEpisode) error {
+	b, marshalErr := json.Marshal(r)
+	if marshalErr != nil {
+		return marshalErr
+	}
 	res, err := tx.ExecContext(ctx, "UPDATE t_share_media_file SET status=$1,result=$2,error=$3,version=version+1,updated_at=now() WHERE id=$4 AND version=$5", status, b, msg, m.ID, m.Version)
 	if err != nil {
 		return err
@@ -278,7 +300,7 @@ func (d *ShareRecordDAO) Identify(ctx context.Context, m domain.ShareMedia, stat
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func shareMediaIdentity(r *domain.TmdbIdentifyResult) (string, string, string, string, error) {

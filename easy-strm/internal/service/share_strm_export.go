@@ -13,8 +13,9 @@ import (
 )
 
 type shareStrmConflict struct {
-	shareIDs map[int]bool
-	labels   map[string]int
+	shareIDs   map[int]bool
+	labels     map[string]int
+	fileCounts map[int]int
 }
 
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
@@ -74,7 +75,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			if err = s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed, failed); err != nil {
 				return err
 			}
-			metadata := map[string]interface{}{"exported_files": written, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享来源时，文件名追加分享名称；同一分享内重复文件采用首个有效来源"}
+			metadata := map[string]interface{}{"exported_files": written, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID"}
 			metadata["share_export"] = true
 			metadata["export_query"] = q
 			if s.output != nil {
@@ -148,7 +149,7 @@ func (s *ShareStrmService) shareStrmConflicts(ctx context.Context, q domain.Shar
 				identity := shareStrmIdentity(source, episode)
 				conflict := result[identity]
 				if conflict == nil {
-					conflict = &shareStrmConflict{shareIDs: map[int]bool{}, labels: map[string]int{}}
+					conflict = &shareStrmConflict{shareIDs: map[int]bool{}, labels: map[string]int{}, fileCounts: map[int]int{}}
 					result[identity] = conflict
 				}
 				shareID := shareStrmSourceID(source)
@@ -156,6 +157,7 @@ func (s *ShareStrmService) shareStrmConflicts(ctx context.Context, q domain.Shar
 					conflict.shareIDs[shareID] = true
 					conflict.labels[s.shareStrmSourceLabel(source)]++
 				}
+				conflict.fileCounts[shareID]++
 			}
 		}
 	}
@@ -216,6 +218,13 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 				suffix += fmt.Sprintf("-分享%d", shareID)
 			}
 		}
+		if conflict != nil && conflict.fileCounts[shareID] > 1 {
+			if suffix != "" {
+				suffix += "-"
+			}
+			suffix += fmt.Sprintf("文件%d", source.ID)
+			seenIdentity += fmt.Sprintf(":file:%d", source.ID)
+		}
 		relative, pathErr := s.strmRelativePath(current, file, cats, suffix)
 		if pathErr != nil {
 			return written > 0, pathErr
@@ -230,6 +239,9 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 			exportKey := fmt.Sprintf("%d:%d:%d", source.MediaID, episode.SeasonNumber, episode.EpisodeNumber)
 			if conflict != nil && len(conflict.shareIDs) > 1 {
 				exportKey += fmt.Sprintf(":share:%d", shareID)
+			}
+			if conflict != nil && conflict.fileCounts[shareID] > 1 {
+				exportKey += fmt.Sprintf(":file:%d", source.ID)
 			}
 			_, writeErr = s.output.Write(ctx, exportKey, localPath, cfg.BaseURL+"/share-strm/"+entry.ID+"\n", string(raw), entry.ID)
 		} else {

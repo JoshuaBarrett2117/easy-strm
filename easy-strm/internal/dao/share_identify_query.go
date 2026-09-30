@@ -59,6 +59,19 @@ func (d *ShareRecordDAO) ListIdentifyContext(ctx context.Context, recordIDs []in
 	return scanShareIdentifyRows(rows)
 }
 
+// ListManualBatchContext 锁定目标文件及同分享待核对文件的版本快照，供手动批量核对。
+func (d *ShareRecordDAO) ListManualBatchContext(ctx context.Context, shareID int) ([]domain.ShareRecord, error) {
+	rows, err := d.db.QueryContext(ctx, `SELECT s.id,s.media_type,f.id,f.file_name,f.metadata_source,f.status,f.result,f.version
+ FROM t_share_record s JOIN t_share_media_file f ON f.share_id=s.id
+ WHERE s.id=$1 AND NOT s.share_cancelled AND f.available AND f.status IN ('failed','pending','')
+ ORDER BY f.id`, shareID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanShareIdentifyRows(rows)
+}
+
 func scanShareIdentifyRows(rows *sql.Rows) ([]domain.ShareRecord, error) {
 	records := []domain.ShareRecord{}
 	indexes := map[int]int{}

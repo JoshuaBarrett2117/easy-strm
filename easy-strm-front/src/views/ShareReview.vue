@@ -48,6 +48,7 @@
           </n-list-item>
         </n-list>
         <n-alert v-if="selected" type="info">确认将当前文件关联到 {{ selected.title }} · {{ selected.year }} · {{ selected.media_type }} · ID {{ selected.tmdb_id || selected.metadata_id }}<span v-if="form.type==='tv'"> · 第 {{ form.season }} 季 · 集号 {{ form.episodes }}</span></n-alert>
+        <n-checkbox v-if="selected && form.type==='tv'" v-model:checked="applyToSeries" :disabled="saving">同时核对同一分享、同一目录下的其他集（仅处理可解析季集且标题、年份一致的待核对文件）</n-checkbox>
         <n-button v-if="selected" type="primary" :loading="saving" @click="save(selected)">保存核对结果</n-button>
       </n-space>
     </n-modal>
@@ -57,7 +58,7 @@
 <script setup>
 import { h, onMounted, onBeforeUnmount, watch, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { NAlert, NButton, NCard, NDataTable, NDescriptions, NDescriptionsItem, NEmpty, NForm, NFormItem, NImage, NInput, NInputNumber, NList, NListItem, NModal, NSpace, NSelect, NThing, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NDataTable, NDescriptions, NDescriptionsItem, NEmpty, NForm, NFormItem, NImage, NInput, NInputNumber, NList, NListItem, NModal, NSpace, NSelect, NThing, useMessage } from 'naive-ui'
 import { getShareRecords, getShareReviewItems, manualIdentifyShareMedia, searchTmdb } from '../utils/api/media'
 
 const route = useRoute(), message = useMessage()
@@ -68,6 +69,7 @@ const loadShares=async (keyword='')=>{ const version=++shareVersion; try { const
 const items = ref([]), total = ref(0), loading = ref(false), page = ref(1), status = ref(route.query.status || 'failed,pending'), keyword = ref('')
 const pagination = reactive({ page: 1, pageSize: 20, pageSizes: [10, 20, 50, 100], showSizePicker: true, itemCount: 0 })
 const reviewShow = ref(false), target = ref(null), searching = ref(false), saving = ref(false), searched = ref(false), candidates = ref([])
+const applyToSeries = ref(false)
 const form = reactive({ keyword: '', type: 'tv', source: 'tmdb', year: null, season: 1, episodes: '' })
 const statusOptions = [{ label: '全部待核对', value: 'failed,pending' }, { label: '识别失败', value: 'failed' }, { label: '待识别', value: 'pending' }]
 const typeOptions = [{ label: '电视剧', value: 'tv' }, { label: '电影', value: 'movie' }]
@@ -88,6 +90,7 @@ const load = async () => {
 const reload = () => { page.value = 1; load() }
 const changePageSize = size => { pagination.pageSize = size; page.value = 1; load() }
 const openReview = item => {
+  applyToSeries.value = false
   searchVersion++; searching.value=false; selected.value=null; target.value = item; candidates.value = []; searched.value = false; reviewShow.value = true
   form.keyword = item.result?.title || item.result?.original_title || item.parsed_title || item.file_name.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')
   form.type = ['movie','tv'].includes(item.result?.media_type) ? item.result.media_type : (item.media_type==='tv'?'tv':'movie'); form.source = item.metadata_source === 'metatube' ? 'metatube' : 'tmdb'; form.year = item.result?.year || item.parsed_year || null
@@ -107,7 +110,7 @@ const save = async candidate => {
   const episodes = form.type === 'tv' ? [...new Set(form.episodes.split(/[,，\s]+/).map(Number).filter(v => Number.isInteger(v) && v > 0))] : []
   if (form.type === 'tv' && (!Number.isInteger(form.season) || form.season < 0 || !episodes.length)) { message.error('电视剧必须填写有效的季号和集号'); return }
   saving.value = true
-  try { await manualIdentifyShareMedia(target.value.id, { ...target.value, result: candidate, episodes: episodes.map(v => ({ season_number: form.season, episode_number: v })) }); message.success('手动核对已保存'); reviewShow.value = false; await load() }
+  try { const response = await manualIdentifyShareMedia(target.value.id, { ...target.value, result: candidate, apply_to_series: form.type === 'tv' && applyToSeries.value, episodes: episodes.map(v => ({ season_number: form.season, episode_number: v })) }); message.success(`已核对 ${response.data?.data?.identified_count || 1} 个文件`); reviewShow.value = false; await load() }
   catch (error) { message.error(error.response?.data?.error || error.response?.data?.message || '保存核对结果失败') } finally { saving.value = false }
 }
 const columns = [

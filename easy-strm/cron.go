@@ -120,13 +120,15 @@ type FullGenerateResult struct {
 
 // RunIncrementalSync 执行增量同步
 func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID string) (*IncrementalSyncResult, error) {
-	release, err := scheduler.AcquireStrmExecution(strmConfig.ID, taskID)
+	waitCtx, stopWaiting := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer stopWaiting()
+	release, err := scheduler.WaitStrmExecution(waitCtx, strmConfig.ID, taskID)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 	Info("Running incremental sync for config ID: %d", strmConfig.ID)
-	output, err := service.NewStrmOutput(context.Background(), db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID)
+	output, err := service.WaitStrmOutput(waitCtx, db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID, func() bool { return IsTaskCancelled(taskID) })
 	if err != nil {
 		return nil, err
 	}
@@ -298,7 +300,9 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 
 // RunFullStrmGenerate 执行全量生成STRM文件
 func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID string) (*FullGenerateResult, error) {
-	release, err := scheduler.AcquireStrmExecution(strmConfig.ID, taskID)
+	waitCtx, stopWaiting := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer stopWaiting()
+	release, err := scheduler.WaitStrmExecution(waitCtx, strmConfig.ID, taskID)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +329,7 @@ func RunFullStrmGenerate(strmConfig *StrmConfig, cloud115 *Cloud115, taskID stri
 
 	client := NewClient(&Config{ServerURL: "http://localhost:8082"})
 	Info("[cron] STRM output directory: %s", strmConfig.LocalPath)
-	output, err := service.NewStrmOutput(context.Background(), db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID)
+	output, err := service.WaitStrmOutput(waitCtx, db, strmConfig.LocalPath, fmt.Sprintf("cloud115:%d", strmConfig.ID), taskID, func() bool { return IsTaskCancelled(taskID) })
 	if err != nil {
 		return nil, err
 	}
