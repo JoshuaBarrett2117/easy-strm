@@ -1,7 +1,14 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"easy-strm/internal/dao"
 
@@ -104,7 +111,8 @@ func main() {
 	SetupAuthRoutes(r, config, client)
 
 	// 设置需要认证的路由（所有业务API）
-	SetupAuthProtectedRoutes(r, config, client)
+	embyProxyService := SetupAuthProtectedRoutes(r, config, client)
+	defer embyProxyService.Close()
 
 	// 业务处理器全部注册后再装载，避免任务未注册或调度引擎未启动。
 	if err := LoadCronTasksFromDB(); err != nil {
@@ -120,7 +128,26 @@ func main() {
 
 	// 启动服务器
 	Info("Gin server starting on http://localhost:8082")
-	r.Run(":8082")
+	server := &http.Server{Addr: ":8082", Handler: r, ReadHeaderTimeout: 15 * time.Second}
+	shutdownSignal, stopSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignal()
+	shutdownDone := make(chan struct{})
+	go func() {
+		defer close(shutdownDone)
+		<-shutdownSignal.Done()
+		embyProxyService.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			Error("HTTP 服务关闭失败: %v", err)
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		Error("HTTP 服务启动失败: %v", err)
+	}
+	if shutdownSignal.Err() != nil {
+		<-shutdownDone
+	}
 }
 
 // GetDB 获取全局数据库连接（供 router 使用）

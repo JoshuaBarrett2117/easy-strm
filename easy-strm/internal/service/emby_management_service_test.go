@@ -17,7 +17,7 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-const testEmbyServerSelect = `SELECT id, name, base_url, api_key, enabled, is_default, create_time, update_time FROM t_emby_server WHERE id=$1`
+const testEmbyServerSelect = `SELECT id, name, base_url, api_key, enabled, is_default, create_time, update_time, proxy_port FROM t_emby_server WHERE id=$1`
 
 func newEmbyManagementTestService(t *testing.T, handler http.HandlerFunc) (*EmbyManagementService, sqlmock.Sqlmock, *TaskService, func()) {
 	t.Helper()
@@ -42,8 +42,8 @@ func expectEmbyServer(t *testing.T, mock sqlmock.Sqlmock, endpoint string) {
 	t.Helper()
 	now := time.Now()
 	mock.ExpectQuery(regexp.QuoteMeta(testEmbyServerSelect)).WithArgs(1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).
-			AddRow(1, "家庭 Emby", endpoint, "test-key", true, true, now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).
+			AddRow(1, "家庭 Emby", endpoint, "test-key", true, true, now, now, 0))
 }
 
 func TestEmbyManagementListUsersUsesSelectedServer(t *testing.T) {

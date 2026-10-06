@@ -19,8 +19,9 @@ export const refreshEmbyLibrary = (libraryId = '', options = {}) => {
 }
 
 export const getEmbyServers = () => api.get('/emby/servers')
-export const createEmbyServer = data => api.post('/emby/servers', data)
-export const updateEmbyServer = (serverId, data) => api.put(`/emby/servers/${serverId}`, data)
+const embyServerPayload = data => ({ ...data, proxy_port: data.proxy_port ?? 0 })
+export const createEmbyServer = data => api.post('/emby/servers', embyServerPayload(data))
+export const updateEmbyServer = (serverId, data) => api.put(`/emby/servers/${serverId}`, embyServerPayload(data))
 export const deleteEmbyServer = serverId => api.delete(`/emby/servers/${serverId}`)
 export const testEmbyServer = serverId => api.post(`/emby/servers/${serverId}/test`)
 

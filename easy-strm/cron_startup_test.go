@@ -23,7 +23,7 @@ func TestCronStartupWiring(t *testing.T) {
 		if name, ok := call.Fun.(*ast.Ident); ok {
 			positions[name.Name] = call.Pos()
 		}
-		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" {
+		if sel, ok := call.Fun.(*ast.SelectorExpr); ok && (sel.Sel.Name == "Run" || sel.Sel.Name == "ListenAndServe") {
 			positions["serve"] = call.Pos()
 		}
 		return true

@@ -75,12 +75,13 @@ func (c *EmbyManagementController) CreateServer(ctx *gin.Context) {
 		APIKey    string `json:"api_key"`
 		Enabled   bool   `json:"enabled"`
 		IsDefault bool   `json:"is_default"`
+		ProxyPort int    `json:"proxy_port" binding:"min=0,max=65535"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ErrorResp(ctx, 400, "请求参数错误")
 		return
 	}
-	server, taskID, err := c.service.CreateServerTask(req.Name, req.BaseURL, req.APIKey, req.Enabled, req.IsDefault)
+	server, taskID, err := c.service.CreateServerTask(req.Name, req.BaseURL, req.APIKey, req.Enabled, req.IsDefault, req.ProxyPort)
 	if err != nil {
 		ErrorResp(ctx, 400, err.Error())
 		return
@@ -100,12 +101,13 @@ func (c *EmbyManagementController) UpdateServer(ctx *gin.Context) {
 		APIKey    string `json:"api_key"`
 		Enabled   bool   `json:"enabled"`
 		IsDefault bool   `json:"is_default"`
+		ProxyPort int    `json:"proxy_port" binding:"min=0,max=65535"`
 	}
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		ErrorResp(ctx, 400, "请求参数错误")
 		return
 	}
-	server, taskID, err := c.service.UpdateServerTask(id, req.Name, req.BaseURL, req.APIKey, req.Enabled, req.IsDefault)
+	server, taskID, err := c.service.UpdateServerTask(id, req.Name, req.BaseURL, req.APIKey, req.Enabled, req.IsDefault, req.ProxyPort)
 	if err != nil {
 		ErrorResp(ctx, 400, err.Error())
 		return

@@ -44,7 +44,7 @@ func TestPlaybackLinksSeriesIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer db.Close()
-			mock.ExpectQuery("SELECT id, name, base_url").WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).AddRow(1, "test", remote.URL, "secret", true, true, time.Now(), time.Now()))
+			mock.ExpectQuery("SELECT id, name, base_url").WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).AddRow(1, "test", remote.URL, "secret", true, true, time.Now(), time.Now(), 0))
 			svc := NewEmbyManagementService(dao.NewEmbyServerDAO(db), nil, nil, remote.Client())
 			links, err := svc.PlaybackLinks("生物黑客", 100074, 2, 1)
 			if mode == "upstream" {

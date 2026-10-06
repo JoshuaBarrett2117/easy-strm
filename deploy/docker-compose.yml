@@ -43,6 +43,8 @@ services:
     restart: unless-stopped
     ports:
       - "${APP_PORT:-80}:80"
+      # Emby 实例配置反代端口后，逐个取消注释或增加对应映射；不会自动发布。
+      # - "8097:8097"
     environment:
       # 服务器配置 - 请修改为你的实际访问地址
       SERVER_URL: ${SERVER_URL:-http://localhost:80}

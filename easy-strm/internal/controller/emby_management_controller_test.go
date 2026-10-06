@@ -41,7 +41,7 @@ func TestEmbyUserLibrariesController(t *testing.T) {
 			}))
 			defer remote.Close()
 			if tc.id == "1" {
-				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).AddRow(1, "测试", remote.URL, "test-key", true, true, time.Now(), time.Now()))
+				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).AddRow(1, "测试", remote.URL, "test-key", true, true, time.Now(), time.Now(), 0))
 			}
 			manager := service.NewEmbyManagementService(dao.NewEmbyServerDAO(db), nil, nil, remote.Client())
 			router := gin.New()
@@ -130,7 +130,7 @@ func TestEmbyScheduledTasksController(t *testing.T) {
 			}))
 			defer remote.Close()
 			if tc.id == "1" {
-				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).AddRow(1, "测试", remote.URL, "test-key", true, true, time.Now(), time.Now()))
+				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).AddRow(1, "测试", remote.URL, "test-key", true, true, time.Now(), time.Now(), 0))
 			}
 			manager := service.NewEmbyManagementService(dao.NewEmbyServerDAO(db), nil, nil, remote.Client())
 			router := gin.New()
@@ -193,7 +193,7 @@ func TestStartEmbyScheduledTaskController(t *testing.T) {
 			}))
 			defer remote.Close()
 			if tc.id == "1" {
-				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).AddRow(1, "测试", remote.URL, "key", true, true, time.Now(), time.Now()))
+				mock.ExpectQuery("SELECT id, name, base_url").WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).AddRow(1, "测试", remote.URL, "key", true, true, time.Now(), time.Now(), 0))
 			}
 			manager := service.NewEmbyManagementService(dao.NewEmbyServerDAO(db), tasks, nil, remote.Client())
 			router := gin.New()

@@ -19,7 +19,7 @@ import (
 )
 
 // SetupAuthProtectedRoutes 设置需要认证的路由组
-func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
+func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *service.EmbyProxyService {
 	// 初始化 DAO（DAO层已在main.go中初始化）
 
 	mediaSourceDAO := dao.NewMediaSourceDAO()
@@ -85,7 +85,11 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
 	embyService := service.NewEmbyService(systemConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
 	embyServerDAO := dao.NewEmbyServerDAO(dao.DB)
-	embyManagementService := service.NewEmbyManagementService(embyServerDAO, taskService, systemConfigDAO, NewProxyAwareHTTPClient(60*time.Second))
+	embyProxyService := service.NewEmbyProxyService(embyServerDAO, NewProxyAwareHTTPClient(30*time.Second), 80, 8082)
+	if err := embyProxyService.Start(); err != nil {
+		Error("Emby 反代启动异常: %v", err)
+	}
+	embyManagementService := service.NewEmbyManagementService(embyServerDAO, taskService, systemConfigDAO, NewProxyAwareHTTPClient(60*time.Second), embyProxyService)
 	embyMonitorDAO := dao.NewEmbyMonitorDAO(dao.DB)
 	embyMonitorService := service.NewEmbyMonitorService(embyServerDAO, embyMonitorDAO, NewProxyAwareHTTPClient(30*time.Second), dao.GetGlobalRedisClient())
 	embyMonitorCollector := service.NewEmbyMonitorCollector(embyMonitorService)
@@ -1179,4 +1183,5 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) {
 
 	// 将正式注册的业务路由同步暴露为 MCP 工具，调用时仍经过原路由鉴权、参数校验和 Service。
 	mcpController.RegisterBusinessRoutes(r, nil)
+	return embyProxyService
 }

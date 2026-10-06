@@ -68,8 +68,8 @@ func TestEmbyUserAccessLiveRepair(t *testing.T) {
 	after, _ := json.Marshal(normalized.EnabledFolders)
 	t.Logf("目标用户 %s；原选择=%s；映射结果=%s", user.Name, before, after)
 	mock.ExpectQuery(regexp.QuoteMeta(testEmbyServerSelect)).WithArgs(1).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).
-			AddRow(server.ID, server.Name, server.BaseURL, server.APIKey, true, true, time.Now(), time.Now()))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).
+			AddRow(server.ID, server.Name, server.BaseURL, server.APIKey, true, true, time.Now(), time.Now(), 0))
 	if _, err = manager.UpdateUser(1, userID, "", &user.Policy); err != nil {
 		t.Fatal(err)
 	}

@@ -167,6 +167,12 @@
       <n-form label-placement="top">
         <n-form-item label="实例名称"><n-input v-model:value="serverForm.name" /></n-form-item>
         <n-form-item label="服务地址"><n-input v-model:value="serverForm.base_url" placeholder="http://emby:8096" /></n-form-item>
+        <n-form-item label="反代端口">
+          <div class="w-full space-y-2">
+            <n-input-number v-model:value="serverForm.proxy_port" :min="0" :max="65535" :precision="0" placeholder="0 表示关闭" class="w-full" />
+            <div class="text-sm text-gray-500">0 或留空表示关闭。启用后，Emby 客户端连接 easy-strm 主机的此端口。Docker 部署还必须发布对应容器端口，例如 8097:8097。</div>
+          </div>
+        </n-form-item>
         <n-form-item label="API Key"><SecretConfigInput v-model:value="serverForm.api_key" secret-key="emby_server_api_key" :server-id="serverForm.id || 0" :has-saved="!!serverForm.api_key_mask" :reset-key="serverDialog" :placeholder="serverForm.api_key_mask ? `已配置 ${serverForm.api_key_mask}，留空保持不变` : '请输入 API Key'" /></n-form-item>
         <div class="flex gap-6"><n-checkbox v-model:checked="serverForm.enabled">启用</n-checkbox><n-checkbox v-model:checked="serverForm.is_default">默认实例</n-checkbox></div>
       </n-form>
@@ -242,7 +248,7 @@ import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import EmbyScheduledTasks from '../components/EmbyScheduledTasks.vue'
-import { NAlert, NButton, NCheckbox, NCollapse, NCollapseItem, NForm, NFormItem, NInput, NModal, NSelect, NTabPane, NTabs, NTag } from 'naive-ui'
+import { NAlert, NButton, NCheckbox, NCollapse, NCollapseItem, NForm, NFormItem, NInput, NInputNumber, NModal, NSelect, NTabPane, NTabs, NTag } from 'naive-ui'
 import PageCard from '../components/common/PageCard.vue'
 import EmptyState from '../components/common/EmptyState.vue'
 import { message } from '../utils/ui/feedback'
@@ -271,7 +277,7 @@ const coverLoading = ref(false); const coverTaskId = ref(''); const coverPreview
 const manualCoverFile = ref(null)
 let coverPollTimer = null
 
-const serverForm = reactive({ id: null, name: '', base_url: '', api_key: '', api_key_mask: '', enabled: true, is_default: false })
+const serverForm = reactive({ id: null, name: '', base_url: '', proxy_port: 0, api_key: '', api_key_mask: '', enabled: true, is_default: false })
 const emptyPolicy = () => ({ IsAdministrator: false, IsDisabled: false, EnableRemoteAccess: true, EnableMediaPlayback: true, EnableVideoPlaybackTranscoding: true, EnableAudioPlaybackTranscoding: true, EnableContentDownloading: false, EnableSubtitleDownloading: true, EnableSubtitleManagement: false, EnableRemoteControlOfOtherUsers: false, EnableAllFolders: true, EnabledFolders: [] })
 const userForm = reactive({ id: '', name: '', password: '', policy: emptyPolicy() })
 const userLibraries = ref([])
@@ -359,7 +365,7 @@ watch(selectedServerId, () => {
   reloadServerData()
 })
 
-const openServerDialog = server => { Object.assign(serverForm, server ? { ...server, api_key: '' } : { id: null, name: '', base_url: '', api_key: '', api_key_mask: '', enabled: true, is_default: servers.value.length === 0 }); serverDialog.value = true }
+const openServerDialog = server => { Object.assign(serverForm, server ? { ...server, proxy_port: server.proxy_port || 0, api_key: '' } : { id: null, name: '', base_url: '', proxy_port: 0, api_key: '', api_key_mask: '', enabled: true, is_default: servers.value.length === 0 }); serverDialog.value = true }
 const saveServer = async () => { saving.value = true; try { if (serverForm.id) await updateEmbyServer(serverForm.id, serverForm); else await createEmbyServer(serverForm); serverDialog.value = false; await loadServers(); message.success('Emby 实例已保存') } finally { saving.value = false } }
 const removeServer = async () => { try { await showConfirmDialog(`只删除 easy-strm 中的“${activeServer.value.name}”连接配置，不会删除 Emby 数据。`, '删除 Emby 实例'); await deleteEmbyServer(activeServer.value.id); await loadServers(); message.success('Emby 实例已删除') } catch {} }
 const testConnection = async () => { testing.value = true; try { const data = payload(await testEmbyServer(selectedServerId.value)); connectionOK.value = !!data.connected; connectionText.value = data.connected ? `连接成功：${data.info?.ServerName || ''} v${data.info?.Version || ''}` : `连接失败：${data.error || '未知错误'}` } finally { testing.value = false } }

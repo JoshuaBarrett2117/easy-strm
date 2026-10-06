@@ -82,6 +82,8 @@ docker compose ps
 
 访问 `http://localhost:80`（或配置的 `APP_PORT`）。首次启动会创建默认管理员账号：`admin` / `admin`。请登录后立即修改密码，并妥善保管 `.env` 中的密钥。
 
+Emby 实例可配置独立反代端口，使 HTTP(S) STRM 直接播放通过 302 交给客户端。Docker 部署需在应用 `ports` 下为每个实例显式发布端口，例如 `- "8097:8097"`，然后执行 `docker compose up -d`。Emby 客户端连接 `http://宿主机IP:8097`，实例的服务地址仍为原始 Emby 地址。非 Docker 部署直接访问配置端口。详见 [Emby 管理](docs/Emby管理.md)（2026-10-06，维护者：Codex）。
+
 > 使用本地媒体源、STRM 输出目录或供 Emby/Jellyfin 读取的目录时，请在 `docker-compose.yml` 中为应用增加所需的宿主机目录挂载，并在系统内填写容器内的绝对路径。例如将宿主机 `D:\Media` 挂载为容器内 `/media` 后，媒体源和输出目录应使用 `/media`。
 
 也可以使用发布镜像的部署文件：

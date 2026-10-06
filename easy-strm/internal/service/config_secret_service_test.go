@@ -42,7 +42,7 @@ func TestConfigSecretRead(t *testing.T) {
 	if _, err := s.Read("global_api_key", 0); err == nil {
 		t.Fatal("不能吞掉读取错误")
 	}
-	mock.ExpectQuery("SELECT id, name").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}).AddRow(7, "test", "http://localhost", "server-secret", true, true, time.Now(), time.Now()))
+	mock.ExpectQuery("SELECT id, name").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}).AddRow(7, "test", "http://localhost", "server-secret", true, true, time.Now(), time.Now(), 0))
 	if value, err := s.Read("emby_server_api_key", 7); err != nil || value != "server-secret" {
 		t.Fatalf("实例明文错误: %q %v", value, err)
 	}
@@ -58,7 +58,7 @@ func TestConfigSecretRead(t *testing.T) {
 			t.Fatalf("%s: %q %v", tc.key, value, err)
 		}
 	}
-	mock.ExpectQuery("SELECT id, name").WithArgs(99).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time"}))
+	mock.ExpectQuery("SELECT id, name").WithArgs(99).WillReturnRows(sqlmock.NewRows([]string{"id", "name", "base_url", "api_key", "enabled", "is_default", "create_time", "update_time", "proxy_port"}))
 	if _, err := s.Read("emby_server_api_key", 99); err == nil {
 		t.Fatal("不存在的实例应返回错误")
 	}

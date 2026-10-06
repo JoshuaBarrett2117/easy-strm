@@ -2,10 +2,12 @@ package dao
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"easy-strm/internal/domain"
+	"github.com/lib/pq"
 )
 
 // EmbyServerDAO 管理 Emby 多实例连接配置。
@@ -18,11 +20,11 @@ func NewEmbyServerDAO(db *sql.DB) *EmbyServerDAO {
 	return &EmbyServerDAO{db: db}
 }
 
-const embyServerColumns = `id, name, base_url, api_key, enabled, is_default, create_time, update_time`
+const embyServerColumns = `id, name, base_url, api_key, enabled, is_default, create_time, update_time, proxy_port`
 
 func scanEmbyServer(scanner interface{ Scan(...interface{}) error }) (*domain.EmbyServer, error) {
 	server := &domain.EmbyServer{}
-	if err := scanner.Scan(&server.ID, &server.Name, &server.BaseURL, &server.APIKey, &server.Enabled, &server.IsDefault, &server.CreateTime, &server.UpdateTime); err != nil {
+	if err := scanner.Scan(&server.ID, &server.Name, &server.BaseURL, &server.APIKey, &server.Enabled, &server.IsDefault, &server.CreateTime, &server.UpdateTime, &server.ProxyPort); err != nil {
 		return nil, err
 	}
 	server.APIKeyMask = maskEmbyAPIKey(server.APIKey)
@@ -83,7 +85,7 @@ func (d *EmbyServerDAO) GetDefault() (*domain.EmbyServer, error) {
 }
 
 // Create 新增 Emby 实例，并保证最多只有一个默认实例。
-func (d *EmbyServerDAO) Create(name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, error) {
+func (d *EmbyServerDAO) Create(name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return nil, err
@@ -101,9 +103,9 @@ func (d *EmbyServerDAO) Create(name, baseURL, apiKey string, enabled, isDefault 
 			return nil, err
 		}
 	}
-	server, err := scanEmbyServer(tx.QueryRow(`INSERT INTO t_emby_server(name, base_url, api_key, enabled, is_default) VALUES($1,$2,$3,$4,$5) RETURNING `+embyServerColumns, name, strings.TrimRight(baseURL, "/"), apiKey, enabled, isDefault))
+	server, err := scanEmbyServer(tx.QueryRow(`INSERT INTO t_emby_server(name, base_url, api_key, enabled, is_default, proxy_port) VALUES($1,$2,$3,$4,$5,$6) RETURNING `+embyServerColumns, name, strings.TrimRight(baseURL, "/"), apiKey, enabled, isDefault, proxyPort))
 	if err != nil {
-		return nil, fmt.Errorf("新增 Emby 实例失败: %w", err)
+		return nil, fmt.Errorf("新增 Emby 实例失败: %w", embyServerWriteError(err))
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -112,7 +114,7 @@ func (d *EmbyServerDAO) Create(name, baseURL, apiKey string, enabled, isDefault 
 }
 
 // Update 更新 Emby 实例；apiKey 为空时保留原值。
-func (d *EmbyServerDAO) Update(id int, name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, error) {
+func (d *EmbyServerDAO) Update(id int, name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, error) {
 	tx, err := d.db.Begin()
 	if err != nil {
 		return nil, err
@@ -120,22 +122,34 @@ func (d *EmbyServerDAO) Update(id int, name, baseURL, apiKey string, enabled, is
 	defer tx.Rollback()
 	if !isDefault {
 		var otherDefaults int
-		if err = tx.QueryRow(`SELECT COUNT(*) FROM t_emby_server WHERE id<>$1 AND is_default=true`, id).Scan(&otherDefaults); err != nil { return nil, err }
-		if otherDefaults == 0 { isDefault = true }
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM t_emby_server WHERE id<>$1 AND is_default=true`, id).Scan(&otherDefaults); err != nil {
+			return nil, err
+		}
+		if otherDefaults == 0 {
+			isDefault = true
+		}
 	}
 	if isDefault {
 		if _, err = tx.Exec(`UPDATE t_emby_server SET is_default=false WHERE id<>$1 AND is_default=true`, id); err != nil {
 			return nil, err
 		}
 	}
-	server, err := scanEmbyServer(tx.QueryRow(`UPDATE t_emby_server SET name=$2, base_url=$3, api_key=CASE WHEN $4='' THEN api_key ELSE $4 END, enabled=$5, is_default=$6, update_time=CURRENT_TIMESTAMP WHERE id=$1 RETURNING `+embyServerColumns, id, name, strings.TrimRight(baseURL, "/"), apiKey, enabled, isDefault))
+	server, err := scanEmbyServer(tx.QueryRow(`UPDATE t_emby_server SET name=$2, base_url=$3, api_key=CASE WHEN $4='' THEN api_key ELSE $4 END, enabled=$5, is_default=$6, proxy_port=$7, update_time=CURRENT_TIMESTAMP WHERE id=$1 RETURNING `+embyServerColumns, id, name, strings.TrimRight(baseURL, "/"), apiKey, enabled, isDefault, proxyPort))
 	if err != nil {
-		return nil, fmt.Errorf("更新 Emby 实例失败: %w", err)
+		return nil, fmt.Errorf("更新 Emby 实例失败: %w", embyServerWriteError(err))
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 	return server, nil
+}
+
+func embyServerWriteError(err error) error {
+	var postgresError *pq.Error
+	if errors.As(err, &postgresError) && postgresError.Code == "23505" && postgresError.Constraint == "uk_emby_server_proxy_port" {
+		return fmt.Errorf("反代端口已被其他 Emby 实例配置，请更换端口: %w", err)
+	}
+	return err
 }
 
 // Delete 删除连接配置，数据库外键只解除关联，不触碰 Emby 数据。
@@ -152,7 +166,9 @@ func (d *EmbyServerDAO) Delete(id int) error {
 		}
 		return err
 	}
-	if _, err = tx.Exec(`UPDATE t_media_source SET emby_server_id=NULL, emby_library_id='', update_time=CURRENT_TIMESTAMP WHERE emby_server_id=$1`, id); err != nil { return err }
+	if _, err = tx.Exec(`UPDATE t_media_source SET emby_server_id=NULL, emby_library_id='', update_time=CURRENT_TIMESTAMP WHERE emby_server_id=$1`, id); err != nil {
+		return err
+	}
 	result, err := tx.Exec(`DELETE FROM t_emby_server WHERE id=$1`, id)
 	if err != nil {
 		return fmt.Errorf("删除 Emby 实例失败: %w", err)

@@ -573,6 +573,7 @@ END $$;
 		name VARCHAR(100) NOT NULL,
 		base_url VARCHAR(1000) NOT NULL,
 		api_key TEXT NOT NULL DEFAULT '',
+		proxy_port INTEGER NOT NULL DEFAULT 0,
 		enabled BOOLEAN NOT NULL DEFAULT TRUE,
 		is_default BOOLEAN NOT NULL DEFAULT FALSE,
 		create_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -584,6 +585,9 @@ END $$;
 	if _, err = db.Exec(createEmbyServerTableSQL); err != nil {
 		Error("Failed to create t_emby_server table: %v", err)
 		return err
+	}
+	if err = migrateEmbyProxyPort(); err != nil {
+		return fmt.Errorf("Emby 反代端口迁移失败: %w", err)
 	}
 
 	// Emby 观影监控表；与 migrate_v19_emby_monitor.sql 保持一致。

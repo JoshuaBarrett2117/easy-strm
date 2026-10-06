@@ -50,6 +50,7 @@ type SystemConfigWriter interface {
 // EmbyManagementService 编排多实例 Emby 管理及任务中心同步。
 type EmbyManagementService struct {
 	servers      *dao.EmbyServerDAO
+	proxy        *EmbyProxyService
 	tasks        *TaskService
 	configs      SystemConfigWriter
 	httpClient   *http.Client
@@ -59,12 +60,16 @@ type EmbyManagementService struct {
 }
 
 // NewEmbyManagementService 创建 Emby 管理服务。
-func NewEmbyManagementService(servers *dao.EmbyServerDAO, tasks *TaskService, configs SystemConfigWriter, httpClient *http.Client) *EmbyManagementService {
+func NewEmbyManagementService(servers *dao.EmbyServerDAO, tasks *TaskService, configs SystemConfigWriter, httpClient *http.Client, proxies ...*EmbyProxyService) *EmbyManagementService {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
+	proxy := NewEmbyProxyService(servers, httpClient, 80, 8082)
+	if len(proxies) > 0 && proxies[0] != nil {
+		proxy = proxies[0]
+	}
 	return &EmbyManagementService{
-		servers: servers, tasks: tasks, configs: configs, httpClient: httpClient,
+		servers: servers, proxy: proxy, tasks: tasks, configs: configs, httpClient: httpClient,
 		previewDir:   filepath.Join(os.TempDir(), "easy-strm-emby-covers"),
 		pollInterval: 5 * time.Second, pollTimeout: 30 * time.Minute,
 	}
@@ -274,20 +279,23 @@ func (s *EmbyManagementService) embyItemURL(server *domain.EmbyServer, itemID st
 }
 
 // CreateServer 新增实例。
-func (s *EmbyManagementService) CreateServer(name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, error) {
+func (s *EmbyManagementService) CreateServer(name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, error) {
 	if err := validateEmbyServerInput(name, baseURL, apiKey, false); err != nil {
 		return nil, err
 	}
-	return s.servers.Create(strings.TrimSpace(name), strings.TrimSpace(baseURL), strings.TrimSpace(apiKey), enabled, isDefault)
+	input := &domain.EmbyServer{Name: strings.TrimSpace(name), BaseURL: strings.TrimSpace(baseURL), APIKey: strings.TrimSpace(apiKey), Enabled: enabled, ProxyPort: proxyPort}
+	return s.proxy.save(input, func() (*domain.EmbyServer, error) {
+		return s.servers.Create(input.Name, input.BaseURL, input.APIKey, enabled, isDefault, proxyPort)
+	})
 }
 
 // CreateServerTask 新增实例并生成任务中心记录。
-func (s *EmbyManagementService) CreateServerTask(name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, string, error) {
+func (s *EmbyManagementService) CreateServerTask(name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, string, error) {
 	metadata := map[string]interface{}{"operation": "create_server", "target": strings.TrimSpace(name), "origin": embyTaskOriginManual}
 	var server *domain.EmbyServer
 	taskID, err := s.runShortTask(domain.TaskTypeEmbyServer, "新增 Emby 实例", metadata, func() error {
 		var createErr error
-		server, createErr = s.CreateServer(name, baseURL, apiKey, enabled, isDefault)
+		server, createErr = s.CreateServer(name, baseURL, apiKey, enabled, isDefault, proxyPort)
 		if server != nil {
 			metadata["server_id"] = server.ID
 			metadata["server_name"] = server.Name
@@ -298,27 +306,32 @@ func (s *EmbyManagementService) CreateServerTask(name, baseURL, apiKey string, e
 }
 
 // UpdateServer 更新实例。
-func (s *EmbyManagementService) UpdateServer(id int, name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, error) {
+func (s *EmbyManagementService) UpdateServer(id int, name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, error) {
 	if err := validateEmbyServerInput(name, baseURL, apiKey, true); err != nil {
 		return nil, err
 	}
-	return s.servers.Update(id, strings.TrimSpace(name), strings.TrimSpace(baseURL), strings.TrimSpace(apiKey), enabled, isDefault)
+	input := &domain.EmbyServer{ID: id, Name: strings.TrimSpace(name), BaseURL: strings.TrimSpace(baseURL), APIKey: strings.TrimSpace(apiKey), Enabled: enabled, ProxyPort: proxyPort}
+	return s.proxy.save(input, func() (*domain.EmbyServer, error) {
+		return s.servers.Update(id, input.Name, input.BaseURL, input.APIKey, enabled, isDefault, proxyPort)
+	})
 }
 
 // UpdateServerTask 更新实例并生成任务中心记录。
-func (s *EmbyManagementService) UpdateServerTask(id int, name, baseURL, apiKey string, enabled, isDefault bool) (*domain.EmbyServer, string, error) {
+func (s *EmbyManagementService) UpdateServerTask(id int, name, baseURL, apiKey string, enabled, isDefault bool, proxyPort int) (*domain.EmbyServer, string, error) {
 	metadata := map[string]interface{}{"server_id": id, "server_name": name, "operation": "update_server", "target": name, "origin": embyTaskOriginManual}
 	var server *domain.EmbyServer
 	taskID, err := s.runShortTask(domain.TaskTypeEmbyServer, "修改 Emby 实例", metadata, func() error {
 		var updateErr error
-		server, updateErr = s.UpdateServer(id, name, baseURL, apiKey, enabled, isDefault)
+		server, updateErr = s.UpdateServer(id, name, baseURL, apiKey, enabled, isDefault, proxyPort)
 		return updateErr
 	})
 	return server, taskID, err
 }
 
 // DeleteServer 删除实例连接配置。
-func (s *EmbyManagementService) DeleteServer(id int) error { return s.servers.Delete(id) }
+func (s *EmbyManagementService) DeleteServer(id int) error {
+	return s.proxy.delete(id, func() error { return s.servers.Delete(id) })
+}
 
 // DeleteServerTask 删除实例配置并生成任务中心记录。
 func (s *EmbyManagementService) DeleteServerTask(id int) (string, error) {

@@ -24,6 +24,7 @@ type EmbyServer struct {
 	ID         int       `json:"id"`
 	Name       string    `json:"name"`
 	BaseURL    string    `json:"base_url"`
+	ProxyPort  int       `json:"proxy_port"`
 	APIKey     string    `json:"-"`
 	APIKeyMask string    `json:"api_key_mask"`
 	Enabled    bool      `json:"enabled"`
