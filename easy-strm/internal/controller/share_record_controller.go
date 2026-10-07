@@ -39,14 +39,14 @@ func (c *ShareRecordController) SaveTaskSettings(x *gin.Context) {
 	SuccessResp(x, value)
 }
 
-// ClearMedia 清空指定分享的媒体内容，返回实际删除条数。
+// ClearMedia 提交指定分享清空任务，完成数量在任务结果中返回。
 func (c *ShareRecordController) ClearMedia(x *gin.Context) {
 	id, err := strconv.Atoi(x.Param("id"))
 	if err != nil || id <= 0 {
 		ErrorResp(x, 400, "分享ID无效")
 		return
 	}
-	count, err := c.s.ClearMedia(x, id)
+	taskID, err := c.s.StartClearMedia(x, []int{id})
 	if errors.Is(err, sql.ErrNoRows) {
 		ErrorResp(x, 404, "分享不存在")
 		return
@@ -55,17 +55,17 @@ func (c *ShareRecordController) ClearMedia(x *gin.Context) {
 		ErrorResp(x, 409, err.Error())
 		return
 	}
-	SuccessResp(x, gin.H{"deleted": count})
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
 
-// ClearAllMedia 清空全部分享的媒体内容，返回实际删除条数。
+// ClearAllMedia 提交当前全部分享的清空任务，不包含后来新增的分享。
 func (c *ShareRecordController) ClearAllMedia(x *gin.Context) {
-	count, err := c.s.ClearAllMedia(x)
+	taskID, err := c.s.StartClearAllMedia(x)
 	if err != nil {
 		ErrorResp(x, 409, err.Error())
 		return
 	}
-	SuccessResp(x, gin.H{"deleted": count})
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
 
 // ClearSelectedMedia 清空选中分享下的媒体内容。
@@ -77,12 +77,12 @@ func (c *ShareRecordController) ClearSelectedMedia(x *gin.Context) {
 		ErrorResp(x, 400, "请至少选择一个分享")
 		return
 	}
-	count, err := c.s.ClearSelectedMedia(x, input.IDs)
+	taskID, err := c.s.StartClearMedia(x, input.IDs)
 	if err != nil {
 		ErrorResp(x, 409, err.Error())
 		return
 	}
-	SuccessResp(x, gin.H{"deleted": count})
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
 
 // ParseImport 返回批量分享预览，不创建分享或执行网盘操作。
@@ -164,11 +164,16 @@ func (c *ShareRecordController) Delete(x *gin.Context) {
 		ErrorResp(x, 400, "分享ID无效")
 		return
 	}
-	if e := c.s.Delete(x, id); e != nil {
+	taskID, e := c.s.StartDelete(x, id)
+	if errors.Is(e, sql.ErrNoRows) {
+		ErrorResp(x, 404, "分享不存在")
+		return
+	}
+	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return
 	}
-	SuccessResp(x, nil)
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
 func (c *ShareRecordController) AddMedia(x *gin.Context) {
 	var m domain.ShareMedia
@@ -181,12 +186,22 @@ func (c *ShareRecordController) AddMedia(x *gin.Context) {
 	SuccessResp(x, m)
 }
 func (c *ShareRecordController) DeleteMedia(x *gin.Context) {
-	id, _ := strconv.Atoi(x.Param("mediaId"))
-	if e := c.s.DeleteMedia(x, id); e != nil {
-		ErrorResp(x, 500, e.Error())
+	id, e := strconv.Atoi(x.Param("mediaId"))
+	shareID, err := strconv.Atoi(x.Param("id"))
+	if e != nil || err != nil || id <= 0 || shareID <= 0 {
+		ErrorResp(x, 400, "分享或文件ID无效")
 		return
 	}
-	SuccessResp(x, nil)
+	taskID, e := c.s.StartDeleteMedia(x, shareID, id)
+	if errors.Is(e, sql.ErrNoRows) {
+		ErrorResp(x, 404, "文件或分享不存在")
+		return
+	}
+	if e != nil {
+		ErrorResp(x, 409, e.Error())
+		return
+	}
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
 func (c *ShareRecordController) Identify(x *gin.Context) {
 	id, _ := strconv.Atoi(x.Param("mediaId"))

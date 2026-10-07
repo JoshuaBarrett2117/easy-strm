@@ -5,50 +5,52 @@ import (
 	"fmt"
 )
 
-// ClearMedia 清空分享的全部媒体候选及识别结果，保留分享配置，供后续重新扫描。
+// ClearMedia 同步清空指定分享；HTTP入口使用持久化队列。
 func (s *ShareRecordService) ClearMedia(ctx context.Context, id int) (int64, error) {
 	if id <= 0 {
 		return 0, fmt.Errorf("分享ID无效")
 	}
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	if s.activeSyncID != "" {
-		return 0, fmt.Errorf("有分享同步任务正在运行，请等待任务结束后再清空")
+	release, err := s.Coordinator().try(shareResource{key: shareKey(id), exclusive: true})
+	if err != nil {
+		return 0, err
 	}
-	if !s.identifyMu.TryLock() {
-		return 0, fmt.Errorf("有分享识别任务正在运行，请等待任务结束后再清空")
+	defer release()
+	count, err := s.dao.ClearMedia(ctx, id)
+	if err == nil {
+		s.Coordinator().invalidate([]int{id})
 	}
-	defer s.identifyMu.Unlock()
-	return s.dao.ClearMedia(ctx, id)
+	return count, err
 }
 
-// ClearAllMedia 清空全部分享的媒体候选及识别结果，保留所有分享配置。
+// ClearAllMedia 固定调用时的分享集合，不使用全局清空锁。
 func (s *ShareRecordService) ClearAllMedia(ctx context.Context) (int64, error) {
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	if s.activeSyncID != "" {
-		return 0, fmt.Errorf("有分享同步任务正在运行，请等待任务结束后再清空")
+	ids, err := s.dao.ShareIDs(ctx)
+	if err != nil {
+		return 0, err
 	}
-	if !s.identifyMu.TryLock() {
-		return 0, fmt.Errorf("有分享识别任务正在运行，请等待任务结束后再清空")
-	}
-	defer s.identifyMu.Unlock()
-	return s.dao.ClearAllMedia(ctx)
+	return s.ClearSelectedMedia(ctx, ids)
 }
 
-// ClearSelectedMedia 清空选中分享的媒体候选及识别结果，保留分享配置。
+// ClearSelectedMedia 原子清空选中分享，同步调用冲突时返回错误。
 func (s *ShareRecordService) ClearSelectedMedia(ctx context.Context, ids []int) (int64, error) {
 	if len(ids) == 0 {
-		return 0, fmt.Errorf("请至少选择一个分享")
+		return 0, nil
 	}
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	if s.activeSyncID != "" {
-		return 0, fmt.Errorf("有分享同步任务正在运行，请等待任务结束后再清空")
+	resources := []shareResource{}
+	for _, id := range ids {
+		if id <= 0 {
+			return 0, fmt.Errorf("分享ID无效")
+		}
+		resources = append(resources, shareResource{key: shareKey(id), exclusive: true})
 	}
-	if !s.identifyMu.TryLock() {
-		return 0, fmt.Errorf("有分享识别任务正在运行，请等待任务结束后再清空")
+	release, err := s.Coordinator().try(resources...)
+	if err != nil {
+		return 0, err
 	}
-	defer s.identifyMu.Unlock()
-	return s.dao.ClearSelectedMedia(ctx, ids)
+	defer release()
+	count, err := s.dao.ClearSelectedMedia(ctx, ids)
+	if err == nil {
+		s.Coordinator().invalidate(ids)
+	}
+	return count, err
 }

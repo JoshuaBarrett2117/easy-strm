@@ -36,6 +36,7 @@ func TestShareBatchUsesConfiguredWorkersAndProgress(t *testing.T) {
 	m.ExpectQuery(`SELECT s.id,s.media_type,f.id`).WillReturnRows(rows())
 	m.ExpectQuery(`CASE WHEN f.status='identified'`).WillReturnRows(rows())
 	for i := 0; i < 4; i++ {
+		m.ExpectQuery(`SELECT s.id,s.media_type,f.id`).WithArgs("{7}", fmt.Sprintf("{%d}", i+1)).WillReturnRows(sqlmock.NewRows([]string{"id", "type", "fid", "name", "source", "status", "result", "version"}).AddRow(7, "tv", i+1, fmt.Sprintf("Show%d S01E01.mkv", i+1), "tmdb", "pending", nil, 1))
 		m.ExpectBegin()
 		m.ExpectExec("UPDATE t_share_media_file SET status").WillReturnResult(sqlmock.NewResult(0, 1))
 		m.ExpectQuery("SELECT media_id").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(nil))

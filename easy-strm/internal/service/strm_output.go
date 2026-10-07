@@ -19,6 +19,8 @@ type StrmOutput struct {
 	Store                              *dao.StrmExportDAO
 	Root, Owner, Run                   string
 	Paths                              map[string]bool
+	Seen                               map[string]bool
+	Snapshot                           dao.ExportSnapshot
 	Added, Updated, Skipped, Conflicts int
 }
 
@@ -66,11 +68,11 @@ func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*S
 			break
 		}
 	}
-	store, e := dao.LockStrmOutput(ctx, db, chain)
+	store, e := dao.LockStrmOutputShared(ctx, db, chain)
 	if e != nil {
 		return nil, e
 	}
-	s := &StrmOutput{Store: store, Root: root, Owner: owner, Run: run, Paths: map[string]bool{}}
+	s := &StrmOutput{Store: store, Root: root, Owner: owner, Run: run, Paths: map[string]bool{}, Seen: map[string]bool{}}
 	legacy, e := store.LegacyPaths(ctx)
 	if e != nil {
 		store.Close()
@@ -98,6 +100,11 @@ func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*S
 		if s.contains(p) {
 			s.Paths[p] = true
 		}
+	}
+	s.Snapshot, e = store.Snapshot(ctx, owner)
+	if e != nil {
+		store.Close()
+		return nil, e
 	}
 	return s, nil
 }
@@ -137,6 +144,11 @@ func (s *StrmOutput) Write(ctx context.Context, key, p, content, mapping, playba
 	if !s.contains(p) {
 		return false, fmt.Errorf("输出路径超出配置目录")
 	}
+	unlock, e := s.Store.LockPath(ctx, p)
+	if e != nil {
+		return false, e
+	}
+	defer unlock()
 	own, e := s.Store.CheckPath(ctx, p, s.Owner, key)
 	if e != nil {
 		s.Conflicts++
@@ -171,17 +183,47 @@ func (s *StrmOutput) Write(ctx context.Context, key, p, content, mapping, playba
 		return changed, fmt.Errorf("文件已处理但登记失败：%w", e)
 	}
 	s.Paths[p] = true
+	if s.Seen == nil {
+		s.Seen = map[string]bool{}
+	}
+	s.Seen[key] = true
 	return changed, nil
 }
 
 // Clear 根据用户明确选择清理内容，已完成清理的同一任务不重复清空。
-func (s *StrmOutput) Clear(ctx context.Context) error {
+func (s *StrmOutput) Clear(ctx context.Context) (clearErr error) {
 	if filepath.Dir(s.Root) == s.Root {
 		return fmt.Errorf("不能清空磁盘根目录")
 	}
 	done, e := s.Store.ClearStarted(ctx, s.Run, s.Root)
 	if e != nil || done {
 		return e
+	}
+	chain := []string{}
+	for p := s.Root; ; p = filepath.Dir(p) {
+		chain = append([]string{p}, chain...)
+		if filepath.Dir(p) == p {
+			break
+		}
+	}
+	if e = s.Store.ExclusiveDirectory(ctx, chain); e != nil {
+		return e
+	}
+	defer func() {
+		if err := s.Store.SharedDirectory(context.Background(), s.Root); err != nil {
+			s.Store.Close()
+			clearErr = errors.Join(clearErr, fmt.Errorf("恢复目录共享占用失败: %w", err))
+		}
+	}()
+	// 等待独占期间其他任务可能补充清单，取得独占后再读取实际清空范围。
+	known, e := s.Store.KnownPaths(ctx)
+	if e != nil {
+		return e
+	}
+	for _, p := range known {
+		if s.contains(p) {
+			s.Paths[p] = true
+		}
 	}
 	entries, e := os.ReadDir(s.Root)
 	if e != nil && !os.IsNotExist(e) {

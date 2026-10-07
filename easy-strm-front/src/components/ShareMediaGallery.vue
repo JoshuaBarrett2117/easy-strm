@@ -17,8 +17,8 @@
           <div class="directory">关联 {{ item.file_count || 1 }} 个有效文件</div>
           <div v-if="item.result?.message?.includes('季信息待核对')" class="recognition-note">{{ item.result.message }}</div>
           <div class="card-actions">
-            <n-button size="tiny" secondary type="primary" @click="$emit('identify', item)">重新识别</n-button>
-            <n-button size="tiny" secondary @click="openManual(item)">手动识别</n-button>
+            <n-button size="tiny" secondary type="primary" :disabled="props.blocked || props.busyFileIDs.includes(item.id)" @click="$emit('identify', item)">重新识别</n-button>
+            <n-button size="tiny" secondary :disabled="props.blocked || props.busyFileIDs.includes(item.id)" @click="openManual(item)">手动识别</n-button>
           </div>
         </div>
       </article>
@@ -30,7 +30,7 @@
       <n-button :disabled="loading" @click="changePageSize">应用</n-button>
     </n-space>
     <n-modal v-model:show="manualShow" preset="card" title="手动识别" style="width: min(720px, 94vw)" :mask-closable="!saving" :closable="!saving">
-      <n-button :disabled="saving" @click="router.push({path:'/dashboard/share-review',query:{share_id:props.shareId,media_id:target.id}})">打开手动核对中心</n-button>
+      <n-button :disabled="saving || props.blocked || props.busyFileIDs.includes(target?.id)" @click="router.push({path:'/dashboard/share-review',query:{share_id:props.shareId,media_id:target.id}})">打开手动核对中心</n-button>
       <p class="manual-path">{{ target?.file_name }}</p>
       <n-space vertical>
         <n-input v-model:value="keyword" placeholder="输入正确的电影或剧集名称" @keyup.enter="search" />
@@ -38,7 +38,7 @@
           <n-select v-model:value="mediaType" :options="[{label:'电视剧',value:'tv'},{label:'电影',value:'movie'}]" style="width:120px" />
           <n-select v-model:value="metadataSource" :disabled="mediaType === 'tv'" :options="[{label:'TMDB',value:'tmdb'},{label:'MetaTube',value:'metatube'}]" style="width:130px" />
           <n-input-number v-model:value="year" placeholder="年份（可选）" :min="1800" :max="2200" style="width:150px" />
-          <n-button type="primary" :loading="searching" :disabled="saving" @click="search">搜索</n-button>
+          <n-button type="primary" :loading="searching" :disabled="saving || props.blocked || props.busyFileIDs.includes(target?.id)" @click="search">搜索</n-button>
         </n-space>
         <n-space v-if="mediaType === 'tv'">
           <n-input-number v-model:value="season" placeholder="季" :min="0" :precision="0" style="width:120px" />
@@ -47,7 +47,7 @@
         <div v-for="candidate in candidates" :key="`${candidate.media_type}-${candidate.tmdb_id}-${candidate.metadata_id}`" class="manual-result">
           <img v-if="candidate.poster_path" :src="candidate.poster_path" alt="候选海报" />
           <div><strong>{{ candidate.title }}</strong><p>{{ candidate.original_title }} · {{ candidate.year }} · {{ candidate.media_type === 'tv' ? '电视剧' : '电影' }}</p></div>
-          <n-button :disabled="saving" @click="saveManual(candidate)">选择并保存</n-button>
+          <n-button :disabled="saving || props.blocked || props.busyFileIDs.includes(target?.id)" @click="saveManual(candidate)">选择并保存</n-button>
         </div>
         <p v-if="searched && !searching && !candidates.length">没有匹配结果，请调整名称、年份或媒体类型。</p>
       </n-space>
@@ -66,7 +66,7 @@ import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, ND
 import { getShareMedia, getShareFiles, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
 
 const router = useRouter()
-const props = defineProps({ shareId: { type: Number, required: true }, revision: Number })
+const props = defineProps({ shareId: { type: Number, required: true }, revision: Number, blocked: Boolean, busyFileIDs: { type: Array, default: () => [] } })
 const showDuplicates = ref(false), page = ref(1), total = ref(0)
 const duplicateCount = ref(0), visibleMedia = ref([]), loading = ref(false), loadError = ref(false)
 const filesShow = ref(false), filesLoading = ref(false), files = ref([]), filePage = ref(1), fileTotal = ref(0)
@@ -120,7 +120,7 @@ const changePageSize = () => {
   else loadPage()
 }
 onBeforeUnmount(() => { disposed = true; requestVersion++; searchVersion++ })
-const emit = defineEmits(['identify', 'saved'])
+const emit = defineEmits(['identify', 'saved', 'remove'])
 const message = useMessage()
 const manualShow = ref(false), target = ref(null), keyword = ref(''), year = ref(null), mediaType = ref('tv'), metadataSource = ref('tmdb'), season = ref(1), episodeText = ref('')
 const candidates = ref([]), searching = ref(false), saving = ref(false), searched = ref(false)
@@ -180,7 +180,7 @@ const fileColumns = [
   {title:'状态', key:'status', render:row => h(NTag, {size:'small', type:row.status==='identified'?'success':row.status==='failed'?'error':'default'}, {default:() => row.available===false?'失效':row.status})},
   {title:'季集', render:row => (row.episodes || []).map(value => `S${String(value.season_number).padStart(2,'0')}E${String(value.episode_number).padStart(2,'0')}`).join('、') || '—'},
   {title:'识别说明', key:'error', render:row => row.error || row.result?.message || '—', ellipsis:{tooltip:true}},
-  {title:'操作', render:row => h(NSpace, {}, {default:() => [h(NButton,{size:'tiny',onClick:()=>emit('identify',row)},{default:()=>'自动识别'}),h(NButton,{size:'tiny',onClick:()=>openManual(row)},{default:()=>'手动识别'})]})}
+  {title:'操作', render:row => h(NSpace, {}, {default:() => [h(NButton,{size:'tiny',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>emit('identify',row)},{default:()=>'自动识别'}),h(NButton,{size:'tiny',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>openManual(row)},{default:()=>'手动识别'}),h(NButton,{size:'tiny',type:'error',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>emit('remove',row)},{default:()=>'删除候选'})]})}
 ]
 const failedImages = reactive({})
 const title = item => item.result?.title || item.result?.original_title || item.file_name

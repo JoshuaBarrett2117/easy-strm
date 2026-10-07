@@ -15,6 +15,7 @@ const saves = []
 await page.addInitScript(() => localStorage.setItem('token', 'fixture'))
 await page.route('**/api/**', async route => {
   const url = new URL(route.request().url())
+  if (!url.pathname.startsWith('/api/')) return route.continue()
   let data = {}
   if (url.pathname.endsWith('/share-review')) {
     const rows = items.filter(i => !url.searchParams.get('media_id') || i.id === Number(url.searchParams.get('media_id')))

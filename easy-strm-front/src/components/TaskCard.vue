@@ -214,6 +214,7 @@ const emit = defineEmits(['cancel', 'resume', 'detail'])
 const task = toRef(props, 'task')
 
 const taskTypeNames = {
+ share_delete: '删除分享', share_clear: '清空分享文件记录', share_media_delete: '删除分享文件记录',
   strm_generate: 'STRM 文件生成',
   incremental_sync: '增量同步',
   sync_full: '全量同步',
@@ -366,7 +367,7 @@ const taskStatusIcon = computed(() => {
 
 const canCancel = computed(() => {
   const t = task.value
-  return !!t && (t.status === 'pending' || t.status === 'running')
+  return !!t && (t.status === 'pending' || t.status === 'running') && (!['share_delete','share_clear','share_media_delete'].includes(t.task_type) || (t.status === 'pending' && t.metadata?.cancellable !== false))
 })
 
 const canResume = computed(() => {
@@ -545,6 +546,8 @@ const taskStageText = computed(() => {
 const taskSummaryItems = computed(() => {
   const t = task.value
   if (!t) return []
+
+  if (['share_delete','share_clear','share_media_delete'].includes(t.task_type)) return [{label:'目标分享',value:(t.metadata?.record_ids || []).join('、')},{label:'当前阶段',value:t.metadata?.phase || '等待目标资源'},{label:'清理记录数',value:t.metadata?.result?.deleted ?? '等待执行'}]
 
   if (String(t.task_id || '').startsWith('share_strm_')) {
     return [

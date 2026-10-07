@@ -25,3 +25,17 @@ test('卸载时结束等待并忽略在途响应', async () => {
   assert.equal(await result, null)
   assert.equal(await watcher.watch('new'), null)
 })
+
+test('任务持久化后短暂读取失败会自动重试，重复订阅仍复用轮询', async () => {
+  let attempts = 0, warnings = 0
+  const watcher = createShareTaskWatcher(async id => {
+    if (++attempts === 1) throw new Error('任务中心暂不可用')
+    return { task_id: id, status: 'completed' }
+  }, () => {}, () => {}, 1, () => { warnings++ })
+  const result = watcher.watch('durable-cleanup')
+  assert.equal(watcher.watch('durable-cleanup'), result)
+  assert.equal((await result).status, 'completed')
+  assert.equal(attempts, 2)
+  assert.equal(warnings, 1)
+  watcher.dispose()
+})

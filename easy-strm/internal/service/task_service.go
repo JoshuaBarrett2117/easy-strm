@@ -13,7 +13,8 @@ import (
 type TaskService struct {
 	taskRedisDAO *dao.TaskRedisDAO
 	// cancelFuncs 存储运行中任务的取消函数，用于从外部中断长时间运行的任务
-	cancelFuncs sync.Map // map[string]context.CancelFunc
+	cancelGuards sync.Map // map[string]func() error，持久化操作只在等待阶段允许取消
+	cancelFuncs  sync.Map // map[string]context.CancelFunc
 }
 
 func NewTaskService(taskRedisDAO *dao.TaskRedisDAO) *TaskService {
@@ -98,6 +99,11 @@ func (s *TaskService) UpdateMetadata(taskID string, metadata map[string]interfac
 
 // Delete 删除任务
 func (s *TaskService) Delete(taskID string) error {
+	if _, guarded := s.cancelGuards.Load(taskID); guarded {
+		if err := s.Cancel(taskID); err != nil {
+			return err
+		}
+	}
 	// 先尝试取消运行中的任务
 	s.CancelContext(taskID)
 	if err := s.taskRedisDAO.Delete(taskID); err != nil {
@@ -132,6 +138,10 @@ func (s *TaskService) RecoverInterruptedTasks() {
 		return
 	}
 	for _, task := range tasks {
+		kind, _ := task["task_type"].(string)
+		if domain.IsShareOperationType(kind) {
+			continue
+		}
 		status, _ := task["status"].(string)
 		if status != "pending" && status != "running" {
 			continue
@@ -148,6 +158,18 @@ func (s *TaskService) RecoverInterruptedTasks() {
 
 // Cancel 取消任务（设置Redis取消标记 + 调用context cancel + 更新状态）
 func (s *TaskService) Cancel(taskID string) error {
+	if guard, ok := s.cancelGuards.Load(taskID); ok {
+		if err := guard.(func() error)(); err != nil {
+			return err
+		}
+	} else if task, err := s.Get(taskID); err != nil {
+		return err
+	} else if task != nil {
+		kind, _ := task["task_type"].(string)
+		if domain.IsShareOperationType(kind) {
+			return fmt.Errorf("分享清理操作已结束或正在恢复，不能取消")
+		}
+	}
 	// 先调用 context cancel 中断实际运行的 goroutine
 	s.CancelContext(taskID)
 
@@ -168,6 +190,16 @@ func (s *TaskService) Cancel(taskID string) error {
 
 // Resume 恢复已取消或失败的任务
 func (s *TaskService) Resume(taskID string) error {
+	task, err := s.Get(taskID)
+	if err != nil {
+		return err
+	}
+	if task != nil {
+		kind, _ := task["task_type"].(string)
+		if domain.IsShareOperationType(kind) {
+			return fmt.Errorf("清理操作需重新确认并提交，请返回分享管理重试")
+		}
+	}
 	if err := s.taskRedisDAO.Resume(taskID); err != nil {
 		logger.Errorf("TaskService[Resume] 恢复任务失败: %v", err)
 		return fmt.Errorf("恢复任务失败: %v", err)
@@ -239,3 +271,11 @@ func (s *TaskService) TaskStatusToDomain(taskMap map[string]interface{}) *domain
 	}
 	return task
 }
+
+// RegisterCancelGuard 注册持久化操作的原子取消校验，须早于接口返回。
+func (s *TaskService) RegisterCancelGuard(id string, guard func() error) {
+	s.cancelGuards.Store(id, guard)
+}
+
+// RemoveCancelGuard 清理操作结束后移除取消校验。
+func (s *TaskService) RemoveCancelGuard(id string) { s.cancelGuards.Delete(id) }

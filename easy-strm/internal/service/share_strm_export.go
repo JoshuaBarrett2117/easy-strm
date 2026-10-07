@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"easy-strm/internal/domain"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -25,13 +27,15 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			return e
 		}
 	}
+	var output *StrmOutput
 	if s.exportDB != nil {
-		output, e := NewStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id)
+		var e error
+		output, e = WaitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, func() bool { return s.tasks != nil && s.tasks.IsCancelled(id) })
 		if e != nil {
 			return e
 		}
-		s.output = output
-		defer func() { output.Store.Close(); s.output = nil }()
+		defer output.Store.Close()
+		ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
 	}
 	cats, err := s.categories()
 	if err != nil {
@@ -41,7 +45,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if err != nil {
 		return err
 	}
-	after, processed, written, failed := 0, 0, 0, 0
+	after, processed, written, failed, skipped := 0, 0, 0, 0, 0
 	sourceErrors := []string{}
 	seen := map[string]bool{}
 	for {
@@ -57,7 +61,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			if err = ctx.Err(); err != nil {
 				return err
 			}
-			if s.tasks.IsCancelled(id) {
+			if s.tasks != nil && s.tasks.IsCancelled(id) {
 				return context.Canceled
 			}
 			after = source.ID
@@ -66,24 +70,26 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			if created {
 				written++
 			}
-			if sourceErr != nil {
+			if errors.Is(sourceErr, ErrShareUnitSkipped) || errors.Is(sourceErr, sql.ErrNoRows) {
+				skipped++
+			} else if sourceErr != nil {
 				failed++
 				if len(sourceErrors) < 100 {
 					sourceErrors = append(sourceErrors, fmt.Sprintf("来源%d：%v", source.ID, sourceErr))
 				}
 			}
-			if err = s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed, failed); err != nil {
+			if err = s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed-skipped, failed); err != nil {
 				return err
 			}
-			metadata := map[string]interface{}{"exported_files": written, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID"}
+			metadata := map[string]interface{}{"exported_files": written, "skipped_sources": skipped, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID"}
 			metadata["share_export"] = true
 			metadata["export_query"] = q
-			if s.output != nil {
-				metadata["added"] = s.output.Added
-				metadata["updated"] = s.output.Updated
-				metadata["skipped"] = s.output.Skipped
-				metadata["conflicts"] = s.output.Conflicts
-				metadata["exported_files"] = s.output.Added + s.output.Updated
+			if output != nil {
+				metadata["added"] = output.Added
+				metadata["updated"] = output.Updated
+				metadata["skipped"] = output.Skipped
+				metadata["conflicts"] = output.Conflicts
+				metadata["exported_files"] = output.Added + output.Updated
 			}
 			if err = s.tasks.UpdateMetadata(id, metadata); err != nil {
 				return err
@@ -98,14 +104,14 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	q.Sort = ""
 	q.Direction = ""
 	q.Available = false
-	if s.output != nil && isFullShareStrmQuery(q) {
-		return s.output.Store.Finish(ctx, "share:default", id)
+	if output != nil && isFullShareStrmQuery(q) {
+		return output.Store.FinishSnapshot(ctx, "share:default", output.Snapshot, output.Seen)
 	}
 	return nil
 }
 
 func isFullShareStrmQuery(q domain.ShareLibraryQuery) bool {
-	return q.Keyword == "" && q.TmdbID == 0 && q.MediaType == "" && q.YearMin == 0 && q.YearMax == 0 && q.RatingMin == nil && q.RatingMax == nil && q.Genres == "" && q.Countries == "" && len(q.FileIDs) == 0
+	return q.WorkKey == "" && q.Keyword == "" && q.TmdbID == 0 && q.MediaType == "" && q.YearMin == 0 && q.YearMax == 0 && q.RatingMin == nil && q.RatingMax == nil && q.Genres == "" && q.Countries == "" && len(q.FileIDs) == 0
 }
 
 func shareStrmIdentity(source domain.ShareStrmSource, episode domain.ShareEpisode) string {
@@ -164,6 +170,40 @@ func (s *ShareStrmService) shareStrmConflicts(ctx context.Context, q domain.Shar
 }
 
 func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (bool, error) {
+	resources := []shareResource{{key: shareKey(source.ShareID)}, {key: fmt.Sprintf("share-config:%d", source.ShareID)}, {key: fileKey(source.ID), exclusive: true}}
+	matchesForLock := shareCodeRe.FindStringSubmatch(source.URL)
+	if len(matchesForLock) > 1 {
+		resources = append(resources, shareResource{key: "mapping-code:" + matchesForLock[1]}, shareResource{key: "mapping:" + uuid.NewSHA1(uuid.NameSpaceURL, []byte(matchesForLock[1]+":path:"+shareCandidatePath(source.FileName))).String(), exclusive: true})
+	}
+	sourceEpisodes := source.Episodes
+	if source.Result.MediaType == "movie" {
+		sourceEpisodes = []domain.ShareEpisode{{}}
+	}
+	for _, ep := range sourceEpisodes {
+		resources = append(resources, shareResource{key: "identity:" + shareStrmIdentity(source, ep), exclusive: true})
+	}
+	release, err := s.Coordinator().acquire(ctx, []int{source.ShareID}, resources...)
+	if err != nil {
+		return false, err
+	}
+	defer release()
+	if reader, ok := s.store.(shareStrmSourceReader); ok {
+		fresh, err := reader.GetStrmSource(ctx, source.ID)
+		if err != nil {
+			return false, err
+		}
+		if source.FileVersion != fresh.FileVersion || source.ShareVersion != fresh.ShareVersion || source.WorkKey != fresh.WorkKey {
+			return false, ErrShareUnitSkipped
+		}
+		source = fresh
+		conflicts, err := s.shareStrmConflicts(ctx, domain.ShareLibraryQuery{WorkKey: source.WorkKey})
+		if err != nil {
+			return false, err
+		}
+		conflictMaps = []map[string]*shareStrmConflict{conflicts}
+	}
+	output, _ := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
+
 	filePath := shareCandidatePath(source.FileName)
 	file := domain.ShareFileInfo{Name: path.Base(filePath), Path: filePath}
 	if len(selectShareMediaFiles([]domain.ShareFileInfo{file})) == 0 {
@@ -233,8 +273,30 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 			continue
 		}
 		localPath := filepath.Join(cfg.OutputPath, relative)
+		normalized, pathErr := NormalizeStrmOutputPath(localPath)
+		if pathErr != nil {
+			return written > 0, pathErr
+		}
+		pathRelease, pathErr := s.Coordinator().acquire(ctx, nil, shareResource{key: "path:" + normalized, exclusive: true})
+		if pathErr != nil {
+			return written > 0, pathErr
+		}
+		var unlock func()
+		if output != nil {
+			unlock, pathErr = output.Store.LockPath(ctx, normalized)
+			if pathErr != nil {
+				pathRelease()
+				return written > 0, pathErr
+			}
+		}
+		finishPath := func() {
+			if unlock != nil {
+				unlock()
+			}
+			pathRelease()
+		}
 		var writeErr error
-		if s.output != nil {
+		if output != nil {
 			raw, _ := json.Marshal(entry)
 			exportKey := fmt.Sprintf("%d:%d:%d", source.MediaID, episode.SeasonNumber, episode.EpisodeNumber)
 			if conflict != nil && len(conflict.shareIDs) > 1 {
@@ -243,16 +305,19 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 			if conflict != nil && conflict.fileCounts[shareID] > 1 {
 				exportKey += fmt.Sprintf(":file:%d", source.ID)
 			}
-			_, writeErr = s.output.Write(ctx, exportKey, localPath, cfg.BaseURL+"/share-strm/"+entry.ID+"\n", string(raw), entry.ID)
+			_, writeErr = output.Write(ctx, exportKey, localPath, cfg.BaseURL+"/share-strm/"+entry.ID+"\n", string(raw), entry.ID)
 		} else {
 			writeErr = writeShareStrm(localPath, cfg.BaseURL+"/share-strm/"+entry.ID)
 		}
 		if err := writeErr; err != nil {
+			finishPath()
 			return written > 0, err
 		}
 		if err := s.store.SaveExportedStrmFile(ctx, domain.StrmFile{StrmConfigID: -1, FileName: file.Name, FilePath: localPath, LocalStrmPath: localPath}); err != nil {
+			finishPath()
 			return written > 0, fmt.Errorf("STRM已写入，但登记文件清单失败：%w", err)
 		}
+		finishPath()
 		seen[seenIdentity] = true
 		written++
 	}
@@ -296,4 +361,9 @@ func (s *ShareStrmService) resolveStrmFileID(ctx context.Context, entry domain.S
 		cid = found.DirID
 	}
 	return "", fmt.Errorf("无法定位分享文件")
+}
+
+type shareExportOutputContext struct{}
+type shareStrmSourceReader interface {
+	GetStrmSource(context.Context, int) (domain.ShareStrmSource, error)
 }

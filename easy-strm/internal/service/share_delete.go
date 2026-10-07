@@ -6,12 +6,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
-// SetStrmDeleteGuard 复用导出任务锁，防止分享删除与STRM生成并发。
+// SetStrmDeleteGuard 让导出和分享操作共用资源协调器，不持有全局导出锁。
 func (s *ShareRecordService) SetStrmDeleteGuard(exporter *ShareStrmService) {
-	s.strmExportMu = &exporter.exportMu
+	exporter.coordinator = s.Coordinator()
 }
 
 // Delete 删除分享及其同步记录、播放映射和已生成STRM；磁盘清理失败时保留数据库以便重试。
@@ -19,21 +20,18 @@ func (s *ShareRecordService) Delete(ctx context.Context, id int) error {
 	if id <= 0 {
 		return fmt.Errorf("分享ID无效")
 	}
-	s.syncMu.Lock()
-	defer s.syncMu.Unlock()
-	if s.activeSyncID != "" {
-		return fmt.Errorf("有分享同步任务正在运行，请等待任务结束后再删除")
+	release, err := s.Coordinator().try(shareResource{key: shareKey(id), exclusive: true})
+	if err != nil {
+		return err
 	}
-	if !s.identifyMu.TryLock() {
-		return fmt.Errorf("有分享识别任务正在运行，请等待任务结束后再删除")
+	defer release()
+	if err = s.deleteShare(ctx, id); err == nil {
+		s.Coordinator().invalidate([]int{id})
 	}
-	defer s.identifyMu.Unlock()
-	if s.strmExportMu != nil {
-		if !s.strmExportMu.TryLock() {
-			return fmt.Errorf("分享STRM导出正在运行，请等待任务结束后再删除")
-		}
-		defer s.strmExportMu.Unlock()
-	}
+	return err
+}
+
+func (s *ShareRecordService) deleteShare(ctx context.Context, id int) error {
 	rawURL, err := s.dao.ShareDeleteURL(ctx, id)
 	if err != nil {
 		return err
@@ -41,6 +39,18 @@ func (s *ShareRecordService) Delete(ctx context.Context, id int) error {
 	matches := shareCodeRe.FindStringSubmatch(rawURL)
 	if len(matches) < 2 {
 		return fmt.Errorf("分享链接无效，无法确定STRM归属")
+	}
+	release, err := s.Coordinator().acquire(ctx, nil, shareResource{key: "mapping-code:" + matches[1], exclusive: true})
+	if err != nil {
+		return err
+	}
+	defer release()
+	shared, err := s.dao.HasOtherShareCode(ctx, id, matches[1])
+	if err != nil {
+		return err
+	}
+	if shared {
+		return s.dao.DeleteWithStrm(ctx, id, nil, nil)
 	}
 	entries, err := s.dao.ShareDeleteEntries(ctx, matches[1])
 	if err != nil {
@@ -69,6 +79,25 @@ func (s *ShareRecordService) Delete(ctx context.Context, id int) error {
 				paths = append(paths, candidate.Path)
 			}
 		}
+		sort.Strings(paths)
+		resources := []shareResource{}
+		for _, p := range paths {
+			normalized, e := NormalizeStrmOutputPath(p)
+			if e != nil {
+				return e
+			}
+			resources = append(resources, shareResource{key: "path:" + normalized, exclusive: true})
+		}
+		unlock, err := s.Coordinator().acquire(ctx, nil, resources...)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		unlockPaths, err := s.dao.LockStrmDeletePaths(ctx, paths)
+		if err != nil {
+			return err
+		}
+		defer unlockPaths()
 		if err = s.dao.RememberShareDeletePaths(ctx, entries[0], paths); err != nil {
 			return err
 		}
@@ -84,6 +113,8 @@ func (s *ShareRecordService) Delete(ctx context.Context, id int) error {
 				if err = os.Remove(p); err != nil && !os.IsNotExist(err) {
 					return fmt.Errorf("删除STRM失败，保留分享记录供重试：%w", err)
 				}
+			} else if _, statErr := os.Stat(p); statErr == nil {
+				return fmt.Errorf("STRM归属已变化，保留文件和记录：%s", p)
 			}
 		}
 	}

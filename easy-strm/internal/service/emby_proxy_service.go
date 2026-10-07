@@ -1,10 +1,8 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -180,7 +178,7 @@ func (s *EmbyProxyService) save(input *domain.EmbyServer, persist func() (*domai
 	serving := &embyProxyTrackedListener{Listener: bound, connections: &listener.connections}
 	bound = nil
 	go func() {
-		if err := listener.server.Serve(serving); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := listener.server.Serve(serving); err != nil && !errors.Is(err, http.ErrServerClosed) && !errors.Is(err, net.ErrClosed) {
 			logger.Error("Emby 实例 %d 反代端口 %d 监听失败: %v", server.ID, server.ProxyPort, err)
 		}
 	}()
@@ -211,22 +209,37 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(embyProxyTarget(target, r.In.URL.Path))
 			r.SetXForwarded()
+			r.Out.Header.Set("X-Request-ID", logger.RequestID(r.In.Context()))
 		},
 		Transport: s.client.Transport,
+		ModifyResponse: func(response *http.Response) error {
+			// 请求入口已设置标识，移除上游同名头，避免 ReverseProxy 追加重复值。
+			response.Header.Del("X-Request-ID")
+			if response.Request != nil {
+				if response.StatusCode >= 500 {
+					failure := newEmbyProxyFailure("proxy", "upstream_http_error", "Emby 反代上游返回异常状态", response.StatusCode, nil)
+					failure.status, failure.blocked = response.StatusCode, false
+					logEmbyProxyFailure(&config, response.Request, failure)
+				}
+			}
+			return nil
+		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			logger.Error("Emby 实例 %d 反代上游不可用", config.ID)
-			http.Error(w, "Emby 反代上游不可用", http.StatusBadGateway)
+			failure := newEmbyProxyFailure("proxy", "connection_failed", "Emby 反代上游不可用", 0, err)
+			failure.blocked = false
+			writeEmbyProxyFailure(&config, w, r, failure)
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		itemID, prefix, playback := embyStreamRequest(r)
-		if !playback {
+		playback, matched := embyPlaybackRequest(r)
+		r = beginEmbyProxyRequest(r, w, playback)
+		if !matched {
 			proxy.ServeHTTP(w, r)
 			return
 		}
-		location, status, err := s.playbackLocation(&config, target, r, itemID, prefix)
-		if err != nil {
-			http.Error(w, err.Error(), status)
+		location, failure := s.playbackLocation(&config, target, r, playback)
+		if failure != nil {
+			writeEmbyProxyFailure(&config, w, r, failure)
 			return
 		}
 		if location == "" {
@@ -259,112 +272,6 @@ func embyQuery(query url.Values, key string) string {
 		}
 	}
 	return ""
-}
-
-func embyStreamRequest(r *http.Request) (string, string, bool) {
-	if r.Method != http.MethodGet && r.Method != http.MethodHead {
-		return "", "", false
-	}
-	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-	prefix := ""
-	if len(parts) > 0 && strings.EqualFold(parts[0], "emby") {
-		prefix = "/" + parts[0]
-		parts = parts[1:]
-	}
-	if len(parts) != 3 || !strings.EqualFold(parts[0], "Videos") || parts[1] == "" {
-		return "", "", false
-	}
-	stream := strings.ToLower(parts[2])
-	if stream != "stream" && stream != "stream.mp4" && stream != "stream.mkv" && stream != "stream.avi" && stream != "stream.mov" {
-		return "", "", false
-	}
-	query := r.URL.Query()
-	if strings.EqualFold(embyQuery(query, "Static"), "false") || embyQuery(query, "TranscodeReasons") != "" {
-		return "", "", false
-	}
-	for _, key := range []string{"VideoCodec", "AudioCodec"} {
-		codec := embyQuery(query, key)
-		if codec != "" && !strings.EqualFold(codec, "copy") {
-			return "", "", false
-		}
-	}
-	return parts[1], prefix, true
-}
-
-type embyProxyMediaSource struct {
-	ID        string `json:"Id"`
-	Path      string `json:"Path"`
-	Protocol  string `json:"Protocol"`
-	Container string `json:"Container"`
-	IsRemote  bool   `json:"IsRemote"`
-}
-
-func (s *EmbyProxyService) playbackLocation(server *domain.EmbyServer, base *url.URL, incoming *http.Request, itemID, prefix string) (string, int, error) {
-	path := prefix + "/Items/" + url.PathEscape(itemID) + "/PlaybackInfo"
-	endpoint := *embyProxyTarget(base, path)
-	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + prefix + "/Items/" + itemID + "/PlaybackInfo"
-	endpoint.RawPath = strings.TrimRight(embyProxyTarget(base, path).EscapedPath(), "/") + path
-	query := incoming.URL.Query()
-	endpoint.RawQuery = query.Encode()
-	request, err := http.NewRequestWithContext(incoming.Context(), http.MethodGet, endpoint.String(), nil)
-	if err != nil {
-		return "", 502, fmt.Errorf("无法构造 Emby 播放信息请求")
-	}
-	for _, key := range []string{"Authorization", "X-Emby-Authorization", "X-Emby-Token", "X-MediaBrowser-Token", "Cookie", "User-Agent"} {
-		for _, value := range incoming.Header.Values(key) {
-			request.Header.Add(key, value)
-		}
-	}
-	// 客户端带身份时绝不以管理员 API Key 覆盖，保留上游的用户授权判定。
-	if !embyClientIdentity(incoming) {
-		request.Header.Set("X-Emby-Token", server.APIKey)
-	}
-	response, err := s.client.Do(request)
-	if err != nil {
-		return "", 502, fmt.Errorf("Emby 播放信息请求失败，请检查实例连接")
-	}
-	defer response.Body.Close()
-	if response.StatusCode == 401 || response.StatusCode == 403 {
-		return "", response.StatusCode, fmt.Errorf("Emby 拒绝当前客户端的播放授权")
-	}
-	if response.StatusCode != 200 {
-		return "", 502, fmt.Errorf("Emby 播放信息请求失败（HTTP %d）", response.StatusCode)
-	}
-	var info struct {
-		MediaSources []embyProxyMediaSource `json:"MediaSources"`
-		ErrorCode    string                 `json:"ErrorCode"`
-	}
-	if err := json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(&info); err != nil {
-		return "", 502, fmt.Errorf("Emby 播放信息解析失败")
-	}
-	if info.ErrorCode != "" || len(info.MediaSources) == 0 {
-		return "", 502, fmt.Errorf("Emby 未提供可用的播放媒体源")
-	}
-	selected := info.MediaSources[0]
-	if id := embyQuery(query, "MediaSourceId"); id != "" {
-		found := false
-		for _, source := range info.MediaSources {
-			if source.ID == id {
-				selected = source
-				found = true
-				break
-			}
-		}
-		if !found {
-			return "", 502, fmt.Errorf("Emby 未提供客户端选择的媒体源")
-		}
-	} else if len(info.MediaSources) > 1 {
-		return "", 502, fmt.Errorf("存在多个播放媒体源，请指定 MediaSourceId")
-	}
-	value := strings.TrimSpace(selected.Path)
-	parsed, parseErr := url.Parse(value)
-	if parseErr == nil && parsed.Hostname() != "" && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) && !strings.ContainsAny(value, "\r\n") {
-		return value, 302, nil
-	}
-	if (selected.IsRemote && (value == "" || parseErr != nil || parsed.Scheme == "")) || strings.EqualFold(selected.Protocol, "Http") || strings.EqualFold(selected.Protocol, "Https") || strings.EqualFold(selected.Container, "strm") || strings.HasPrefix(strings.ToLower(value), "http:") || strings.HasPrefix(strings.ToLower(value), "https:") {
-		return "", 502, fmt.Errorf("远程 STRM 播放地址无效，已停止回源，请检查 Emby PlaybackInfo")
-	}
-	return "", 0, nil
 }
 
 func embyClientIdentity(r *http.Request) bool {

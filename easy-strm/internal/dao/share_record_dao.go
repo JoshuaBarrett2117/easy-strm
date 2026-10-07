@@ -167,6 +167,9 @@ func (d *ShareRecordDAO) DeleteWithStrm(ctx context.Context, id int, entries, pa
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
 		return err
 	}
+	if err = completeShareOperationTx(ctx, tx, 1); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 func (d *ShareRecordDAO) AddMedia(ctx context.Context, m *domain.ShareMedia) error {
@@ -213,6 +216,9 @@ func (d *ShareRecordDAO) DeleteMedia(ctx context.Context, id int) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
+		return err
+	}
+	if err = completeShareOperationTx(ctx, tx, 1); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -357,14 +363,20 @@ func insertShareMedia(ctx context.Context, tx *sql.Tx, m *domain.ShareMedia) err
 }
 
 // SyncFiles 原子同步一次完整分享扫描；只有调用本方法才会将未见历史文件标记失效。
-func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken string, files []domain.ShareMedia) (int, error) {
+func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken string, files []domain.ShareMedia, versions ...int) (int, error) {
 	tx, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
 	var locked int
-	if err = tx.QueryRowContext(ctx, "SELECT id FROM t_share_record WHERE id=$1 FOR UPDATE", shareID).Scan(&locked); err != nil {
+	query := "SELECT id FROM t_share_record WHERE id=$1"
+	args := []interface{}{shareID}
+	if len(versions) > 0 {
+		query += " AND version=$2"
+		args = append(args, versions[0])
+	}
+	if err = tx.QueryRowContext(ctx, query+" FOR UPDATE", args...).Scan(&locked); err != nil {
 		return 0, err
 	}
 	for i := range files {

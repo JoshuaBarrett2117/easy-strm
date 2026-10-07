@@ -3,118 +3,109 @@ package controller
 import (
 	"bytes"
 	"database/sql"
-	"easy-strm/internal/dao"
-	"easy-strm/internal/service"
-	"fmt"
+	"encoding/json"
+	"errors"
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/gin-gonic/gin"
 	"net/http/httptest"
 	"testing"
 )
 
-// TestClearShareMedia 覆盖路由参数、空分享、删除范围、不存在以及事务失败回滚。
+// TestClearShareMedia 覆盖提交契约、错误参数、目标不存在及队列持久化失败。
 func TestClearShareMedia(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, tt := range []struct {
+	for _, tc := range []struct {
 		name, id string
-		count    int64
 		status   int
-	}{
-		{"参数错误", "bad", 0, 400}, {"非正数", "0", 0, 400}, {"成功", "9", 43, 200}, {"重复清空", "9", 0, 200}, {"不存在", "9", 0, 404}, {"删除失败", "9", 0, 409},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
+	}{{"参数错误", "bad", 400}, {"非正数", "0", 400}, {"接受任务", "9", 200}, {"不存在", "9", 404}, {"持久化失败", "9", 409}} {
+		t.Run(tc.name, func(t *testing.T) {
 			db, mock, _ := sqlmock.New()
 			defer db.Close()
-			s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
-			r := gin.New()
-			r.DELETE("/shares/:id/media", NewShareRecordController(s).ClearMedia)
-			if tt.status != 400 {
-				mock.ExpectBegin()
-				q := mock.ExpectQuery("SELECT id FROM t_share_record WHERE id=\\$1 FOR UPDATE").WithArgs(9)
-				if tt.status == 404 {
+			s, store := newControllerOperationService(t, db)
+			if tc.status != 400 {
+				q := mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(9)
+				if tc.status == 404 {
 					q.WillReturnError(sql.ErrNoRows)
-					mock.ExpectRollback()
 				} else {
-					q.WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
-					e := mock.ExpectExec("DELETE FROM t_share_media_file WHERE share_id=\\$1").WithArgs(9)
-					if tt.status == 409 {
-						e.WillReturnError(fmt.Errorf("delete failed"))
-						mock.ExpectRollback()
-					} else {
-						e.WillReturnResult(sqlmock.NewResult(0, tt.count))
-						mock.ExpectExec("DELETE FROM t_share_media m WHERE NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 1))
-						mock.ExpectCommit()
-					}
+					q.WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/example"))
 				}
 			}
+			if tc.status == 409 {
+				store.err = errors.New("队列保存失败")
+			}
+			r := gin.New()
+			r.DELETE("/shares/:id/media", NewShareRecordController(s).ClearMedia)
 			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/"+tt.id+"/media", nil))
-			if w.Code != tt.status {
+			r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/"+tc.id+"/media", nil))
+			if w.Code != tc.status {
 				t.Fatalf("%d %s", w.Code, w.Body)
 			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatal(err)
+			if w.Code == 200 {
+				var result struct {
+					Data map[string]interface{} `json:"data"`
+				}
+				if e := json.Unmarshal(w.Body.Bytes(), &result); e != nil {
+					t.Fatal(e)
+				}
+				checkAcceptedOperation(t, result.Data)
+			}
+			if e := mock.ExpectationsWereMet(); e != nil {
+				t.Fatal(e)
 			}
 		})
 	}
 }
-
-// TestClearSelectedShareMedia 覆盖选中分享批量清空的参数校验和成功响应。
 func TestClearSelectedShareMedia(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
-	s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
+	s, store := newControllerOperationService(t, db)
+	for _, id := range []int{2, 3} {
+		mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(id).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/example"))
+	}
 	r := gin.New()
 	r.POST("/shares/batch-clear", NewShareRecordController(s).ClearSelectedMedia)
-	mock.ExpectBegin()
-	mock.ExpectExec("DELETE FROM t_share_media_file WHERE share_id = ANY\\(\\$1\\)").WithArgs(sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 3))
-	mock.ExpectExec("DELETE FROM t_share_media m WHERE NOT EXISTS").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectCommit()
 	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest("POST", "/shares/batch-clear", bytes.NewBufferString(`{"share_ids":[2,3]}`)))
+	r.ServeHTTP(w, httptest.NewRequest("POST", "/shares/batch-clear", bytes.NewBufferString(`{"share_ids":[3,2,2]}`)))
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
+	store.mu.Lock()
+	ids := store.row.ShareIDs
+	store.mu.Unlock()
+	if len(ids) != 2 || ids[0] != 2 || ids[1] != 3 {
+		t.Fatal(ids)
+	}
+	bad := httptest.NewRecorder()
+	r.ServeHTTP(bad, httptest.NewRequest("POST", "/shares/batch-clear", bytes.NewBufferString(`{"share_ids":[]}`)))
+	if bad.Code != 400 {
+		t.Fatal(bad.Code)
+	}
+	if e := mock.ExpectationsWereMet(); e != nil {
+		t.Fatal(e)
 	}
 }
-
-// TestClearAllShareMedia 覆盖批量清空成功和数据库失败响应。
 func TestClearAllShareMedia(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	for _, tt := range []struct {
-		name   string
-		count  int64
-		status int
-	}{
-		{"成功", 86, 200}, {"重复清空", 0, 200}, {"删除失败", 0, 409},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			db, mock, _ := sqlmock.New()
-			defer db.Close()
-			s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
-			r := gin.New()
-			r.DELETE("/shares/media", NewShareRecordController(s).ClearAllMedia)
-			mock.ExpectBegin()
-			expectation := mock.ExpectExec("DELETE FROM t_share_media_file")
-			if tt.status == 409 {
-				expectation.WillReturnError(fmt.Errorf("delete failed"))
-				mock.ExpectRollback()
-			} else {
-				expectation.WillReturnResult(sqlmock.NewResult(0, tt.count))
-				mock.ExpectExec("DELETE FROM t_share_media").WillReturnResult(sqlmock.NewResult(0, tt.count))
-				mock.ExpectCommit()
-			}
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/media", nil))
-			if w.Code != tt.status {
-				t.Fatalf("%d %s", w.Code, w.Body)
-			}
-			if err := mock.ExpectationsWereMet(); err != nil {
-				t.Fatal(err)
-			}
-		})
+	db, mock, _ := sqlmock.New()
+	defer db.Close()
+	s, store := newControllerOperationService(t, db)
+	mock.ExpectQuery("SELECT id FROM t_share_record ORDER BY id").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(9))
+	mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(9).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/example"))
+	r := gin.New()
+	r.DELETE("/shares/media", NewShareRecordController(s).ClearAllMedia)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest("DELETE", "/shares/media", nil))
+	if w.Code != 200 {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	store.mu.Lock()
+	ids := store.row.ShareIDs
+	store.mu.Unlock()
+	if len(ids) != 1 || ids[0] != 9 {
+		t.Fatal(ids)
+	}
+	if e := mock.ExpectationsWereMet(); e != nil {
+		t.Fatal(e)
 	}
 }

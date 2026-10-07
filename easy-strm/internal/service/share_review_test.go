@@ -20,6 +20,7 @@ func TestReviewManualSaveConflictAndEpisodes(t *testing.T) {
 			t.Fatal("missing episodes accepted")
 		}
 		m.Episodes = []domain.ShareEpisode{{SeasonNumber: 0, EpisodeNumber: 1}, {SeasonNumber: 0, EpisodeNumber: 2}}
+		mock.ExpectQuery("SELECT f.share_id,f.version,f.file_name").WithArgs(9).WillReturnRows(sqlmock.NewRows([]string{"share_id", "version", "file_name", "metadata_source", "status", "available", "media_type", "result", "episodes"}).AddRow(7, 2, "Show.S00E01E02.mkv", "tmdb", "failed", true, "tv", nil, `[]`))
 		mock.ExpectBegin()
 		count := int64(1)
 		if conflict {

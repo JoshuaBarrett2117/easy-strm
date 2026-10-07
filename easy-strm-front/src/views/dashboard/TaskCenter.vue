@@ -288,6 +288,7 @@ const taskDetailMetadataRows = computed(() => {
     server_id: 'Emby 实例 ID',
     server_name: 'Emby 实例',
     operation: '操作类型',
+ record_ids: '目标分享', file_id: '目标文件', blocking_task_ids: '等待任务', cancellable: '允许取消等待', result: '执行结果', recoverable_operation: '重启自动恢复',
     target: '操作目标',
     origin: '发起方式',
     current_step: '当前步骤',
@@ -318,12 +319,14 @@ const taskDetailMetadataRows = computed(() => {
       } else if (key === 'operation_mode') {
         formatted = ({ move: '移动', copy: '复制', hardlink: '硬链接', symlink: '软链接' })[value] || value
       } else if (key === 'operation') {
-        formatted = ({ strm_scan_capture: '扫描 STRM 并生成视频封面', media_info: '媒体信息提取', subtitle_scan: '外挂字幕扫描', metadata_refresh: '元数据刷新' })[value] || value
+        formatted = ({ share_delete: '删除分享', share_clear: '清空分享文件记录', share_media_delete: '删除分享文件记录', strm_scan_capture: '扫描 STRM 并生成视频封面', media_info: '媒体信息提取', subtitle_scan: '外挂字幕扫描', metadata_refresh: '元数据刷新' })[value] || value
       } else if (key === 'watch_interval' && Number.isFinite(Number(value))) {
         formatted = `${value} 秒`
       } else if (key === 'errors' && Array.isArray(value)) {
         formatted = value.join('\n') || '无'
-      } else if (Array.isArray(value)) {
+      } else if (['record_ids','blocking_task_ids'].includes(key) && Array.isArray(value)) {
+ formatted=value.join('、') || '无'
+ } else if (Array.isArray(value)) {
         formatted = `${value.length} 项`
       } else if (typeof value === 'object') {
         formatted = JSON.stringify(value)

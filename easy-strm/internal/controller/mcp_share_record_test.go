@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
-	"easy-strm/internal/service"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -18,7 +16,7 @@ func newMCPShareRegistry(t *testing.T) (*MCPRegistry, sqlmock.Sqlmock) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	s := service.NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
+	s, _ := newControllerOperationService(t, db)
 	return NewCoreMCPRegistry(MCPDependencies{ShareRecordService: s}), mock
 }
 
@@ -91,13 +89,8 @@ func TestMCPShareRecordWritesRequireConfirmationAndCRUD(t *testing.T) {
 		t.Fatalf("update failed: %#v %v", updated, err)
 	}
 	mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(8).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
-	mock.ExpectQuery("SELECT id FROM t_share_strm").WithArgs("abc").WillReturnRows(sqlmock.NewRows([]string{"id"}))
-	mock.ExpectBegin()
-	mock.ExpectExec("DELETE FROM t_share_record").WithArgs(8).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("DELETE FROM t_share_media").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectCommit()
 	deleted, err := r.Call(context.Background(), "share_record_delete", json.RawMessage(`{"share_id":8,"confirm":true}`))
-	if err != nil || deleted.(map[string]interface{})["deleted"] != true {
+	if err != nil || deleted.(map[string]interface{})["task_id"] == nil {
 		t.Fatalf("delete failed: %#v %v", deleted, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

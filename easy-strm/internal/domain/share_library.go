@@ -2,6 +2,7 @@ package domain
 
 // ShareLibraryQuery 资源库作品级查询；同维度多选取并集。
 type ShareLibraryQuery struct {
+	WorkKey   string   `form:"-" json:"-"` // 内部按作品重算多来源冲突，不作为HTTP参数
 	Keyword   string   `form:"keyword"`
 	TmdbID    int64    `form:"tmdb_id"`
 	MediaType string   `form:"media_type"`

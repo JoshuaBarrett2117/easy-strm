@@ -3,8 +3,10 @@ package dao
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrStrmOutputBusy 表示输出目录与正在执行的任务重叠，可等待后重试。
@@ -15,6 +17,15 @@ type StrmExportDAO struct{ Conn *sql.Conn }
 
 // LockStrmOutput 按根到叶顺序锁定祖先，目录本身独占；进程退出自动释放。
 func LockStrmOutput(ctx context.Context, db *sql.DB, paths []string) (*StrmExportDAO, error) {
+	return lockStrmOutput(ctx, db, paths, false)
+}
+
+// LockStrmOutputShared 普通导出共享目录树，具体写入路径另行独占。
+func LockStrmOutputShared(ctx context.Context, db *sql.DB, paths []string) (*StrmExportDAO, error) {
+	return lockStrmOutput(ctx, db, paths, true)
+}
+
+func lockStrmOutput(ctx context.Context, db *sql.DB, paths []string, shared bool) (*StrmExportDAO, error) {
 	c, e := db.Conn(ctx)
 	if e != nil {
 		return nil, e
@@ -22,7 +33,7 @@ func LockStrmOutput(ctx context.Context, db *sql.DB, paths []string) (*StrmExpor
 	d := &StrmExportDAO{c}
 	for i, p := range paths {
 		fn := "pg_try_advisory_lock_shared"
-		if i == len(paths)-1 {
+		if i == len(paths)-1 && !shared {
 			fn = "pg_try_advisory_lock"
 		}
 		var ok bool
@@ -37,9 +48,111 @@ func LockStrmOutput(ctx context.Context, db *sql.DB, paths []string) (*StrmExpor
 	return d, nil
 }
 
+// LockPath 在已有目录共享锁内独占一个规范路径，取消时退出等待。
+func (d *StrmExportDAO) LockPath(ctx context.Context, p string) (func(), error) {
+	for {
+		var ok bool
+		err := d.Conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtextextended($1, 34981))", p).Scan(&ok)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return func() {
+				d.Conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock(hashtextextended($1, 34981))", p)
+			}, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// ExclusiveDirectory 升级整目录清空前先释放共享占用，避免多个清空相互等待。
+func (d *StrmExportDAO) ExclusiveDirectory(ctx context.Context, paths []string) error {
+	if _, err := d.Conn.ExecContext(ctx, "SELECT pg_advisory_unlock_all()"); err != nil {
+		return err
+	}
+	for {
+		busy := false
+		for i, p := range paths {
+			fn := "pg_try_advisory_lock_shared"
+			if i == len(paths)-1 {
+				fn = "pg_try_advisory_lock"
+			}
+			var ok bool
+			if err := d.Conn.QueryRowContext(ctx, "SELECT "+fn+"(hashtextextended($1, 34981))", p).Scan(&ok); err != nil {
+				return err
+			}
+			if !ok {
+				busy = true
+				break
+			}
+		}
+		if !busy {
+			return nil
+		}
+		if _, err := d.Conn.ExecContext(ctx, "SELECT pg_advisory_unlock_all()"); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
+// SharedDirectory 清空结束后原子降级叶目录，普通写入继续只独占各自路径。
+func (d *StrmExportDAO) SharedDirectory(ctx context.Context, root string) error {
+	if _, err := d.Conn.ExecContext(ctx, "SELECT pg_advisory_lock_shared(hashtextextended($1, 34981))", root); err != nil {
+		return err
+	}
+	_, err := d.Conn.ExecContext(ctx, "SELECT pg_advisory_unlock(hashtextextended($1, 34981))", root)
+	return err
+}
+
+// ExportSnapshot 保留本次扫描前的清单版本；收尾不能修改其他任务刷新过的行。
+type ExportSnapshot map[string]string
+
+// Snapshot 获取指定归属的清单快照。
+func (d *StrmExportDAO) Snapshot(ctx context.Context, owner string) (ExportSnapshot, error) {
+	rows, err := d.Conn.QueryContext(ctx, "SELECT export_key,last_seen_run_id FROM t_strm_export_state WHERE owner_key=$1", owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := ExportSnapshot{}
+	for rows.Next() {
+		var k, r string
+		if err = rows.Scan(&k, &r); err != nil {
+			return nil, err
+		}
+		out[k] = r
+	}
+	return out, rows.Err()
+}
+
+// FinishSnapshot 仅标记本次未见且运行版本仍等于快照的行。
+func (d *StrmExportDAO) FinishSnapshot(ctx context.Context, owner string, snapshot ExportSnapshot, seen map[string]bool) error {
+	for k, run := range snapshot {
+		if seen[k] {
+			continue
+		}
+		if _, err := d.Conn.ExecContext(ctx, "UPDATE t_strm_export_state SET state='stale' WHERE owner_key=$1 AND export_key=$2 AND last_seen_run_id=$3", owner, k, run); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Close 释放连接持有的全部会话锁。
 func (d *StrmExportDAO) Close() {
-	d.Conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock_all()")
+	if _, err := d.Conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock_all()"); err != nil {
+		// 释放失败时丢弃物理连接，不能让带会话锁的连接重新进入池。
+		_ = d.Conn.Raw(func(interface{}) error { return driver.ErrBadConn })
+	}
 	d.Conn.Close()
 }
 
@@ -84,12 +197,6 @@ func (d *StrmExportDAO) Save(ctx context.Context, s ExportState) error {
 		return e
 	}
 	return tx.Commit()
-}
-
-// Finish 标记完整扫描未见的导出项，不删除磁盘文件。
-func (d *StrmExportDAO) Finish(ctx context.Context, owner, run string) error {
-	_, e := d.Conn.ExecContext(ctx, "UPDATE t_strm_export_state SET state='stale' WHERE owner_key=$1 AND last_seen_run_id<>$2", owner, run)
-	return e
 }
 
 // LegacyPaths 获取历史文件清单用于运行系统上的路径归一化。

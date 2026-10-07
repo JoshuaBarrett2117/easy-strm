@@ -44,6 +44,9 @@ var filenameReviewRulesMigrationSQL string
 //go:embed migrations/migrate_v40_numeric_episode_boundary.sql
 var numericEpisodeBoundaryMigrationSQL string
 
+//go:embed migrations/migrate_v42_share_operation_queue.sql
+var shareOperationMigrationSQL string
+
 // migrateShareRecords 原子迁移旧版单文件分享记录；脚本随二进制分发。
 func migrateShareRecords() error {
 	tx, err := db.Begin()
@@ -106,6 +109,9 @@ func migrateShareRecords() error {
 		return err
 	}
 	if _, err = tx.Exec(strmExportMigrationSQL); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(shareOperationMigrationSQL); err != nil {
 		return err
 	}
 	return tx.Commit()

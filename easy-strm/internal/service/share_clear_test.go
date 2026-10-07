@@ -11,8 +11,11 @@ func TestClearMediaWhileIdentifying(t *testing.T) {
 	if _, err := s.ClearMedia(context.Background(), 0); err == nil {
 		t.Fatal("应拒绝非法ID")
 	}
-	s.identifyMu.RLock()
-	defer s.identifyMu.RUnlock()
+	release, err := s.Coordinator().acquire(context.Background(), nil, shareResource{key: shareKey(9)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
 	if _, err := s.ClearMedia(context.Background(), 9); err == nil {
 		t.Fatal("识别运行中不得清空")
 	}

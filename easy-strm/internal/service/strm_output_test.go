@@ -31,9 +31,7 @@ func TestWaitStrmOutputRetriesBusyDirectory(t *testing.T) {
 	for _, busy := range []bool{true, false} {
 		for i, p := range chain {
 			query := "SELECT pg_try_advisory_lock_shared"
-			if i == len(chain)-1 {
-				query = `SELECT pg_try_advisory_lock\(`
-			}
+
 			mock.ExpectQuery(query).WithArgs(p).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(!busy || i != len(chain)-1))
 		}
 		if busy {
@@ -42,6 +40,7 @@ func TestWaitStrmOutputRetriesBusyDirectory(t *testing.T) {
 	}
 	mock.ExpectQuery("SELECT strm_config_id,local_strm_path").WillReturnRows(sqlmock.NewRows([]string{"id", "path"}))
 	mock.ExpectQuery("SELECT output_path FROM t_strm_export_state").WillReturnRows(sqlmock.NewRows([]string{"path"}))
+	mock.ExpectQuery("SELECT export_key,last_seen_run_id").WithArgs("cloud115:1").WillReturnRows(sqlmock.NewRows([]string{"key", "run"}))
 	mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -111,6 +110,7 @@ func TestStrmOutputPreservesUnchangedAndForeignFiles(t *testing.T) {
 				}
 				rows.AddRow(owner, "1:1:1")
 			}
+			m.ExpectQuery(`SELECT pg_try_advisory_lock\(`).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 			m.ExpectQuery("SELECT owner_key,export_key").WillReturnRows(rows)
 			if scenario == "unchanged" || scenario == "missing" {
 				m.ExpectExec("INSERT INTO t_strm_export_history VALUES").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -119,6 +119,7 @@ func TestStrmOutputPreservesUnchangedAndForeignFiles(t *testing.T) {
 				m.ExpectExec("INSERT INTO t_strm_export_state").WillReturnResult(sqlmock.NewResult(0, 1))
 				m.ExpectCommit()
 			}
+			m.ExpectExec("SELECT pg_advisory_unlock\\(").WillReturnResult(sqlmock.NewResult(0, 0))
 			s := &StrmOutput{Store: &dao.StrmExportDAO{Conn: c}, Root: root, Owner: "share:default", Run: "run", Paths: map[string]bool{}}
 			changed, e := s.Write(context.Background(), "1:1:1", p, content, "", "")
 			if scenario == "foreign" || scenario == "unregistered" {
@@ -179,5 +180,53 @@ func TestStrmClearResumeKeepsGeneratedFiles(t *testing.T) {
 	}
 	if e = m.ExpectationsWereMet(); e != nil {
 		t.Fatal(e)
+	}
+}
+
+func TestStrmClearRefreshesManifestAndReleasesDirectoryExclusive(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	c, _ := db.Conn(context.Background())
+	defer c.Close()
+	root := t.TempDir()
+	p := filepath.Join(root, "concurrent.strm")
+	if err := os.WriteFile(p, []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.ExpectExec("INSERT INTO t_strm_clear_run").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectQuery("SELECT completed").WillReturnRows(sqlmock.NewRows([]string{"completed"}).AddRow(false))
+	m.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
+	chain := []string{}
+	for q := root; ; q = filepath.Dir(q) {
+		chain = append([]string{q}, chain...)
+		if filepath.Dir(q) == q {
+			break
+		}
+	}
+	for i, q := range chain {
+		fn := "SELECT pg_try_advisory_lock_shared"
+		if i == len(chain)-1 {
+			fn = "SELECT pg_try_advisory_lock\\("
+		}
+		m.ExpectQuery(fn).WithArgs(q).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
+	}
+	m.ExpectQuery("SELECT output_path FROM t_strm_export_state").WillReturnRows(sqlmock.NewRows([]string{"path"}).AddRow(p))
+	m.ExpectBegin()
+	m.ExpectExec("INSERT INTO t_strm_export_state").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("UPDATE t_strm_export_state SET state='missing'").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("DELETE FROM t_strm_export_history").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("UPDATE t_strm_clear_run").WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectCommit()
+	m.ExpectExec("SELECT pg_advisory_lock_shared\\(").WithArgs(root).WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("SELECT pg_advisory_unlock\\(").WithArgs(root).WillReturnResult(sqlmock.NewResult(0, 1))
+	s := &StrmOutput{Store: &dao.StrmExportDAO{Conn: c}, Root: root, Run: "clear", Paths: map[string]bool{}}
+	if err := s.Clear(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("目录没有清空", err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

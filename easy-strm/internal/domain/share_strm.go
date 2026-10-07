@@ -10,6 +10,8 @@ type ShareStrmSettings struct {
 
 // ShareStrmSource 是可导出来源及作品识别信息。
 type ShareStrmSource struct {
+	FileVersion  int
+	ShareVersion int
 	MediaID      int
 	Remaining    int
 	ID           int

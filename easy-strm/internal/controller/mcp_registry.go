@@ -588,11 +588,19 @@ func NewCoreMCPRegistry(d MCPDependencies) *MCPRegistry {
 		startIdentify := func(name, description string, schema map[string]interface{}, retry, pending, failed bool) {
 			add(name, description, schema, false, true, false, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
 				var mediaIDs, shareIDs []int
-				if err := decodeArg(a, "media_ids", &mediaIDs, false); err != nil { return nil, err }
-				if err := decodeArg(a, "share_ids", &shareIDs, false); err != nil { return nil, err }
-				if pending && failed { return nil, fmt.Errorf("待识别与失败筛选不能同时启用") }
+				if err := decodeArg(a, "media_ids", &mediaIDs, false); err != nil {
+					return nil, err
+				}
+				if err := decodeArg(a, "share_ids", &shareIDs, false); err != nil {
+					return nil, err
+				}
+				if pending && failed {
+					return nil, fmt.Errorf("待识别与失败筛选不能同时启用")
+				}
 				taskID, err := d.ShareRecordService.StartBatchIdentify(ctx, mediaIDs, retry, shareIDs, pending, failed)
-				if err != nil { return nil, err }
+				if err != nil {
+					return nil, err
+				}
 				return map[string]interface{}{"task_id": taskID, "selected_by_media_ids": len(mediaIDs) > 0, "selected_by_share_ids": len(shareIDs) > 0, "retry_failed": retry, "pending_only": pending, "failed_only": failed}, nil
 			})
 		}
@@ -661,15 +669,16 @@ func NewCoreMCPRegistry(d MCPDependencies) *MCPRegistry {
 			}
 			return sanitizeShareRecord(record), nil
 		})
-		add("share_record_delete", "删除分享记录；必须显式 confirm=true", objectSchema(withConfirm(map[string]interface{}{"share_id": intProperty("分享记录 ID")}), "share_id", "confirm"), false, true, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
+		add("share_record_delete", "提交分享删除任务，完成结果通过task_id查询；必须显式 confirm=true", objectSchema(withConfirm(map[string]interface{}{"share_id": intProperty("分享记录 ID")}), "share_id", "confirm"), false, true, true, func(ctx context.Context, a map[string]json.RawMessage) (interface{}, error) {
 			id, err := requiredInt(a, "share_id")
 			if err != nil {
 				return nil, err
 			}
-			if err = d.ShareRecordService.Delete(ctx, id); err != nil {
+			taskID, err := d.ShareRecordService.StartDelete(ctx, id)
+			if err != nil {
 				return nil, err
 			}
-			return map[string]interface{}{"share_id": id, "deleted": true}, nil
+			return map[string]interface{}{"share_id": id, "task_id": taskID}, nil
 		})
 	}
 	if d.Cron != nil {

@@ -254,17 +254,31 @@ func RunIncrementalSync(strmConfig *StrmConfig, cloud115 *Cloud115, taskID strin
 			if e != nil {
 				return nil, e
 			}
-			own, e := output.Store.CheckPath(context.Background(), normalized, output.Owner, path)
-			if e != nil || !own {
-				continue
-			}
-			if err := os.Remove(existingFile.LocalStrmPath); err != nil && !os.IsNotExist(err) {
-				Warn("删除STRM文件失败 %s: %v", existingFile.LocalStrmPath, err)
-			} else {
-				DeleteStrmFileByPath(strmConfig.ID, path)
+			// 路径占用覆盖归属检查、磁盘删除和旧清单更新。
+			e = func() error {
+				unlock, err := output.Store.LockPath(context.Background(), normalized)
+				if err != nil {
+					return err
+				}
+				defer unlock()
+				own, err := output.Store.CheckPath(context.Background(), normalized, output.Owner, path)
+				if err != nil || !own {
+					return err
+				}
+				if err = os.Remove(existingFile.LocalStrmPath); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				if err = DeleteStrmFileByPath(strmConfig.ID, path); err != nil {
+					return err
+				}
 				result.Deleted++
 				Debug("删除STRM文件: %s", existingFile.LocalStrmPath)
+				return nil
+			}()
+			if e != nil {
+				return result, e
 			}
+
 		}
 	}
 

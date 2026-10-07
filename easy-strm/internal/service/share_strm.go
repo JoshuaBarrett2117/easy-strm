@@ -39,18 +39,18 @@ type ShareStrmStore interface {
 
 // ShareStrmService 负责资料库导出及按需转存播放，复用现有分类、任务和115能力。
 type ShareStrmService struct {
-	exportDB   *sql.DB
-	output     *StrmOutput
-	store      ShareStrmStore
-	settings   ShareTaskSettingsStore
-	client     Cloud115Client
-	tmdb       *TmdbService
-	organizer  *OrganizeService
-	tasks      *TaskService
-	categories func() ([]*domain.MediaCategory, error)
-	account    func(int) (*domain.Cloud115, error)
-	directLink func(string, int, string, string) (string, error)
-	exportMu   sync.Mutex
+	exportDB    *sql.DB
+	store       ShareStrmStore
+	settings    ShareTaskSettingsStore
+	client      Cloud115Client
+	tmdb        *TmdbService
+	organizer   *OrganizeService
+	tasks       *TaskService
+	categories  func() ([]*domain.MediaCategory, error)
+	account     func(int) (*domain.Cloud115, error)
+	directLink  func(string, int, string, string) (string, error)
+	coordOnce   sync.Once
+	coordinator *ShareOperationCoordinator
 }
 
 // SetExportDatabase 注入统一输出清单数据库。
@@ -63,10 +63,6 @@ func (s *ShareStrmService) RunScheduledExport(ctx context.Context, id string) er
 
 // RunExportQuery 在已有任务中执行保存的筛选条件。
 func (s *ShareStrmService) RunExportQuery(ctx context.Context, id string, q domain.ShareLibraryQuery) error {
-	if !s.exportMu.TryLock() {
-		return fmt.Errorf("分享导出正在执行")
-	}
-	defer s.exportMu.Unlock()
 	cfg, e := s.Settings()
 	if e != nil {
 		return e
@@ -74,12 +70,12 @@ func (s *ShareStrmService) RunExportQuery(ctx context.Context, id string, q doma
 	if e = validateShareStrmSettings(&cfg); e != nil {
 		return e
 	}
-	return s.export(ctx, cfg, q, id)
+	return s.export(s.Coordinator().batchContext(ctx, id), cfg, q, id)
 }
 
 // NewShareStrmService 在装配层注入持久化、外部客户端和现有业务服务。
 func NewShareStrmService(store ShareStrmStore, settings ShareTaskSettingsStore, client Cloud115Client, tmdb *TmdbService, organizer *OrganizeService, tasks *TaskService, categories func() ([]*domain.MediaCategory, error), account func(int) (*domain.Cloud115, error), directLink func(string, int, string, string) (string, error)) *ShareStrmService {
-	return &ShareStrmService{store: store, settings: settings, client: client, tmdb: tmdb, organizer: organizer, tasks: tasks, categories: categories, account: account, directLink: directLink}
+	return &ShareStrmService{store: store, settings: settings, client: client, tmdb: tmdb, organizer: organizer, tasks: tasks, categories: categories, account: account, directLink: directLink, coordinator: NewShareOperationCoordinator()}
 }
 
 // Settings 获取持久化导出配置。
@@ -144,22 +140,28 @@ func (s *ShareStrmService) StartExport(q domain.ShareLibraryQuery) (string, erro
 	if err = validateShareStrmSettings(&cfg); err != nil {
 		return "", err
 	}
-	if !s.exportMu.TryLock() {
-		return "", fmt.Errorf("资料库STRM导出正在执行，请在任务中心查看")
-	}
 	if s.tasks == nil {
-		s.exportMu.Unlock()
 		return "", fmt.Errorf("任务服务未初始化")
 	}
+	q.FileIDs = sortedShareIDs(q.FileIDs)
+	raw, _ := json.Marshal(struct {
+		Query  domain.ShareLibraryQuery
+		Files  []int
+		Config domain.ShareStrmSettings
+	}{q, q.FileIDs, cfg})
+	key := "export:" + string(raw)
 	id := "share_strm_" + uuid.NewString()
-	if err = s.tasks.Create(id, "strm_generate", "分享资料库STRM导出"); err != nil {
-		s.exportMu.Unlock()
+	taskID, created, err := s.Coordinator().registerRequest(context.Background(), key, id, func() error { return s.tasks.Create(id, "strm_generate", "分享资料库STRM导出") })
+	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	if !created {
+		return taskID, nil
+	}
+	ctx, cancel := context.WithCancel(s.Coordinator().batchContext(context.Background(), id))
 	s.tasks.RegisterCancel(id, cancel)
 	go func() {
-		defer s.exportMu.Unlock()
+		defer s.Coordinator().finishRequest(key, id)
 		defer s.tasks.RemoveCancel(id)
 		defer cancel()
 		defer func() {
@@ -322,6 +324,15 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 	if err != nil {
 		return "", err
 	}
+	release, err := s.Coordinator().acquire(ctx, nil, shareResource{key: "mapping-code:" + entry.ShareCode}, shareResource{key: "mapping:" + id, exclusive: true})
+	if err != nil {
+		return "", err
+	}
+	defer release()
+	entry, err = s.store.GetStrmEntry(ctx, id)
+	if err != nil {
+		return "", err
+	}
 	account, err := s.account(cfg.Cloud115ID)
 	if err != nil {
 		return "", err
@@ -473,4 +484,14 @@ func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string
 			return "", nil
 		}
 	}
+}
+
+// Coordinator 返回导出与分享生命周期共用的资源协调器。
+func (s *ShareStrmService) Coordinator() *ShareOperationCoordinator {
+	s.coordOnce.Do(func() {
+		if s.coordinator == nil {
+			s.coordinator = NewShareOperationCoordinator()
+		}
+	})
+	return s.coordinator
 }

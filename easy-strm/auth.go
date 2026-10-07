@@ -135,6 +135,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	tmdbController := controller.NewTmdbController(tmdbService)
 	shareRecordService := service.NewShareRecordService(dao.NewShareRecordDAO(dao.DB), tmdbService, taskService, shareTransferService)
 	shareRecordService.SetTaskSettingsStore(systemConfigDAO)
+	shareRecordService.SetOperationStore(dao.NewShareOperationDAO(dao.DB))
 	mcpController := controller.NewMCPControllerWithDependencies(controller.MCPDependencies{API: globalAPIService, Tasks: taskService, Dashboard: dashboardService, MediaSources: mediaSourceService, FileManager: fileManagerService, TMDB: tmdbService, Rename: renameService, Organize: organizeService, STRM: strmService, Cloud115: cloud115Service, Cron: cronService, Emby: embyService, Categories: mediaCategoryService, Settings: systemConfigService, ShareRecordService: shareRecordService})
 	shareRecordController := controller.NewShareRecordController(shareRecordService)
 	shareStrmService := service.NewShareStrmService(dao.NewShareRecordDAO(dao.DB), systemConfigDAO, client, tmdbService, organizeService, taskService, mediaCategoryDAO.GetAll, cloud115DAO.GetByID, func(pick string, accountID int, cookie, ua string) (string, error) {
@@ -150,6 +151,9 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
 	shareRecordService.SetAutoStrmExport(shareStrmService.StartAutoExport)
 	shareRecordService.SetStrmDeleteGuard(shareStrmService)
+	if err := shareRecordService.RecoverOperations(context.Background()); err != nil {
+		panic(fmt.Errorf("恢复分享操作队列失败: %w", err))
+	}
 	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
 	playbackRecordService.SetPosterResolver(tmdbService.ResolvePlaybackMoviePoster)
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)

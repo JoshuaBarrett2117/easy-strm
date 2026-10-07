@@ -1,6 +1,6 @@
 # Emby 管理
 
-- 更新日期：2026-10-06
+- 更新日期：2026-10-07
 - 维护者：Codex
 
 ## 功能概览
@@ -23,9 +23,19 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 
 “服务地址”仍填写原始 Emby 地址，例如 `http://emby:8096`。Emby 客户端的服务器地址改为 `http://easy-strm主机IP:8097`，登录及浏览请求会反代到原始 Emby。每个实例使用独立端口，不要把实例服务地址填写为它自己的反代地址。
 
-当客户端请求 `/Videos/{item_id}/stream`（也支持 `/emby/` 前缀及常见直接播放文件扩展名）时，反代沿用客户端认证与查询参数读取上游 `PlaybackInfo`，没有客户端身份时才使用实例 API Key。按 `MediaSourceId` 选中媒体源，其 `Path` 为有效 HTTP(S) 地址时，GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不访问视频响应体，也不向 Location 添加实例 API Key。客户端直接请求原 STRM 地址以及后续直链，视频不经过 easy-strm 或 Emby 的播放接口。
+反代识别 GET/HEAD 的 `/Videos/{item_id}/stream` 及各扩展名、`original` 及各扩展名、HLS 清单和分片，以及 `/Items/{item_id}/Download` 原始文件下载，也支持 `/emby/` 前缀。识别播放接口后，沿用客户端认证与查询参数读取上游 `PlaybackInfo`，没有客户端身份时才使用实例 API Key。按 `MediaSourceId` 选中媒体源，其 HTTP(S) 路径、HTTP 协议、STRM 容器或 `.strm` 路径均视为 STRM；媒体源呈现为本地文件时，再通过 Emby `/Items` 的 `Path`、`IsShortcut` 和媒体源信息确认原项目类型，避免将 STRM 缓存路径误当成本地视频。
 
-本地文件、非 HTTP(S) 媒体、明确转码请求和 HLS 请求继续透明反代。远程 STRM 地址无效、播放信息请求失败、选中媒体源不存在或未指定多版本媒体源时返回明确错误，避免静默回源传输视频。Emby 返回的 401/403 保留给客户端。播放器需要支持并跟随 302；转码会继续占用服务端带宽。
+STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不请求视频，也不向 Location 添加实例 API Key。客户端直接请求原 STRM 地址以及后续直链。STRM 转码/HLS 请求、无效地址、解析失败、缺失媒体源或媒体类型无法确认时返回 502，已禁止回源；Emby 返回的 401/403 保留给客户端。每次请求重新判断，后续有效的直接播放请求仍能恢复 302。
+
+仅明确为非 STRM 的本地或其他协议媒体允许视频回源，其直接播放、转码和 HLS 保持正常。浏览、登录、图片、字幕及 WebSocket 仍透明反代。禁止回源规则作用于配置的实例反代端口，客户端需要支持并跟随 302。
+
+### 失败日志
+
+在系统日志页面选择 ERROR 并搜索 `[EmbyProxy]`，可查看播放信息解析、认证、上游连接和 STRM 回退拦截的失败日志。每个失败请求记录一次主要日志，包含 `request_id`、`server_id`、`proxy_port`、`item_id`、`media_source_id`、请求方法与路径、客户端地址、`stage`、`reason`、响应状态、上游状态及 `duration_ms`。播放拦截失败明确记录 `fallback_blocked=true` 和“已禁止回源”；普通反代的连接或上游错误记录 `fallback_blocked=false`。
+
+响应头 `X-Request-ID` 与日志中的 `request_id` 对应，可用于定位单次失败。日志不记录完整查询串、认证头、Cookie、API Key、签名直链或上游响应体，网络错误也不会输出含敏感查询参数的 URL。
+
+反代不在 302 前探测直链。客户端收到 302 后访问直链失败，且未再次请求反代时，反代无法获知该结果；客户端后续改用反代端口请求转码/HLS 时会被拦截并记录失败日志。
 
 当前 STRM 文件及 `SERVER_URL` 保持不变，但其中的地址必须能被播放器访问。反代端口使用 HTTP；需要 HTTPS 时，可由已有入口网关转发至该端口。
 

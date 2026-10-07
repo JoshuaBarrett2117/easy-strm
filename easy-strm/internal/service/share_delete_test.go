@@ -7,7 +7,6 @@ import (
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"os"
 	"path/filepath"
-	"sync"
 	"testing"
 )
 
@@ -16,22 +15,17 @@ func TestDeleteShareRejectsBusyOrInvalid(t *testing.T) {
 	if err := s.Delete(context.Background(), 0); err == nil {
 		t.Fatal("应拒绝无效ID")
 	}
-	s.activeSyncID = "sync"
-	if err := s.Delete(context.Background(), 1); err == nil {
-		t.Fatal("同步期间不得删除")
+	for _, kind := range []string{"同步", "识别", "导出"} {
+		release, err := s.Coordinator().acquire(context.Background(), nil, shareResource{key: shareKey(1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Delete(context.Background(), 1); err == nil {
+			t.Fatal(kind + "目标处理期间不得同步删除")
+		}
+		release()
 	}
-	s.activeSyncID = ""
-	s.identifyMu.RLock()
-	if err := s.Delete(context.Background(), 1); err == nil {
-		t.Fatal("识别期间不得删除")
-	}
-	s.identifyMu.RUnlock()
-	s.strmExportMu = &sync.Mutex{}
-	s.strmExportMu.Lock()
-	defer s.strmExportMu.Unlock()
-	if err := s.Delete(context.Background(), 1); err == nil {
-		t.Fatal("导出期间不得删除")
-	}
+
 }
 
 func TestDeleteShareCleanupFailureKeepsRecords(t *testing.T) {
@@ -42,6 +36,7 @@ func TestDeleteShareCleanupFailureKeepsRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectQuery("SELECT url FROM t_share_record").WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("SELECT id FROM t_share_strm").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("entry-1"))
 	mock.ExpectQuery("SELECT output_path").WillReturnRows(sqlmock.NewRows([]string{"path", "linked"}).AddRow(p, true))
 	s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
@@ -66,8 +61,10 @@ func TestDeleteShareRetryAfterDatabaseFailure(t *testing.T) {
 	s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
 	for attempt := 0; attempt < 2; attempt++ {
 		mock.ExpectQuery("SELECT url FROM t_share_record").WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
+		mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 		mock.ExpectQuery("SELECT id FROM t_share_strm").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("entry-1"))
 		mock.ExpectQuery("SELECT output_path").WillReturnRows(sqlmock.NewRows([]string{"path", "linked"}).AddRow(p, attempt > 0))
+		expectShareDeletePathLock(mock, p)
 		mock.ExpectExec("INSERT INTO t_strm_export_history").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectBegin()
 		if attempt == 0 {
@@ -79,6 +76,7 @@ func TestDeleteShareRetryAfterDatabaseFailure(t *testing.T) {
 			}
 			mock.ExpectCommit()
 		}
+		mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
 		err := s.Delete(context.Background(), 7)
 		if (attempt == 0) != (err != nil) {
 			t.Fatalf("attempt=%d err=%v", attempt, err)
@@ -96,6 +94,7 @@ func TestDeleteShareWithoutExports(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
 	mock.ExpectQuery("SELECT url FROM t_share_record").WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("SELECT id FROM t_share_strm").WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectBegin()
 	mock.ExpectExec("DELETE FROM t_share_record").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -109,6 +108,23 @@ func TestDeleteShareWithoutExports(t *testing.T) {
 	}
 }
 
+func TestDeleteSharePreservesMappingReferencedByOtherRecord(t *testing.T) {
+	db, m, _ := sqlmock.New()
+	defer db.Close()
+	m.ExpectQuery("SELECT url FROM t_share_record").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/shared"))
+	m.ExpectQuery("SELECT EXISTS").WithArgs(7, "shared").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	m.ExpectBegin()
+	m.ExpectExec("DELETE FROM t_share_record").WithArgs(7).WillReturnResult(sqlmock.NewResult(0, 1))
+	m.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.ExpectCommit()
+	if err := NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil).Delete(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ExpectationsWereMet(); err != nil {
+		t.Fatal("共享映射被删除", err)
+	}
+}
+
 func TestDeleteShareRemovesOnlyMatchingStrm(t *testing.T) {
 	db, mock, _ := sqlmock.New()
 	defer db.Close()
@@ -117,14 +133,17 @@ func TestDeleteShareRemovesOnlyMatchingStrm(t *testing.T) {
 	os.WriteFile(own, []byte("http://localhost/share-strm/entry-1\n"), 0600)
 	os.WriteFile(other, []byte("http://localhost/share-strm/entry-2\n"), 0600)
 	mock.ExpectQuery("SELECT url FROM t_share_record").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"url"}).AddRow("https://115.com/s/abc"))
+	mock.ExpectQuery("SELECT EXISTS").WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
 	mock.ExpectQuery("SELECT id FROM t_share_strm").WithArgs("abc").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("entry-1"))
 	mock.ExpectQuery("SELECT output_path").WillReturnRows(sqlmock.NewRows([]string{"path", "linked"}).AddRow(own, true).AddRow(other, false))
+	expectShareDeletePathLock(mock, own)
 	mock.ExpectExec("INSERT INTO t_strm_export_history").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectBegin()
 	for _, table := range []string{"t_strm_file", "t_strm_export_history", "t_strm_export_state", "t_share_strm", "t_share_record", "t_share_media"} {
 		mock.ExpectExec("DELETE FROM " + table).WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 	mock.ExpectCommit()
+	mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
 	s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
 	if err := s.Delete(context.Background(), 7); err != nil {
 		t.Fatal(err)
@@ -137,5 +156,23 @@ func TestDeleteShareRemovesOnlyMatchingStrm(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func expectShareDeletePathLock(mock sqlmock.Sqlmock, p string) {
+	p, _ = NormalizeStrmOutputPath(p)
+	chain := []string{}
+	for q := p; ; q = filepath.Dir(q) {
+		chain = append([]string{q}, chain...)
+		if filepath.Dir(q) == q {
+			break
+		}
+	}
+	for i, q := range chain {
+		query := "SELECT pg_try_advisory_lock_shared"
+		if i == len(chain)-1 {
+			query = "SELECT pg_try_advisory_lock\\("
+		}
+		mock.ExpectQuery(query).WithArgs(q).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 	}
 }

@@ -28,6 +28,9 @@ func (d *ShareRecordDAO) ClearMedia(ctx context.Context, id int) (int64, error) 
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
 		return 0, err
 	}
+	if err = completeShareOperationTx(ctx, tx, count); err != nil {
+		return 0, err
+	}
 	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -50,6 +53,9 @@ func (d *ShareRecordDAO) ClearAllMedia(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media"); err != nil {
+		return 0, err
+	}
+	if err = completeShareOperationTx(ctx, tx, count); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -77,6 +83,9 @@ func (d *ShareRecordDAO) ClearSelectedMedia(ctx context.Context, ids []int) (int
 		return 0, err
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
+		return 0, err
+	}
+	if err = completeShareOperationTx(ctx, tx, count); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(); err != nil {

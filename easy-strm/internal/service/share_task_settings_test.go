@@ -11,6 +11,18 @@ type shareSettingsMemory struct {
 	values map[string]*domain.SystemConfig
 }
 
+func TestShareUnitsRetainTaskSubmissionSettings(t *testing.T) {
+	s := &ShareRecordService{taskSettingsStore: &shareSettingsMemory{values: map[string]*domain.SystemConfig{shareTaskTimeoutKey: {ConfigVal: "invalid"}}}}
+	captured := ShareTaskSettings{TimeoutMinutes: 30, SyncWorkers: 2, WorkerCount: 3}
+	ctx := context.WithValue(context.Background(), shareTaskSettingsContext{}, captured)
+	if got, err := s.unitSettings(ctx); err != nil || got != captured {
+		t.Fatal(got, err)
+	}
+	if _, err := s.unitSettings(context.Background()); err == nil {
+		t.Fatal("新请求没有读取最新设置")
+	}
+}
+
 func (s *shareSettingsMemory) GetByKey(key string) (*domain.SystemConfig, error) {
 	return s.values[key], nil
 }

@@ -30,9 +30,9 @@ func TestEmbyProxyPlayback(t *testing.T) {
 		{"多版本选中源", "GET", "/Videos/42/stream?MediaSourceId=s2", `{"MediaSources":[{"Id":"s1","Path":"/media/1.mkv"},{"Id":"s2","Path":"https://cdn.example/2"}]}`, "https://cdn.example/2", 200, 302, false},
 		{"本地文件", "GET", "/Videos/42/stream", `{"MediaSources":[{"Path":"/media/movie.mkv","Protocol":"File"}]}`, "", 200, 206, true},
 		{"非HTTP远程", "GET", "/Videos/42/stream", `{"MediaSources":[{"Path":"rtsp://example/video","Protocol":"Rtsp","IsRemote":true}]}`, "", 200, 206, true},
-		{"转码", "GET", "/Videos/42/stream?Static=false", "", "", 200, 206, true},
-		{"编码转码", "GET", "/Videos/42/stream?VideoCodec=h264", "", "", 200, 206, true},
-		{"HLS", "GET", "/Videos/42/master.m3u8", "", "", 200, 206, true},
+		{"转码", "GET", "/Videos/42/stream?Static=false", `{"MediaSources":[{"Path":"/media/movie.mkv","Protocol":"File"}]}`, "", 200, 206, true},
+		{"编码转码", "GET", "/Videos/42/stream?VideoCodec=h264", `{"MediaSources":[{"Path":"/media/movie.mkv","Protocol":"File"}]}`, "", 200, 206, true},
+		{"HLS", "GET", "/Videos/42/master.m3u8", `{"MediaSources":[{"Path":"/media/movie.mkv","Protocol":"File"}]}`, "", 200, 206, true},
 		{"远程地址无效", "GET", "/Videos/42/stream", `{"MediaSources":[{"Path":"http:///invalid","IsRemote":true,"Protocol":"Http"}]}`, "", 200, 502, false},
 		{"远程源缺地址", "GET", "/Videos/42/stream", `{"MediaSources":[{"IsRemote":true}]}`, "", 200, 502, false},
 		{"远程源解析失败", "GET", "/Videos/42/stream", `{"MediaSources":[{"IsRemote":true,"Path":"bad%path"}]}`, "", 200, 502, false},
@@ -60,6 +60,13 @@ func TestEmbyProxyPlayback(t *testing.T) {
 					}
 					w.WriteHeader(tc.upstreamStatus)
 					_, _ = io.WriteString(w, tc.body)
+					return
+				}
+				if r.URL.Path == "/Items" {
+					if r.URL.Query().Get("Ids") != "42" || r.URL.Query().Get("Fields") != "Path,MediaSources" {
+						t.Errorf("未查询原项目类型: %s", r.URL.Path)
+					}
+					_, _ = io.WriteString(w, `{"Items":[{"Id":"42","Path":"/media/movie.mkv","IsShortcut":false}]}`)
 					return
 				}
 				streamCalls.Add(1)

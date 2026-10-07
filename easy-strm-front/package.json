@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "e2e:organize-preview-refresh": "node scripts/e2e-organize-preview-refresh.mjs",
     "e2e:organize-preview-cancel": "node scripts/e2e-organize-preview-cancel.mjs",
+    "e2e:share-delete": "node scripts/e2e-share-delete.mjs",
+    "e2e:share-clear": "node scripts/e2e-share-clear.mjs",
+    "e2e:share-file-delete": "node scripts/e2e-share-file-delete.mjs",
     "e2e:share-review": "node scripts/e2e-share-review.mjs",
     "e2e:emby-monitor": "node scripts/e2e-emby-monitor.mjs"
   },

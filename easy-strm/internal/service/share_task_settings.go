@@ -157,3 +157,13 @@ func (s *ShareRecordService) finishShareTaskContext(taskID string, err error, mi
 	}
 	_ = s.tasks.SetError(taskID, fmt.Sprintf("分享识别任务达到配置的总时限（%d分钟），已保存处理结果；可调整为无限制后重新发起", minutes))
 }
+
+// shareTaskSettingsContext 保留提交时的配置，运行中的单元不重新读取设置。
+type shareTaskSettingsContext struct{}
+
+func (s *ShareRecordService) unitSettings(ctx context.Context) (ShareTaskSettings, error) {
+	if v, ok := ctx.Value(shareTaskSettingsContext{}).(ShareTaskSettings); ok {
+		return v, nil
+	}
+	return s.GetTaskSettings()
+}

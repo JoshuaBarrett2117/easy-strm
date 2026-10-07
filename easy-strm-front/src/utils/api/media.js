@@ -87,6 +87,7 @@ export const parseShareImport = (text) => api.post('/media/share-records/parse',
 export const updateShareRecord = (id, data) => api.put(`/media/share-records/${id}`, data)
 export const deleteShareRecord = (id) => api.delete(`/media/share-records/${id}`)
 // 清空媒体候选及识别内容，保留分享链接配置。
+// 清空／删除返回已持久化的 task_id；完成数量通过任务结果读取。
 export const clearShareMedia = (id) => api.delete(`/media/share-records/${id}/media`)
 export const clearAllShareMedia = () => api.delete('/media/share-records/media')
 export const clearSelectedShareMedia = (shareIds) => api.post('/media/share-records/batch-clear', { share_ids: shareIds })
@@ -98,7 +99,7 @@ export const batchSyncShareRecords = (shareIds) => api.post('/media/share-record
 export const identifyShareRecord = (id, pendingOnly = false, failedOnly = false, forceRefresh = false) => api.post(`/media/share-records/${id}/identify`, null, {params: {pending_only: pendingOnly, failed_only: failedOnly, force_refresh: forceRefresh}})
 export const syncShareRecord = (id) => api.post(`/media/share-records/${id}/sync`)
 export const getShareFiles = (id, params) => api.get(`/media/share-records/${id}/files`, { params })
-export const getShareIdentifyTask = (taskId) => api.get(`/tasks/${taskId}`)
+export const getShareIdentifyTask = (taskId) => api.get(`/tasks/${taskId}`, { skipGlobalErrorMessage: true })
 
 // 获取电影详情
 export const getMovieDetail = (id) => api.get(`/media/tmdb/movie/${id}`)

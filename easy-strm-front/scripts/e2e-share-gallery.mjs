@@ -33,7 +33,7 @@ try {
     return route.fulfill({ json: { data: [] } })
   })
 
-  await page.goto('http://127.0.0.1:3001/dashboard/share-records')
+  await page.goto((process.env.E2E_BASE_URL || 'http://127.0.0.1:3001') + '/dashboard/share-records')
   await page.getByText('测试分享', { exact: true }).waitFor()
   const syncResponse = page.waitForResponse(response => response.url().endsWith('/share-records/1/sync'))
   await page.getByRole('button', { name: '同步分享文件', exact: true }).click()

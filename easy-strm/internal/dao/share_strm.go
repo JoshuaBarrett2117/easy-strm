@@ -2,6 +2,7 @@ package dao
 
 import (
 	"context"
+	"database/sql"
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"fmt"
@@ -19,7 +20,7 @@ func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQ
 		fileFilter = ` AND m.work_key IN (SELECT selected_media.work_key FROM t_share_media_file selected_file JOIN t_share_media selected_media ON selected_media.id=selected_file.media_id WHERE selected_file.id=ANY($` + fmt.Sprint(len(args)) + `::integer[]))`
 	}
 	args = append(args, after)
-	query := libraryWorks + ` SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id),
+	query := libraryWorks + ` SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id,'_file_version',f.version,'_share_version',s.version),
 	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
 	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
@@ -39,12 +40,15 @@ func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQ
 			return nil, err
 		}
 		var identity struct {
-			ID int `json:"_media_id"`
+			ID           int `json:"_media_id"`
+			FileVersion  int `json:"_file_version"`
+			ShareVersion int `json:"_share_version"`
 		}
 		if err = json.Unmarshal(raw, &identity); err != nil {
 			return nil, err
 		}
 		v.MediaID = identity.ID
+		v.FileVersion, v.ShareVersion = identity.FileVersion, identity.ShareVersion
 		if err = json.Unmarshal(episodes, &v.Episodes); err != nil {
 			return nil, err
 		}
@@ -101,4 +105,16 @@ func (d *ShareRecordDAO) LockStrmPlayback(ctx context.Context, key string) (func
 		return nil, err
 	}
 	return func() { _ = tx.Rollback(); _ = conn.Close() }, nil
+}
+
+// GetStrmSource 在取得单文件占用后重新读取有效导出来源。
+func (d *ShareRecordDAO) GetStrmSource(ctx context.Context, id int) (domain.ShareStrmSource, error) {
+	rows, err := d.StrmSources(ctx, domain.ShareLibraryQuery{FileIDs: []int{id}}, id-1)
+	if err != nil {
+		return domain.ShareStrmSource{}, err
+	}
+	if len(rows) == 0 || rows[0].ID != id {
+		return domain.ShareStrmSource{}, sql.ErrNoRows
+	}
+	return rows[0], nil
 }

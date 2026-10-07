@@ -146,10 +146,15 @@ const (
 	TaskTypeOfflineDownload TaskType = "offline_download"
 	TaskTypeFileTransfer    TaskType = "file_transfer"
 	TaskTypeShareIdentify   TaskType = "share_identify"
+	// 分享清理任务由持久化队列恢复。
+	TaskTypeShareDelete      TaskType = "share_delete"
+	TaskTypeShareClear       TaskType = "share_clear"
+	TaskTypeShareMediaDelete TaskType = "share_media_delete"
 )
 
 // TaskTypeNames 任务类型中文名称映射
 var TaskTypeNames = map[TaskType]string{
+	TaskTypeShareDelete: "删除分享", TaskTypeShareClear: "清空分享文件记录", TaskTypeShareMediaDelete: "删除分享文件记录",
 	TaskTypeStrmGenerate:    "STRM文件生成",
 	TaskTypeIncrementalSync: "增量同步",
 	TaskTypeSyncFull:        "全量同步",

@@ -30,6 +30,9 @@ func libraryWhere(q domain.ShareLibraryQuery) (string, []interface{}) {
 		args = append(args, val)
 		parts = append(parts, fmt.Sprintf(expr, len(args)))
 	}
+	if q.WorkKey != "" {
+		add("work_key=$%d", q.WorkKey)
+	}
 	if q.Keyword != "" {
 		add("(title ILIKE '%%'||$%[1]d||'%%' OR original_title ILIKE '%%'||$%[1]d||'%%')", q.Keyword)
 	}

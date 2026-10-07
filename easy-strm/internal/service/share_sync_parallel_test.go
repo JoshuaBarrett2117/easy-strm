@@ -38,9 +38,9 @@ func TestShareSyncParallelAndDuplicate(t *testing.T) {
 	mock.ExpectQuery(`FROM \(SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(1, "auto", "分享", "https://115.com/s/abc", "", "", 1, "now", "now", false, nil, nil, nil, nil, nil, nil, nil))
 	p := &blockedSyncParser{started: make(chan struct{}), release: make(chan struct{})}
 	s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, tasks, p)
-	s.identifyMu.Lock()
+	release, _ := s.Coordinator().acquire(context.Background(), nil, shareResource{key: shareKey(1)}, shareResource{key: fileKey(1), exclusive: true})
 	id, err := s.StartRecordSync(context.Background(), 1)
-	s.identifyMu.Unlock()
+	release()
 	if err != nil {
 		t.Fatal("识别运行时应允许同步:", err)
 	}
@@ -65,8 +65,8 @@ func TestShareSyncParallelAndDuplicate(t *testing.T) {
 	if err != nil || duplicate != id {
 		t.Fatalf("重复同步未复用任务: %s %v", duplicate, err)
 	}
-	if _, err := s.StartRecordSync(context.Background(), 2); err == nil {
-		t.Fatal("不同同步应继续串行")
+	if _, err := s.StartRecordSync(context.Background(), 2); err != nil {
+		t.Fatal("无关分享同步不得被全局锁拦截", err)
 	}
 	if _, err := s.ClearMedia(context.Background(), 1); err == nil {
 		t.Fatal("同步时不允许清空")

@@ -522,14 +522,13 @@ func TestShareStrmExportCancellation(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("任务未开始")
 	}
-	if _, err = s.StartExport(domain.ShareLibraryQuery{}); err == nil {
-		t.Fatal("重复运行未拦截")
+	if duplicate, e := s.StartExport(domain.ShareLibraryQuery{}); e != nil || duplicate != id {
+		t.Fatal("相同导出请求应复用任务", duplicate, e)
 	}
 	s.tasks.CancelContext(id)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if s.exportMu.TryLock() {
-			s.exportMu.Unlock()
+		if task, e := s.tasks.Get(id); e == nil && task["status"] == "cancelled" {
 			break
 		}
 		if time.Now().After(deadline) {
