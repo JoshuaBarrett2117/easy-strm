@@ -20,8 +20,10 @@ type shareStrmConflict struct {
 	fileCounts map[int]int
 }
 
+const shareStrmProgressBatchSize = 100
+
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
-func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) error {
+func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
 	if s.tasks != nil {
 		if e := s.tasks.UpdateMetadata(id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath}); e != nil {
 			return e
@@ -41,12 +43,35 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if err != nil {
 		return err
 	}
-	conflicts, err := s.shareStrmConflicts(ctx, q)
-	if err != nil {
-		return err
+	var conflicts map[string]*shareStrmConflict
+	if _, rereadsSource := s.store.(shareStrmSourceReader); !rereadsSource {
+		conflicts, err = s.shareStrmConflicts(ctx, q)
+		if err != nil {
+			return err
+		}
 	}
 	after, processed, written, failed, skipped := 0, 0, 0, 0, 0
+	total, pending := 0, 0
 	sourceErrors := []string{}
+	flushProgress := func() error {
+		if pending == 0 || s.tasks == nil {
+			return nil
+		}
+		pending = 0
+		progressErr := s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed-skipped, failed)
+		metadata := map[string]interface{}{"exported_files": written, "skipped_sources": skipped, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID", "share_export": true, "export_query": q}
+		if output != nil {
+			metadata["added"] = output.Added
+			metadata["updated"] = output.Updated
+			metadata["skipped"] = output.Skipped
+			metadata["conflicts"] = output.Conflicts
+			metadata["exported_files"] = output.Added + output.Updated
+		}
+		return errors.Join(progressErr, s.tasks.UpdateMetadata(id, metadata))
+	}
+	defer func() {
+		exportErr = errors.Join(exportErr, flushProgress())
+	}()
 	seen := map[string]bool{}
 	for {
 		rows, err := s.store.StrmSources(ctx, q, after)
@@ -56,7 +81,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		if len(rows) == 0 {
 			break
 		}
-		total := processed + max(rows[0].Remaining, len(rows))
+		total = processed + max(rows[0].Remaining, len(rows))
 		for _, source := range rows {
 			if err = ctx.Err(); err != nil {
 				return err
@@ -78,26 +103,25 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 					sourceErrors = append(sourceErrors, fmt.Sprintf("来源%d：%v", source.ID, sourceErr))
 				}
 			}
-			if err = s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed-skipped, failed); err != nil {
-				return err
-			}
-			metadata := map[string]interface{}{"exported_files": written, "skipped_sources": skipped, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID"}
-			metadata["share_export"] = true
-			metadata["export_query"] = q
-			if output != nil {
-				metadata["added"] = output.Added
-				metadata["updated"] = output.Updated
-				metadata["skipped"] = output.Skipped
-				metadata["conflicts"] = output.Conflicts
-				metadata["exported_files"] = output.Added + output.Updated
-			}
-			if err = s.tasks.UpdateMetadata(id, metadata); err != nil {
-				return err
+			pending++
+			if pending >= shareStrmProgressBatchSize {
+				if err = flushProgress(); err != nil {
+					return err
+				}
 			}
 		}
 	}
 	if failed > 0 {
 		return fmt.Errorf("导出结束：生成%d个STRM，%d个本地记录失败，详情见任务记录", written, failed)
+	}
+	if err = flushProgress(); err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	if s.tasks != nil && s.tasks.IsCancelled(id) {
+		return context.Canceled
 	}
 	q.Page = 0
 	q.PageSize = 0

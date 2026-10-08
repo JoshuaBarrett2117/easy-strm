@@ -31,6 +31,7 @@ def compare(before, after):
             "after_ns": new["ElapsedNS"],
             "baseline_counts": old["Counts"],
             "after_counts": new["Counts"],
+            "final_counts": {name: new[name] for name in ("Total", "Processed", "Success", "Failed", "Added", "Updated", "Skipped", "Conflicts", "SkippedSources", "ExportedFiles")},
         })
     return rows
 
@@ -63,7 +64,7 @@ def main():
         timing = medians.get(result["scenario"])
         duration = f"{timing['baseline_median_ns']/1e6:.3f}→{timing['after_median_ns']/1e6:.3f}" if timing else "仅回归，不计入基准"
         lines.append(f"| {result['scenario']} | {old['MemoryReads']}→{new['MemoryReads']} | {old['SQLReads']}/{old['SQLWrites']}→{new['SQLReads']}/{new['SQLWrites']} | {old['ProgressWrites']}/{old['MetadataWrites']}→{new['ProgressWrites']}/{new['MetadataWrites']} | {duration} |")
-    lines += ["", "限制：来源与播放映射使用内存 store，SQL 计数来自实际 sqlmock 驱动调用（含锁查询/释放，不含事务控制语句），任务使用本地 miniredis，文件使用 TMPDIR 下真实磁盘；不是生产 PostgreSQL/Redis 延迟。磁盘计数来自前后内容、mtime、inode 的观察，不是业务计数推断。跨运行绝对路径、mtime 和包含临时路径的 content fingerprint 不参与相等判断；内容、mapping fingerprint 与状态参与比较。当前重启是全量重跑，无 checkpoint/resume。未更改 SQL、schema、迁移、查询范围、命名、归属检查或删除策略。"]
+    lines += ["", "限制：大部分来源与播放映射使用内存 store；sql_seed/sql_unchanged 调用真实 ShareRecordDAO 的 sqlmock SQL。SQL 计数来自实际驱动调用（含锁查询/释放，不含事务控制语句），任务使用本地 miniredis，文件使用 TMPDIR 下真实磁盘；不是生产 PostgreSQL/Redis 延迟。磁盘计数来自前后内容、mtime、inode 的观察，不是业务计数推断。跨运行绝对路径、mtime 和包含临时路径的 content fingerprint 不参与相等判断；内容、mapping fingerprint 与状态参与比较。当前重启是全量重跑，无 checkpoint/resume。未更改 SQL、schema、迁移、查询范围、命名、归属检查或删除策略。", "", "三轮耗时取中位数，部分场景未加速或波动较大，不据此承诺生产性能。after-benchmark-concurrent-race.* 保留与 race 同时运行的首次测量；主表使用随后单独执行的相同三轮基准，避免竞态测试额外负载。"]
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     print(f"PASS: {len(rows)} 个场景；{len(baseline_runs)} 轮同夹具基准语义一致")
 
