@@ -124,14 +124,19 @@ func (store *shareExportFaultStore) StrmSources(ctx context.Context, query domai
 	return store.strmMemory.StrmSources(ctx, query, after)
 }
 
-func TestShareStrmPhase01LastSourceCancellationDoesNotFinishSnapshot(t *testing.T) {
+func TestShareStrmPhase01LastSourceTaskFlagCancellationCanFinishSnapshot(t *testing.T) {
 	fixture := newPhaseFixture(t, true)
 	fixture.store.sources = []domain.ShareStrmSource{phaseSource(1)}
 	fixture.store.cancelAfter, fixture.store.flagCancel = 1, true
-	result := fixture.round("last_source_cancel", domain.ShareLibraryQuery{}, false)
-	if result.Error != context.Canceled.Error() || result.Processed != 1 || result.Added != 1 {
-		t.Fatalf("最后一条取消应刷新后退出: %+v", result)
+	result := fixture.round("last_source_cancel", domain.ShareLibraryQuery{}, true)
+	cancelled := fixture.service.tasks.IsCancelled("last_source_cancel")
+	if result.Error != "" || result.Processed != 1 || result.Success != 1 || result.Added != 1 || !cancelled {
+		t.Fatalf("保留原版最后一条任务标记取消仍可完成导出的行为: %+v / cancelled=%v", result, cancelled)
 	}
+	if len(result.Stale) != 1 || result.Stale[0] != "sentinel" || result.Counts.Deletes != 0 {
+		t.Fatalf("保留原版快照收尾标记旧状态但不删除文件的行为: %+v", result)
+	}
+	t.Logf("原版边界保留: cancelled=%v error=%q processed=%d added=%d stale=%v deletes=%d", cancelled, result.Error, result.Processed, result.Added, result.Stale, result.Counts.Deletes)
 }
 
 func (store *shareExportFaultStore) SaveExportedStrmFile(ctx context.Context, file domain.StrmFile) error {

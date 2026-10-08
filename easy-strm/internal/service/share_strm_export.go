@@ -117,12 +117,6 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if err = flushProgress(); err != nil {
 		return err
 	}
-	if err = ctx.Err(); err != nil {
-		return err
-	}
-	if s.tasks != nil && s.tasks.IsCancelled(id) {
-		return context.Canceled
-	}
 	q.Page = 0
 	q.PageSize = 0
 	q.Sort = ""
