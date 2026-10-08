@@ -25,6 +25,19 @@ func LockStrmOutputShared(ctx context.Context, db *sql.DB, paths []string) (*Str
 	return lockStrmOutput(ctx, db, paths, true)
 }
 
+// TryShareOwner 同一分享 owner 的全量与增量任务互斥，不受输出根目录变化影响。
+func (d *StrmExportDAO) TryShareOwner(ctx context.Context) error {
+	var locked bool
+	err := d.Conn.QueryRowContext(ctx, `SELECT pg_try_advisory_lock(hashtextextended('share:default',34982))`).Scan(&locked)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return ErrStrmOutputBusy
+	}
+	return nil
+}
+
 func lockStrmOutput(ctx context.Context, db *sql.DB, paths []string, shared bool) (*StrmExportDAO, error) {
 	c, e := db.Conn(ctx)
 	if e != nil {
@@ -161,8 +174,7 @@ type ExportState struct{ Owner, Key, Path, Content, Mapping, Playback, Run strin
 
 // CheckPath 查询现有归属及旧清单，缺失与失效记录仍保护尚存文件。
 func (d *StrmExportDAO) CheckPath(ctx context.Context, p, owner, key string) (bool, error) {
-	rows, e := d.Conn.QueryContext(ctx, `SELECT owner_key,export_key FROM t_strm_export_state WHERE output_path=$1 AND state<>'missing'
- UNION ALL SELECT owner_key,'' FROM t_strm_export_history WHERE output_path=$1`, p)
+	rows, e := d.Conn.QueryContext(ctx, strmExportCheckPathSQL, p)
 	if e != nil {
 		return false, e
 	}
@@ -180,6 +192,12 @@ func (d *StrmExportDAO) CheckPath(ctx context.Context, p, owner, key string) (bo
 	}
 	return own, rows.Err()
 }
+
+const strmExportCheckPathSQL = `SELECT owner_key,export_key FROM t_strm_export_state WHERE output_path=$1 AND state<>'missing'
+ UNION ALL SELECT owner_key,'' FROM t_strm_export_history WHERE output_path=$1
+ UNION ALL SELECT CASE WHEN strm_config_id=-1 THEN 'share:default' ELSE 'cloud115:'||strm_config_id::text END,''
+ FROM t_strm_file WHERE local_strm_path=$1
+ AND NOT EXISTS(SELECT 1 FROM t_strm_export_state WHERE output_path=$1)`
 
 // Save 保存新结果并保留改名前的路径归属。
 func (d *StrmExportDAO) Save(ctx context.Context, s ExportState) error {

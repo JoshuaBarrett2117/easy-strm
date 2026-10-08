@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"database/sql"
+	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"errors"
@@ -22,15 +23,32 @@ type shareStrmConflict struct {
 
 const shareStrmProgressBatchSize = 100
 
+type shareExportRecoveryContext struct{}
+
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
 func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
+	var recovery *dao.ShareExportCheckpointDAO
+	var recoveryRevision int64
+	if s.exportDB != nil {
+		candidate := dao.NewShareExportCheckpointDAO(s.exportDB)
+		if err := candidate.CheckSchema(ctx); err == nil {
+			var revisionErr error
+			recoveryRevision, revisionErr = candidate.RecoveryRevision(ctx)
+			if revisionErr != nil {
+				return revisionErr
+			}
+			recovery = candidate
+		} else if !errors.Is(err, dao.ErrShareExportSchemaMissing) {
+			return err
+		}
+	}
 	if s.tasks != nil {
 		if e := s.tasks.UpdateMetadata(id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath}); e != nil {
 			return e
 		}
 	}
-	var output *StrmOutput
-	if s.exportDB != nil {
+	output, _ := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
+	if s.exportDB != nil && output == nil {
 		var e error
 		output, e = WaitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, func() bool { return s.tasks != nil && s.tasks.IsCancelled(id) })
 		if e != nil {
@@ -38,6 +56,10 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		}
 		defer output.Store.Close()
 		ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
+	}
+	if recovery != nil && output != nil {
+		recovery = recovery.ForOutputConnection(output.Store.Conn)
+		ctx = context.WithValue(ctx, shareExportRecoveryContext{}, recovery)
 	}
 	cats, err := s.categories()
 	if err != nil {
@@ -123,7 +145,12 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	q.Direction = ""
 	q.Available = false
 	if output != nil && isFullShareStrmQuery(q) {
-		return output.Store.FinishSnapshot(ctx, "share:default", output.Snapshot, output.Seen)
+		if err = output.Store.FinishSnapshot(ctx, "share:default", output.Snapshot, output.Seen); err != nil {
+			return err
+		}
+		if recovery != nil {
+			return recovery.MarkLegacyReconciled(ctx, recoveryRevision)
+		}
 	}
 	return nil
 }
@@ -222,6 +249,11 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 	}
 	output, _ := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
 
+	attempt, _ := ctx.Value(shareIncrementalAttemptContext{}).(*shareIncrementalAttempt)
+	if attempt != nil && attempt.mappedKeys == nil {
+		attempt.mappedKeys = map[string]string{}
+	}
+
 	filePath := shareCandidatePath(source.FileName)
 	file := domain.ShareFileInfo{Name: path.Base(filePath), Path: filePath}
 	if len(selectShareMediaFiles([]domain.ShareFileInfo{file})) == 0 {
@@ -287,7 +319,15 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		if pathErr != nil {
 			return written > 0, pathErr
 		}
+		exportKey := shareStrmExportKey(source, episode, conflict)
 		if seen[seenIdentity] {
+			if attempt != nil {
+				if mappedKey, ok := attempt.mappedKeys[seenIdentity]; ok {
+					exportKey = mappedKey
+				}
+				attempt.mappedKeys[seenIdentity] = exportKey
+				attempt.keys[source.ID] = append(attempt.keys[source.ID], exportKey)
+			}
 			continue
 		}
 		localPath := filepath.Join(cfg.OutputPath, relative)
@@ -316,12 +356,16 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		var writeErr error
 		if output != nil {
 			raw, _ := json.Marshal(entry)
-			exportKey := fmt.Sprintf("%d:%d:%d", source.MediaID, episode.SeasonNumber, episode.EpisodeNumber)
-			if conflict != nil && len(conflict.shareIDs) > 1 {
-				exportKey += fmt.Sprintf(":share:%d", shareID)
-			}
-			if conflict != nil && conflict.fileCounts[shareID] > 1 {
-				exportKey += fmt.Sprintf(":file:%d", source.ID)
+			if attempt != nil {
+				if writeErr = attempt.record(ctx, exportKey); writeErr != nil {
+					finishPath()
+					return written > 0, writeErr
+				}
+			} else if recovery, ok := ctx.Value(shareExportRecoveryContext{}).(*dao.ShareExportCheckpointDAO); ok {
+				if writeErr = recovery.RecordExternalPlannedKeys(ctx, source.WorkKey, []string{exportKey}); writeErr != nil {
+					finishPath()
+					return written > 0, writeErr
+				}
 			}
 			_, writeErr = output.Write(ctx, exportKey, localPath, cfg.BaseURL+"/share-strm/"+entry.ID+"\n", string(raw), entry.ID)
 		} else {
@@ -330,6 +374,10 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		if err := writeErr; err != nil {
 			finishPath()
 			return written > 0, err
+		}
+		if attempt != nil {
+			attempt.mappedKeys[seenIdentity] = exportKey
+			attempt.keys[source.ID] = append(attempt.keys[source.ID], exportKey)
 		}
 		if err := s.store.SaveExportedStrmFile(ctx, domain.StrmFile{StrmConfigID: -1, FileName: file.Name, FilePath: localPath, LocalStrmPath: localPath}); err != nil {
 			finishPath()
@@ -340,6 +388,18 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		written++
 	}
 	return written > 0, nil
+}
+
+func shareStrmExportKey(source domain.ShareStrmSource, episode domain.ShareEpisode, conflict *shareStrmConflict) string {
+	key := fmt.Sprintf("%d:%d:%d", source.MediaID, episode.SeasonNumber, episode.EpisodeNumber)
+	shareID := shareStrmSourceID(source)
+	if conflict != nil && len(conflict.shareIDs) > 1 {
+		key += fmt.Sprintf(":share:%d", shareID)
+	}
+	if conflict != nil && conflict.fileCounts[shareID] > 1 {
+		key += fmt.Sprintf(":file:%d", source.ID)
+	}
+	return key
 }
 
 // resolveStrmFileID 首次播放只逐级读取目标路径所在目录，不遍历分享中的其他目录。

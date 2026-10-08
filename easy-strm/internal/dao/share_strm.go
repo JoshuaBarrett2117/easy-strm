@@ -10,8 +10,29 @@ import (
 	"github.com/lib/pq"
 )
 
+const shareStrmSourceSelect = `SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id,'_file_version',f.version,'_share_version',s.version),
+ COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
+ FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id
+ WHERE f.available AND NOT s.share_cancelled AND f.status='identified'`
+
+const shareStrmWorkSourcesSQL = shareStrmSourceSelect + ` AND m.work_key=$1 AND f.id>$2 ORDER BY f.id LIMIT 100`
+const shareStrmFileSourceSQL = shareStrmSourceSelect + ` AND f.id=$1`
+
+// StrmWorkSources 仅点查一个作品的全部有效来源，避免全库统计聚合。
+func (d *ShareRecordDAO) StrmWorkSources(ctx context.Context, key string, after int) ([]domain.ShareStrmSource, error) {
+	return d.scanStrmSources(ctx, shareStrmWorkSourcesSQL, key, after)
+}
+
 // StrmSources 按当前作品筛选条件遍历有效来源；分页采用来源ID游标。
 func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
+	if q.WorkKey != "" && isOnlyStrmWorkQuery(q) {
+		return d.StrmWorkSources(ctx, q.WorkKey, after)
+	}
+	query, args := buildShareStrmSourcesQuery(q, after)
+	return d.scanStrmSources(ctx, query, args...)
+}
+
+func buildShareStrmSourcesQuery(q domain.ShareLibraryQuery, after int) (string, []interface{}) {
 	where, args := libraryWhere(q)
 	fileFilter := ""
 	if len(q.FileIDs) > 0 {
@@ -24,6 +45,14 @@ func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQ
 	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
 	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
+	return query, args
+}
+
+func isOnlyStrmWorkQuery(q domain.ShareLibraryQuery) bool {
+	return q.Keyword == "" && q.TmdbID == 0 && q.MediaType == "" && q.YearMin == 0 && q.YearMax == 0 && q.RatingMin == nil && q.RatingMax == nil && q.Genres == "" && q.Countries == "" && len(q.FileIDs) == 0
+}
+
+func (d *ShareRecordDAO) scanStrmSources(ctx context.Context, query string, args ...interface{}) ([]domain.ShareStrmSource, error) {
 	rows, err := d.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -109,7 +138,7 @@ func (d *ShareRecordDAO) LockStrmPlayback(ctx context.Context, key string) (func
 
 // GetStrmSource 在取得单文件占用后重新读取有效导出来源。
 func (d *ShareRecordDAO) GetStrmSource(ctx context.Context, id int) (domain.ShareStrmSource, error) {
-	rows, err := d.StrmSources(ctx, domain.ShareLibraryQuery{FileIDs: []int{id}}, id-1)
+	rows, err := d.scanStrmSources(ctx, shareStrmFileSourceSQL, id)
 	if err != nil {
 		return domain.ShareStrmSource{}, err
 	}

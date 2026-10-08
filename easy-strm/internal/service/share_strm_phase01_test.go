@@ -227,11 +227,16 @@ type phaseFixture struct {
 	history       map[string]string
 	stale         map[string]bool
 	foreign       bool
+	unregistered  bool
 	finish        bool
 	run           string
 	entries       int
 	freshID       int
 	awaitConflict bool
+	recovery      bool
+	recovered     bool
+	recoveryRace  bool
+	externalPlans map[string][]string
 }
 
 func newPhaseFixture(test testing.TB, reader bool) *phaseFixture {
@@ -361,6 +366,23 @@ func (fixture *phaseFixture) expectPaths(entry domain.ShareStrmEntry) {
 	fixture.entries++
 	for range entry.Episodes {
 		fixture.mock.ExpectQuery(`SELECT pg_try_advisory_lock\(`).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
+		if fixture.recovery {
+			var work string
+			fixture.mock.ExpectExec("INSERT INTO t_share_export_dirty_work AS dirty").WithArgs(
+				phaseArgument(func(value driver.Value) bool { work = value.(string); return work != "" }),
+				phaseArgument(func(value driver.Value) bool {
+					var keys []string
+					if err := json.Unmarshal([]byte(value.(string)), &keys); err != nil {
+						fixture.test.Fatal(err)
+					}
+					if fixture.externalPlans == nil {
+						fixture.externalPlans = map[string][]string{}
+					}
+					fixture.externalPlans[work] = sortedIncrementalKeys(append(fixture.externalPlans[work], keys...))
+					return len(keys) > 0
+				}),
+			).WillReturnResult(sqlmock.NewResult(0, 1))
+		}
 		fixture.mock.ExpectQuery(`SELECT pg_try_advisory_lock\(`).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 		rows := sqlmock.NewRows([]string{"owner_key", "export_key"})
 		fixture.mock.ExpectQuery("SELECT owner_key,export_key").WithArgs(phaseArgument(func(value driver.Value) bool {
@@ -379,7 +401,7 @@ func (fixture *phaseFixture) expectPaths(entry domain.ShareStrmEntry) {
 			}
 			return true
 		})).WillReturnRows(rows)
-		if !fixture.foreign {
+		if !fixture.foreign && !fixture.unregistered {
 			fixture.mock.ExpectExec("INSERT INTO t_strm_export_history VALUES").WithArgs(sqlmock.AnyArg(), phaseArgument(func(value driver.Value) bool { fixture.history[value.(string)] = "share:default"; return true })).WillReturnResult(sqlmock.NewResult(0, 1))
 			fixture.mock.ExpectBegin()
 			fixture.mock.ExpectExec("INSERT INTO t_strm_export_history SELECT").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -440,12 +462,18 @@ func (fixture *phaseFixture) round(name string, query domain.ShareLibraryQuery, 
 	fixture.finish, fixture.run, fixture.entries = finish, name, 0
 	fixture.freshID = 0
 	before := phaseFiles(fixture.test, fixture.cfg.OutputPath)
+	fixture.recovered = false
+	fixture.mock.ExpectQuery("SELECT to_regclass").WillReturnRows(sqlmock.NewRows([]string{"present"}).AddRow(fixture.recovery))
+	if fixture.recovery {
+		fixture.mock.ExpectQuery("SELECT config_revision FROM").WillReturnRows(sqlmock.NewRows([]string{"revision"}).AddRow(1))
+	}
 	for directory := fixture.cfg.OutputPath; ; directory = filepath.Dir(directory) {
 		fixture.mock.ExpectQuery("SELECT pg_try_advisory_lock_shared").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 		if filepath.Dir(directory) == directory {
 			break
 		}
 	}
+	fixture.mock.ExpectQuery("SELECT pg_try_advisory_lock\\(hashtextextended\\('share:default',34982\\)\\)").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 	fixture.mock.ExpectQuery("SELECT strm_config_id,local_strm_path").WillReturnRows(sqlmock.NewRows([]string{"id", "path"}))
 	fixture.mock.ExpectQuery("SELECT output_path FROM").WillReturnRows(sqlmock.NewRows([]string{"path"}))
 	fixture.states["sentinel"] = dao.ExportState{Owner: "share:default", Key: "sentinel", Run: "previous"}
@@ -543,6 +571,16 @@ func (fixture *phaseFixture) expectFinish() {
 				return true
 			})).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
+	}
+	if fixture.recovery {
+		count := int64(1)
+		if fixture.recoveryRace {
+			count = 0
+		}
+		fixture.mock.ExpectExec("UPDATE t_share_export_consumer SET legacy_outputs_reconciled=true").WithArgs(phaseArgument(func(value driver.Value) bool {
+			fixture.recovered = !fixture.recoveryRace
+			return value == int64(1)
+		})).WillReturnResult(sqlmock.NewResult(0, count))
 	}
 }
 

@@ -61,4 +61,5 @@ nul
 # Debug files & directory
 *_debug*.txt
 parse_log.txt
-debug/
+debug/*
+!debug/phase02/

@@ -54,6 +54,10 @@ func NormalizeStrmOutputPath(p string) (string, error) {
 
 // NewStrmOutput 锁定目录并迁移历史文件归属，不触碰实际文件。
 func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*StrmOutput, error) {
+	return newStrmOutput(ctx, db, root, owner, run, true)
+}
+
+func newStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, full bool) (*StrmOutput, error) {
 	if filepath.Clean(strings.TrimSpace(root)) == "." {
 		return nil, fmt.Errorf("输出目录不能是当前工作目录")
 	}
@@ -72,7 +76,16 @@ func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*S
 	if e != nil {
 		return nil, e
 	}
+	if owner == "share:default" {
+		if e = store.TryShareOwner(ctx); e != nil {
+			store.Close()
+			return nil, e
+		}
+	}
 	s := &StrmOutput{Store: store, Root: root, Owner: owner, Run: run, Paths: map[string]bool{}, Seen: map[string]bool{}}
+	if !full {
+		return s, nil
+	}
 	legacy, e := store.LegacyPaths(ctx)
 	if e != nil {
 		store.Close()
@@ -112,6 +125,10 @@ func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*S
 // WaitStrmOutput 等待重叠目录释放；每次重试先释放已持有的锁，避免父子目录互相阻塞。
 // 调用方通过 ctx 限制等待时间，通过 cancelled 接入任务中心的取消标记。
 func WaitStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, cancelled func() bool) (*StrmOutput, error) {
+	return waitStrmOutput(ctx, db, root, owner, run, cancelled, true)
+}
+
+func waitStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, cancelled func() bool, full bool) (*StrmOutput, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -119,7 +136,7 @@ func WaitStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, ca
 		if cancelled != nil && cancelled() {
 			return nil, context.Canceled
 		}
-		output, err := NewStrmOutput(ctx, db, root, owner, run)
+		output, err := newStrmOutput(ctx, db, root, owner, run, full)
 		if !errors.Is(err, dao.ErrStrmOutputBusy) {
 			return output, err
 		}
