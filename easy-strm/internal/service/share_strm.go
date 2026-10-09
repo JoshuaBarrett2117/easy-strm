@@ -86,7 +86,25 @@ func (s *ShareStrmService) Settings() (domain.ShareStrmSettings, error) {
 		return v, err
 	}
 	err = json.Unmarshal([]byte(row.ConfigVal), &v)
+	if err == nil {
+		var raw map[string]json.RawMessage
+		if json.Unmarshal([]byte(row.ConfigVal), &raw) == nil {
+			if _, present := raw["strm_dedupe_export"]; !present {
+				v.DedupeExport = true
+			}
+		}
+	}
 	return v, err
+}
+
+// normalizeShareStrmSettings 为旧配置补齐安全默认值；显式 false 仍可回退旧行为。
+func normalizeShareStrmSettings(v *domain.ShareStrmSettings, raw []byte) {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) == nil {
+		if _, present := fields["strm_dedupe_export"]; !present {
+			v.DedupeExport = true
+		}
+	}
 }
 
 func validateShareStrmSettings(v *domain.ShareStrmSettings) error {

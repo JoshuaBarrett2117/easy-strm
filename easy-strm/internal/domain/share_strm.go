@@ -6,6 +6,7 @@ type ShareStrmSettings struct {
 	BaseURL      string `json:"base_url"`
 	Cloud115ID   int    `json:"cloud115_id"`
 	TransferPath string `json:"transfer_path"`
+	DedupeExport bool   `json:"strm_dedupe_export"`
 }
 
 // ShareStrmSource 是可导出来源及作品识别信息。
@@ -22,6 +23,8 @@ type ShareStrmSource struct {
 	Password     string
 	FileName     string
 	RemoteFileID string
+	FileSize     int64
+	Available    bool
 	Episodes     []ShareEpisode
 	Result       TmdbIdentifyResult
 }

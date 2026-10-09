@@ -94,7 +94,7 @@ func (c *strmClient) ReceiveShare(code, password, ids, cid string, id int, cooki
 
 func strmFixture(t *testing.T) (*ShareStrmService, *strmMemory, *strmClient) {
 	t.Helper()
-	cfg := domain.ShareStrmSettings{OutputPath: t.TempDir(), BaseURL: "http://media.example", Cloud115ID: 7, TransferPath: "/播放"}
+	cfg := domain.ShareStrmSettings{OutputPath: t.TempDir(), BaseURL: "http://media.example", Cloud115ID: 7, TransferPath: "/播放", DedupeExport: true}
 	raw, _ := json.Marshal(cfg)
 	store := &strmMemory{entries: map[string]domain.ShareStrmEntry{"entry": {ID: "entry", ShareCode: "share", FileID: "file-3", FileName: "Show.S02E03.mkv"}}}
 	client := &strmClient{}
@@ -105,6 +105,48 @@ func strmFixture(t *testing.T) (*ShareStrmService, *strmMemory, *strmClient) {
 		return "https://cdn.example/video", nil
 	})
 	return svc, store, client
+}
+
+func setShareDedupe(t *testing.T, s *ShareStrmService, enabled bool) {
+	t.Helper()
+	cfg, err := s.Settings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.DedupeExport = enabled
+	if err = s.SaveSettings(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShareStrmWinnerSelectionIsDeterministic(t *testing.T) {
+	base := domain.ShareStrmSource{ID: 20, ShareID: 20, Available: true, FileSize: 100}
+	if betterShareStrmSource(domain.ShareStrmSource{ID: 1, ShareID: 1, Available: false, FileSize: 999}, base) {
+		t.Fatal("unavailable source must lose to available source")
+	}
+	base.Available = false
+	if !betterShareStrmSource(domain.ShareStrmSource{ID: 2, ShareID: 2, FileSize: 200}, base) {
+		t.Fatal("larger file must win")
+	}
+	base.FileSize = 200
+	if !betterShareStrmSource(domain.ShareStrmSource{ID: 3, ShareID: 3, FileSize: 200}, base) {
+		t.Fatal("smaller share ID must win ties")
+	}
+	if betterShareStrmSource(domain.ShareStrmSource{ID: 4, ShareID: 4, FileSize: 200}, domain.ShareStrmSource{ID: 3, ShareID: 3, FileSize: 200}) {
+		t.Fatal("larger share ID must lose ties")
+	}
+}
+
+func TestShareStrmDedupeExportKeyStable(t *testing.T) {
+	source := domain.ShareStrmSource{ID: 9, MediaID: 88, ShareID: 7}
+	episode := domain.ShareEpisode{SeasonNumber: 2, EpisodeNumber: 3}
+	conflict := &shareStrmConflict{shareIDs: map[int]bool{7: true, 8: true}, fileCounts: map[int]int{7: 2}}
+	if got := shareStrmExportKey(source, episode, conflict, true); got != "88:2:3" {
+		t.Fatalf("dedupe export key = %q", got)
+	}
+	if got := shareStrmExportKey(source, episode, conflict, false); got != "88:2:3:share:7:file:9" {
+		t.Fatalf("legacy export key = %q", got)
+	}
 }
 
 func TestShareStrmPlaybackTransfersOnceAndPreservesUA(t *testing.T) {
@@ -296,6 +338,7 @@ func TestShareStrmExportCreatesEpisodesWithoutTransfer(t *testing.T) {
 
 func TestShareStrmExportDistinguishesFilesWithinAndAcrossShares(t *testing.T) {
 	s, store, _ := strmFixture(t)
+	setShareDedupe(t, s, false)
 	mini := miniredis.RunT(t)
 	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	defer rc.Close()
@@ -334,6 +377,7 @@ func TestShareStrmExportDistinguishesFilesWithinAndAcrossShares(t *testing.T) {
 
 func TestShareStrmExportDistinguishesSameShareOnly(t *testing.T) {
 	s, store, _ := strmFixture(t)
+	setShareDedupe(t, s, false)
 	mini := miniredis.RunT(t)
 	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	defer rc.Close()
@@ -364,6 +408,7 @@ func TestShareStrmExportDistinguishesSameShareOnly(t *testing.T) {
 
 func TestShareStrmExportDistinguishesSameEpisodeWithinShare(t *testing.T) {
 	s, store, _ := strmFixture(t)
+	setShareDedupe(t, s, false)
 	mini := miniredis.RunT(t)
 	rc := redis.NewClient(&redis.Options{Addr: mini.Addr()})
 	defer rc.Close()

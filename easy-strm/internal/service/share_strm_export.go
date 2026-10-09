@@ -19,7 +19,12 @@ type shareStrmConflict struct {
 	shareIDs   map[int]bool
 	labels     map[string]int
 	fileCounts map[int]int
+	sources    map[int]domain.ShareStrmSource
+	winners    map[string]int
 }
+
+// ErrShareStrmDedupSkipped 表示该来源仅因同作品同季集已选出更优来源而跳过落盘。
+var ErrShareStrmDedupSkipped = errors.New("分享STRM因去重策略跳过")
 
 const shareStrmProgressBatchSize = 100
 
@@ -68,14 +73,11 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if err != nil {
 		return err
 	}
-	var conflicts map[string]*shareStrmConflict
-	if _, rereadsSource := s.store.(shareStrmSourceReader); !rereadsSource {
-		conflicts, err = s.shareStrmConflicts(ctx, q)
-		if err != nil {
-			return err
-		}
+	conflicts, err := s.shareStrmConflicts(ctx, q)
+	if err != nil {
+		return err
 	}
-	after, processed, written, failed, skipped := 0, 0, 0, 0, 0
+	after, processed, written, failed, skipped, skippedDedupe := 0, 0, 0, 0, 0, 0
 	total, pending := 0, 0
 	sourceErrors := []string{}
 	flushProgress := func() error {
@@ -84,7 +86,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		}
 		pending = 0
 		progressErr := s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed-skipped, failed)
-		metadata := map[string]interface{}{"exported_files": written, "skipped_sources": skipped, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "同作品同集存在多个分享时追加分享名称；同一分享内存在多个文件时追加文件来源ID", "share_export": true, "export_query": q}
+		metadata := map[string]interface{}{"exported_files": written, "written": written, "skipped_sources": skipped, "skipped_dedupe": skippedDedupe, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": "按可用性、文件大小、分享ID、文件ID确定性选优；其余同作品同季集来源去重跳过", "share_export": true, "export_query": q}
 		if output != nil {
 			metadata["added"] = output.Added
 			metadata["updated"] = output.Updated
@@ -120,7 +122,9 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			if created {
 				written++
 			}
-			if errors.Is(sourceErr, ErrShareUnitSkipped) || errors.Is(sourceErr, sql.ErrNoRows) {
+			if errors.Is(sourceErr, ErrShareStrmDedupSkipped) {
+				skippedDedupe++
+			} else if errors.Is(sourceErr, ErrShareUnitSkipped) || errors.Is(sourceErr, sql.ErrNoRows) {
 				skipped++
 			} else if sourceErr != nil {
 				failed++
@@ -214,18 +218,36 @@ func (s *ShareStrmService) shareStrmConflicts(ctx context.Context, q domain.Shar
 				identity := shareStrmIdentity(source, episode)
 				conflict := result[identity]
 				if conflict == nil {
-					conflict = &shareStrmConflict{shareIDs: map[int]bool{}, labels: map[string]int{}, fileCounts: map[int]int{}}
+					conflict = &shareStrmConflict{shareIDs: map[int]bool{}, labels: map[string]int{}, fileCounts: map[int]int{}, sources: map[int]domain.ShareStrmSource{}, winners: map[string]int{}}
 					result[identity] = conflict
 				}
 				shareID := shareStrmSourceID(source)
+				conflict.sources[source.ID] = source
 				if !conflict.shareIDs[shareID] {
 					conflict.shareIDs[shareID] = true
 					conflict.labels[s.shareStrmSourceLabel(source)]++
 				}
 				conflict.fileCounts[shareID]++
+				winnerID := conflict.winners[identity]
+				if winnerID == 0 || betterShareStrmSource(source, conflict.sources[winnerID]) {
+					conflict.winners[identity] = source.ID
+				}
 			}
 		}
 	}
+}
+
+func betterShareStrmSource(candidate, current domain.ShareStrmSource) bool {
+	if candidate.Available != current.Available {
+		return candidate.Available
+	}
+	if candidate.FileSize != current.FileSize {
+		return candidate.FileSize > current.FileSize
+	}
+	if shareStrmSourceID(candidate) != shareStrmSourceID(current) {
+		return shareStrmSourceID(candidate) < shareStrmSourceID(current)
+	}
+	return candidate.ID < current.ID
 }
 
 func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (bool, error) {
@@ -302,6 +324,7 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		return false, err
 	}
 	written := 0
+	dedupeSkipped := false
 	conflicts := map[string]*shareStrmConflict{}
 	if len(conflictMaps) > 0 && conflictMaps[0] != nil {
 		conflicts = conflictMaps[0]
@@ -313,16 +336,24 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		identity := shareStrmIdentity(source, episode)
 		conflict := conflicts[identity]
 		shareID := shareStrmSourceID(source)
+		if cfg.DedupeExport && conflict != nil && conflict.winners[identity] != source.ID {
+			dedupeSkipped = true
+			if attempt != nil {
+				winner := conflict.sources[conflict.winners[identity]]
+				attempt.keys[source.ID] = append(attempt.keys[source.ID], shareStrmExportKey(winner, episode, conflict, true))
+			}
+			continue
+		}
 		suffix := ""
 		seenIdentity := identity
-		if conflict != nil && len(conflict.shareIDs) > 1 {
+		if !cfg.DedupeExport && conflict != nil && len(conflict.shareIDs) > 1 {
 			suffix = s.shareStrmSourceLabel(source)
 			seenIdentity += fmt.Sprintf(":share:%d", shareID)
 			if conflict.labels[suffix] > 1 {
 				suffix += fmt.Sprintf("-分享%d", shareID)
 			}
 		}
-		if conflict != nil && conflict.fileCounts[shareID] > 1 {
+		if !cfg.DedupeExport && conflict != nil && conflict.fileCounts[shareID] > 1 {
 			if suffix != "" {
 				suffix += "-"
 			}
@@ -333,7 +364,7 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		if pathErr != nil {
 			return written > 0, pathErr
 		}
-		exportKey := shareStrmExportKey(source, episode, conflict)
+		exportKey := shareStrmExportKey(source, episode, conflict, cfg.DedupeExport)
 		if seen[seenIdentity] {
 			if attempt != nil {
 				if mappedKey, ok := attempt.mappedKeys[seenIdentity]; ok {
@@ -401,16 +432,19 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		seen[seenIdentity] = true
 		written++
 	}
+	if dedupeSkipped && written == 0 {
+		return false, ErrShareStrmDedupSkipped
+	}
 	return written > 0, nil
 }
 
-func shareStrmExportKey(source domain.ShareStrmSource, episode domain.ShareEpisode, conflict *shareStrmConflict) string {
+func shareStrmExportKey(source domain.ShareStrmSource, episode domain.ShareEpisode, conflict *shareStrmConflict, dedupe ...bool) string {
 	key := fmt.Sprintf("%d:%d:%d", source.MediaID, episode.SeasonNumber, episode.EpisodeNumber)
 	shareID := shareStrmSourceID(source)
-	if conflict != nil && len(conflict.shareIDs) > 1 {
+	if (len(dedupe) == 0 || !dedupe[0]) && conflict != nil && len(conflict.shareIDs) > 1 {
 		key += fmt.Sprintf(":share:%d", shareID)
 	}
-	if conflict != nil && conflict.fileCounts[shareID] > 1 {
+	if (len(dedupe) == 0 || !dedupe[0]) && conflict != nil && conflict.fileCounts[shareID] > 1 {
 		key += fmt.Sprintf(":file:%d", source.ID)
 	}
 	return key
