@@ -59,21 +59,28 @@ ROLLBACK TO SAVEPOINT file_case;
 
 SAVEPOINT episode_case;
 DO $episode_changes$
-DECLARE work TEXT; previous BIGINT;
+DECLARE work TEXT; previous BIGINT; next_work TEXT; next_previous BIGINT; deleted_rows BIGINT;
 BEGIN
- SELECT work_key INTO work FROM t_share_media WHERE id=200000002;
+ -- 种子中 300000002 属于 TV 200000002；300020002 的序号 20002 经特殊扇出归属电影 200000001。
+ SELECT m.work_key INTO work FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id WHERE f.id=300000002;
+ SELECT m.work_key INTO next_work FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id WHERE f.id=300020002;
+ IF COALESCE(btrim(work),'')='' OR COALESCE(btrim(next_work),'')='' OR work=next_work
+ THEN RAISE EXCEPTION '剧集重绑种子必须归属两个不同的非空作品'; END IF;
  previous:=pg_temp.revision(work);
  INSERT INTO t_share_media_file_episode VALUES(300000002,3,99);
  PERFORM pg_temp.assert_bumped(work,previous);
  previous:=pg_temp.revision(work);
  UPDATE t_share_media_file_episode SET season_number=4,episode_number=100 WHERE file_id=300000002 AND season_number=3 AND episode_number=99;
  PERFORM pg_temp.assert_bumped(work,previous);
- previous:=pg_temp.revision(work);
+ previous:=pg_temp.revision(work); next_previous:=pg_temp.revision(next_work);
  UPDATE t_share_media_file_episode SET file_id=300020002 WHERE file_id=300000002 AND season_number=4 AND episode_number=100;
- PERFORM pg_temp.assert_bumped(work,previous);
- previous:=pg_temp.revision(work);
+ PERFORM pg_temp.assert_bumped(work,previous); PERFORM pg_temp.assert_bumped(next_work,next_previous);
+ -- 删除按 OLD.file_id 解析重绑后的作品；检查点可保留历史归属，不要求原作品修订不变。
+ next_previous:=pg_temp.revision(next_work);
  DELETE FROM t_share_media_file_episode WHERE file_id=300020002 AND season_number=4 AND episode_number=100;
- PERFORM pg_temp.assert_bumped(work,previous);
+ GET DIAGNOSTICS deleted_rows = ROW_COUNT;
+ IF deleted_rows<>1 THEN RAISE EXCEPTION '剧集删除应影响恰好一行，实际：%',deleted_rows; END IF;
+ PERFORM pg_temp.assert_bumped(next_work,next_previous);
 END $episode_changes$;
 ROLLBACK TO SAVEPOINT episode_case;
 
@@ -99,7 +106,7 @@ ROLLBACK TO SAVEPOINT share_case;
 
 SAVEPOINT media_case;
 DO $media_changes$
-DECLARE work TEXT; previous BIGINT; statement TEXT; next_work TEXT;
+DECLARE work TEXT; previous BIGINT; statement TEXT; next_work TEXT; diagnostic_before TIMESTAMP; diagnostic_after TIMESTAMP; diagnostic_rows BIGINT;
 BEGIN
  SELECT work_key INTO work FROM t_share_media WHERE id=200000003;
  FOREACH statement IN ARRAY ARRAY[
@@ -113,7 +120,11 @@ BEGIN
   PERFORM pg_temp.assert_bumped(work,previous);
  END LOOP;
  previous:=pg_temp.revision(work);
- UPDATE t_share_media SET updated_at=now(),error='synthetic-diagnostic' WHERE id=200000003;
+ SELECT updated_at INTO STRICT diagnostic_before FROM t_share_media WHERE id=200000003;
+ IF diagnostic_before IS NULL OR NOT isfinite(diagnostic_before) THEN RAISE EXCEPTION '媒体诊断时间戳必须为非空有限值'; END IF;
+ UPDATE t_share_media SET updated_at=diagnostic_before+interval '1 microsecond' WHERE id=200000003 RETURNING updated_at INTO diagnostic_after;
+ GET DIAGNOSTICS diagnostic_rows=ROW_COUNT;
+ IF diagnostic_rows<>1 OR diagnostic_after IS NULL OR diagnostic_after IS NOT DISTINCT FROM diagnostic_before THEN RAISE EXCEPTION '媒体诊断更新必须影响一行且改变时间戳'; END IF;
  IF pg_temp.revision(work) IS DISTINCT FROM previous THEN RAISE EXCEPTION '媒体纯诊断字段错误投递'; END IF;
  previous:=pg_temp.revision(work); next_work:='phase02-synthetic-moved-work';
  UPDATE t_share_media SET work_key=next_work WHERE id=200000003;

@@ -4,6 +4,7 @@ import (
 	"easy-strm/internal/domain"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -47,6 +48,45 @@ func phase02ExplainSQL() string {
 		fmt.Fprintf(&output, "DEALLOCATE phase02_%s;\n", query.name)
 	}
 	return output.String()
+}
+
+// TestShareExportMediaDiagnosticHarness 离线验证媒体诊断更新真实改变时间戳且不投递，并阻止 v33 已删除字段回流。
+func TestShareExportMediaDiagnosticHarness(test *testing.T) {
+	data, err := os.ReadFile("../../../debug/phase02/assertions.sql")
+	if err != nil {
+		test.Fatal(err)
+	}
+	sql := string(data)
+	start := strings.Index(sql, "DO $media_changes$")
+	end := strings.Index(sql, "END $media_changes$;")
+	if start < 0 || end <= start {
+		test.Fatal("缺少完整媒体断言块")
+	}
+	media := sql[start:end]
+	for _, column := range []string{"error", "status", "share_id", "file_name"} {
+		if regexp.MustCompile(`(?i)\b` + column + `\s*=`).MatchString(media) {
+			test.Errorf("媒体断言引用 v33 已删除字段：%s", column)
+		}
+	}
+	for _, required := range []string{
+		"SELECT updated_at INTO STRICT diagnostic_before FROM t_share_media WHERE id=200000003;",
+		"diagnostic_before IS NULL OR NOT isfinite(diagnostic_before)",
+		"UPDATE t_share_media SET updated_at=diagnostic_before+interval '1 microsecond' WHERE id=200000003 RETURNING updated_at INTO diagnostic_after;",
+		"GET DIAGNOSTICS diagnostic_rows=ROW_COUNT;",
+		"diagnostic_rows<>1 OR diagnostic_after IS NULL OR diagnostic_after IS NOT DISTINCT FROM diagnostic_before",
+		"IF pg_temp.revision(work) IS DISTINCT FROM previous THEN RAISE EXCEPTION '媒体纯诊断字段错误投递'; END IF;",
+	} {
+		if !strings.Contains(media, required) {
+			test.Errorf("媒体诊断断言缺少保护：%s", required)
+		}
+	}
+	update := regexp.MustCompile(`(?i)UPDATE\s+t_share_media\s+SET\s+updated_at=([^;]+);`).FindString(media)
+	if update == "" || strings.Contains(update, "now()") {
+		test.Error("诊断时间戳必须确定变化，不能依赖事务内稳定的 now()")
+	}
+	if !strings.Contains(sql, "UPDATE t_share_media_file SET updated_at=now(),last_seen_at=now(),last_seen_scan_token='synthetic-scan-only',error='synthetic-diagnostic-only' WHERE id=300000001;") {
+		test.Error("文件表仍有 error，不能移除合法的文件诊断断言")
+	}
 }
 
 func TestPhase02ExactDAOSQLHarness(t *testing.T) {
