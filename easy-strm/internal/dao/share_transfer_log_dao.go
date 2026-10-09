@@ -61,21 +61,21 @@ func (d *ShareTransferLogDAO) insertBatch(ctx context.Context, logs []domain.Sha
 		return nil
 	}
 
-	// 构建 VALUES 占位符
+	// 原先显式绑定 create_time 空串会触发 PostgreSQL timestamp 转换失败，而非使用默认值。
+	// 仅绑定十二个业务字段，创建与更新时间均由数据库默认值生成。
 	valuePlaceholders := make([]string, 0, len(logs))
-	args := make([]interface{}, 0, len(logs)*13)
+	args := make([]interface{}, 0, len(logs)*12)
 
 	for idx, log := range logs {
-		base := idx * 13
+		base := idx * 12
 		valuePlaceholders = append(valuePlaceholders, fmt.Sprintf(
-			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12, base+13,
+			"($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8, base+9, base+10, base+11, base+12,
 		))
 		args = append(args,
 			log.TaskId, log.ShareCode, log.ShareFolderName, log.FileName,
 			log.FilePickCode, log.FileSize, log.FileSha1, log.Cloud115Id,
 			log.TargetDirectory, log.Status, log.ErrorMessage, log.IsSecondTransfer,
-			"", // create_time 使用数据库默认值
 		)
 	}
 
@@ -83,7 +83,7 @@ func (d *ShareTransferLogDAO) insertBatch(ctx context.Context, logs []domain.Sha
 		`INSERT INTO t_share_transfer_log
 		(task_id, share_code, share_folder_name, file_name, file_pick_code,
 		 file_size, file_sha1, cloud115_id, target_directory, status, error_message,
-		 is_second_transfer, create_time)
+		 is_second_transfer)
 		VALUES %s`,
 		strings.Join(valuePlaceholders, ","),
 	)
@@ -145,9 +145,9 @@ func (d *ShareTransferLogDAO) GetByTaskId(ctx context.Context, taskId string) ([
 // 参数:
 //   - ctx: 上下文
 //   - taskId: 任务ID
-//   - pickCode: 文件pickcode（唯一标识）
+//   - pickCode: 分享文件 Fid（历史列名 file_pick_code，实际存储 Fid，与转存调用一致）
 //   - status: 新状态
-//   - errMsg: 错误信息（为空时保持不变）
+//   - errMsg: 错误信息（为空时清除旧错误，原注释误称保持不变）
 //
 // 返回:
 //   - error: 更新失败时返回错误

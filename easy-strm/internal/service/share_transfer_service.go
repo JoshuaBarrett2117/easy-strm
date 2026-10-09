@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	shareCacheKeyPrefix = "easy_strm:share:cache:" // 分享缓存Redis key前缀
-	shareCacheTTL       = 5 * time.Minute          // 分享缓存过期时间
+	shareCacheKeyPrefix              = "easy_strm:share:cache:" // 分享缓存Redis key前缀
+	shareCacheTTL                    = 5 * time.Minute          // 分享缓存过期时间
+	shareTransferPasswordMetadataKey = "share_transfer_password"
 
 	// 转存状态常量
 	transferStatusQueued       = "queued"
@@ -555,7 +556,14 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 		"scrape_task_id":       "", // 整理成功后回填
 		"parent_task_id":       "", // organize/scrape 任务反向指向转存任务
 	}
-	s.taskDAO.UpdateMetadata(taskId, metadata)
+	// 原任务未保存密码，导致重试丢失分享访问凭据；沿用内部任务元数据保存原值，公开响应另行过滤。
+	metadata[shareTransferPasswordMetadataKey] = req.Password
+	if err := s.taskDAO.UpdateMetadata(taskId, metadata); err != nil {
+		if stateErr := s.taskDAO.SetError(taskId, "保存转存重试参数失败"); stateErr != nil {
+			logger.Warnf("ShareTransfer | taskId=%s | action=submit | setTaskError=%v", taskId, stateErr)
+		}
+		return nil, fmt.Errorf("保存转存重试参数失败: %w", err)
+	}
 
 	// 6. 批量写入PG日志（status=pending）
 	logs := make([]domain.ShareTransferLog, 0, len(req.Files))
@@ -568,6 +576,10 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 			FileName:        f.Name,
 			FilePickCode:    f.Fid,
 			FileSize:        f.Size,
+			FileSha1:        "", // ShareTransferFileItem 没有 SHA1 来源，不能凭空填充或挪用 PickCode。
+			// 原先遗漏目标账号与目录，日志恒为 0/空串；直接保留本次请求的真实目标。
+			Cloud115Id:      req.TargetCloud115Id,
+			TargetDirectory: req.TargetDirectory,
 			Status:          logStatusPending,
 		})
 		estimatedSize += f.Size
@@ -940,6 +952,8 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 	targetDir, _ := metadata["target_directory"].(string)
 	targetAccountID, _ := metadata["target_account_id"].(float64)
 	conflictStrategy, _ := metadata["conflict_strategy"].(string)
+	// 恢复原请求密码；历史任务未保存此字段，只能保持空值，无法自动恢复遗失密码。
+	password, _ := metadata[shareTransferPasswordMetadataKey].(string)
 
 	// 获取原任务的PG日志以匹配文件信息
 	logs, err := s.logDAO.GetByTaskId(ctx, taskId)
@@ -953,21 +967,22 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 		if !item.Retryable {
 			continue
 		}
-		// 从日志中匹配文件名获取pickcode
-		var pickCode string
+		// 历史列 file_pick_code 实际由提交时写入 Fid；原先回填 PickCode 会使 executeTransfer 收到空 Fid。
+		// 重试和 UpdateStatus 均继续使用同一 Fid，不伪造真实 PickCode。
+		var fid string
 		var fileSize int64
 		for _, log := range logs {
 			if log.FileName == item.Name {
-				pickCode = log.FilePickCode
+				fid = log.FilePickCode
 				fileSize = log.FileSize
 				break
 			}
 		}
-		if pickCode != "" {
+		if fid != "" {
 			retryFiles = append(retryFiles, domain.ShareTransferFileItem{
-				PickCode: pickCode,
-				Name:     item.Name,
-				Size:     fileSize,
+				Fid:  fid,
+				Name: item.Name,
+				Size: fileSize,
 			})
 		}
 	}
@@ -986,6 +1001,7 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 	// 重新提交转存
 	retryReq := domain.TransferRequest{
 		ShareCode:        shareCode,
+		Password:         password,
 		TargetCloud115Id: int(targetAccountID),
 		TargetDirectory:  targetDir,
 		Files:            retryFiles,

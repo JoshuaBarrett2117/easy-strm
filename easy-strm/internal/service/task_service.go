@@ -50,7 +50,7 @@ func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
 		return task, err
 	}
 	task["display_status"] = taskDisplayStatus(task)
-	return task, nil
+	return buildPublicTask(task), nil
 }
 
 // UpdateStatus 更新任务状态
@@ -115,7 +115,14 @@ func (s *TaskService) Delete(taskID string) error {
 
 // GetAll 获取所有任务
 func (s *TaskService) GetAll() ([]map[string]interface{}, error) {
-	return s.taskRedisDAO.GetAll()
+	tasks, err := s.taskRedisDAO.GetAll()
+	if err != nil {
+		return nil, err
+	}
+	for index, task := range tasks {
+		tasks[index] = buildPublicTask(task)
+	}
+	return tasks, nil
 }
 
 // GetUnified 获取统一格式的任务列表
@@ -124,8 +131,9 @@ func (s *TaskService) GetUnified() ([]map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, task := range tasks {
+	for index, task := range tasks {
 		task["display_status"] = taskDisplayStatus(task)
+		tasks[index] = buildPublicTask(task)
 	}
 	return tasks, nil
 }
@@ -252,6 +260,7 @@ func (s *TaskService) RemoveCancel(taskID string) {
 
 // TaskStatusToDomain 将map转换为TaskStatus domain对象
 func (s *TaskService) TaskStatusToDomain(taskMap map[string]interface{}) *domain.TaskStatus {
+	taskMap = buildPublicTask(taskMap)
 	task := &domain.TaskStatus{
 		TaskID:         taskMap["task_id"].(string),
 		TaskType:       domain.TaskType(taskMap["task_type"].(string)),
@@ -275,6 +284,24 @@ func (s *TaskService) TaskStatusToDomain(taskMap map[string]interface{}) *domain
 		task.Priority = int(priority)
 	}
 	return task
+}
+
+// 原任务响应直接透传内部元数据；复制后过滤新保存的分享密码，避免泄露且不破坏重试所需原值。
+func buildPublicTask(task map[string]interface{}) map[string]interface{} {
+	publicTask := make(map[string]interface{}, len(task))
+	for key, value := range task {
+		publicTask[key] = value
+	}
+	if metadata, ok := task["metadata"].(map[string]interface{}); ok {
+		publicMetadata := make(map[string]interface{}, len(metadata))
+		for key, value := range metadata {
+			if key != shareTransferPasswordMetadataKey {
+				publicMetadata[key] = value
+			}
+		}
+		publicTask["metadata"] = publicMetadata
+	}
+	return publicTask
 }
 
 // RegisterCancelGuard 注册持久化操作的原子取消校验，须早于接口返回。

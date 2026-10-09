@@ -517,7 +517,8 @@ func (s *DashboardService) limitTasks(tasks []map[string]interface{}, limit int)
 
 	result := make([]map[string]any, 0, limit)
 	for _, task := range tasks[:limit] {
-		result = append(result, task)
+		// 仪表盘原先直接透传 DAO 任务；复用公开投影，避免新保存的分享密码泄露。
+		result = append(result, buildPublicTask(task))
 	}
 	return result
 }

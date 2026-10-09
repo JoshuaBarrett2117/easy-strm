@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -1094,6 +1095,11 @@ END $$;
 	}
 	if err = migrateOtherMediaCategories(); err != nil {
 		Error("Failed to migrate other media categories: %v", err)
+		return err
+	}
+	// 原启动只初始化其它业务表而漏掉转存日志；显式补入 v46，缺表和重复启动共用幂等 SQL。
+	if err = applyShareTransferLogMigration(context.Background(), db); err != nil {
+		Error("Failed to initialize share transfer log: %v", err)
 		return err
 	}
 	Info("Database initialized successfully")
