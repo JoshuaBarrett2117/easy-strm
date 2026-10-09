@@ -6,13 +6,16 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
+# 可通过 --build-arg NPM_REGISTRY=地址 覆盖 npm 源
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
 COPY easy-strm-front/package*.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retries 5 && \
     npm config set fetch-retry-factor 2 && \
     npm config set fetch-retry-mintimeout 10000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    npm ci --prefer-offline --no-audit --no-fund
+    npm ci --prefer-offline --no-audit --no-fund --registry="${NPM_REGISTRY}"
 
 COPY easy-strm-front/ ./
 RUN npm run build
@@ -23,6 +26,10 @@ FROM golang:1.25-alpine AS backend-builder
 WORKDIR /app/backend
 
 RUN apk add --no-cache git
+
+# 可通过 --build-arg GOPROXY=地址 覆盖 Go 模块代理
+ARG GOPROXY=https://goproxy.cn,direct
+ENV GOPROXY=${GOPROXY}
 
 COPY easy-strm/go.mod easy-strm/go.sum* ./
 RUN go mod download || go mod tidy
