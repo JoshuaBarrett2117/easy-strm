@@ -33,7 +33,7 @@ type ShareExportCheckpointStore interface {
 	FinishBaseline(context.Context, int64) (bool, error)
 }
 
-// ShareStrmIncrementalService 全局消费作品待办；不接受筛选条件、不新增定时任务。
+// ShareStrmIncrementalService 全局消费作品待办；不接受筛选条件、不执行旧全量或 FinishSnapshot。
 type ShareStrmIncrementalService struct {
 	exporter    *ShareStrmService
 	checkpoints ShareExportCheckpointStore
@@ -58,16 +58,29 @@ func shareExportFingerprint(input domain.ShareExportInput) (string, error) {
 	return fmt.Sprintf("%x", sha256.Sum256(raw)), nil
 }
 
-// Rebuild 显式请求全作品对账，仍仅标记 stale、不删除文件。
+// Rebuild 重建可信历史下的作品检查点；building 续跑不重复种子，未知历史必须由独立对账入口处理。
 func (s *ShareStrmIncrementalService) Rebuild(ctx context.Context, id string) error {
-	if s == nil || s.checkpoints == nil {
+	if s == nil || s.checkpoints == nil || s.exporter == nil {
 		return fmt.Errorf("分享增量导出未初始化")
 	}
 	if err := s.checkpoints.CheckSchema(ctx); err != nil {
 		return err
 	}
-	if err := s.checkpoints.RequireBaseline(ctx); err != nil {
+	input, err := s.checkpoints.ReadInput(ctx)
+	if err != nil {
 		return err
+	}
+	if !input.LegacyOutputsReconciled {
+		return dao.ErrShareExportBaselineRequired
+	}
+	fingerprint, err := shareExportFingerprint(input)
+	if err != nil {
+		return err
+	}
+	if input.BaselineState != "required" && !(input.BaselineState == "building" && input.PreparedRevision == input.ConfigRevision && input.Fingerprint == fingerprint) {
+		if err = s.checkpoints.RequireBaseline(ctx); err != nil {
+			return err
+		}
 	}
 	return s.Run(ctx, id)
 }
@@ -116,14 +129,28 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) error 
 		return err
 	}
 	defer output.Store.Close()
+	return s.runPrepared(ctx, id, input, fingerprint, output)
+}
+
+func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string, input domain.ShareExportInput, fingerprint string, output *StrmOutput) (runErr error) {
 	ctx = s.exporter.Coordinator().batchContext(ctx, id)
 	ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
-	if err = s.checkpoints.Prepare(ctx, input, fingerprint); err != nil {
+	if err := s.checkpoints.Prepare(ctx, input, fingerprint); err != nil {
 		return err
 	}
+	var err error
 	attempted := []string{}
 	processed, sources, stale := 0, 0, 0
 	failures := []error{}
+	persist := func() error {
+		if s.exporter.tasks == nil {
+			return nil
+		}
+		progressErr := s.exporter.tasks.UpdateProgress(id, processed, processed, processed-len(failures), len(failures))
+		metadataErr := s.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts})
+		return errors.Join(progressErr, metadataErr)
+	}
+	defer func() { runErr = errors.Join(runErr, persist()) }()
 	for {
 		if err = s.cancelled(ctx, id); err != nil {
 			return err
@@ -158,13 +185,8 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) error 
 		if latest.ConfigRevision != input.ConfigRevision {
 			return dao.ErrShareExportChanged
 		}
-		if s.exporter.tasks != nil {
-			if err = s.exporter.tasks.UpdateProgress(id, processed, processed, processed-len(failures), len(failures)); err != nil {
-				return err
-			}
-			if err = s.exporter.tasks.UpdateMetadata(id, map[string]interface{}{"share_export": true, "incremental": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts}); err != nil {
-				return err
-			}
+		if err = persist(); err != nil {
+			return err
 		}
 	}
 	if len(failures) > 0 {

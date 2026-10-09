@@ -24,10 +24,11 @@ type CronParameter struct {
 
 // CronHandler 将稳定标识绑定到实际代码方法。
 type CronHandler struct {
-	Key        string                                                          `json:"key"`
-	Name       string                                                          `json:"name"`
-	Parameters []CronParameter                                                 `json:"parameters"`
-	Execute    func(context.Context, *domain.CronTask, string) (string, error) `json:"-"`
+	Key         string                                                          `json:"key"`
+	Name        string                                                          `json:"name"`
+	DefaultCron string                                                          `json:"default_cron,omitempty"`
+	Parameters  []CronParameter                                                 `json:"parameters"`
+	Execute     func(context.Context, *domain.CronTask, string) (string, error) `json:"-"`
 }
 
 // CronService 统一配置、调度和执行状态。
@@ -364,6 +365,27 @@ func (s *CronService) WaitStrmExecution(ctx context.Context, configID int, taskI
 	}
 }
 
+func cronShareMode(handler string) string {
+	switch handler {
+	case "share_strm_incremental_export":
+		return "incremental"
+	case "share_strm_full_reconciliation":
+		return "reconciliation"
+	default:
+		return ""
+	}
+}
+
+func cronTaskKind(handler string) string {
+	if handler == "full_generate" || cronShareMode(handler) != "" {
+		return "strm_generate"
+	}
+	if handler == "incremental_sync" {
+		return "incremental_sync"
+	}
+	return "cleanup"
+}
+
 // Run 统一手动和定时触发，返回任务中心执行ID。
 func (s *CronService) Run(id int, trigger string) (string, error) {
 	s.mu.Lock()
@@ -394,9 +416,17 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 	if t.StrmConfigID > 0 {
 		keys = append(keys, fmt.Sprintf("strm:%d", t.StrmConfigID))
 	}
+	mode := cronShareMode(t.Handler)
+	if mode != "" {
+		keys = append(keys, "share:default:scheduled")
+	}
 	busy := false
+	blockedBy := ""
 	for _, key := range keys {
 		busy = busy || s.running[key] != ""
+		if s.running[key] != "" {
+			blockedBy = s.running[key]
+		}
 	}
 	if !busy {
 		for _, key := range keys {
@@ -407,21 +437,27 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 	release := func() {
 		s.mu.Lock()
 		for _, key := range keys {
-			delete(s.running, key)
+			if s.running[key] == taskID {
+				delete(s.running, key)
+			}
 		}
 		s.mu.Unlock()
 	}
 	if busy {
+		reason := "同一任务或STRM配置正在运行，跳过此次触发"
+		if mode != "" {
+			reason = "分享库增量导出或全量对账正在运行，互斥跳过此次触发"
+		}
 		if err = s.cronTaskDAO.StartRun(id, taskID, trigger, "skipped"); err != nil {
 			return "", err
 		}
-		if err = s.cronTaskDAO.FinishRun(taskID, "skipped", "同一任务或STRM配置正在运行，跳过此次触发"); err != nil {
+		if err = s.cronTaskDAO.FinishRun(taskID, "skipped", reason); err != nil {
 			return "", err
 		}
-		if err = s.tasks.Create(taskID, "cleanup", t.TaskName+"（跳过）"); err != nil {
+		if err = s.tasks.Create(taskID, cronTaskKind(t.Handler), t.TaskName+"（跳过）"); err != nil {
 			return "", err
 		}
-		if err = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "outcome": "skipped", "message": "同一任务或STRM配置正在运行"}); err != nil {
+		if err = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": "skipped", "outcome": "skipped", "skip_reason": reason, "blocked_by_task_id": blockedBy, "message": reason}); err != nil {
 			return "", err
 		}
 		return taskID, s.tasks.UpdateStatus(taskID, "completed")
@@ -430,14 +466,7 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 		release()
 		return "", err
 	}
-	kind := "cleanup"
-	if t.Handler == "full_generate" {
-		kind = "strm_generate"
-	} else if t.Handler == "share_strm_incremental_export" {
-		kind = "strm_generate"
-	} else if t.Handler == "incremental_sync" {
-		kind = "incremental_sync"
-	}
+	kind := cronTaskKind(t.Handler)
 	if err = s.tasks.Create(taskID, kind, t.TaskName); err != nil {
 		release()
 		_ = s.cronTaskDAO.FinishRun(taskID, "failed", err.Error())
@@ -445,8 +474,13 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.tasks.RegisterCancel(taskID, cancel)
-	if e := s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "trigger_type": trigger}); e != nil {
-		logger.Warnf("保存调度元数据失败: %v", e)
+	if e := s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
+		cancel()
+		s.tasks.RemoveCancel(taskID)
+		release()
+		_ = s.tasks.SetError(taskID, e.Error())
+		_ = s.cronTaskDAO.FinishRun(taskID, "failed", e.Error())
+		return taskID, e
 	}
 	go func() {
 		defer cancel()
@@ -499,6 +533,9 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 		message, runErr = h.Execute(ctx, t, taskID)
 		if runErr != nil {
 			status = "failed"
+			if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+				status = "cancelled"
+			}
 			message = runErr.Error()
 		}
 	}()

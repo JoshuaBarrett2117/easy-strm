@@ -17,6 +17,10 @@ type CronScheduler = service.CronService
 
 var scheduler *CronScheduler
 
+func registerShareStrmCronHandlers(exporter *service.ShareStrmService) {
+	service.RegisterShareStrmCronHandlers(scheduler, exporter)
+}
+
 // InitCronScheduler 注册现有业务与维护方法，路由依赖就绪后启动。
 func InitCronScheduler() error {
 	scheduler = service.NewCronService(dao.NewCronTaskDAO())

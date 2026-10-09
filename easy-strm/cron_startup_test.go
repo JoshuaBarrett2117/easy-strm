@@ -1,6 +1,7 @@
 package main
 
 import (
+	"easy-strm/internal/service"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -45,6 +46,21 @@ func TestCronStartupWiring(t *testing.T) {
 		}
 		return true
 	})
+	if positions["SetupAuthProtectedRoutes"] == token.NoPos {
+		t.Fatal("production setup missing")
+	}
+	registered := false
+	ast.Inspect(f, func(node ast.Node) bool {
+		if call, ok := node.(*ast.CallExpr); ok {
+			if name, ok := call.Fun.(*ast.Ident); ok && name.Name == "registerShareStrmCronHandlers" {
+				registered = true
+			}
+		}
+		return true
+	})
+	if !registered {
+		t.Fatal("production assembly must register both share STRM handlers")
+	}
 }
 
 func TestCronBuiltinHandlersRegistered(t *testing.T) {
@@ -53,11 +69,12 @@ func TestCronBuiltinHandlersRegistered(t *testing.T) {
 	if err := InitCronScheduler(); err != nil {
 		t.Fatal(err)
 	}
+	registerShareStrmCronHandlers(&service.ShareStrmService{})
 	handlers := map[string]bool{}
 	for _, h := range scheduler.Handlers() {
 		handlers[h.Key] = h.Execute != nil
 	}
-	for _, key := range []string{"full_generate", "incremental_sync", "log_cleanup", "identify_cache_cleanup", "cooling_recovery"} {
+	for _, key := range []string{"full_generate", "incremental_sync", "log_cleanup", "identify_cache_cleanup", "cooling_recovery", "share_strm_incremental_export", "share_strm_full_reconciliation"} {
 		if !handlers[key] {
 			t.Errorf("处理器 %s 未注册", key)
 		}

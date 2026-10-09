@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 
+	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 
@@ -156,6 +157,12 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 	}
 
 	taskType, _ := task["task_type"].(string)
+	metadata, _ := task["metadata"].(map[string]interface{})
+	handler, _ := metadata["cron_handler"].(string)
+	if domain.IsShareStrmCronHandler(handler) {
+		ErrorResp(ctx, http.StatusBadRequest, "分享库调度任务请等待下次调度，或在定时任务管理中手动触发；不会重放旧全量")
+		return
+	}
 	if taskType == "strm_generate" && c.retryStrmTask != nil {
 		if err := c.retryStrmTask(taskID, task); err != nil {
 			ErrorResp(ctx, 400, err.Error())

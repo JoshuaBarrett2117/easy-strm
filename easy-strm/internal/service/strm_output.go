@@ -86,10 +86,18 @@ func newStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, ful
 	if !full {
 		return s, nil
 	}
-	legacy, e := store.LegacyPaths(ctx)
-	if e != nil {
+	if e = s.prepareSnapshot(ctx); e != nil {
 		store.Close()
 		return nil, e
+	}
+	return s, nil
+}
+
+func (s *StrmOutput) prepareSnapshot(ctx context.Context) error {
+	store := s.Store
+	legacy, e := store.LegacyPaths(ctx)
+	if e != nil {
+		return e
 	}
 	for raw, owners := range legacy {
 		p, pe := NormalizeStrmOutputPath(raw)
@@ -99,27 +107,24 @@ func newStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, ful
 		s.Paths[p] = true
 		for _, o := range owners {
 			if e = store.RememberLegacy(ctx, p, o); e != nil {
-				store.Close()
-				return nil, e
+				return e
 			}
 		}
 	}
 	known, e := store.KnownPaths(ctx)
 	if e != nil {
-		store.Close()
-		return nil, e
+		return e
 	}
 	for _, p := range known {
 		if s.contains(p) {
 			s.Paths[p] = true
 		}
 	}
-	s.Snapshot, e = store.Snapshot(ctx, owner)
+	s.Snapshot, e = store.Snapshot(ctx, s.Owner)
 	if e != nil {
-		store.Close()
-		return nil, e
+		return e
 	}
-	return s, nil
+	return nil
 }
 
 // WaitStrmOutput 等待重叠目录释放；每次重试先释放已持有的锁，避免父子目录互相阻塞。

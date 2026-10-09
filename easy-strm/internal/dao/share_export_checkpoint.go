@@ -180,6 +180,29 @@ func (d *ShareExportCheckpointDAO) RequireBaseline(ctx context.Context) error {
 	return err
 }
 
+// CompleteReconciliation 将成功全量的凭证、作品种子和 building 阶段原子提交；失败保留 required，不能跳过重试。
+func (d *ShareExportCheckpointDAO) CompleteReconciliation(ctx context.Context, input domain.ShareExportInput, fingerprint string) error {
+	transaction, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	var revision int64
+	if err = transaction.QueryRowContext(ctx, `SELECT config_revision FROM t_share_export_consumer WHERE consumer='share:default' FOR UPDATE`).Scan(&revision); err != nil {
+		return err
+	}
+	if revision != input.ConfigRevision {
+		return ErrShareExportChanged
+	}
+	if _, err = transaction.ExecContext(ctx, shareExportFanoutSQL); err != nil {
+		return err
+	}
+	if _, err = transaction.ExecContext(ctx, `UPDATE t_share_export_consumer SET legacy_outputs_reconciled=true,config_fingerprint=$1,prepared_revision=config_revision,protocol_version=1,baseline_state='building',updated_at=now() WHERE consumer='share:default'`, fingerprint); err != nil {
+		return err
+	}
+	return transaction.Commit()
+}
+
 // MarkLegacyReconciled 仅在旧全量 FinishSnapshot 成功且配置未改变后登记一次性凭证。
 func (d *ShareExportCheckpointDAO) MarkLegacyReconciled(ctx context.Context, revision int64) error {
 	result, err := d.execRecovery(ctx, `UPDATE t_share_export_consumer SET legacy_outputs_reconciled=true,updated_at=now() WHERE consumer='share:default' AND config_revision=$1`, revision)

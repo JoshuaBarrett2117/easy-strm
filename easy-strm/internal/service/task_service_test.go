@@ -8,16 +8,17 @@ import (
 	"github.com/go-redis/redis/v8"
 
 	"easy-strm/internal/dao"
+	"github.com/alicebob/miniredis/v2"
 )
 
 func setupTaskRedisMock(t *testing.T) *redis.Client {
 	t.Helper()
 	client := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
+		Addr: miniredis.RunT(t).Addr(),
 	})
 	ctx := context.Background()
 	if err := client.Ping(ctx).Err(); err != nil {
-		t.Skip("Redis not available, skipping test")
+		t.Fatalf("isolated Redis mock unavailable: %v", err)
 	}
 	for _, pattern := range []string{"easy_strm:task:*", "easy_strm:task:cancel:*", "easy_strm:task:progress:*"} {
 		keys, _ := client.Keys(ctx, pattern).Result()

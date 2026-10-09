@@ -196,6 +196,11 @@ func (s *TaskService) Resume(taskID string) error {
 	}
 	if task != nil {
 		kind, _ := task["task_type"].(string)
+		metadata, _ := task["metadata"].(map[string]interface{})
+		handler, _ := metadata["cron_handler"].(string)
+		if domain.IsShareStrmCronHandler(handler) {
+			return fmt.Errorf("分享库调度任务请等待下次调度，或在定时任务管理中手动触发")
+		}
 		if domain.IsShareOperationType(kind) {
 			return fmt.Errorf("清理操作需重新确认并提交，请返回分享管理重试")
 		}

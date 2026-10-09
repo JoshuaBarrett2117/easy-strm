@@ -158,9 +158,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	playbackRecordService.SetPosterResolver(tmdbService.ResolvePlaybackMoviePoster)
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
 	shareStrmService.SetExportDatabase(dao.DB)
-	scheduler.Register(service.CronHandler{Key: "share_strm_incremental_export", Name: "分享库 STRM 增量导出", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
-		return "分享库增量检查完成", shareStrmService.RunScheduledExport(ctx, id)
-	}})
+	registerShareStrmCronHandlers(shareStrmService)
 	r.GET("/share-strm/:id", shareStrmController.Playback)
 	r.HEAD("/share-strm/:id", shareStrmController.Playback)
 	mediaCategoryController := controller.NewMediaCategoryController(mediaCategoryService)

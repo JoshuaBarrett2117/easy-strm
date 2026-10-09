@@ -1,5 +1,10 @@
 package domain
 
+// IsShareStrmCronHandler 判断分享库独立调度入口，防止任务重试误回放旧全量导出。
+func IsShareStrmCronHandler(handler string) bool {
+	return handler == "share_strm_incremental_export" || handler == "share_strm_full_reconciliation"
+}
+
 // ShareExportInput 保存同一数据库快照下的输出输入，不包含账号凭据。
 type ShareExportInput struct {
 	Settings                ShareStrmSettings

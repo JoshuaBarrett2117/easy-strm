@@ -25,8 +25,11 @@ const shareStrmProgressBatchSize = 100
 
 type shareExportRecoveryContext struct{}
 
+type shareReconciliationCompletionContext struct{}
+
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
 func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
+	completion, scheduled := ctx.Value(shareReconciliationCompletionContext{}).(func(context.Context) error)
 	var recovery *dao.ShareExportCheckpointDAO
 	var recoveryRevision int64
 	if s.exportDB != nil {
@@ -38,12 +41,12 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 				return revisionErr
 			}
 			recovery = candidate
-		} else if !errors.Is(err, dao.ErrShareExportSchemaMissing) {
+		} else if scheduled || !errors.Is(err, dao.ErrShareExportSchemaMissing) {
 			return err
 		}
 	}
 	if s.tasks != nil {
-		if e := s.tasks.UpdateMetadata(id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath}); e != nil {
+		if e := s.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath}); e != nil {
 			return e
 		}
 	}
@@ -89,7 +92,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			metadata["conflicts"] = output.Conflicts
 			metadata["exported_files"] = output.Added + output.Updated
 		}
-		return errors.Join(progressErr, s.tasks.UpdateMetadata(id, metadata))
+		return errors.Join(progressErr, s.updateExportMetadata(ctx, id, metadata))
 	}
 	defer func() {
 		exportErr = errors.Join(exportErr, flushProgress())
@@ -145,8 +148,19 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	q.Direction = ""
 	q.Available = false
 	if output != nil && isFullShareStrmQuery(q) {
+		if scheduled {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			if s.tasks != nil && s.tasks.IsCancelled(id) {
+				return context.Canceled
+			}
+		}
 		if err = output.Store.FinishSnapshot(ctx, "share:default", output.Snapshot, output.Seen); err != nil {
 			return err
+		}
+		if scheduled {
+			return completion(ctx)
 		}
 		if recovery != nil {
 			return recovery.MarkLegacyReconciled(ctx, recoveryRevision)
