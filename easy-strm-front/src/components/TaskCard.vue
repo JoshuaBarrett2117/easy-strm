@@ -184,6 +184,7 @@
 
 <script setup>
 import { computed, ref, toRef } from 'vue'
+import { isShareStrmCronTask, shareStrmTaskSummary } from '../utils/ui/share-strm-task-summary'
 import { NAlert, NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import {
   TimeOutline,
@@ -311,6 +312,7 @@ const taskAccentClass = computed(() => {
 const taskTypeName = computed(() => {
   const t = task.value
   if (!t) return '未知任务'
+  if (isShareStrmCronTask(t)) return t.metadata.requested_mode === 'reconciliation' ? '分享库 STRM 全量对账' : '分享库 STRM 增量导出'
   if (t.task_type === 'watch_auto_organize') {
     const sourceType = t.metadata?.source_type
     if (sourceType === 'local') return '本地自动整理'
@@ -324,6 +326,7 @@ const taskTypeTagType = computed(() => task.value ? (taskTypeTagTypes[task.value
 const effectiveStatus = computed(() => task.value?.display_status || task.value?.status)
 
 const taskStatusType = computed(() => {
+  if (task.value?.metadata?.outcome === 'skipped') return 'default'
   const statusMap = {
     pending: 'info',
     running: 'warning',
@@ -339,6 +342,7 @@ const taskStatusType = computed(() => {
 })
 
 const taskStatusText = computed(() => {
+  if (task.value?.metadata?.outcome === 'skipped') return '已跳过'
   const textMap = {
     pending: '待执行',
     running: '执行中',
@@ -372,6 +376,7 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
   const t = task.value
+  if (isShareStrmCronTask(t)) return false
   if (!t || !['cancelled', 'failed', 'partial_success'].includes(t.status)) return false
   if (t.task_type === 'watch_auto_organize' || t.task_type === 'share_sync' || t.task_type === 'strm_generate') return true
   return false
@@ -379,6 +384,7 @@ const canResume = computed(() => {
 
 const showProgress = computed(() => {
   const t = task.value
+  if (t?.metadata?.outcome === 'skipped') return false
   return !!t && ['pending', 'running', 'completed', 'success', 'partial_success', 'unknown', 'failed', 'cancelled'].includes(effectiveStatus.value)
 })
 
@@ -549,12 +555,8 @@ const taskSummaryItems = computed(() => {
 
   if (['share_delete','share_clear','share_media_delete'].includes(t.task_type)) return [{label:'目标分享',value:(t.metadata?.record_ids || []).join('、')},{label:'当前阶段',value:t.metadata?.phase || '等待目标资源'},{label:'清理记录数',value:t.metadata?.result?.deleted ?? '等待执行'}]
 
-  if (String(t.task_id || '').startsWith('share_strm_')) {
-    return [
-      { label: '已处理记录', value: `${t.processed_files || 0} / ${t.total_files || 0}` },
-      { label: '已生成 STRM', value: t.metadata?.exported_files || 0 }
-    ]
-  }
+  const shareSummary = shareStrmTaskSummary(t)
+  if (shareSummary) return shareSummary
 
   const items = []
 

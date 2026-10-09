@@ -3,7 +3,7 @@
     <n-space justify="space-between"
       ><div>
         <h2>定时任务管理</h2>
-        <p>统一管理业务与系统维护任务</p>
+        <p>统一管理业务与系统维护任务；分享库增量与全量对账使用两个独立调度。</p>
       </div>
       <n-button type="primary" @click="edit()">新建任务</n-button></n-space
     >
@@ -51,6 +51,10 @@
         <n-form-item label="时区"
           ><n-input v-model:value="form.timezone" placeholder="Local 或 Asia/Shanghai"
         /></n-form-item>
+        <n-alert v-if="currentHandler?.default_cron" type="info" style="margin-bottom: 16px">
+          分享库增量建议每日每 6 小时运行，全量对账建议每周日 03:00 运行。两类任务互斥，冲突会跳过并记录占用任务。
+          检查点不可信时增量会升级为全量对账；中断后等待下次调度续跑，不自动补跑。仅标记失效，不删除文件。
+        </n-alert>
         <p>Local 使用服务所在时区。停用仅停止后续调度，当前执行可在任务中心取消。</p>
         <n-form-item label="状态"
           ><n-select v-model:value="form.status" :options="statusOptions"
@@ -151,6 +155,10 @@ const resetParams = () => {
   form.value.params = Object.fromEntries(
     (currentHandler.value?.parameters || []).map((p) => [p.key, p.type==='boolean' ? false : p.default || null])
   )
+  if (currentHandler.value?.default_cron) {
+    form.value.cron_expr = currentHandler.value.default_cron
+    if (!form.value.task_name || handlers.value.some(handler => handler.name === form.value.task_name)) form.value.task_name = currentHandler.value.name
+  }
 }
 const edit = (row) => {
   form.value = row
