@@ -27,11 +27,14 @@ const (
 
 // EmbyMonitorService 聚合 Emby 实时会话、播放历史和最近入库数据。
 type EmbyMonitorService struct {
-	servers *dao.EmbyServerDAO
-	monitor *dao.EmbyMonitorDAO
-	http    *http.Client
-	redis   *redis.Client
-	now     func() time.Time
+	servers        *dao.EmbyServerDAO
+	monitor        *dao.EmbyMonitorDAO
+	http           *http.Client
+	redis          *redis.Client
+	now            func() time.Time
+	requestContext context.Context
+	overviewMu     sync.Mutex
+	overviews      map[int]*embyOverviewSnapshot
 }
 
 // NewEmbyMonitorService 创建 Emby 观影监控服务。
@@ -140,7 +143,7 @@ func (s *EmbyMonitorService) requestJSON(server *domain.EmbyServer, path string,
 	if len(query) > 0 {
 		endpoint += "?" + query.Encode()
 	}
-	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	req, err := http.NewRequestWithContext(s.context(), http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
 	}
@@ -270,7 +273,7 @@ func (s *EmbyMonitorService) cacheGet(key string, output interface{}) bool {
 	if s.redis == nil {
 		return false
 	}
-	data, err := s.redis.Get(context.Background(), key).Bytes()
+	data, err := s.redis.Get(s.context(), key).Bytes()
 	return err == nil && json.Unmarshal(data, output) == nil
 }
 
@@ -280,7 +283,7 @@ func (s *EmbyMonitorService) cacheSet(key string, value interface{}) {
 	}
 	data, err := json.Marshal(value)
 	if err == nil {
-		_ = s.redis.Set(context.Background(), key, data, time.Minute).Err()
+		_ = s.redis.Set(s.context(), key, data, time.Minute).Err()
 	}
 }
 
@@ -306,7 +309,7 @@ func (s *EmbyMonitorService) pluginAvailable(server *domain.EmbyServer) error {
 	if err != nil {
 		reason = err.Error()
 	}
-	_ = s.monitor.UpdateState(server.ID, nil, nil, false, err == nil, reason)
+	_ = s.monitor.UpdateStateContext(s.context(), server.ID, nil, nil, false, err == nil, reason)
 	return err
 }
 
@@ -458,26 +461,21 @@ func (s *EmbyMonitorService) pluginMediaReport(server *domain.EmbyServer, mediaT
 
 // GetOverview 返回汇总、趋势和实时会话。
 func (s *EmbyMonitorService) GetOverview(serverID int) (*domain.EmbyMonitorOverview, error) {
-	server, err := s.requireServer(serverID)
-	if err != nil {
-		return nil, err
-	}
+	return s.GetOverviewContext(context.Background(), serverID)
+}
+
+func (s *EmbyMonitorService) loadOverview(server *domain.EmbyServer) (*domain.EmbyMonitorOverview, error) {
+	serverID := server.ID
 	now := s.now()
 	today, _, _ := timeBounds("day", now)
 	week, _, _ := timeBounds("week", now)
 	month, _, _ := timeBounds("month", now)
 	trendStart, trendEnd, _ := timeBounds("7d", now)
-	history, _ := s.monitor.HistoryStart(serverID)
+	var history *time.Time
 	source := embyMonitorSourceLocal
 	degraded := ""
-	summary, err := s.monitor.Summary(serverID, today, week, month)
-	if err != nil {
-		return nil, err
-	}
-	trend, err := s.monitor.Trend(serverID, trendStart, trendEnd)
-	if err != nil {
-		return nil, err
-	}
+	var summary domain.EmbyMonitorSummary
+	var trend []domain.EmbyMonitorTrendPoint
 	if pluginErr := s.pluginAvailable(server); pluginErr == nil {
 		source = embyMonitorSourcePlugin
 		pluginHistory, historyErr := s.pluginOverview(server, today, week, month)
@@ -497,7 +495,28 @@ func (s *EmbyMonitorService) GetOverview(serverID int) (*domain.EmbyMonitorOverv
 	} else {
 		degraded = pluginErr.Error()
 	}
+	if err := s.context().Err(); err != nil {
+		return nil, err
+	}
+	if source == embyMonitorSourceLocal {
+		var err error
+		history, err = s.monitor.HistoryStartContext(s.context(), serverID)
+		if err != nil {
+			return nil, err
+		}
+		summary, err = s.monitor.SummaryContext(s.context(), serverID, today, week, month)
+		if err != nil {
+			return nil, err
+		}
+		trend, err = s.monitor.TrendContext(s.context(), serverID, trendStart, trendEnd)
+		if err != nil {
+			return nil, err
+		}
+	}
 	sessionsRaw, sessionErr := s.sessions(server)
+	if err := s.context().Err(); err != nil {
+		return nil, err
+	}
 	sessions := []domain.EmbyMonitorSession{}
 	if sessionErr == nil {
 		for _, session := range sessionsRaw {

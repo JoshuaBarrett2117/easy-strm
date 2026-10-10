@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -161,7 +162,12 @@ func (d *EmbyMonitorDAO) GetState(serverID int) (*domain.EmbyMonitorState, error
 
 // UpdateState 更新实例监控状态，只覆盖本次提供的采集时间。
 func (d *EmbyMonitorDAO) UpdateState(serverID int, sessionAt, itemAt *time.Time, baseline bool, plugin bool, lastError string) error {
-	_, err := d.db.Exec(`INSERT INTO t_emby_monitor_state(server_id,baseline_completed_at,last_session_poll_at,last_item_poll_at,plugin_available,last_error)
+	return d.UpdateStateContext(context.Background(), serverID, sessionAt, itemAt, baseline, plugin, lastError)
+}
+
+// UpdateStateContext 在请求预算内保存监控状态，其他采集入口可继续使用原接口。
+func (d *EmbyMonitorDAO) UpdateStateContext(ctx context.Context, serverID int, sessionAt, itemAt *time.Time, baseline bool, plugin bool, lastError string) error {
+	_, err := d.db.ExecContext(ctx, `INSERT INTO t_emby_monitor_state(server_id,baseline_completed_at,last_session_poll_at,last_item_poll_at,plugin_available,last_error)
 		VALUES($1,CASE WHEN $4 THEN CURRENT_TIMESTAMP END,$2,$3,$5,$6)
 		ON CONFLICT(server_id) DO UPDATE SET
 		baseline_completed_at=CASE WHEN $4 THEN COALESCE(t_emby_monitor_state.baseline_completed_at,CURRENT_TIMESTAMP) ELSE t_emby_monitor_state.baseline_completed_at END,
@@ -172,8 +178,13 @@ func (d *EmbyMonitorDAO) UpdateState(serverID int, sessionAt, itemAt *time.Time,
 
 // HistoryStart 返回本地自采历史起点。
 func (d *EmbyMonitorDAO) HistoryStart(serverID int) (*time.Time, error) {
+	return d.HistoryStartContext(context.Background(), serverID)
+}
+
+// HistoryStartContext 在请求预算内读取本地历史起点。
+func (d *EmbyMonitorDAO) HistoryStartContext(ctx context.Context, serverID int) (*time.Time, error) {
 	var value sql.NullTime
-	err := d.db.QueryRow(`SELECT MIN(started_at) FROM t_emby_playback_event WHERE server_id=$1`, serverID).Scan(&value)
+	err := d.db.QueryRowContext(ctx, `SELECT MIN(started_at) FROM t_emby_playback_event WHERE server_id=$1`, serverID).Scan(&value)
 	if err != nil || !value.Valid {
 		return nil, err
 	}
@@ -182,8 +193,13 @@ func (d *EmbyMonitorDAO) HistoryStart(serverID int) (*time.Time, error) {
 
 // Summary 查询自然时间范围内的汇总数据。
 func (d *EmbyMonitorDAO) Summary(serverID int, today, week, month time.Time) (domain.EmbyMonitorSummary, error) {
+	return d.SummaryContext(context.Background(), serverID, today, week, month)
+}
+
+// SummaryContext 在请求预算内计算原有完整统计，不伪造总时长或活跃用户数。
+func (d *EmbyMonitorDAO) SummaryContext(ctx context.Context, serverID int, today, week, month time.Time) (domain.EmbyMonitorSummary, error) {
 	var result domain.EmbyMonitorSummary
-	err := d.db.QueryRow(`SELECT
+	err := d.db.QueryRowContext(ctx, `SELECT
 		COALESCE(SUM(watched_seconds) FILTER(WHERE started_at >= $2),0),
 		COALESCE(SUM(watched_seconds) FILTER(WHERE started_at >= $3),0),
 		COALESCE(SUM(watched_seconds) FILTER(WHERE started_at >= $4),0),COALESCE(SUM(watched_seconds),0),
@@ -197,8 +213,13 @@ func (d *EmbyMonitorDAO) Summary(serverID int, today, week, month time.Time) (do
 
 // Trend 查询每小时活跃用户及观看时长。
 func (d *EmbyMonitorDAO) Trend(serverID int, start, end time.Time) ([]domain.EmbyMonitorTrendPoint, error) {
+	return d.TrendContext(context.Background(), serverID, start, end)
+}
+
+// TrendContext 在请求预算内读取趋势，保持时间范围和排序不变。
+func (d *EmbyMonitorDAO) TrendContext(ctx context.Context, serverID int, start, end time.Time) ([]domain.EmbyMonitorTrendPoint, error) {
 	trendHour := `date_trunc('hour',started_at)`
-	rows, err := d.db.Query(fmt.Sprintf(`SELECT %s,COUNT(DISTINCT user_id),COALESCE(SUM(watched_seconds),0)
+	rows, err := d.db.QueryContext(ctx, fmt.Sprintf(`SELECT %s,COUNT(DISTINCT user_id),COALESCE(SUM(watched_seconds),0)
 		FROM t_emby_playback_event WHERE server_id=$1 AND started_at >= $2 AND started_at < $3
 		GROUP BY %s ORDER BY %s`, trendHour, trendHour, trendHour), serverID, start, end)
 	if err != nil {

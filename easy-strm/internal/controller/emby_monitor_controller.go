@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,7 +14,7 @@ import (
 
 // EmbyMonitorController 提供 Emby 观影统计只读接口。
 type embyMonitorService interface {
-	GetOverview(int) (*domain.EmbyMonitorOverview, error)
+	GetOverviewContext(context.Context, int) (*domain.EmbyMonitorOverview, error)
 	GetRankings(int, string, string, string) (*domain.EmbyMonitorRankingResponse, error)
 	GetHeatmap(int, string, string) (*domain.EmbyMonitorHeatmapResponse, error)
 	GetRecentItems(int, string, string, string) (*domain.EmbyMonitorRecentResponse, error)
@@ -42,7 +43,7 @@ func (c *EmbyMonitorController) GetOverview(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := c.service.GetOverview(id)
+	data, err := c.service.GetOverviewContext(ctx.Request.Context(), id)
 	if err != nil {
 		ErrorResp(ctx, http.StatusBadGateway, err.Error())
 		return

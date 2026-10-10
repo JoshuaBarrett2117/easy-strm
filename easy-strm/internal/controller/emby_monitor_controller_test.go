@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,7 +12,7 @@ import (
 
 type embyMonitorControllerStub struct{}
 
-func (embyMonitorControllerStub) GetOverview(int) (*domain.EmbyMonitorOverview, error) {
+func (embyMonitorControllerStub) GetOverviewContext(context.Context, int) (*domain.EmbyMonitorOverview, error) {
 	return &domain.EmbyMonitorOverview{Sessions: []domain.EmbyMonitorSession{}}, nil
 }
 func (embyMonitorControllerStub) GetRankings(int, string, string, string) (*domain.EmbyMonitorRankingResponse, error) {

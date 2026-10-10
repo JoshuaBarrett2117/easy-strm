@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -62,7 +63,12 @@ func (d *EmbyServerDAO) List() ([]*domain.EmbyServer, error) {
 
 // GetByID 按 ID 查询 Emby 实例，not found 时返回 nil。
 func (d *EmbyServerDAO) GetByID(id int) (*domain.EmbyServer, error) {
-	server, err := scanEmbyServer(d.db.QueryRow(`SELECT `+embyServerColumns+` FROM t_emby_server WHERE id=$1`, id))
+	return d.GetByIDContext(context.Background(), id)
+}
+
+// GetByIDContext 按主键读取实例配置，保留请求取消和 not found 语义。
+func (d *EmbyServerDAO) GetByIDContext(ctx context.Context, id int) (*domain.EmbyServer, error) {
+	server, err := scanEmbyServer(d.db.QueryRowContext(ctx, `SELECT `+embyServerColumns+` FROM t_emby_server WHERE id=$1`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
