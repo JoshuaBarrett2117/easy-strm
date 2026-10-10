@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 )
 
 type boundedFileClient struct {
@@ -97,5 +100,47 @@ func TestBatchFileOperationCapBeforeLookupAndCancelledCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
 		t.Fatal("已取消复制不得创建目标文件")
+	}
+}
+
+func TestBatchFileOperationMissing115AccountFailsWithoutPanic(t *testing.T) {
+	accountID := 7
+	worker := &FileOperationService{preparedAccounts: map[int]fileOperationAccount{accountID: {}}}
+	if account, err := worker.operationAccount(accountID); account != nil || err == nil {
+		t.Fatalf("已删除账号必须返回明确错误，不能进入SDK：账号=%v 错误=%v", account, err)
+	}
+	mock, cleanup := setupServiceMockDB(t)
+	defer cleanup()
+	expectFileOperationMediaSourceByID(mock, 1, domain.SourceTypeCloud115, "0", &accountID)
+	mock.ExpectQuery("SELECT id, name, cookie, COALESCE").WithArgs(accountID).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	service := NewFileOperationService(NewMediaSourceService(dao.NewMediaSourceDAO(), nil), dao.NewCloud115DAO(), &fakeFileOperationCloud115Client{})
+	items := []domain.BatchOperationItem{{FileID: "1", NewName: "新名称"}, {FileID: "2", NewName: "新名称"}}
+	result, err := service.BatchOperationContext(context.Background(), "rename", 1, 0, items)
+	if err != nil || result.Total != 2 || result.Success != 0 || result.Failed != 2 {
+		t.Fatalf("缺失账号应逐项失败并保持结果契约：%+v %v", result, err)
+	}
+	for _, item := range result.Results {
+		if item.Success || !strings.Contains(item.Message, "115账号不存在") {
+			t.Fatalf("缺失账号错误未保留：%+v", item)
+		}
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBatchFileOperationOversizedRejectsBeforeResultAllocation(t *testing.T) {
+	service := &FileOperationService{}
+	items := make([]domain.BatchOperationItem, 50001)
+	measurement := testing.Benchmark(func(benchmark *testing.B) {
+		for iteration := 0; iteration < benchmark.N; iteration++ {
+			if _, err := service.BatchOperationContext(context.Background(), "move", 1, 0, items); err == nil {
+				benchmark.Fatal("超过上限的批次必须拒绝")
+			}
+		}
+	})
+	if measurement.AllocedBytesPerOp() > 4096 {
+		t.Fatalf("拒绝批次不能先分配整批结果：每次分配%d字节", measurement.AllocedBytesPerOp())
 	}
 }

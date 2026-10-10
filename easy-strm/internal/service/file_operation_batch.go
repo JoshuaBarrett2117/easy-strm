@@ -41,13 +41,20 @@ func (s *FileOperationService) operationAccount(id int) (*domain.Cloud115, error
 	if err := s.operationContext().Err(); err != nil {
 		return nil, err
 	}
+	var account *domain.Cloud115
+	var err error
 	if value, present := s.preparedAccounts[id]; present {
-		return value.account, value.err
+		account, err = value.account, value.err
+	} else {
+		if s.cloud115DAO == nil {
+			return nil, fmt.Errorf("115账号仓库未初始化")
+		}
+		account, err = s.cloud115DAO.GetByIDContext(s.operationContext(), id)
 	}
-	if s.cloud115DAO == nil {
-		return nil, fmt.Errorf("115账号仓库未初始化")
+	if err == nil && account == nil {
+		err = fmt.Errorf("115账号不存在: %d", id)
 	}
-	return s.cloud115DAO.GetByIDContext(s.operationContext(), id)
+	return account, err
 }
 
 func (s *FileOperationService) runBatchItem(operation string, sourceID, targetID int, item domain.BatchOperationItem) (domain.FileOperationResult, bool) {

@@ -506,15 +506,15 @@ func (s *FileOperationService) BatchOperation(operation string, sourceID, target
 
 // BatchOperationContext 以最多四个协程执行有界批次，复用配置；取消后保留已执行结果，不启动剩余项。
 func (s *FileOperationService) BatchOperationContext(ctx context.Context, operation string, sourceID, targetID int, items []domain.BatchOperationItem) (*domain.BatchOperationResult, error) {
-	result := &domain.BatchOperationResult{
-		Total:   len(items),
-		Results: make([]domain.FileOperationResult, len(items)),
-	}
 	if len(items) == 0 || len(items) > FileOperationBatchLimit {
 		return nil, fmt.Errorf("操作项数量需为1至%d", FileOperationBatchLimit)
 	}
 	if operation != "move" && operation != "copy" && operation != "delete" && operation != "rename" {
 		return nil, fmt.Errorf("不支持的操作类型: %s", operation)
+	}
+	result := &domain.BatchOperationResult{
+		Total:   len(items),
+		Results: make([]domain.FileOperationResult, len(items)),
 	}
 	worker := &FileOperationService{mediaSourceService: s.mediaSourceService, cloud115DAO: s.cloud115DAO, cloud115Client: s.cloud115Client, requestContext: ctx}
 	source, err := worker.operationSource(sourceID)
