@@ -124,7 +124,7 @@ func (t *TaskRedisDAO) Get(taskID string) (map[string]interface{}, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("TaskRedisDAO[Get] 获取失败: %v", err)
+		return nil, fmt.Errorf("TaskRedisDAO[Get] 获取失败: %w", err)
 	}
 
 	var task map[string]interface{}
@@ -259,7 +259,7 @@ func (t *TaskRedisDAO) GetAll() ([]map[string]interface{}, error) {
 	ctx := t.context()
 	taskIDs, err := t.client.LRange(ctx, taskListKey, 0, -1).Result()
 	if err != nil && err != redis.Nil {
-		return nil, fmt.Errorf("TaskRedisDAO[GetAll] 获取列表失败: %v", err)
+		return nil, fmt.Errorf("TaskRedisDAO[GetAll] 获取列表失败: %w", err)
 	}
 
 	tasks := make([]map[string]interface{}, 0)

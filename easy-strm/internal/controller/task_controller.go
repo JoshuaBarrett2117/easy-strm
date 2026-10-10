@@ -78,7 +78,7 @@ func (c *TaskController) GetAll(ctx *gin.Context) {
 func (c *TaskController) GetUnified(ctx *gin.Context) {
 	logger.Debugf("TaskController[GetUnified] get unified tasks from %s", ctx.ClientIP())
 
-	tasks, err := c.taskService.GetUnified()
+	tasks, err := c.taskService.GetUnifiedContext(ctx.Request.Context())
 	if err != nil {
 		logger.Errorf("TaskController[GetUnified] failed to get unified tasks: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取任务列表失败")
@@ -101,7 +101,7 @@ func (c *TaskController) Get(ctx *gin.Context) {
 		return
 	}
 
-	task, err := c.taskService.Get(taskID)
+	task, err := c.taskService.GetContext(ctx.Request.Context(), taskID)
 	if err != nil {
 		logger.Errorf("TaskController[Get] failed to get task: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取任务失败")

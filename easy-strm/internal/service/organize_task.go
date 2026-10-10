@@ -224,18 +224,23 @@ func (s *OrganizeService) runCandidateTask(ctx context.Context, taskID string, s
 }
 
 func (s *OrganizeService) GetCandidateTaskStatus(taskID string) (*OrganizeCandidateTask, error) {
+	return s.GetCandidateTaskStatusContext(context.Background(), taskID)
+}
+
+// GetCandidateTaskStatusContext 使用请求预算点读候选状态，完整终态结果只在任务完成时写入。
+func (s *OrganizeService) GetCandidateTaskStatusContext(ctx context.Context, taskID string) (*OrganizeCandidateTask, error) {
 	if s.redisClient == nil {
 		return nil, fmt.Errorf("候选扫描任务存储未初始化")
 	}
-
 	taskKey := fmt.Sprintf("organize:task:%s", taskID)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
 	if err == redis.Nil {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("获取候选扫描任务状态失败: %v", err)
+		return nil, fmt.Errorf("获取候选扫描任务状态失败: %w", err)
 	}
 
 	var task OrganizeCandidateTask
@@ -369,15 +374,24 @@ func (s *OrganizeService) runPreviewTask(ctx context.Context, taskID string, sou
 // GetPreviewTaskStatus 获取预览任务状态
 
 func (s *OrganizeService) GetPreviewTaskStatus(taskID string) (*OrganizePreviewTask, error) {
+	return s.GetPreviewTaskStatusContext(context.Background(), taskID)
+}
+
+// GetPreviewTaskStatusContext 使用请求预算点读预览状态，保留完整终态结果和恢复选择信息。
+func (s *OrganizeService) GetPreviewTaskStatusContext(ctx context.Context, taskID string) (*OrganizePreviewTask, error) {
+	if s.redisClient == nil {
+		return nil, fmt.Errorf("预览任务存储未初始化")
+	}
 	taskKey := fmt.Sprintf("organize:task:%s", taskID)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
 	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
 	if err == redis.Nil {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("获取任务状态失败: %v", err)
+		return nil, fmt.Errorf("获取任务状态失败: %w", err)
 	}
 
 	var task OrganizePreviewTask

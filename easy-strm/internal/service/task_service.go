@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -162,7 +163,14 @@ func (s *TaskService) GetAll() ([]map[string]interface{}, error) {
 
 // GetUnified 获取统一格式的任务列表
 func (s *TaskService) GetUnified() ([]map[string]interface{}, error) {
-	tasks, err := s.taskRedisDAO.GetUnified()
+	return s.GetUnifiedContext(context.Background())
+}
+
+// GetUnifiedContext 保留完整排序、总数与前端筛选输入，使用请求预算读取已有分批 MGET 列表。
+func (s *TaskService) GetUnifiedContext(ctx context.Context) ([]map[string]interface{}, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	tasks, err := s.taskRedisDAO.WithContext(ctx).GetUnified()
 	if err != nil {
 		return nil, err
 	}

@@ -101,7 +101,7 @@ func (c *OrganizeController) GetCandidateTaskStatus(ctx *gin.Context) {
 		return
 	}
 
-	task, err := c.organizeService.GetCandidateTaskStatus(taskID)
+	task, err := c.organizeService.GetCandidateTaskStatusContext(ctx.Request.Context(), taskID)
 	if err != nil {
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
 		return
@@ -216,7 +216,7 @@ func (c *OrganizeController) GetPreviewTaskStatus(ctx *gin.Context) {
 		return
 	}
 
-	task, err := c.organizeService.GetPreviewTaskStatus(taskID)
+	task, err := c.organizeService.GetPreviewTaskStatusContext(ctx.Request.Context(), taskID)
 	if err != nil {
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
 		return
