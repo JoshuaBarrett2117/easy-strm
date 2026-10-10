@@ -36,12 +36,12 @@ type fileManagerCloud115Repository interface {
 }
 
 type fileManagerTaskManager interface {
-	Create(taskID string, taskType, taskName string) error
-	UpdateStatus(taskID, status string) error
-	UpdateProgress(taskID string, totalFiles, processedFiles, successFiles, failedFiles int) error
-	UpdateMetadata(taskID string, metadata map[string]interface{}) error
-	SetError(taskID, errMsg string) error
-	IsCancelled(taskID string) bool
+	CreateContext(ctx context.Context, taskID string, taskType, taskName string) error
+	UpdateStatusContext(ctx context.Context, taskID, status string) error
+	UpdateProgressContext(ctx context.Context, taskID string, totalFiles, processedFiles, successFiles, failedFiles int) error
+	UpdateMetadataContext(ctx context.Context, taskID string, metadata map[string]interface{}) error
+	SetErrorContext(ctx context.Context, taskID, errMsg string) error
+	IsCancelledContext(ctx context.Context, taskID string) bool
 	RegisterCancel(taskID string, cancel context.CancelFunc)
 	RemoveCancel(taskID string)
 }
@@ -168,6 +168,11 @@ func (s *FileManagerService) browseCloud115(accountID int, path string) (*domain
 
 // StartTransfer 创建复制或剪切粘贴任务并异步执行。
 func (s *FileManagerService) StartTransfer(req domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error) {
+	return s.StartTransferContext(context.Background(), req)
+}
+
+// StartTransferContext 保留文件传输入口标识，后台执行仍受独立任务取消控制。
+func (s *FileManagerService) StartTransferContext(parent context.Context, req domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error) {
 	if req.Operation != domain.FileManagerOperationCopy && req.Operation != domain.FileManagerOperationMove {
 		return nil, errors.New("operation仅支持copy或move")
 	}
@@ -183,12 +188,12 @@ func (s *FileManagerService) StartTransfer(req domain.FileManagerTransferRequest
 
 	taskID := uuid.NewString()
 	taskName := fmt.Sprintf("文件%s - %d项", map[bool]string{true: "剪切", false: "复制"}[req.Operation == domain.FileManagerOperationMove], len(req.Items))
-	if err := s.tasks.Create(taskID, fileManagerTaskType, taskName); err != nil {
+	if err := s.tasks.CreateContext(parent, taskID, fileManagerTaskType, taskName); err != nil {
 		return nil, err
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"operation": req.Operation, "source_type": req.Source.Type, "source_id": req.Source.ID, "target_type": req.Target.Type, "target_id": req.Target.ID, "target_path": req.TargetPath})
+	_ = s.tasks.UpdateMetadataContext(parent, taskID, map[string]interface{}{"operation": req.Operation, "source_type": req.Source.Type, "source_id": req.Source.ID, "target_type": req.Target.Type, "target_id": req.Target.ID, "target_path": req.TargetPath})
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
 	s.tasks.RegisterCancel(taskID, cancel)
 	go s.runTransfer(ctx, taskID, req)
 	return &domain.FileManagerTransferResponse{TaskID: taskID, Total: len(req.Items)}, nil
@@ -196,27 +201,27 @@ func (s *FileManagerService) StartTransfer(req domain.FileManagerTransferRequest
 
 func (s *FileManagerService) runTransfer(ctx context.Context, taskID string, req domain.FileManagerTransferRequest) {
 	defer s.tasks.RemoveCancel(taskID)
-	_ = s.tasks.UpdateStatus(taskID, "running")
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, "running")
 	total, success, failed := len(req.Items), 0, 0
 	errorsFound := make([]string, 0)
 	for index, item := range req.Items {
-		if ctx.Err() != nil || s.tasks.IsCancelled(taskID) {
+		if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {
 			return
 		}
 		if err := s.transferItem(ctx, req, item); err != nil {
 			failed++
 			errorsFound = append(errorsFound, fmt.Sprintf("%s: %v", item.Name, err))
-			logger.Errorf("FileManagerService[Transfer] task=%s item=%s err=%v", taskID, item.Name, err)
+			logger.WithContext(ctx, "file_transfer").Log(logger.ERROR, "文件传输失败", logger.Fields{"item": item.Name}, err)
 		} else {
 			success++
 		}
-		_ = s.tasks.UpdateProgress(taskID, total, index+1, success, failed)
+		_ = s.tasks.UpdateProgressContext(ctx, taskID, total, index+1, success, failed)
 	}
 	if failed > 0 {
-		_ = s.tasks.SetError(taskID, strings.Join(errorsFound, "; "))
+		_ = s.tasks.SetErrorContext(ctx, taskID, strings.Join(errorsFound, "; "))
 		return
 	}
-	_ = s.tasks.UpdateStatus(taskID, "completed")
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, "completed")
 }
 
 func (s *FileManagerService) transferItem(ctx context.Context, req domain.FileManagerTransferRequest, item domain.FileManagerTransferItem) error {
@@ -435,7 +440,7 @@ func (s *FileManagerService) copyCloudEntryAcrossAccounts(ctx context.Context, i
 			return transferErr
 		})
 		if err != nil {
-			logger.Errorf("FileManagerService[RapidTransfer] source=%d target=%d file=%s raw_error=%v", source.ID, target.ID, item.Name, err)
+			logger.WithContext(ctx, "file_transfer").Log(logger.ERROR, "跨账号秒传失败", logger.Fields{"source_id": source.ID, "target_id": target.ID, "file": item.Name}, err)
 			return errors.New(cloud115RapidTransferMessage(err))
 		}
 		return nil
@@ -471,7 +476,7 @@ func retryCloud115Operation(ctx context.Context, operationName string, operation
 			break
 		}
 		delay := time.Duration(attempt+1) * cloud115RetryBaseDelay
-		logger.Warnf("FileManagerService[Retry] operation=%s attempt=%d/%d error=%v", operationName, attempt+1, cloud115OperationRetryCount, lastErr)
+		logger.WithContext(ctx, "file_transfer").Log(logger.WARN, "文件操作重试", logger.Fields{"operation": operationName, "attempt": attempt + 1, "retry_limit": cloud115OperationRetryCount}, lastErr)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():

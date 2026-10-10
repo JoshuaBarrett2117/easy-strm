@@ -25,11 +25,16 @@ func NewTaskService(taskRedisDAO *dao.TaskRedisDAO) *TaskService {
 
 // Create 创建新任务（默认优先级5）
 func (s *TaskService) Create(taskID string, taskType, taskName string) error {
-	if err := s.taskRedisDAO.Create(taskID, taskType, taskName); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
+	return s.CreateContext(nil, taskID, taskType, taskName)
+}
+
+// CreateContext 创建任务并将入口标识传至 DAO 与任务日志，兼容后台无请求调用。
+func (s *TaskService) CreateContext(ctx context.Context, taskID string, taskType, taskName string) error {
+	if err := s.taskRedisDAO.WithContext(ctx).Create(taskID, taskType, taskName); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
 		return fmt.Errorf("创建任务失败: %v", err)
 	}
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType}, nil)
+	logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType}, nil)
 	return nil
 }
 
@@ -45,7 +50,12 @@ func (s *TaskService) CreateWithPriority(taskID string, taskType, taskName strin
 
 // Get 获取任务状态
 func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
-	task, err := s.taskRedisDAO.Get(taskID)
+	return s.GetContext(nil, taskID)
+}
+
+// GetContext 在入口上下文中读取任务，并返回已脱敏的展示状态。
+func (s *TaskService) GetContext(ctx context.Context, taskID string) (map[string]interface{}, error) {
+	task, err := s.taskRedisDAO.WithContext(ctx).Get(taskID)
 	if err != nil || task == nil {
 		return task, err
 	}
@@ -55,8 +65,13 @@ func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
 
 // UpdateStatus 更新任务状态
 func (s *TaskService) UpdateStatus(taskID, status string) error {
-	if err := s.taskRedisDAO.UpdateStatus(taskID, status); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务状态失败", nil, err)
+	return s.UpdateStatusContext(nil, taskID, status)
+}
+
+// UpdateStatusContext 更新任务状态并保留入口诊断标识。
+func (s *TaskService) UpdateStatusContext(ctx context.Context, taskID, status string) error {
+	if err := s.taskRedisDAO.WithContext(ctx).UpdateStatus(taskID, status); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "更新任务状态失败", nil, err)
 		return fmt.Errorf("更新任务状态失败: %v", err)
 	}
 	return nil
@@ -64,8 +79,13 @@ func (s *TaskService) UpdateStatus(taskID, status string) error {
 
 // UpdateProgress 更新任务进度
 func (s *TaskService) UpdateProgress(taskID string, totalFiles, processedFiles, successFiles, failedFiles int) error {
-	if err := s.taskRedisDAO.UpdateProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务进度失败", nil, err)
+	return s.UpdateProgressContext(nil, taskID, totalFiles, processedFiles, successFiles, failedFiles)
+}
+
+// UpdateProgressContext 持久化进度，失败日志保留请求与任务上下文。
+func (s *TaskService) UpdateProgressContext(ctx context.Context, taskID string, totalFiles, processedFiles, successFiles, failedFiles int) error {
+	if err := s.taskRedisDAO.WithContext(ctx).UpdateProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "更新任务进度失败", nil, err)
 		return fmt.Errorf("更新任务进度失败: %v", err)
 	}
 	return nil
@@ -73,7 +93,12 @@ func (s *TaskService) UpdateProgress(taskID string, totalFiles, processedFiles, 
 
 // UpdateProgressPercent 更新非文件型任务的可信进度百分比。
 func (s *TaskService) UpdateProgressPercent(taskID string, progress int) error {
-	if err := s.taskRedisDAO.UpdateProgressPercent(taskID, progress); err != nil {
+	return s.UpdateProgressPercentContext(nil, taskID, progress)
+}
+
+// UpdateProgressPercentContext 写入非文件型进度并保留入口上下文。
+func (s *TaskService) UpdateProgressPercentContext(ctx context.Context, taskID string, progress int) error {
+	if err := s.taskRedisDAO.WithContext(ctx).UpdateProgressPercent(taskID, progress); err != nil {
 		return fmt.Errorf("更新任务进度失败: %v", err)
 	}
 	return nil
@@ -81,8 +106,13 @@ func (s *TaskService) UpdateProgressPercent(taskID string, progress int) error {
 
 // SetError 设置任务错误信息
 func (s *TaskService) SetError(taskID, errMsg string) error {
-	if err := s.taskRedisDAO.SetError(taskID, errMsg); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "设置任务错误失败", nil, err)
+	return s.SetErrorContext(nil, taskID, errMsg)
+}
+
+// SetErrorContext 保留任务错误写入的入口上下文，不打印原任务错误正文。
+func (s *TaskService) SetErrorContext(ctx context.Context, taskID, errMsg string) error {
+	if err := s.taskRedisDAO.WithContext(ctx).SetError(taskID, errMsg); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "设置任务错误失败", nil, err)
 		return fmt.Errorf("设置任务错误失败: %v", err)
 	}
 	return nil
@@ -90,8 +120,13 @@ func (s *TaskService) SetError(taskID, errMsg string) error {
 
 // UpdateMetadata 更新任务元数据
 func (s *TaskService) UpdateMetadata(taskID string, metadata map[string]interface{}) error {
-	if err := s.taskRedisDAO.UpdateMetadata(taskID, metadata); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务元数据失败", nil, err)
+	return s.UpdateMetadataContext(nil, taskID, metadata)
+}
+
+// UpdateMetadataContext 写入任务元数据，日志只携带上下文与错误而不输出负载。
+func (s *TaskService) UpdateMetadataContext(ctx context.Context, taskID string, metadata map[string]interface{}) error {
+	if err := s.taskRedisDAO.WithContext(ctx).UpdateMetadata(taskID, metadata); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "更新任务元数据失败", nil, err)
 		return fmt.Errorf("更新任务元数据失败: %v", err)
 	}
 	return nil
@@ -198,7 +233,12 @@ func (s *TaskService) Cancel(taskID string) error {
 
 // Resume 恢复已取消或失败的任务
 func (s *TaskService) Resume(taskID string) error {
-	task, err := s.Get(taskID)
+	return s.ResumeContext(nil, taskID)
+}
+
+// ResumeContext 恢复任务状态并保留重试入口的请求与动作关联。
+func (s *TaskService) ResumeContext(ctx context.Context, taskID string) error {
+	task, err := s.GetContext(ctx, taskID)
 	if err != nil {
 		return err
 	}
@@ -213,17 +253,22 @@ func (s *TaskService) Resume(taskID string) error {
 			return fmt.Errorf("清理操作需重新确认并提交，请返回分享管理重试")
 		}
 	}
-	if err := s.taskRedisDAO.Resume(taskID); err != nil {
-		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "恢复任务失败", nil, err)
+	if err := s.taskRedisDAO.WithContext(ctx).Resume(taskID); err != nil {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "恢复任务失败", nil, err)
 		return fmt.Errorf("恢复任务失败: %v", err)
 	}
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "恢复任务成功", nil, nil)
+	logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.INFO, "恢复任务成功", nil, nil)
 	return nil
 }
 
 // IsCancelled 检查任务是否已被取消
 func (s *TaskService) IsCancelled(taskID string) bool {
-	return s.taskRedisDAO.IsCancelled(taskID)
+	return s.IsCancelledContext(nil, taskID)
+}
+
+// IsCancelledContext 检查取消标记，异常日志关联到原任务入口。
+func (s *TaskService) IsCancelledContext(ctx context.Context, taskID string) bool {
+	return s.taskRedisDAO.WithContext(ctx).IsCancelled(taskID)
 }
 
 // AddProcessedFileID 记录已处理的文件ID

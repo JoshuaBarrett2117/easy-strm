@@ -22,6 +22,19 @@ const (
 // TaskRedisDAO 任务状态Redis数据访问层
 type TaskRedisDAO struct {
 	client *redis.Client
+	ctx    context.Context
+}
+
+// WithContext 返回共享客户端但上下文独立的 DAO，不修改其他请求的协作者。
+func (t *TaskRedisDAO) WithContext(ctx context.Context) *TaskRedisDAO {
+	return &TaskRedisDAO{client: t.client, ctx: ctx}
+}
+
+func (t *TaskRedisDAO) context() context.Context {
+	if t.ctx == nil {
+		return context.Background()
+	}
+	return t.ctx
 }
 
 // NewTaskRedisDAO 创建任务Redis DAO实例
@@ -87,7 +100,7 @@ func (t *TaskRedisDAO) CreateWithPriority(taskID string, taskType, taskName stri
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 序列化失败: %v", err)
 	}
 
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskKeyPrefix + taskID
 	if err := t.client.Set(ctx, key, taskJSON, 24*time.Hour).Err(); err != nil {
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 保存失败: %v", err)
@@ -97,13 +110,13 @@ func (t *TaskRedisDAO) CreateWithPriority(taskID string, taskType, taskName stri
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 添加到列表失败: %v", err)
 	}
 
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task_dao").Log(logger.INFO, "创建任务记录成功", logger.Fields{"type": taskType, "priority": priority}, nil)
+	logger.WithContext(logger.WithTaskID(t.context(), taskID), "task_dao").Log(logger.INFO, "创建任务记录成功", logger.Fields{"type": taskType, "priority": priority}, nil)
 	return nil
 }
 
 // Get 获取任务状态
 func (t *TaskRedisDAO) Get(taskID string) (map[string]interface{}, error) {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskKeyPrefix + taskID
 
 	taskJSON, err := t.client.Get(ctx, key).Result()
@@ -226,7 +239,7 @@ func (t *TaskRedisDAO) Cancel(taskID string) error {
 
 // Delete 删除任务
 func (t *TaskRedisDAO) Delete(taskID string) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskKeyPrefix + taskID
 
 	if err := t.client.Del(ctx, key).Err(); err != nil {
@@ -237,13 +250,13 @@ func (t *TaskRedisDAO) Delete(taskID string) error {
 		return fmt.Errorf("TaskRedisDAO[Delete] 从列表移除失败: %v", err)
 	}
 
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task_dao").Log(logger.INFO, "删除任务记录成功", nil, nil)
+	logger.WithContext(logger.WithTaskID(t.context(), taskID), "task_dao").Log(logger.INFO, "删除任务记录成功", nil, nil)
 	return nil
 }
 
 // GetAll 获取所有任务（按创建时间降序）
 func (t *TaskRedisDAO) GetAll() ([]map[string]interface{}, error) {
-	ctx := context.Background()
+	ctx := t.context()
 	taskIDs, err := t.client.LRange(ctx, taskListKey, 0, -1).Result()
 	if err != nil && err != redis.Nil {
 		return nil, fmt.Errorf("TaskRedisDAO[GetAll] 获取列表失败: %v", err)
@@ -289,7 +302,7 @@ func sortTasksByCreateTimeDesc(tasks []map[string]interface{}) {
 
 // save 保存任务到Redis
 func (t *TaskRedisDAO) save(taskID string, task map[string]interface{}) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskKeyPrefix + taskID
 
 	taskJSON, err := json.Marshal(task)
@@ -308,21 +321,21 @@ func (t *TaskRedisDAO) save(taskID string, task map[string]interface{}) error {
 
 // SetCancelFlag 设置任务取消标记
 func (t *TaskRedisDAO) SetCancelFlag(taskID string) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskCancelKeyPrefix + taskID
 	return t.client.Set(ctx, key, "1", 24*time.Hour).Err()
 }
 
 // IsCancelled 检查任务是否已被取消
 func (t *TaskRedisDAO) IsCancelled(taskID string) bool {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskCancelKeyPrefix + taskID
 	val, err := t.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return false
 	}
 	if err != nil {
-		logger.Warnf("TaskRedisDAO[IsCancelled] 检查取消标记失败 %s: %v", taskID, err)
+		logger.WithContext(logger.WithTaskID(t.context(), taskID), "task_dao").Log(logger.WARN, "检查取消标记失败", nil, err)
 		return false
 	}
 	return val == "1"
@@ -330,7 +343,7 @@ func (t *TaskRedisDAO) IsCancelled(taskID string) bool {
 
 // ClearCancelFlag 清除任务取消标记
 func (t *TaskRedisDAO) ClearCancelFlag(taskID string) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskCancelKeyPrefix + taskID
 	return t.client.Del(ctx, key).Err()
 }
@@ -339,14 +352,14 @@ func (t *TaskRedisDAO) ClearCancelFlag(taskID string) error {
 
 // AddProcessedFileID 记录已处理的文件ID到 Redis Set
 func (t *TaskRedisDAO) AddProcessedFileID(taskID string, fileID string) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskProgressKeyPrefix + taskID
 	return t.client.SAdd(ctx, key, fileID).Err()
 }
 
 // IsFileProcessed 检查文件是否已被处理过
 func (t *TaskRedisDAO) IsFileProcessed(taskID string, fileID string) bool {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskProgressKeyPrefix + taskID
 	isMember, err := t.client.SIsMember(ctx, key, fileID).Result()
 	if err != nil {
@@ -358,14 +371,14 @@ func (t *TaskRedisDAO) IsFileProcessed(taskID string, fileID string) bool {
 
 // GetProcessedFileIDs 获取已处理的文件ID集合
 func (t *TaskRedisDAO) GetProcessedFileIDs(taskID string) ([]string, error) {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskProgressKeyPrefix + taskID
 	return t.client.SMembers(ctx, key).Result()
 }
 
 // ClearProgress 清除任务的进度记录
 func (t *TaskRedisDAO) ClearProgress(taskID string) error {
-	ctx := context.Background()
+	ctx := t.context()
 	key := taskProgressKeyPrefix + taskID
 	return t.client.Del(ctx, key).Err()
 }

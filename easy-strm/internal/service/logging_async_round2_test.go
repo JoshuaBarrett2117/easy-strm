@@ -53,7 +53,7 @@ func TestActualAsyncExportHTTPAndScheduledTaskTimeline(t *testing.T) {
 			if err := json.Unmarshal([]byte(line), &entry); err != nil {
 				t.Fatal(err)
 			}
-			if entry.TaskID != id || entry.Module != "share_export" {
+			if entry.TaskID != id {
 				continue
 			}
 			expectedRequest, expectedTrace := "-", "-"
@@ -62,6 +62,9 @@ func TestActualAsyncExportHTTPAndScheduledTaskTimeline(t *testing.T) {
 			}
 			if entry.RequestID != expectedRequest || entry.TraceID != expectedTrace {
 				t.Fatalf("异步上下文丢失: %s", line)
+			}
+			if entry.Module != "share_export" {
+				continue
 			}
 			event, _ := entry.Fields["event"].(string)
 			found[event] = true
@@ -76,4 +79,5 @@ func TestActualAsyncExportHTTPAndScheduledTaskTimeline(t *testing.T) {
 		}
 		t.Logf("origin=%s task=%s real asynchronous export start/file/complete logs reconstructed", origin, id)
 	}
+	t.Logf("validated captured async logs:\n%s", output.String())
 }

@@ -15,6 +15,7 @@ import (
 	"easy-strm/internal/controller"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	pkglogger "easy-strm/internal/pkg/logger"
 	"easy-strm/internal/service"
 )
 
@@ -172,7 +173,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	cronController := controller.NewCronController(cronService, strmService, cloud115Service)
 	logController := controller.NewLogController(systemConfigService)
 	taskController := controller.NewTaskController(taskService)
-	taskController.SetRetryStrmTask(func(id string, task map[string]interface{}) error {
+	taskController.SetRetryStrmTask(func(parent context.Context, id string, task map[string]interface{}) error {
 		metadata, _ := task["metadata"].(map[string]interface{})
 		configID := service.CronInt(metadata, "strm_config_id")
 		share, _ := metadata["share_export"].(bool)
@@ -198,15 +199,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 				return fmt.Errorf("账号不存在")
 			}
 		}
-		if e = taskService.Resume(id); e != nil {
+		if e = taskService.ResumeContext(parent, id); e != nil {
 			return e
 		}
 		go func() {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithCancel(pkglogger.WithTaskID(context.WithoutCancel(parent), id))
 			defer cancel()
 			taskService.RegisterCancel(id, cancel)
 			defer taskService.RemoveCancel(id)
-			if e := taskService.UpdateStatus(id, "running"); e != nil {
+			if e := taskService.UpdateStatusContext(ctx, id, "running"); e != nil {
 				return
 			}
 			var runErr error
@@ -220,13 +221,13 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 			} else {
 				_, runErr = RunFullStrmGenerate(cfg, account, id)
 			}
-			if taskService.IsCancelled(id) {
+			if taskService.IsCancelledContext(ctx, id) {
 				return
 			}
 			if runErr != nil {
-				taskService.SetError(id, runErr.Error())
+				taskService.SetErrorContext(ctx, id, runErr.Error())
 			} else {
-				taskService.UpdateStatus(id, "completed")
+				taskService.UpdateStatusContext(ctx, id, "completed")
 			}
 		}()
 		return nil
@@ -250,8 +251,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	taskController.SetRetryAutoOrganizeTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)
 	})
-	taskController.SetRetryShareSyncTask(func(taskID string, task map[string]interface{}) (string, error) {
-		return shareRecordService.RetryBatchSyncTask(taskID, task)
+	taskController.SetRetryShareSyncTask(func(ctx context.Context, taskID string, task map[string]interface{}) (string, error) {
+		return shareRecordService.RetryBatchSyncTaskContext(ctx, taskID, task)
 	})
 	telegramBotService.SetRetryTask(func(taskID string) error {
 		return watchService.RetryAutoOrganizeTask(taskID)

@@ -31,9 +31,9 @@ func (s *ShareStrmService) updateExportMetadata(ctx context.Context, id string, 
 		for key, value := range metadata {
 			accumulated[key] = value
 		}
-		return s.tasks.UpdateMetadata(id, accumulated)
+		return s.tasks.UpdateMetadataContext(ctx, id, accumulated)
 	}
-	return s.tasks.UpdateMetadata(id, metadata)
+	return s.tasks.UpdateMetadataContext(ctx, id, metadata)
 }
 
 // NewShareStrmScheduledService 复用分享导出和检查点，构造过程不连接数据库或启动任务。
@@ -79,8 +79,21 @@ func shareReconciliationReason(input domain.ShareExportInput, fingerprint string
 }
 
 // Run 只消费可信增量或显式手动全量；缺少基线报错，不自动降级全量。
-func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id string) error {
+func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id string) (runErr error) {
 	ctx = logger.WithTaskID(ctx, id)
+	entry := logger.WithContext(ctx, "share_scheduled")
+	origin := "scheduled"
+	if logger.RequestID(ctx) != "" {
+		origin = "http"
+	}
+	entry.Log(logger.INFO, "分享调度导出开始", logger.Fields{"event": "scheduled_start", "requested_mode": requested, "origin": origin}, nil)
+	defer func() {
+		level := logger.INFO
+		if runErr != nil {
+			level = logger.ERROR
+		}
+		entry.Log(level, "分享调度导出结束", logger.Fields{"event": "scheduled_complete", "requested_mode": requested}, runErr)
+	}()
 	if s == nil || s.store == nil || s.worker == nil || s.worker.exporter == nil || s.worker.exporter.exportDB == nil || id == "" {
 		return fmt.Errorf("分享调度导出未初始化或任务ID为空")
 	}

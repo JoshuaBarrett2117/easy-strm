@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -47,6 +48,19 @@ type shareReconciliationCompletionContext struct{}
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
 func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
 	ctx = logger.WithTaskID(ctx, id)
+	logEntry := logger.WithContext(ctx, "share_export")
+	origin := "scheduled"
+	if logger.RequestID(ctx) != "" {
+		origin = "http"
+	}
+	logEntry.Log(logger.INFO, "分享 STRM 导出开始", logger.Fields{"event": "export_start", "origin": origin}, nil)
+	defer func() {
+		level, message := logger.INFO, "分享 STRM 导出完成"
+		if exportErr != nil {
+			level, message = logger.ERROR, "分享 STRM 导出未完成"
+		}
+		logEntry.Log(level, message, logger.Fields{"event": "export_complete"}, exportErr)
+	}()
 	cfg.DedupeExport = true
 	if selections, ok := s.store.(shareSelectionExportStore); ok {
 		if err := selections.CheckSelectionSchema(ctx); err != nil {
@@ -92,20 +106,6 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			}
 		}
 	}
-	ctx = logger.WithTaskID(ctx, id)
-	logEntry := logger.WithContext(ctx, "share_export")
-	origin := "scheduled"
-	if logger.RequestID(ctx) != "" {
-		origin = "http"
-	}
-	logEntry.Log(logger.INFO, "分享 STRM 导出开始", logger.Fields{"event": "export_start", "origin": origin}, nil)
-	defer func() {
-		level, message := logger.INFO, "分享 STRM 导出完成"
-		if exportErr != nil {
-			level, message = logger.ERROR, "分享 STRM 导出未完成"
-		}
-		logEntry.Log(level, message, logger.Fields{"event": "export_complete"}, exportErr)
-	}()
 	completion, scheduled := ctx.Value(shareReconciliationCompletionContext{}).(func(context.Context) error)
 	var recovery *dao.ShareExportCheckpointDAO
 	var recoveryRevision int64
@@ -157,7 +157,9 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			return nil
 		}
 		pending = 0
-		progressErr := s.tasks.UpdateProgress(id, max(total, processed), processed, processed-failed-skipped, failed)
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		progressErr := s.tasks.UpdateProgressContext(persistCtx, id, max(total, processed), processed, processed-failed-skipped, failed)
 		metadata := map[string]interface{}{"exported_files": written, "written": written, "written_unit": shareStrmWrittenUnit, "skipped_sources": skipped, "skipped_dedupe": skippedDedupe, "skipped_dedupe_unit": shareStrmSkippedDedupeUnit, "output_path": cfg.OutputPath, "errors": sourceErrors, "conflict_policy": shareStrmConflictPolicy, "share_export": true, "export_query": q}
 		if output != nil {
 			metadata["added"] = output.Added
@@ -166,7 +168,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			metadata["conflicts"] = output.Conflicts
 			metadata["exported_files"] = output.Added + output.Updated
 		}
-		return errors.Join(progressErr, s.updateExportMetadata(ctx, id, metadata))
+		return errors.Join(progressErr, s.updateExportMetadata(persistCtx, id, metadata))
 	}
 	defer func() {
 		exportErr = errors.Join(exportErr, flushProgress())

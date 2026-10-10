@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -442,7 +443,7 @@ func TestConfigureStrmCaptureDependenciesWritesAndReadsBack(t *testing.T) {
 	management.httpClient = remote.Client()
 	server := &domain.EmbyServer{ID: 1, Name: "Test", BaseURL: remote.URL, APIKey: "test-key", Enabled: true}
 	metadata := map[string]interface{}{"steps": buildEmbySteps("检测", "读取", "Image Capture", "Library Scope", "核验")}
-	if err := management.configureStrmCaptureDependencies(server, "lib-3", "not-persisted", metadata); err != nil {
+	if err := management.configureStrmCaptureDependencies(context.Background(), server, "lib-3", "not-persisted", metadata); err != nil {
 		t.Fatalf("自动配置失败: %v", err)
 	}
 	if !imageCaptureEnabled.Load() || pluginScope != "lib-1,lib-2,lib-3" || metadata["configuration_verified"] != true {

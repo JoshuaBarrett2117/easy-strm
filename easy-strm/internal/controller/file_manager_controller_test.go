@@ -2,6 +2,7 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,7 +23,7 @@ func (f *fakeFileManagerUseCase) ListLocations() ([]domain.FileManagerLocation, 
 func (f *fakeFileManagerUseCase) Browse(location domain.FileManagerLocationRef, path string) (*domain.FileManagerBrowseResult, error) {
 	return &domain.FileManagerBrowseResult{Path: path, Entries: []domain.FileManagerEntry{}, Total: 0}, nil
 }
-func (f *fakeFileManagerUseCase) StartTransfer(req domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error) {
+func (f *fakeFileManagerUseCase) StartTransferContext(_ context.Context, req domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error) {
 	return &domain.FileManagerTransferResponse{TaskID: "task-1", Total: len(req.Items)}, nil
 }
 func (f *fakeFileManagerUseCase) Delete(domain.FileManagerDeleteRequest) error { return nil }

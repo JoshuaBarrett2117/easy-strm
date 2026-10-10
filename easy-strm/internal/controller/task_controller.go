@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 
 	"easy-strm/internal/domain"
@@ -11,15 +12,15 @@ import (
 )
 
 type TaskController struct {
-	retryStrmTask         func(string, map[string]interface{}) error
+	retryStrmTask         func(context.Context, string, map[string]interface{}) error
 	taskService           *service.TaskService
 	getAllTasks           func() (interface{}, error)
 	retryAutoOrganizeTask func(taskID string) error
-	retryShareSyncTask    func(taskID string, task map[string]interface{}) (string, error)
+	retryShareSyncTask    func(context.Context, string, map[string]interface{}) (string, error)
 }
 
 // SetRetryStrmTask 注入可恢复的 STRM 执行入口。
-func (c *TaskController) SetRetryStrmTask(fn func(string, map[string]interface{}) error) {
+func (c *TaskController) SetRetryStrmTask(fn func(context.Context, string, map[string]interface{}) error) {
 	c.retryStrmTask = fn
 }
 
@@ -38,7 +39,7 @@ func (c *TaskController) SetRetryAutoOrganizeTask(fn func(taskID string) error) 
 }
 
 // SetRetryShareSyncTask 注入分享同步任务的重新派发入口。
-func (c *TaskController) SetRetryShareSyncTask(fn func(string, map[string]interface{}) (string, error)) {
+func (c *TaskController) SetRetryShareSyncTask(fn func(context.Context, string, map[string]interface{}) (string, error)) {
 	c.retryShareSyncTask = fn
 }
 
@@ -143,11 +144,12 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TaskController[Resume] resume task: %s from %s", taskID, ctx.ClientIP())
+	entry := logger.WithContext(logger.WithTaskID(ctx.Request.Context(), taskID), "task_controller")
+	entry.Log(logger.INFO, "恢复任务", nil, nil)
 
-	task, err := c.taskService.Get(taskID)
+	task, err := c.taskService.GetContext(ctx.Request.Context(), taskID)
 	if err != nil {
-		logger.Errorf("TaskController[Resume] failed to load task: %v", err)
+		entry.Log(logger.ERROR, "读取待恢复任务失败", nil, err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取任务失败")
 		return
 	}
@@ -164,7 +166,7 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 		return
 	}
 	if taskType == "strm_generate" && c.retryStrmTask != nil {
-		if err := c.retryStrmTask(taskID, task); err != nil {
+		if err := c.retryStrmTask(ctx.Request.Context(), taskID, task); err != nil {
 			ErrorResp(ctx, 400, err.Error())
 			return
 		}
@@ -173,7 +175,7 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 	}
 	if taskType == "watch_auto_organize" && c.retryAutoOrganizeTask != nil {
 		if err := c.retryAutoOrganizeTask(taskID); err != nil {
-			logger.Errorf("TaskController[Resume] failed to retry auto organize task: %v", err)
+			entry.Log(logger.ERROR, "重试自动整理任务失败", nil, err)
 			ErrorResp(ctx, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -185,7 +187,7 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 		return
 	}
 	if taskType == "share_sync" && c.retryShareSyncTask != nil {
-		newTaskID, err := c.retryShareSyncTask(taskID, task)
+		newTaskID, err := c.retryShareSyncTask(ctx.Request.Context(), taskID, task)
 		if err != nil {
 			ErrorResp(ctx, http.StatusBadRequest, err.Error())
 			return
@@ -194,8 +196,8 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 		return
 	}
 
-	if err := c.taskService.Resume(taskID); err != nil {
-		logger.Errorf("TaskController[Resume] failed to resume task: %v", err)
+	if err := c.taskService.ResumeContext(ctx.Request.Context(), taskID); err != nil {
+		entry.Log(logger.ERROR, "恢复任务失败", nil, err)
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}

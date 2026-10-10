@@ -469,31 +469,33 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 		if err = s.cronTaskDAO.FinishRun(taskID, "skipped", reason); err != nil {
 			return "", err
 		}
-		if err = s.tasks.Create(taskID, cronTaskKind(t.Handler), t.TaskName+"（跳过）"); err != nil {
+		if err = s.tasks.CreateContext(parent, taskID, cronTaskKind(t.Handler), t.TaskName+"（跳过）"); err != nil {
 			return "", err
 		}
-		if err = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": "skipped", "outcome": "skipped", "skip_reason": reason, "blocked_by_task_id": blockedBy, "message": reason}); err != nil {
+		if err = s.tasks.UpdateMetadataContext(parent, taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": "skipped", "outcome": "skipped", "skip_reason": reason, "blocked_by_task_id": blockedBy, "message": reason}); err != nil {
 			return "", err
 		}
-		return taskID, s.tasks.UpdateStatus(taskID, "completed")
+		return taskID, s.tasks.UpdateStatusContext(parent, taskID, "completed")
 	}
 	if err = s.cronTaskDAO.StartRun(id, taskID, trigger, "pending"); err != nil {
 		release()
 		return "", err
 	}
 	kind := cronTaskKind(t.Handler)
-	if err = s.tasks.Create(taskID, kind, t.TaskName); err != nil {
+	if err = s.tasks.CreateContext(parent, taskID, kind, t.TaskName); err != nil {
 		release()
 		_ = s.cronTaskDAO.FinishRun(taskID, "failed", err.Error())
 		return "", err
 	}
 	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
+	entry := logger.WithContext(ctx, "cron")
+	entry.Log(logger.INFO, "调度任务开始", logger.Fields{"event": "cron_start", "trigger": trigger, "handler": t.Handler}, nil)
 	s.tasks.RegisterCancel(taskID, cancel)
-	if e := s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
+	if e := s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
 		cancel()
 		s.tasks.RemoveCancel(taskID)
 		release()
-		_ = s.tasks.SetError(taskID, e.Error())
+		_ = s.tasks.SetErrorContext(context.WithoutCancel(ctx), taskID, e.Error())
 		_ = s.cronTaskDAO.FinishRun(taskID, "failed", e.Error())
 		return taskID, e
 	}
@@ -508,26 +510,27 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 				status = "failed"
 				message = fmt.Sprint(v)
 			}
-			if ctx.Err() != nil || s.tasks.IsCancelled(taskID) {
+			if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {
 				status = "cancelled"
 				message = "任务已取消"
 			}
 			if status == "failed" {
-				_ = s.tasks.SetError(taskID, message)
+				_ = s.tasks.SetErrorContext(context.WithoutCancel(ctx), taskID, message)
 			} else if status == "cancelled" {
-				_ = s.tasks.UpdateStatus(taskID, "cancelled")
+				_ = s.tasks.UpdateStatusContext(context.WithoutCancel(ctx), taskID, "cancelled")
 			} else {
-				_ = s.tasks.UpdateStatus(taskID, "completed")
+				_ = s.tasks.UpdateStatusContext(context.WithoutCancel(ctx), taskID, "completed")
 			}
 			if e := s.cronTaskDAO.FinishRun(taskID, status, message); e != nil {
-				logger.Errorf("保存执行记录失败: %v", e)
+				entry.Log(logger.ERROR, "保存执行记录失败", nil, e)
 			}
 			if e := s.cronTaskDAO.UpdateRunInfo(id, &now, s.GetNextRunTime(id), status, message); e != nil {
-				logger.Errorf("保存调度状态失败: %v", e)
+				entry.Log(logger.ERROR, "保存调度状态失败", nil, e)
 			}
+			entry.Log(logger.INFO, "调度任务结束", logger.Fields{"event": "cron_complete", "status": status}, nil)
 		}()
 
-		if ctx.Err() != nil || s.tasks.IsCancelled(taskID) {
+		if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {
 			return
 		}
 		if e := s.cronTaskDAO.MarkRunStarted(taskID); e != nil {
@@ -535,13 +538,13 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 			message = e.Error()
 			return
 		}
-		if e := s.tasks.UpdateStatus(taskID, "running"); e != nil {
+		if e := s.tasks.UpdateStatusContext(ctx, taskID, "running"); e != nil {
 			status = "failed"
 			message = e.Error()
 			return
 		}
 		_ = s.cronTaskDAO.UpdateRunInfo(id, &now, s.GetNextRunTime(id), "running", "")
-		if s.tasks.IsCancelled(taskID) {
+		if s.tasks.IsCancelledContext(ctx, taskID) {
 			return
 		}
 		var runErr error

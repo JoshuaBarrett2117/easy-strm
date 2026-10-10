@@ -170,7 +170,7 @@ func (s *ShareStrmService) StartExportContext(parent context.Context, q domain.S
 	}
 	id := "share_strm_" + generated.String()
 	parent = logger.WithTaskID(context.WithoutCancel(parent), id)
-	taskID, created, err := s.Coordinator().registerRequest(parent, key, id, func() error { return s.tasks.Create(id, "strm_generate", "分享资料库STRM导出") })
+	taskID, created, err := s.Coordinator().registerRequest(parent, key, id, func() error { return s.tasks.CreateContext(parent, id, "strm_generate", "分享资料库STRM导出") })
 	if err != nil {
 		return "", err
 	}
@@ -185,23 +185,23 @@ func (s *ShareStrmService) StartExportContext(parent context.Context, q domain.S
 		defer cancel()
 		defer func() {
 			if v := recover(); v != nil {
-				_ = s.tasks.SetError(id, fmt.Sprint(v))
+				_ = s.tasks.SetErrorContext(ctx, id, fmt.Sprint(v))
 			}
 		}()
-		if err := s.tasks.UpdateStatus(id, "running"); err != nil {
-			_ = s.tasks.SetError(id, err.Error())
+		if err := s.tasks.UpdateStatusContext(ctx, id, "running"); err != nil {
+			_ = s.tasks.SetErrorContext(ctx, id, err.Error())
 			return
 		}
 		err := s.export(ctx, cfg, q, id)
-		if ctx.Err() != nil || s.tasks.IsCancelled(id) {
-			_ = s.tasks.UpdateStatus(id, "cancelled")
+		if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, id) {
+			_ = s.tasks.UpdateStatusContext(context.WithoutCancel(ctx), id, "cancelled")
 			return
 		}
 		if err != nil {
-			_ = s.tasks.SetError(id, err.Error())
+			_ = s.tasks.SetErrorContext(ctx, id, err.Error())
 			return
 		}
-		_ = s.tasks.UpdateStatus(id, "completed")
+		_ = s.tasks.UpdateStatusContext(ctx, id, "completed")
 	}()
 	return id, nil
 }
@@ -475,7 +475,7 @@ func (s *ShareStrmService) getTransferPickCode(ctx context.Context, key string) 
 	}
 	pick, err := client.Get(ctx, key).Result()
 	if err != nil && err != redis.Nil {
-		logger.Warnf("ShareStrmService[getTransferPickCode] 读取Redis失败: %v", err)
+		logger.WithContext(ctx, "share_playback").Log(logger.WARN, "读取转存缓存失败", nil, err)
 	}
 	return strings.TrimSpace(pick)
 }
@@ -486,7 +486,7 @@ func (s *ShareStrmService) saveTransferPickCode(ctx context.Context, key, pick s
 		return
 	}
 	if err := client.Set(ctx, key, pick, transferPickCodeCacheTTL).Err(); err != nil {
-		logger.Warnf("ShareStrmService[saveTransferPickCode] 保存Redis失败: %v", err)
+		logger.WithContext(ctx, "share_playback").Log(logger.WARN, "保存转存缓存失败", nil, err)
 	}
 }
 
@@ -497,7 +497,7 @@ func (s *ShareStrmService) saveSHA1Cache(ctx context.Context, sha1, pick string)
 		return
 	}
 	if err := client.Set(ctx, sha1CachePrefix+sha1, pick, sha1CacheTTL).Err(); err != nil {
-		logger.Warnf("ShareStrmService[saveSHA1Cache] 保存Redis失败: %v", err)
+		logger.WithContext(ctx, "share_playback").Log(logger.WARN, "保存文件缓存失败", nil, err)
 	}
 }
 

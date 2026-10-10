@@ -16,6 +16,10 @@ func (s *PlaybackRecordService) SetPosterResolver(resolve func(context.Context, 
 }
 
 func (s *PlaybackRecordService) completePoster(record domain.PlaybackRecord) {
+	s.completePosterContext(context.Background(), record)
+}
+
+func (s *PlaybackRecordService) completePosterContext(parent context.Context, record domain.PlaybackRecord) {
 	if record.Poster != "" || s.posterResolver == nil {
 		return
 	}
@@ -40,7 +44,7 @@ func (s *PlaybackRecordService) completePoster(record domain.PlaybackRecord) {
 	s.sessionMu.Unlock()
 	go func() {
 		defer func() { <-s.posterSlots }()
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), 20*time.Second)
 		defer cancel()
 		poster, err := s.posterResolver(ctx, record.Name)
 		if err == nil && poster != "" {
@@ -50,7 +54,7 @@ func (s *PlaybackRecordService) completePoster(record domain.PlaybackRecord) {
 			err = s.store.UpdatePoster(ctx, record.ID, poster)
 		}
 		if err != nil {
-			logger.Warnf("播放记录海报补全失败，record_id=%s: %v", record.ID, err)
+			logger.WithContext(ctx, "playback_poster").Log(logger.WARN, "播放记录海报补全失败", logger.Fields{"record_id": record.ID}, err)
 		}
 	}()
 }

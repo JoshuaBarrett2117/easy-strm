@@ -23,6 +23,7 @@ import (
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 
 	"github.com/google/uuid"
 	"golang.org/x/image/font"
@@ -722,6 +723,11 @@ func validateLibraryInput(input domain.EmbyLibraryInput) error {
 
 // StartRefresh 启动媒体库刷新并在后台跟踪可信进度。
 func (s *EmbyManagementService) StartRefresh(serverID int, libraryID string) (string, error) {
+	return s.StartRefreshContext(context.Background(), serverID, libraryID)
+}
+
+// StartRefreshContext 将手动刷新后台任务关联到入口请求。
+func (s *EmbyManagementService) StartRefreshContext(parent context.Context, serverID int, libraryID string) (string, error) {
 	server, err := s.requireServer(serverID)
 	if err != nil {
 		return "", err
@@ -734,11 +740,11 @@ func (s *EmbyManagementService) StartRefresh(serverID int, libraryID string) (st
 	metadata["current_step"] = "等待执行"
 	metadata["steps"] = buildEmbySteps("校验实例连接", "提交刷新请求", "跟踪 Emby 刷新进度", "确认刷新终态", "写入执行结论")
 	taskID := "emby-" + uuid.NewString()
-	if err = s.tasks.Create(taskID, string(domain.TaskTypeEmbyRefresh), "Emby 媒体库刷新"); err != nil {
+	if err = s.tasks.CreateContext(parent, taskID, string(domain.TaskTypeEmbyRefresh), "Emby 媒体库刷新"); err != nil {
 		return "", err
 	}
-	_ = s.tasks.UpdateMetadata(taskID, metadata)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
 	s.tasks.RegisterCancel(taskID, cancel)
 	go s.runRefreshTask(ctx, taskID, server, libraryID, metadata)
 	return taskID, nil
@@ -777,31 +783,31 @@ func (s *EmbyManagementService) BindMediaSource(serverID, sourceID int, libraryI
 
 func (s *EmbyManagementService) runRefreshTask(ctx context.Context, taskID string, server *domain.EmbyServer, libraryID string, metadata map[string]interface{}) {
 	defer s.tasks.RemoveCancel(taskID)
-	_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusRunning)
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 0, "running", "正在校验 Emby 连接", 2)
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusRunning)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 0, "running", "正在校验 Emby 连接", 2)
 	if _, err := s.CheckServerConnection(server.ID); err != nil {
-		s.failEmbyTask(taskID, metadata, 0, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 0, err)
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 1, "running", "正在提交刷新请求", 5)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 1, "running", "正在提交刷新请求", 5)
 	targetIDs := map[string]struct{}{}
 	failedItems := make([]map[string]interface{}, 0)
 	total := 1
 	if libraryID != "" {
 		targetIDs[libraryID] = struct{}{}
 		if err := s.requestJSON(server, http.MethodPost, "/emby/Items/"+url.PathEscape(libraryID)+"/Refresh", nil, nil, nil); err != nil {
-			s.failEmbyTask(taskID, metadata, 1, err)
+			s.failEmbyTaskContext(ctx, taskID, metadata, 1, err)
 			return
 		}
 	} else {
 		libraries, err := s.ListLibraries(server.ID)
 		if err != nil {
-			s.failEmbyTask(taskID, metadata, 1, fmt.Errorf("读取待刷新媒体库失败: %w", err))
+			s.failEmbyTaskContext(ctx, taskID, metadata, 1, fmt.Errorf("读取待刷新媒体库失败: %w", err))
 			return
 		}
 		total = len(libraries)
 		if total == 0 {
-			s.failEmbyTask(taskID, metadata, 1, fmt.Errorf("当前实例没有可刷新的媒体库"))
+			s.failEmbyTaskContext(ctx, taskID, metadata, 1, fmt.Errorf("当前实例没有可刷新的媒体库"))
 			return
 		}
 		for _, library := range libraries {
@@ -817,13 +823,13 @@ func (s *EmbyManagementService) runRefreshTask(ctx context.Context, taskID strin
 		metadata["failed_items"] = failedItems
 		metadata["submitted_count"] = len(targetIDs)
 		metadata["failed_count"] = len(failedItems)
-		_ = s.tasks.UpdateMetadata(taskID, metadata)
+		_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
 		if len(targetIDs) == 0 {
 			metadata["success_count"] = 0
-			_ = s.tasks.UpdateProgress(taskID, total, total, 0, len(failedItems))
-			s.failEmbyTask(taskID, metadata, 1, fmt.Errorf("全部媒体库刷新请求均提交失败"))
+			_ = s.tasks.UpdateProgressContext(ctx, taskID, total, total, 0, len(failedItems))
+			s.failEmbyTaskContext(ctx, taskID, metadata, 1, fmt.Errorf("全部媒体库刷新请求均提交失败"))
 			metadata["conclusion"] = "全部媒体库刷新请求均提交失败"
-			_ = s.tasks.UpdateMetadata(taskID, metadata)
+			_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
 			return
 		}
 	}
@@ -831,7 +837,7 @@ func (s *EmbyManagementService) runRefreshTask(ctx context.Context, taskID strin
 	if len(failedItems) > 0 {
 		submitMessage = fmt.Sprintf("Emby 已接受 %d 个请求，%d 个提交失败", len(targetIDs), len(failedItems))
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 1, "success", submitMessage, 10)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 1, "success", submitMessage, 10)
 	deadline := time.NewTimer(s.pollTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(s.pollInterval)
@@ -843,25 +849,25 @@ func (s *EmbyManagementService) runRefreshTask(ctx context.Context, taskID strin
 			return
 		case <-deadline.C:
 			metadata["conclusion"] = "Emby 已接受请求，最终结果未能确认"
-			updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "unknown", "等待 Emby 终态超时", 10)
-			_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusUnknown)
+			updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "unknown", "等待 Emby 终态超时", 10)
+			_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusUnknown)
 			return
 		case <-ticker.C:
 			libs, err := s.ListLibraries(server.ID)
 			if err != nil {
 				metadata["last_poll_error"] = err.Error()
-				_ = s.tasks.UpdateMetadata(taskID, metadata)
+				_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
 				continue
 			}
 			progress, running := refreshProgressForTargets(libs, targetIDs)
 			if running {
 				seenRunning = true
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "running", "Emby 正在刷新媒体库", maxInt(10, int(progress)))
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "running", "Emby 正在刷新媒体库", maxInt(10, int(progress)))
 				continue
 			}
 			if seenRunning || allRefreshTargetsIdle(libs, targetIDs) {
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "success", "Emby 刷新已结束", 95)
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 3, "success", "已确认刷新终态", 98)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "success", "Emby 刷新已结束", 95)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 3, "success", "已确认刷新终态", 98)
 				metadata["success_count"] = len(targetIDs)
 				metadata["failed_count"] = len(failedItems)
 				finalStatus := domain.TaskStatusSuccess
@@ -871,9 +877,9 @@ func (s *EmbyManagementService) runRefreshTask(ctx context.Context, taskID strin
 					conclusion = fmt.Sprintf("媒体库刷新部分成功：%d 个成功，%d 个失败", len(targetIDs), len(failedItems))
 				}
 				metadata["conclusion"] = conclusion
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 4, "success", conclusion, 100)
-				_ = s.tasks.UpdateProgress(taskID, total, total, len(targetIDs), len(failedItems))
-				_ = s.tasks.UpdateStatus(taskID, finalStatus)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 4, "success", conclusion, 100)
+				_ = s.tasks.UpdateProgressContext(ctx, taskID, total, total, len(targetIDs), len(failedItems))
+				_ = s.tasks.UpdateStatusContext(ctx, taskID, finalStatus)
 				return
 			}
 		}
@@ -958,6 +964,11 @@ func (s *EmbyManagementService) StartStrmAssistantTask(serverID int, action, lib
 
 // StartStrmAssistantTaskWithOptions 触发神医助手任务，并可在 STRM 截图前自动配置依赖项。
 func (s *EmbyManagementService) StartStrmAssistantTaskWithOptions(serverID int, action, libraryID string, autoConfigure bool) (string, error) {
+	return s.StartStrmAssistantTaskContext(context.Background(), serverID, action, libraryID, autoConfigure)
+}
+
+// StartStrmAssistantTaskContext 保留扫描及截图后台任务的 HTTP 关联标识。
+func (s *EmbyManagementService) StartStrmAssistantTaskContext(parent context.Context, serverID int, action, libraryID string, autoConfigure bool) (string, error) {
 	server, err := s.requireServer(serverID)
 	if err != nil {
 		return "", err
@@ -1011,11 +1022,11 @@ func (s *EmbyManagementService) StartStrmAssistantTaskWithOptions(serverID int, 
 		metadata["steps"] = buildEmbySteps("检测神医助手与媒体库", "读取 Image Capture 与 Library Scope", "启用媒体库 Image Capture", "合并神医助手 Library Scope", "回读并核验配置", "提交 Emby 媒体库扫描", "等待 STRM 扫描完成", "统计 STRM 与现有封面", "提交视频截图任务", "跟踪截图任务进度", "回读封面覆盖结果", "写入执行结论")
 	}
 	taskID := "emby-plugin-" + uuid.NewString()
-	if err = s.tasks.Create(taskID, string(domain.TaskTypeEmbyPlugin), taskName); err != nil {
+	if err = s.tasks.CreateContext(parent, taskID, string(domain.TaskTypeEmbyPlugin), taskName); err != nil {
 		return "", err
 	}
-	_ = s.tasks.UpdateMetadata(taskID, metadata)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
 	s.tasks.RegisterCancel(taskID, cancel)
 	if action == strmScanCaptureAction {
 		go s.runStrmScanCaptureTask(ctx, taskID, server, remoteID, libraryID, autoConfigure, metadata)
@@ -1027,77 +1038,77 @@ func (s *EmbyManagementService) StartStrmAssistantTaskWithOptions(serverID int, 
 
 func (s *EmbyManagementService) runStrmScanCaptureTask(ctx context.Context, taskID string, server *domain.EmbyServer, remoteID, libraryID string, autoConfigure bool, metadata map[string]interface{}) {
 	defer s.tasks.RemoveCancel(taskID)
-	_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusRunning)
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 0, "success", "已检测到神医助手媒体信息提取任务", 3)
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusRunning)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 0, "success", "已检测到神医助手媒体信息提取任务", 3)
 	if autoConfigure {
-		if err := s.configureStrmCaptureDependencies(server, libraryID, taskID, metadata); err != nil {
-			s.failEmbyTask(taskID, metadata, 4, err)
+		if err := s.configureStrmCaptureDependencies(ctx, server, libraryID, taskID, metadata); err != nil {
+			s.failEmbyTaskContext(ctx, taskID, metadata, 4, err)
 			return
 		}
 	} else {
 		for index := 1; index <= 4; index++ {
-			updateEmbyTaskStep(s.tasks, taskID, metadata, index, "skipped", "未请求自动配置，沿用现有 Emby 与神医助手设置", 8)
+			updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, index, "skipped", "未请求自动配置，沿用现有 Emby 与神医助手设置", 8)
 		}
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 5, "running", "正在提交媒体库扫描", 10)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 5, "running", "正在提交媒体库扫描", 10)
 	if err := s.requestJSON(server, http.MethodPost, "/emby/Items/"+url.PathEscape(libraryID)+"/Refresh", nil, nil, nil); err != nil {
-		s.failEmbyTask(taskID, metadata, 5, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 5, err)
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 5, "success", "Emby 已接受媒体库扫描请求", 15)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 5, "success", "Emby 已接受媒体库扫描请求", 15)
 	if unknown, err := s.waitForLibraryIdle(ctx, server, libraryID, func(progress int) {
-		updateEmbyTaskStep(s.tasks, taskID, metadata, 6, "running", "Emby 正在扫描 STRM 文件", maxInt(15, minInt(45, 15+progress*30/100)))
+		updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 6, "running", "Emby 正在扫描 STRM 文件", maxInt(15, minInt(45, 15+progress*30/100)))
 	}); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		s.failEmbyTask(taskID, metadata, 6, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 6, err)
 		return
 	} else if unknown {
-		s.finishUnknownTask(taskID, metadata, 6, "Emby 已接受媒体库扫描，但未能确认扫描终态")
+		s.finishUnknownTask(ctx, taskID, metadata, 6, "Emby 已接受媒体库扫描，但未能确认扫描终态")
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 6, "success", "媒体库扫描已结束", 45)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 6, "success", "媒体库扫描已结束", 45)
 	strmTotal, coveredBefore, err := s.getStrmCoverStats(server, libraryID)
 	if err != nil {
-		s.failEmbyTask(taskID, metadata, 7, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 7, err)
 		return
 	}
 	metadata["strm_count"] = strmTotal
 	metadata["covered_before"] = coveredBefore
-	_ = s.tasks.UpdateMetadata(taskID, metadata)
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 7, "success", fmt.Sprintf("发现 %d 个 STRM 视频，其中 %d 个已有主图", strmTotal, coveredBefore), 50)
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 7, "success", fmt.Sprintf("发现 %d 个 STRM 视频，其中 %d 个已有主图", strmTotal, coveredBefore), 50)
 	if strmTotal == 0 {
 		metadata["covered_after"] = 0
 		metadata["generated_cover_count"] = 0
 		metadata["conclusion"] = "媒体库扫描完成，未发现 STRM 视频"
-		updateEmbyTaskStep(s.tasks, taskID, metadata, 11, "success", metadata["conclusion"].(string), 100)
-		_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusSuccess)
+		updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 11, "success", metadata["conclusion"].(string), 100)
+		_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusSuccess)
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 8, "running", "正在提交神医助手媒体信息与视频截图任务", 52)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 8, "running", "正在提交神医助手媒体信息与视频截图任务", 52)
 	query := url.Values{"LibraryId": {libraryID}}
 	if err = s.requestJSON(server, http.MethodPost, "/emby/ScheduledTasks/Running/"+url.PathEscape(remoteID), query, nil, nil); err != nil {
-		s.failEmbyTask(taskID, metadata, 8, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 8, err)
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 8, "success", "神医助手已接受视频截图任务", 55)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 8, "success", "神医助手已接受视频截图任务", 55)
 	if unknown, err := s.waitForScheduledTask(ctx, server, remoteID, func(progress int) {
-		updateEmbyTaskStep(s.tasks, taskID, metadata, 9, "running", "神医助手正在提取媒体信息并生成缺失封面", maxInt(55, minInt(90, 55+progress*35/100)))
+		updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 9, "running", "神医助手正在提取媒体信息并生成缺失封面", maxInt(55, minInt(90, 55+progress*35/100)))
 	}); err != nil {
 		if ctx.Err() != nil {
 			return
 		}
-		s.failEmbyTask(taskID, metadata, 9, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 9, err)
 		return
 	} else if unknown {
-		s.finishUnknownTask(taskID, metadata, 9, "神医助手已接受视频截图任务，但未能确认最终结果")
+		s.finishUnknownTask(ctx, taskID, metadata, 9, "神医助手已接受视频截图任务，但未能确认最终结果")
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 9, "success", "神医助手视频截图任务已结束", 92)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 9, "success", "神医助手视频截图任务已结束", 92)
 	strmAfter, coveredAfter, err := s.getStrmCoverStats(server, libraryID)
 	if err != nil {
-		s.failEmbyTask(taskID, metadata, 10, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 10, err)
 		return
 	}
 	generated := maxInt(0, coveredAfter-coveredBefore)
@@ -1106,21 +1117,21 @@ func (s *EmbyManagementService) runStrmScanCaptureTask(ctx context.Context, task
 	metadata["generated_cover_count"] = generated
 	missing := maxInt(0, strmAfter-coveredAfter)
 	metadata["missing_cover_count"] = missing
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 10, "success", fmt.Sprintf("回读确认 %d/%d 个 STRM 视频已有主图", coveredAfter, strmAfter), 98)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 10, "success", fmt.Sprintf("回读确认 %d/%d 个 STRM 视频已有主图", coveredAfter, strmAfter), 98)
 	metadata["conclusion"] = fmt.Sprintf("STRM 扫描与截图任务已完成：共 %d 个 STRM 视频，新增 %d 个主图，仍有 %d 个缺少主图", strmAfter, generated, missing)
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 11, "success", metadata["conclusion"].(string), 100)
-	_ = s.tasks.UpdateProgress(taskID, strmAfter, strmAfter, coveredAfter, missing)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 11, "success", metadata["conclusion"].(string), 100)
+	_ = s.tasks.UpdateProgressContext(ctx, taskID, strmAfter, strmAfter, coveredAfter, missing)
 	if missing == 0 {
-		_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusSuccess)
+		_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusSuccess)
 	} else if coveredAfter > 0 {
-		_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusPartialSuccess)
+		_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusPartialSuccess)
 	} else {
-		_ = s.tasks.SetError(taskID, "神医助手任务已结束，但所选媒体库仍没有 STRM 视频主图；请检查 Image Capture、Library Scope 与 ffmpeg 配置")
+		_ = s.tasks.SetErrorContext(ctx, taskID, "神医助手任务已结束，但所选媒体库仍没有 STRM 视频主图；请检查 Image Capture、Library Scope 与 ffmpeg 配置")
 	}
 }
 
-func (s *EmbyManagementService) configureStrmCaptureDependencies(server *domain.EmbyServer, libraryID, taskID string, metadata map[string]interface{}) error {
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 1, "running", "正在读取媒体库与神医助手截图配置", 4)
+func (s *EmbyManagementService) configureStrmCaptureDependencies(ctx context.Context, server *domain.EmbyServer, libraryID, taskID string, metadata map[string]interface{}) error {
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 1, "running", "正在读取媒体库与神医助手截图配置", 4)
 	libraries, err := s.listLibrariesByServer(server)
 	if err != nil {
 		return fmt.Errorf("读取媒体库 Image Capture 配置失败: %w", err)
@@ -1139,9 +1150,9 @@ func (s *EmbyManagementService) configureStrmCaptureDependencies(server *domain.
 	if err != nil {
 		return err
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 1, "success", "已读取 Image Capture 与 Library Scope", 6)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 1, "success", "已读取 Image Capture 与 Library Scope", 6)
 
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "running", "正在启用媒体库 Image Capture", 7)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "running", "正在启用媒体库 Image Capture", 7)
 	libraryChanged, err := enableLibraryImageCapture(library.CollectionType, library.LibraryOptions)
 	if err != nil {
 		return err
@@ -1165,9 +1176,9 @@ func (s *EmbyManagementService) configureStrmCaptureDependencies(server *domain.
 		imageMessage = "媒体库 Image Capture 已处于启用状态"
 	}
 	metadata["image_capture_changed"] = libraryChanged
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "success", imageMessage, 8)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "success", imageMessage, 8)
 
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 3, "running", "正在合并神医助手 Library Scope", 9)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 3, "running", "正在合并神医助手 Library Scope", 9)
 	scopeChanged := mergeStrmAssistantLibraryScope(pluginObject, libraryID)
 	if scopeChanged {
 		if err = s.saveStrmAssistantMediaInfoOptions(server, pageID, pluginObject); err != nil {
@@ -1181,9 +1192,9 @@ func (s *EmbyManagementService) configureStrmCaptureDependencies(server *domain.
 		scopeMessage = "神医助手 Library Scope 已包含所选媒体库，无需修改"
 	}
 	metadata["library_scope_changed"] = scopeChanged
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 3, "success", scopeMessage, 10)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 3, "success", scopeMessage, 10)
 
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 4, "running", "正在回读并核验配置", 11)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 4, "running", "正在回读并核验配置", 11)
 	verifiedLibraries, err := s.listLibrariesByServer(server)
 	if err != nil {
 		return fmt.Errorf("回读媒体库配置失败: %w", err)
@@ -1206,7 +1217,7 @@ func (s *EmbyManagementService) configureStrmCaptureDependencies(server *domain.
 		return fmt.Errorf("回读核验失败：神医助手 Library Scope 未包含所选媒体库")
 	}
 	metadata["configuration_verified"] = true
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 4, "success", "Image Capture 与 Library Scope 已回读确认生效", 12)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 4, "success", "Image Capture 与 Library Scope 已回读确认生效", 12)
 	return nil
 }
 
@@ -1369,17 +1380,17 @@ func containsString(items []string, target string) bool {
 
 func (s *EmbyManagementService) runPluginTask(ctx context.Context, taskID string, server *domain.EmbyServer, remoteID, libraryID string, metadata map[string]interface{}) {
 	defer s.tasks.RemoveCancel(taskID)
-	_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusRunning)
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 0, "success", "已检测到神医助手计划任务", 5)
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusRunning)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 0, "success", "已检测到神医助手计划任务", 5)
 	query := url.Values{}
 	if libraryID != "" {
 		query.Set("LibraryId", libraryID)
 	}
 	if err := s.requestJSON(server, http.MethodPost, "/emby/ScheduledTasks/Running/"+url.PathEscape(remoteID), query, nil, nil); err != nil {
-		s.failEmbyTask(taskID, metadata, 1, err)
+		s.failEmbyTaskContext(ctx, taskID, metadata, 1, err)
 		return
 	}
-	updateEmbyTaskStep(s.tasks, taskID, metadata, 1, "success", "任务已提交", 10)
+	updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 1, "success", "任务已提交", 10)
 	deadline := time.NewTimer(s.pollTimeout)
 	defer deadline.Stop()
 	ticker := time.NewTicker(s.pollInterval)
@@ -1392,8 +1403,8 @@ func (s *EmbyManagementService) runPluginTask(ctx context.Context, taskID string
 			return
 		case <-deadline.C:
 			metadata["conclusion"] = "Emby 已接受请求，最终结果未能确认"
-			_ = s.tasks.UpdateMetadata(taskID, metadata)
-			_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusUnknown)
+			_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
+			_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusUnknown)
 			return
 		case <-ticker.C:
 			var scheduled []map[string]interface{}
@@ -1409,7 +1420,7 @@ func (s *EmbyManagementService) runPluginTask(ctx context.Context, taskID string
 			if state == "running" {
 				seenRunning = true
 				idlePolls = 0
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "running", "神医助手正在执行", maxInt(10, progress))
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "running", "神医助手正在执行", maxInt(10, progress))
 				continue
 			}
 			idlePolls++
@@ -1421,14 +1432,14 @@ func (s *EmbyManagementService) runPluginTask(ctx context.Context, taskID string
 					if errorMessage == "" {
 						errorMessage = "神医助手任务执行失败"
 					}
-					s.failEmbyTask(taskID, metadata, 3, fmt.Errorf("%s", errorMessage))
+					s.failEmbyTaskContext(ctx, taskID, metadata, 3, fmt.Errorf("%s", errorMessage))
 					return
 				}
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 2, "success", "计划任务执行结束", 95)
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 3, "success", "已取得 Emby 执行结论", 98)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 2, "success", "计划任务执行结束", 95)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 3, "success", "已取得 Emby 执行结论", 98)
 				metadata["conclusion"] = "神医助手任务执行成功"
-				updateEmbyTaskStep(s.tasks, taskID, metadata, 4, "success", "执行成功", 100)
-				_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusSuccess)
+				updateEmbyTaskStepContext(ctx, s.tasks, taskID, metadata, 4, "success", "执行成功", 100)
+				_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusSuccess)
 				return
 			}
 		}
@@ -1568,7 +1579,7 @@ func (s *EmbyManagementService) getStrmCoverStats(server *domain.EmbyServer, lib
 	return totalSTRM, covered, nil
 }
 
-func (s *EmbyManagementService) finishUnknownTask(taskID string, metadata map[string]interface{}, step int, conclusion string) {
+func (s *EmbyManagementService) finishUnknownTask(ctx context.Context, taskID string, metadata map[string]interface{}, step int, conclusion string) {
 	metadata["conclusion"] = conclusion
 	steps, _ := metadata["steps"].([]map[string]interface{})
 	if step >= 0 && step < len(steps) {
@@ -1576,8 +1587,8 @@ func (s *EmbyManagementService) finishUnknownTask(taskID string, metadata map[st
 		steps[step]["message"] = conclusion
 	}
 	metadata["current_step"] = conclusion
-	_ = s.tasks.UpdateMetadata(taskID, metadata)
-	_ = s.tasks.UpdateStatus(taskID, domain.TaskStatusUnknown)
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, domain.TaskStatusUnknown)
 }
 
 func findStrmTask(tasks []map[string]interface{}, action string) (string, string) {
@@ -1925,6 +1936,13 @@ func (s *EmbyManagementService) runShortTask(taskType domain.TaskType, taskName 
 }
 
 func (s *EmbyManagementService) failEmbyTask(taskID string, metadata map[string]interface{}, step int, err error) {
+	s.failEmbyTaskContext(context.Background(), taskID, metadata, step, err)
+}
+
+func (s *EmbyManagementService) failEmbyTaskContext(ctx context.Context, taskID string, metadata map[string]interface{}, step int, err error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	logger.WithContext(logger.WithTaskID(ctx, taskID), "emby_task").Log(logger.ERROR, "Emby 后台任务失败", logger.Fields{"step": step}, err)
 	metadata["conclusion"] = "执行失败"
 	metadata["current_step"] = err.Error()
 	steps, _ := metadata["steps"].([]map[string]interface{})
@@ -1932,8 +1950,8 @@ func (s *EmbyManagementService) failEmbyTask(taskID string, metadata map[string]
 		steps[step]["status"] = "failed"
 		steps[step]["message"] = err.Error()
 	}
-	_ = s.tasks.UpdateMetadata(taskID, metadata)
-	_ = s.tasks.SetError(taskID, err.Error())
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, metadata)
+	_ = s.tasks.SetErrorContext(ctx, taskID, err.Error())
 }
 
 func (s *EmbyManagementService) requireServer(id int) (*domain.EmbyServer, error) {
@@ -2012,14 +2030,18 @@ func buildEmbySteps(names ...string) []map[string]interface{} {
 }
 
 func updateEmbyTaskStep(tasks *TaskService, taskID string, metadata map[string]interface{}, index int, status, message string, progress int) {
+	updateEmbyTaskStepContext(context.Background(), tasks, taskID, metadata, index, status, message, progress)
+}
+
+func updateEmbyTaskStepContext(ctx context.Context, tasks *TaskService, taskID string, metadata map[string]interface{}, index int, status, message string, progress int) {
 	steps, _ := metadata["steps"].([]map[string]interface{})
 	if index >= 0 && index < len(steps) {
 		steps[index]["status"] = status
 		steps[index]["message"] = message
 	}
 	metadata["current_step"] = message
-	_ = tasks.UpdateMetadata(taskID, metadata)
-	_ = tasks.UpdateProgressPercent(taskID, progress)
+	_ = tasks.UpdateMetadataContext(ctx, taskID, metadata)
+	_ = tasks.UpdateProgressPercentContext(ctx, taskID, progress)
 }
 
 func numberToInt(value interface{}) int {

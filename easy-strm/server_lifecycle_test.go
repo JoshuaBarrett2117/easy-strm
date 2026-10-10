@@ -30,4 +30,5 @@ func TestActualServerLifecycleLogsUseAbsentRequestMarker(t *testing.T) {
 	if strings.Contains(output.String(), "lifecycle-secret") {
 		t.Fatal("生命周期错误泄漏")
 	}
+	t.Logf("validated captured lifecycle logs:\n%s", output.String())
 }

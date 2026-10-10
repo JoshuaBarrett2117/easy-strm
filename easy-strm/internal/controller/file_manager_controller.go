@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 
@@ -13,7 +14,7 @@ import (
 type fileManagerUseCase interface {
 	ListLocations() ([]domain.FileManagerLocation, error)
 	Browse(location domain.FileManagerLocationRef, path string) (*domain.FileManagerBrowseResult, error)
-	StartTransfer(req domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error)
+	StartTransferContext(context.Context, domain.FileManagerTransferRequest) (*domain.FileManagerTransferResponse, error)
 	Delete(req domain.FileManagerDeleteRequest) error
 }
 
@@ -60,7 +61,7 @@ func (c *FileManagerController) Transfer(ctx *gin.Context) {
 		ErrorResp(ctx, http.StatusBadRequest, "请求参数无效: "+err.Error())
 		return
 	}
-	result, err := c.service.StartTransfer(req)
+	result, err := c.service.StartTransferContext(ctx.Request.Context(), req)
 	if err != nil {
 		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return

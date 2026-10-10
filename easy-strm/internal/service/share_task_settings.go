@@ -150,12 +150,14 @@ func newShareTaskContext(parent context.Context, minutes int) (context.Context, 
 	return context.WithTimeout(parent, time.Duration(minutes)*time.Minute)
 }
 
-func (s *ShareRecordService) finishShareTaskContext(taskID string, err error, minutes int) {
+func (s *ShareRecordService) finishShareTaskContext(ctx context.Context, taskID string, err error, minutes int) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
 	if errors.Is(err, context.Canceled) {
-		_ = s.tasks.UpdateStatus(taskID, "cancelled")
+		_ = s.tasks.UpdateStatusContext(ctx, taskID, "cancelled")
 		return
 	}
-	_ = s.tasks.SetError(taskID, fmt.Sprintf("分享识别任务达到配置的总时限（%d分钟），已保存处理结果；可调整为无限制后重新发起", minutes))
+	_ = s.tasks.SetErrorContext(ctx, taskID, fmt.Sprintf("分享识别任务达到配置的总时限（%d分钟），已保存处理结果；可调整为无限制后重新发起", minutes))
 }
 
 // shareTaskSettingsContext 保留提交时的配置，运行中的单元不重新读取设置。

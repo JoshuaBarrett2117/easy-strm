@@ -60,8 +60,10 @@ func newFakeFileManagerTasks() *fakeFileManagerTasks {
 	return &fakeFileManagerTasks{done: make(chan struct{})}
 }
 
-func (f *fakeFileManagerTasks) Create(_, _, _ string) error { return nil }
-func (f *fakeFileManagerTasks) UpdateStatus(_, status string) error {
+func (f *fakeFileManagerTasks) CreateContext(context.Context, string, string, string) error {
+	return nil
+}
+func (f *fakeFileManagerTasks) UpdateStatusContext(_ context.Context, _ string, status string) error {
 	f.mu.Lock()
 	f.status = status
 	f.mu.Unlock()
@@ -70,23 +72,25 @@ func (f *fakeFileManagerTasks) UpdateStatus(_, status string) error {
 	}
 	return nil
 }
-func (f *fakeFileManagerTasks) UpdateProgress(_ string, _, processed, _, _ int) error {
+func (f *fakeFileManagerTasks) UpdateProgressContext(_ context.Context, _ string, _, processed, _, _ int) error {
 	f.mu.Lock()
 	f.progress = processed
 	f.mu.Unlock()
 	return nil
 }
-func (f *fakeFileManagerTasks) UpdateMetadata(string, map[string]interface{}) error { return nil }
-func (f *fakeFileManagerTasks) SetError(_ string, _ string) error {
+func (f *fakeFileManagerTasks) UpdateMetadataContext(context.Context, string, map[string]interface{}) error {
+	return nil
+}
+func (f *fakeFileManagerTasks) SetErrorContext(context.Context, string, string) error {
 	f.mu.Lock()
 	f.status = "failed"
 	f.mu.Unlock()
 	f.once.Do(func() { close(f.done) })
 	return nil
 }
-func (f *fakeFileManagerTasks) IsCancelled(string) bool                   { return false }
-func (f *fakeFileManagerTasks) RegisterCancel(string, context.CancelFunc) {}
-func (f *fakeFileManagerTasks) RemoveCancel(string)                       {}
+func (f *fakeFileManagerTasks) IsCancelledContext(context.Context, string) bool { return false }
+func (f *fakeFileManagerTasks) RegisterCancel(string, context.CancelFunc)       {}
+func (f *fakeFileManagerTasks) RemoveCancel(string)                             {}
 
 type fakeFileManagerCloudClient struct {
 	mu             sync.Mutex

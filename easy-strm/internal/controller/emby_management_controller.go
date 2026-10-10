@@ -374,7 +374,7 @@ func (c *EmbyManagementController) RefreshLibrary(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	taskID, err := c.service.StartRefresh(id, ctx.Param("library_id"))
+	taskID, err := c.service.StartRefreshContext(ctx.Request.Context(), id, ctx.Param("library_id"))
 	if err != nil {
 		ErrorResp(ctx, 400, err.Error())
 		return
@@ -388,7 +388,7 @@ func (c *EmbyManagementController) RefreshAllLibraries(ctx *gin.Context) {
 	if !ok {
 		return
 	}
-	taskID, err := c.service.StartRefresh(id, "")
+	taskID, err := c.service.StartRefreshContext(ctx.Request.Context(), id, "")
 	if err != nil {
 		ErrorResp(ctx, 400, err.Error())
 		return
@@ -507,7 +507,7 @@ func (c *EmbyManagementController) RunPluginTask(ctx *gin.Context) {
 		ErrorResp(ctx, 400, "请确认自动启用 Image Capture 并更新神医助手 Library Scope")
 		return
 	}
-	taskID, err := c.service.StartStrmAssistantTaskWithOptions(id, req.Action, req.LibraryID, req.AutoConfigure)
+	taskID, err := c.service.StartStrmAssistantTaskContext(ctx.Request.Context(), id, req.Action, req.LibraryID, req.AutoConfigure)
 	if err != nil {
 		ErrorResp(ctx, 400, err.Error())
 		return

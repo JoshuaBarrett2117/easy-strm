@@ -78,6 +78,7 @@ func TestHTTPConcurrentRequestIDsAndThreeGoroutines(t *testing.T) {
 	}
 	workers := map[string]int{}
 	sequences := map[string]map[uint64]bool{}
+	lastSequence := map[string]uint64{}
 	for _, line := range strings.Split(strings.TrimSpace(output.String()), "\n") {
 		var entry struct {
 			RequestID string `json:"request_id"`
@@ -98,6 +99,10 @@ func TestHTTPConcurrentRequestIDsAndThreeGoroutines(t *testing.T) {
 			t.Fatalf("请求内 seq 重复: %s", line)
 		}
 		sequences[entry.RequestID][entry.Seq] = true
+		if entry.Seq <= lastSequence[entry.RequestID] {
+			t.Fatalf("请求内输出 seq 非单调: %s", line)
+		}
+		lastSequence[entry.RequestID] = entry.Seq
 		if entry.Module == "http_worker" {
 			workers[entry.RequestID]++
 		}
@@ -111,6 +116,7 @@ func TestHTTPConcurrentRequestIDsAndThreeGoroutines(t *testing.T) {
 		t.Fatal("递归脱敏有泄漏")
 	}
 	t.Logf("%d concurrent HTTP requests, 3 captured worker logs each, unique UUIDv7 and seq, recursive secrets zero hits", count)
+	t.Logf("validated captured HTTP/worker logs:\n%s", output.String())
 }
 
 func TestHTTPUpstreamRequestAndTraceparentReuse(t *testing.T) {

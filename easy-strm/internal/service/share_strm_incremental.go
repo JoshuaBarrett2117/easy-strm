@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 type shareIncrementalAttemptContext struct{}
@@ -162,8 +163,10 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 		if s.exporter.tasks == nil {
 			return nil
 		}
-		progressErr := s.exporter.tasks.UpdateProgress(id, processed, processed, processed-len(failures), len(failures))
-		metadataErr := s.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts, "exported_files": written, "written": written, "written_unit": shareStrmWrittenUnit, "skipped_dedupe": skippedDedupe, "skipped_dedupe_unit": shareStrmSkippedDedupeUnit, "conflict_policy": shareStrmConflictPolicy})
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		progressErr := s.exporter.tasks.UpdateProgressContext(persistCtx, id, processed, processed, processed-len(failures), len(failures))
+		metadataErr := s.exporter.updateExportMetadata(persistCtx, id, map[string]interface{}{"share_export": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts, "exported_files": written, "written": written, "written_unit": shareStrmWrittenUnit, "skipped_dedupe": skippedDedupe, "skipped_dedupe_unit": shareStrmSkippedDedupeUnit, "conflict_policy": shareStrmConflictPolicy})
 		return errors.Join(progressErr, metadataErr)
 	}
 	defer func() { runErr = errors.Join(runErr, persist()) }()

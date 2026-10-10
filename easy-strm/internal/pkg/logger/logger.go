@@ -110,14 +110,16 @@ func (entry *Logger) write(level Level, message string, fields Fields, errs []er
 	entryRecord := record{
 		Timestamp: time.Now().Format(TimestampLayout), Level: [...]string{"DEBUG", "INFO", "WARN", "ERROR"}[level],
 		RequestID: contextLabel(RequestID(entry.ctx)), TaskID: contextLabel(TaskID(entry.ctx)),
-		TraceID: contextLabel(TraceID(entry.ctx)), Sequence: nextSequence(entry.ctx),
-		Module: sanitizeText(entry.module), Message: sanitizeText(message), Fields: sanitizeValue(fields), ErrorChain: chain,
+		TraceID: contextLabel(TraceID(entry.ctx)),
+		Module:  sanitizeText(entry.module), Message: sanitizeText(message), Fields: sanitizeValue(fields), ErrorChain: chain,
 	}
 	state.Lock()
 	defer state.Unlock()
 	if level < state.level || state.outputs[level] == nil {
 		return
 	}
+	entryRecord.Timestamp = time.Now().Format(TimestampLayout)
+	entryRecord.Sequence = nextSequence(entry.ctx)
 	var line []byte
 	if state.format == "json" {
 		line, _ = json.Marshal(entryRecord)

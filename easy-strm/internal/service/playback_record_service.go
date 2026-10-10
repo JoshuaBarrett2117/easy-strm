@@ -170,7 +170,7 @@ func (s *PlaybackRecordService) List(ctx context.Context, offset, limit int) ([]
 	geoCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	for i := range records {
-		s.completePoster(records[i])
+		s.completePosterContext(ctx, records[i])
 		records[i].Location = s.location(geoCtx, records[i].IP)
 	}
 	return records, total, nil

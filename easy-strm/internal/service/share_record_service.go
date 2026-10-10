@@ -421,7 +421,7 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 	ctx = context.WithValue(ctx, shareWorkScopeKey{}, m.ShareID)
 	r, e := s.tmdb.IdentifyShareFile(ctx, m.FileName, m.MetadataSource, m.MediaType)
 	if e != nil {
-		logger.Errorf("[ShareIdentify] 元数据识别异常 | file=%q | source=%s | error=%v", m.FileName, m.MetadataSource, e)
+		logger.WithContext(ctx, "share_identify").Log(logger.ERROR, "元数据识别异常", logger.Fields{"file": m.FileName, "metadata_source": m.MetadataSource}, e)
 		return false, s.dao.RecordIdentifyError(ctx, m, e.Error())
 	}
 	// 作品识别内部按作品补全详情；失败结果不能进入详情补全。
@@ -440,7 +440,7 @@ func (s *ShareRecordService) identifyOne(ctx context.Context, m domain.ShareMedi
 		r.SeasonNumber = episodes[0].SeasonNumber
 		r.EpisodeNumber = episodes[0].EpisodeNumber
 	}
-	logger.Debugf("[ShareIdentify] 元数据识别结果 | file=%q | success=%v | media_type=%s | tmdb_id=%d | title=%q | year=%d | episodes=%d", m.FileName, r.Success, r.MediaType, r.TmdbID, r.Title, r.Year, len(episodes))
+	logger.WithContext(ctx, "share_identify").Log(logger.DEBUG, "元数据识别结果", logger.Fields{"file": m.FileName, "success": r.Success, "media_type": r.MediaType, "tmdb_id": r.TmdbID, "title": r.Title, "year": r.Year, "episodes": len(episodes)}, nil)
 	return true, s.dao.Identify(ctx, m, "identified", r, "", episodes...)
 }
 
@@ -571,7 +571,7 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 	if len(recordIDs) == 1 {
 		title = "同步分享文件"
 	}
-	id, created, err := s.Coordinator().registerRequest(ctx, key, taskID, func() error { return s.tasks.Create(taskID, "share_sync", title) })
+	id, created, err := s.Coordinator().registerRequest(ctx, key, taskID, func() error { return s.tasks.CreateContext(ctx, taskID, "share_sync", title) })
 	if err != nil {
 		return "", err
 	}
@@ -579,14 +579,14 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 		return id, nil
 	}
 	batchCtx := context.WithValue(s.Coordinator().batchContext(logger.WithTaskID(context.WithoutCancel(ctx), taskID), taskID), shareTaskSettingsContext{}, settings)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"record_ids": recordIDs, "phase": "准备同步"})
+	_ = s.tasks.UpdateMetadataContext(batchCtx, taskID, map[string]interface{}{"record_ids": recordIDs, "phase": "准备同步"})
 	go func() {
 		defer s.Coordinator().finishRequest(key, taskID)
 		taskCtx, cancel := newShareTaskContext(batchCtx, settings.TimeoutMinutes)
 		defer cancel()
 		defer s.tasks.RemoveCancel(taskID)
 		s.tasks.RegisterCancel(taskID, cancel)
-		_ = s.tasks.UpdateStatus(taskID, "running")
+		_ = s.tasks.UpdateStatusContext(taskCtx, taskID, "running")
 		success, failed, files, skipped := 0, 0, 0, 0
 		syncedRecordIDs := make([]int, 0, len(recordIDs))
 		processedRecordIDs := make([]int, 0, len(recordIDs))
@@ -609,7 +609,7 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 			go func() {
 				defer wg.Done()
 				for id := range jobs {
-					if taskCtx.Err() != nil || s.tasks.IsCancelled(taskID) {
+					if taskCtx.Err() != nil || s.tasks.IsCancelledContext(taskCtx, taskID) {
 						continue
 					}
 					count, masked, err := s.SyncShareFiles(taskCtx, id)
@@ -635,16 +635,16 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 			processed++
 			recordID := result.id
 			processedRecordIDs = append(processedRecordIDs, recordID)
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": processed, "total_shares": len(recordIDs), "worker_count": workers})
+			_ = s.tasks.UpdateMetadataContext(taskCtx, taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": processed, "total_shares": len(recordIDs), "worker_count": workers})
 			if len(recordIDs) == 1 {
-				_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"share_id": recordID, "file_count": result.count, "masked_directories": result.masked})
+				_ = s.tasks.UpdateMetadataContext(taskCtx, taskID, map[string]interface{}{"share_id": recordID, "file_count": result.count, "masked_directories": result.masked})
 			}
 			if errors.Is(result.err, ErrShareUnitSkipped) || errors.Is(result.err, sql.ErrNoRows) {
 				skipped++
 			} else if result.err != nil {
-				logger.Errorf("[ShareSync] task=%s share=%d error=%v", taskID, recordID, result.err)
+				logger.WithContext(taskCtx, "share_sync").Log(logger.ERROR, "分享同步失败", logger.Fields{"share_id": recordID}, result.err)
 				if len(recordIDs) == 1 {
-					_ = s.tasks.SetError(taskID, result.err.Error())
+					_ = s.tasks.SetErrorContext(taskCtx, taskID, result.err.Error())
 					return
 				}
 				failed++
@@ -653,26 +653,31 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 				files += result.count
 				syncedRecordIDs = append(syncedRecordIDs, recordID)
 			}
-			_ = s.tasks.UpdateProgress(taskID, len(recordIDs), processed, success, failed)
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": processed, "total_shares": len(recordIDs), "worker_count": workers, "record_ids": recordIDs, "processed_share_ids": processedRecordIDs, "synced_share_ids": syncedRecordIDs})
+			_ = s.tasks.UpdateProgressContext(taskCtx, taskID, len(recordIDs), processed, success, failed)
+			_ = s.tasks.UpdateMetadataContext(taskCtx, taskID, map[string]interface{}{"phase": "同步分享文件", "current_share_id": recordID, "current_index": processed, "total_shares": len(recordIDs), "worker_count": workers, "record_ids": recordIDs, "processed_share_ids": processedRecordIDs, "synced_share_ids": syncedRecordIDs})
 		}
 		if taskCtx.Err() != nil {
-			s.finishShareTaskContext(taskID, taskCtx.Err(), settings.TimeoutMinutes)
+			s.finishShareTaskContext(taskCtx, taskID, taskCtx.Err(), settings.TimeoutMinutes)
 			return
 		}
 		sort.Ints(syncedRecordIDs)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "同步完成", "total_shares": len(recordIDs), "synced_shares": success, "synced_share_ids": syncedRecordIDs, "failed_shares": failed, "skipped": skipped, "file_count": files})
+		_ = s.tasks.UpdateMetadataContext(taskCtx, taskID, map[string]interface{}{"phase": "同步完成", "total_shares": len(recordIDs), "synced_shares": success, "synced_share_ids": syncedRecordIDs, "failed_shares": failed, "skipped": skipped, "file_count": files})
 		if failed > 0 {
-			_ = s.tasks.SetError(taskID, fmt.Sprintf("同步完成，但有 %d 个分享失败", failed))
+			_ = s.tasks.SetErrorContext(taskCtx, taskID, fmt.Sprintf("同步完成，但有 %d 个分享失败", failed))
 			return
 		}
-		_ = s.tasks.UpdateStatus(taskID, "completed")
+		_ = s.tasks.UpdateStatusContext(taskCtx, taskID, "completed")
 	}()
 	return taskID, nil
 }
 
 // RetryBatchSyncTask 从任务元数据恢复分享同步。服务重启后原协程已不存在，因此重新创建一个可追踪任务执行。
 func (s *ShareRecordService) RetryBatchSyncTask(taskID string, task map[string]interface{}) (string, error) {
+	return s.RetryBatchSyncTaskContext(context.Background(), taskID, task)
+}
+
+// RetryBatchSyncTaskContext 重新派发同步任务时保留 HTTP 入口标识，仍只继续未完成分享。
+func (s *ShareRecordService) RetryBatchSyncTaskContext(ctx context.Context, taskID string, task map[string]interface{}) (string, error) {
 	metadata, _ := task["metadata"].(map[string]interface{})
 	if metadata == nil {
 		return "", fmt.Errorf("任务缺少分享同步参数")
@@ -680,7 +685,7 @@ func (s *ShareRecordService) RetryBatchSyncTask(taskID string, task map[string]i
 	idsRaw, ok := metadata["record_ids"].([]interface{})
 	if !ok {
 		if ids, ok2 := metadata["record_ids"].([]int); ok2 {
-			return s.StartBatchSync(context.Background(), ids)
+			return s.StartBatchSync(ctx, ids)
 		}
 		return "", fmt.Errorf("任务缺少分享ID，无法继续")
 	}
@@ -716,7 +721,7 @@ func (s *ShareRecordService) RetryBatchSyncTask(taskID string, task map[string]i
 	if len(remaining) == 0 {
 		return "", fmt.Errorf("任务中的分享均已处理，无需继续")
 	}
-	return s.StartBatchSync(context.Background(), remaining)
+	return s.StartBatchSync(ctx, remaining)
 }
 
 // StartBatchIdentify 创建后台识别任务并立即返回任务 ID。
@@ -747,7 +752,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 	onlyFailed := len(pendingOnly) > 1 && pendingOnly[1]
 	key := fmt.Sprintf("identify:%v:%v:%t:%t:%t", ids, recordIDs, retry, onlyPending, onlyFailed)
 	taskID := fmt.Sprintf("share_identify_%d", time.Now().UnixNano())
-	id, created, err := s.Coordinator().registerRequest(ctx, key, taskID, func() error { return s.tasks.Create(taskID, "share_identify", "分享媒体批量识别") })
+	id, created, err := s.Coordinator().registerRequest(ctx, key, taskID, func() error { return s.tasks.CreateContext(ctx, taskID, "share_identify", "分享媒体批量识别") })
 	if err != nil {
 		return "", err
 	}
@@ -755,7 +760,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 		return id, nil
 	}
 	batchCtx := context.WithValue(s.Coordinator().batchContext(logger.WithTaskID(context.WithoutCancel(ctx), taskID), taskID), shareTaskSettingsContext{}, settings)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 	go func() {
 		defer s.Coordinator().finishRequest(key, taskID)
 		s.runBatchIdentify(batchCtx, taskID, ids, retry, recordIDs, pendingOnly...)
@@ -764,6 +769,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 }
 
 func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string, ids []int, retry bool, recordIDs []int, pendingOnly ...bool) {
+	ctx = logger.WithTaskID(ctx, taskID)
 	onlyPending := len(pendingOnly) > 0 && pendingOnly[0]
 	onlyFailed := len(pendingOnly) > 1 && pendingOnly[1]
 	if _, ok := ctx.Value(shareEpochContext{}).(map[int]uint64); !ok {
@@ -771,7 +777,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	}
 	settings, settingsErr := s.unitSettings(ctx)
 	if settingsErr != nil {
-		_ = s.tasks.SetError(taskID, settingsErr.Error())
+		_ = s.tasks.SetErrorContext(ctx, taskID, settingsErr.Error())
 		return
 	}
 	ctx, cancel := newShareTaskContext(ctx, settings.TimeoutMinutes)
@@ -781,17 +787,17 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			message := fmt.Sprintf("分享识别任务异常中断: %v", recovered)
-			logger.Errorf("ShareRecordService[runBatchIdentify] task=%s panic=%v", taskID, recovered)
-			_ = s.tasks.SetError(taskID, message)
+			logger.WithContext(ctx, "share_identify").Log(logger.ERROR, "分享识别任务异常中断", nil, fmt.Errorf("%v", recovered))
+			_ = s.tasks.SetErrorContext(ctx, taskID, message)
 		}
 	}()
 	s.tasks.RegisterCancel(taskID, cancel)
-	_ = s.tasks.UpdateStatus(taskID, "running")
-	logger.Infof("ShareRecordService[runBatchIdentify] task=%s start records=%v media=%v retry=%v", taskID, recordIDs, ids, retry)
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, "running")
+	logger.WithContext(ctx, "share_identify").Log(logger.INFO, "分享识别开始", logger.Fields{"event": "identify_start", "record_ids": recordIDs, "media_ids": ids, "retry": retry}, nil)
 	preparationStart := time.Now()
 	records, err := s.dao.ListIdentifyMedia(ctx, dao.ShareIdentifyFilter{RecordIDs: recordIDs, MediaIDs: ids, PendingOnly: onlyPending, FailedOnly: retry || onlyFailed, ForceRefresh: bypassShareRecognitionCache(ctx)})
 	if err != nil {
-		_ = s.tasks.SetError(taskID, err.Error())
+		_ = s.tasks.SetErrorContext(ctx, taskID, err.Error())
 		return
 	}
 	contextIDs := make([]int, 0, len(records))
@@ -800,7 +806,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	}
 	evidence, err := s.dao.ListIdentifyContext(ctx, contextIDs)
 	if err != nil {
-		_ = s.tasks.SetError(taskID, err.Error())
+		_ = s.tasks.SetErrorContext(ctx, taskID, err.Error())
 		return
 	}
 	cancelledShares := make(map[int]bool)
@@ -823,7 +829,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			}
 			if isMaskedSharePath(media.FileName) {
 				maskedTotal++
-				logger.Infof("[ShareIdentify] 跳过已有脱敏媒体 | task=%s | directory=%q", taskID, media.FileName)
+				logger.WithContext(ctx, "share_identify").Log(logger.INFO, "跳过已有脱敏媒体", logger.Fields{"directory": media.FileName}, nil)
 				continue
 			}
 			if shouldIdentifyShareMedia(media, record.MediaType, retry, onlyPending, onlyFailed) {
@@ -832,13 +838,13 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			}
 		}
 	}
-	_ = s.tasks.UpdateProgress(taskID, len(items), 0, 0, 0)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
+	_ = s.tasks.UpdateProgressContext(ctx, taskID, len(items), 0, 0, 0)
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "masked": maskedTotal})
 	if len(items) == 0 {
 		// 没有待识别媒体时任务仍是正常完成，进度应显示100%，避免出现“完成但0%”的误导状态。
-		_ = s.tasks.UpdateProgressPercent(taskID, 100)
+		_ = s.tasks.UpdateProgressPercentContext(ctx, taskID, 100)
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running"}, {"name": "汇总结果", "status": "pending"}}})
 	success, failed, skipped := 0, 0, 0
 	identifiedFileIDs := make([]int, 0, len(items))
 	type identifyResult struct {
@@ -864,7 +870,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		go func() {
 			defer wg.Done()
 			for media := range jobs {
-				if ctx.Err() != nil || s.tasks.IsCancelled(taskID) {
+				if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {
 					continue
 				}
 				ok, err := s.identifyOne(ctx, media, retry)
@@ -896,17 +902,17 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			success++
 			identifiedFileIDs = append(identifiedFileIDs, result.media.ID)
 		}
-		_ = s.tasks.UpdateProgress(taskID, len(items), processed, success, failed)
-		_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": result.media.FileName, "retry_failed": retry, "worker_count": workers, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", processed, len(items))}, {"name": "汇总结果", "status": "pending"}}})
+		_ = s.tasks.UpdateProgressContext(ctx, taskID, len(items), processed, success, failed)
+		_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "识别媒体", "current_file": result.media.FileName, "retry_failed": retry, "worker_count": workers, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "running", "message": fmt.Sprintf("正在处理 %d/%d", processed, len(items))}, {"name": "汇总结果", "status": "pending"}}})
 	}
 	if ctx.Err() != nil {
-		s.finishShareTaskContext(taskID, ctx.Err(), settings.TimeoutMinutes)
+		s.finishShareTaskContext(ctx, taskID, ctx.Err(), settings.TimeoutMinutes)
 		return
 	}
 	sort.Ints(identifiedFileIDs)
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "skipped": skipped, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "skipped": skipped, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "running"}}})
 	if failed > 0 {
-		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
+		_ = s.tasks.SetErrorContext(ctx, taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
 		return
 	}
 	autoExport := s.autoExport
@@ -916,15 +922,15 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	if autoExport != nil && len(identifiedFileIDs) > 0 {
 		exportID, started, exportErr := autoExport(identifiedFileIDs)
 		if exportErr != nil {
-			logger.Warnf("ShareRecordService[runBatchIdentify] task=%s 自动导出STRM失败: %v", taskID, exportErr)
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_error": exportErr.Error()})
+			logger.WithContext(ctx, "share_identify").Log(logger.WARN, "自动导出 STRM 失败", nil, exportErr)
+			_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"strm_export_error": exportErr.Error()})
 		} else if started {
-			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_task_id": exportID, "strm_export_file_count": len(identifiedFileIDs)})
+			_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"strm_export_task_id": exportID, "strm_export_file_count": len(identifiedFileIDs)})
 		}
 	}
-	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "skipped": skipped, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
-	_ = s.tasks.UpdateStatus(taskID, "completed")
-	logger.Infof("ShareRecordService[runBatchIdentify] task=%s completed success=%d failed=%d", taskID, success, failed)
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "skipped": skipped, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
+	_ = s.tasks.UpdateStatusContext(ctx, taskID, "completed")
+	logger.WithContext(ctx, "share_identify").Log(logger.INFO, "分享识别完成", logger.Fields{"event": "identify_complete", "success": success, "failed": failed}, nil)
 }
 func (s *ShareRecordService) BatchIdentify(ctx context.Context, ids []int, retry bool) (domain.ShareIdentifySummary, error) {
 	ctx = withShareWorkRound(ctx, retry)

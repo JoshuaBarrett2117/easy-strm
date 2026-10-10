@@ -130,8 +130,8 @@ func (s *ShareRecordService) enqueueOperation(ctx context.Context, kind string, 
 	if err != nil {
 		return "", err
 	}
-	if err = q.launch(v); err != nil { // 操作已经持久化，后台及启动恢复均以原ID继续同步。
-		logger.Errorf("ShareOperation[enqueue] task=%s 任务中心同步失败: %v", v.TaskID, err)
+	if err = q.launch(ctx, v); err != nil { // 操作已经持久化，后台及启动恢复均以原ID继续同步。
+		logger.WithContext(logger.WithTaskID(ctx, v.TaskID), "share_operation").Log(logger.ERROR, "任务中心同步失败", nil, err)
 	}
 	return v.TaskID, nil
 }
@@ -153,12 +153,13 @@ func (s *ShareRecordService) RecoverOperations(ctx context.Context) error {
 		}
 	}
 	for _, v := range rows {
+		operationCtx := logger.WithTaskID(context.WithoutCancel(ctx), v.TaskID)
 		if t := tickets[v.TaskID]; t != nil {
 			q.mu.Lock()
 			q.active[v.TaskID] = true
 			q.mu.Unlock()
-			q.s.tasks.RegisterCancelGuard(v.TaskID, func() error { return q.store.Cancel(context.Background(), v.TaskID) })
-			go q.run(v, t)
+			q.s.tasks.RegisterCancelGuard(v.TaskID, func() error { return q.store.Cancel(operationCtx, v.TaskID) })
+			go q.run(operationCtx, v, t)
 		} else {
 			// 终态只需补发展示，不应因Redis暂不可用阻止业务入口开放。
 			q.mu.Lock()
@@ -166,14 +167,15 @@ func (s *ShareRecordService) RecoverOperations(ctx context.Context) error {
 			q.mu.Unlock()
 			go func(v domain.ShareOperation) {
 				defer func() { q.mu.Lock(); delete(q.active, v.TaskID); q.mu.Unlock() }()
-				_ = q.retry(context.Background(), func() error { return q.publish(v) })
+				_ = q.retry(operationCtx, func() error { return q.publish(operationCtx, v) })
 			}(v)
 		}
 	}
 	return nil
 }
 
-func (q *shareOperationQueue) launch(v domain.ShareOperation) error {
+func (q *shareOperationQueue) launch(ctx context.Context, v domain.ShareOperation) error {
+	ctx = logger.WithTaskID(context.WithoutCancel(ctx), v.TaskID)
 	q.mu.Lock()
 	if q.active[v.TaskID] {
 		q.mu.Unlock()
@@ -182,9 +184,9 @@ func (q *shareOperationQueue) launch(v domain.ShareOperation) error {
 	q.active[v.TaskID] = true
 	q.mu.Unlock()
 	t := q.s.Coordinator().reserveCleanup(v.TaskID, operationResources(v))
-	q.s.tasks.RegisterCancelGuard(v.TaskID, func() error { return q.store.Cancel(context.Background(), v.TaskID) })
-	err := q.publish(v)
-	go q.run(v, t)
+	q.s.tasks.RegisterCancelGuard(v.TaskID, func() error { return q.store.Cancel(ctx, v.TaskID) })
+	err := q.publish(ctx, v)
+	go q.run(ctx, v, t)
 	return err
 }
 
@@ -199,10 +201,10 @@ func operationTitle(kind string) string {
 	}
 }
 
-func (q *shareOperationQueue) publish(v domain.ShareOperation) error {
+func (q *shareOperationQueue) publish(ctx context.Context, v domain.ShareOperation) error {
 	tasks := q.s.tasks
-	if old, err := tasks.Get(v.TaskID); err != nil || old == nil || old["task_type"] != v.Kind || old["task_id"] != v.TaskID {
-		if err = tasks.Create(v.TaskID, v.Kind, operationTitle(v.Kind)); err != nil {
+	if old, err := tasks.GetContext(ctx, v.TaskID); err != nil || old == nil || old["task_type"] != v.Kind || old["task_id"] != v.TaskID {
+		if err = tasks.CreateContext(ctx, v.TaskID, v.Kind, operationTitle(v.Kind)); err != nil {
 			return err
 		}
 	}
@@ -210,11 +212,11 @@ func (q *shareOperationQueue) publish(v domain.ShareOperation) error {
 	if v.Status != "pending" {
 		meta["blocking_task_ids"] = []string{}
 	}
-	if err := tasks.UpdateMetadata(v.TaskID, meta); err != nil {
+	if err := tasks.UpdateMetadataContext(ctx, v.TaskID, meta); err != nil {
 		return err
 	}
 	if v.Status == "failed" {
-		if err := tasks.SetError(v.TaskID, v.Error); err != nil {
+		if err := tasks.SetErrorContext(ctx, v.TaskID, v.Error); err != nil {
 			return err
 		}
 	} else {
@@ -222,25 +224,26 @@ func (q *shareOperationQueue) publish(v domain.ShareOperation) error {
 		if status == "" {
 			status = "pending"
 		}
-		if err := tasks.UpdateStatus(v.TaskID, status); err != nil {
+		if err := tasks.UpdateStatusContext(ctx, v.TaskID, status); err != nil {
 			return err
 		}
 	}
 	if v.Status == "completed" {
-		if err := tasks.UpdateProgressPercent(v.TaskID, 100); err != nil {
+		if err := tasks.UpdateProgressPercentContext(ctx, v.TaskID, 100); err != nil {
 			return err
 		}
 	}
 	if v.Status != "pending" && v.Status != "running" {
-		return q.store.Published(context.Background(), v.TaskID)
+		return q.store.Published(ctx, v.TaskID)
 	}
 	return nil
 }
 
-func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
+func (q *shareOperationQueue) run(parent context.Context, v domain.ShareOperation, t *shareTicket) {
 	taskID := v.TaskID
 	coord := q.s.Coordinator()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
+	persistenceCtx := context.WithoutCancel(ctx)
 	defer cancel()
 	defer func() {
 		q.mu.Lock()
@@ -254,7 +257,7 @@ func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
 		coord.mu.Unlock()
 	}()
 	q.s.tasks.RegisterCancel(v.TaskID, cancel)
-	q.s.tasks.RegisterCancelGuard(taskID, func() error { return q.store.Cancel(context.Background(), taskID) })
+	q.s.tasks.RegisterCancelGuard(taskID, func() error { return q.store.Cancel(persistenceCtx, taskID) })
 	// 数据库状态读取失败时继续等待，不能凭提交时的旧状态执行清理。
 	if err := q.retry(ctx, func() error {
 		stored, e := q.store.Get(ctx, v.TaskID)
@@ -263,7 +266,7 @@ func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
 		}
 		return e
 	}); err != nil {
-		q.publishCancelled(v, t)
+		q.publishCancelled(persistenceCtx, v, t)
 		return
 	}
 	if v.Status != "pending" && v.Status != "running" {
@@ -271,31 +274,31 @@ func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
 		coord.remove(t)
 		coord.signal()
 		coord.mu.Unlock()
-		_ = q.retry(context.Background(), func() error { return q.publish(v) })
+		_ = q.retry(persistenceCtx, func() error { return q.publish(persistenceCtx, v) })
 		return
 	}
-	if err := q.retry(ctx, func() error { return q.publish(v) }); err != nil {
-		q.publishCancelled(v, t)
+	if err := q.retry(ctx, func() error { return q.publish(ctx, v) }); err != nil {
+		q.publishCancelled(persistenceCtx, v, t)
 		return
 	}
 	release, err := coord.waitReported(ctx, t, nil, func() {
-		_ = q.s.tasks.UpdateMetadata(v.TaskID, map[string]interface{}{"blocking_task_ids": coord.blockers(t), "phase": "等待目标资源"})
+		_ = q.s.tasks.UpdateMetadataContext(ctx, v.TaskID, map[string]interface{}{"blocking_task_ids": coord.blockers(t), "phase": "等待目标资源"})
 	})
 	if err != nil {
-		q.publishCancelled(v, t)
+		q.publishCancelled(persistenceCtx, v, t)
 		return
 	}
 	defer release()
 	var started bool
-	err = q.retry(context.Background(), func() error { var e error; started, e = q.store.Start(context.Background(), v.TaskID); return e })
+	err = q.retry(persistenceCtx, func() error { var e error; started, e = q.store.Start(persistenceCtx, v.TaskID); return e })
 	if !started {
 		release()
-		q.publishCancelled(v, t)
+		q.publishCancelled(persistenceCtx, v, t)
 		return
 	}
 	v.Status = "running"
 	v.Phase = "执行清理"
-	_ = q.publish(v)
+	_ = q.publish(persistenceCtx, v)
 	var deletedFile *domain.ShareMedia
 	completedEffect := func() {
 		if v.Kind == "share_media_delete" {
@@ -306,10 +309,10 @@ func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
 			coord.invalidate(v.ShareIDs)
 		}
 	}
-	execCtx := dao.WithShareOperationTask(context.WithValue(context.Background(), shareOwnerContext{}, v.TaskID), v.TaskID)
+	execCtx := dao.WithShareOperationTask(context.WithValue(persistenceCtx, shareOwnerContext{}, v.TaskID), v.TaskID)
 	defer func() {
 		if p := recover(); p != nil {
-			q.fail(v, fmt.Errorf("清理异常: %v", p), release, completedEffect)
+			q.fail(persistenceCtx, v, fmt.Errorf("清理异常: %v", p), release, completedEffect)
 		}
 	}()
 	var count int64
@@ -335,15 +338,15 @@ func (q *shareOperationQueue) run(v domain.ShareOperation, t *shareTicket) {
 		count = 0
 	}
 	if err != nil {
-		q.fail(v, err, release, completedEffect)
+		q.fail(persistenceCtx, v, err, release, completedEffect)
 		return
 	}
-	stored := q.finish(v, "completed", "", map[string]interface{}{"deleted": count})
+	stored := q.finish(persistenceCtx, v, "completed", "", map[string]interface{}{"deleted": count})
 	if stored.Status == "completed" {
 		completedEffect()
 	}
 	release()
-	_ = q.retry(context.Background(), func() error { return q.publish(stored) })
+	_ = q.retry(persistenceCtx, func() error { return q.publish(persistenceCtx, stored) })
 }
 
 func (q *shareOperationQueue) retry(ctx context.Context, action func() error) error {
@@ -355,7 +358,7 @@ func (q *shareOperationQueue) retry(ctx context.Context, action func() error) er
 		if err := action(); err == nil {
 			return nil
 		} else if attempts%30 == 0 {
-			logger.Warnf("ShareOperation 状态读取或同步失败，将继续重试: %v", err)
+			logger.WithContext(ctx, "share_operation").Log(logger.WARN, "状态读取或同步失败，将继续重试", nil, err)
 		}
 		attempts++
 		select {
@@ -365,10 +368,10 @@ func (q *shareOperationQueue) retry(ctx context.Context, action func() error) er
 		}
 	}
 }
-func (q *shareOperationQueue) finish(v domain.ShareOperation, status, message string, result map[string]interface{}) domain.ShareOperation {
-	_ = q.retry(context.Background(), func() error { return q.store.Finish(context.Background(), v.TaskID, status, message, result) })
-	_ = q.retry(context.Background(), func() error {
-		stored, err := q.store.Get(context.Background(), v.TaskID)
+func (q *shareOperationQueue) finish(ctx context.Context, v domain.ShareOperation, status, message string, result map[string]interface{}) domain.ShareOperation {
+	_ = q.retry(ctx, func() error { return q.store.Finish(ctx, v.TaskID, status, message, result) })
+	_ = q.retry(ctx, func() error {
+		stored, err := q.store.Get(ctx, v.TaskID)
 		if err == nil {
 			v = stored
 		}
@@ -376,27 +379,27 @@ func (q *shareOperationQueue) finish(v domain.ShareOperation, status, message st
 	})
 	return v
 }
-func (q *shareOperationQueue) publishCancelled(v domain.ShareOperation, t *shareTicket) {
+func (q *shareOperationQueue) publishCancelled(ctx context.Context, v domain.ShareOperation, t *shareTicket) {
 	c := q.s.Coordinator()
 	c.mu.Lock()
 	c.remove(t)
 	c.signal()
 	c.mu.Unlock()
-	_ = q.retry(context.Background(), func() error {
-		stored, err := q.store.Get(context.Background(), v.TaskID)
+	_ = q.retry(ctx, func() error {
+		stored, err := q.store.Get(ctx, v.TaskID)
 		if err == nil {
 			v = stored
 		}
 		return err
 	})
-	_ = q.retry(context.Background(), func() error { return q.publish(v) })
+	_ = q.retry(ctx, func() error { return q.publish(ctx, v) })
 }
-func (q *shareOperationQueue) fail(v domain.ShareOperation, err error, release func(), completedEffect func()) {
-	logger.Errorf("ShareOperation[fail] task=%s error=%v", v.TaskID, err)
-	stored := q.finish(v, "failed", err.Error(), nil)
+func (q *shareOperationQueue) fail(ctx context.Context, v domain.ShareOperation, err error, release func(), completedEffect func()) {
+	logger.WithContext(ctx, "share_operation").Log(logger.ERROR, "清理失败", nil, err)
+	stored := q.finish(ctx, v, "failed", err.Error(), nil)
 	if stored.Status == "completed" {
 		completedEffect()
 	}
 	release()
-	_ = q.retry(context.Background(), func() error { return q.publish(stored) })
+	_ = q.retry(ctx, func() error { return q.publish(ctx, stored) })
 }

@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/service"
 	"net/http"
@@ -28,7 +29,10 @@ func TestShareStrmCronResumeCannotReplayOldFull(t *testing.T) {
 				t.Fatal(err)
 			}
 			controller := NewTaskController(tasks)
-			controller.SetRetryStrmTask(func(string, map[string]interface{}) error { t.Error("must not dispatch old full"); return nil })
+			controller.SetRetryStrmTask(func(context.Context, string, map[string]interface{}) error {
+				t.Error("must not dispatch old full")
+				return nil
+			})
 			router := gin.New()
 			router.POST("/tasks/:task_id/resume", controller.Resume)
 			response := httptest.NewRecorder()
