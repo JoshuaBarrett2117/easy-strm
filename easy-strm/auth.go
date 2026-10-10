@@ -372,8 +372,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 
 		return RunFullStrmGenerate(mainCfg, mainAcc, taskID)
 	})
-	strmController.SetGetTaskByID(func(taskID string) (interface{}, error) {
-		return GetTask(taskID)
+	strmController.SetGetTaskByID(func(ctx context.Context, taskID string) (interface{}, error) {
+		return GetTaskContext(ctx, taskID)
 	})
 	strmController.SetServerURL(config.ServerURL)
 

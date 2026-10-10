@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
@@ -83,7 +84,7 @@ type StrmController struct {
 	// 参数使用 interface{} 以避免 main 包类型依赖
 	runFullStrmGenerate func(strmConfig interface{}, cloud115 interface{}, taskID string) (interface{}, error)
 	// getTaskByID: 根据 ID 获取任务（main.GetTask）
-	getTaskByID func(taskID string) (interface{}, error)
+	getTaskByID func(ctx context.Context, taskID string) (interface{}, error)
 	// serverURL: 服务器 URL（来自 config.ServerURL）
 	serverURL string
 }
@@ -140,7 +141,8 @@ func (c *StrmController) SetRunFullStrmGenerate(fn func(strmConfig interface{}, 
 	c.runFullStrmGenerate = fn
 }
 
-func (c *StrmController) SetGetTaskByID(fn func(taskID string) (interface{}, error)) {
+// SetGetTaskByID 注入可取消的单任务读取，回调须保留旧任务响应字段。
+func (c *StrmController) SetGetTaskByID(fn func(context.Context, string) (interface{}, error)) {
 	c.getTaskByID = fn
 }
 
@@ -484,7 +486,13 @@ func (c *StrmController) GetTaskStatus(ctx *gin.Context) {
 		return
 	}
 
-	task, err := c.getTaskByID(taskID)
+	requestContext, cancel := context.WithTimeout(ctx.Request.Context(), 5*time.Second)
+	defer cancel()
+	var task interface{}
+	err := requestContext.Err()
+	if err == nil {
+		task, err = c.getTaskByID(requestContext, taskID)
+	}
 	if err != nil {
 		logger.Errorf("StrmController[GetTaskStatus] 获取任务失败 %s: %v", taskID, err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get task status"})

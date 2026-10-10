@@ -118,7 +118,14 @@ func SaveTask(task *TaskStatus) error {
 
 // GetTask 从Redis获取任务状态
 func GetTask(taskID string) (*TaskStatus, error) {
-	ctx := context.Background()
+	return GetTaskContext(context.Background(), taskID)
+}
+
+// GetTaskContext 仅读取一个旧任务并透传请求取消，保持既有字段与不存在时的返回语义。
+func GetTaskContext(ctx context.Context, taskID string) (*TaskStatus, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	key := taskKeyPrefix + taskID
 
 	taskJSON, err := redisClient.Get(ctx, key).Result()
