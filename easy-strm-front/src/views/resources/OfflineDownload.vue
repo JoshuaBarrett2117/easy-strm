@@ -80,6 +80,7 @@
     <div class="records-section">
       <div class="records-header">
         <h3 class="section-title records-title">云下载记录</h3>
+        <span v-if="snapshotAt" class="text-xs text-slate-500">统计快照：{{ new Date(snapshotAt).toLocaleTimeString() }}</span>
         <div class="records-toolbar">
           <n-select
             v-model:value="filterStatus"
@@ -156,6 +157,8 @@ const awaitingQueuedRecords = ref(false)
 
 const records = ref([])
 const total = ref(0)
+const snapshotAt = ref('')
+let recordsRequestSequence = 0
 const page = ref(1)
 const pageSize = ref(20)
 const filterStatus = ref('')
@@ -352,23 +355,29 @@ const handleSubmit = async () => {
 }
 
 /** 加载记录列表 */
-const loadRecords = async () => {
+const loadRecords = async (snapshot = false) => {
+  if (snapshot === true && loadingRecords.value) return
+  const requestSequence = ++recordsRequestSequence
   loadingRecords.value = true
   try {
     const params = { page: page.value, page_size: pageSize.value }
+    if (snapshot === true) params.snapshot = true
     if (filterStatus.value) params.status = filterStatus.value
     const response = await getOfflineDownloadTasks(params)
+    if (requestSequence !== recordsRequestSequence) return
     const result = response.data?.data || response.data || {}
     records.value = result.data || []
     total.value = result.total || 0
+    snapshotAt.value = result.snapshot_at || ''
     if (awaitingQueuedRecords.value && records.value.some(r => r.task_id === lastTaskId.value)) {
       awaitingQueuedRecords.value = false
     }
     adjustPolling()
   } catch (err) {
-    message.error('加载云下载记录失败')
+    if (requestSequence === recordsRequestSequence && (snapshot !== true || err?.response?.status !== 503)) message.error('加载云下载记录失败')
+  } finally {
+    if (requestSequence === recordsRequestSequence) loadingRecords.value = false
   }
-  loadingRecords.value = false
 }
 
 const onPageSizeChange = (size) => {
@@ -403,7 +412,7 @@ const hasActiveRecords = () => {
 
 const adjustPolling = () => {
   if (hasActiveRecords() && !pollTimer) {
-    pollTimer = setInterval(loadRecords, 3000)
+    pollTimer = setInterval(() => loadRecords(true), 3000)
   } else if (!hasActiveRecords() && pollTimer) {
     clearInterval(pollTimer)
     pollTimer = null
@@ -412,7 +421,7 @@ const adjustPolling = () => {
 
 const startPolling = () => {
   if (pollTimer) return
-  pollTimer = setInterval(loadRecords, 3000)
+  pollTimer = setInterval(() => loadRecords(true), 3000)
 }
 
 onBeforeUnmount(() => {

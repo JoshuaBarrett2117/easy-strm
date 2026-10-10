@@ -20,6 +20,7 @@ import (
 var performanceUIOffsetAllowlist = map[string]string{
 	"internal/dao/cron_registry.go:Runs":                       "UI 随机页任务历史",
 	"internal/dao/offline_download_task_dao.go:List":           "UI 随机页离线任务",
+	"internal/dao/offline_download_task_dao.go:SnapshotPage":   "UI 随机页精确总数快照；仅后台刷新，轮询入口不查询 SQL",
 	"internal/dao/share_library.go:Library":                    "UI 海报墙随机页及总数",
 	"internal/dao/share_library.go:LibrarySources":             "UI 作品来源随机页及总数",
 	"internal/dao/share_media_page.go:buildShareRecordParents": "UI 分享随机页；Cursor 内部分支禁止 OFFSET",

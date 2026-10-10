@@ -3,6 +3,7 @@ package dao
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -23,6 +24,26 @@ type OfflineDownloadTaskDAO struct {
 //   - *OfflineDownloadTaskDAO: DAO实例
 func NewOfflineDownloadTaskDAO(db *sql.DB) *OfflineDownloadTaskDAO {
 	return &OfflineDownloadTaskDAO{db: db}
+}
+
+// SnapshotPage 在单条语句的同一快照读取精确总数与当前页，仅供后台轮询快照刷新使用。
+func (d *OfflineDownloadTaskDAO) SnapshotPage(ctx context.Context, accountID int, status string, page, size int) (*domain.OfflineDownloadTaskListResponse, error) {
+	query := `WITH filtered AS NOT MATERIALIZED (
+ SELECT id,task_id,cloud115_id,url,info_hash,name,size,status,percent,error_message,save_dir_id,
+ COALESCE(create_time::text,'') create_time,COALESCE(update_time::text,'') update_time
+ FROM t_offline_download_task WHERE ($1::int=0 OR cloud115_id=$1) AND ($2::text='' OR status=$2)
+ ) SELECT (SELECT count(*) FROM filtered),COALESCE((SELECT json_agg(p ORDER BY id DESC) FROM
+ (SELECT id,task_id,cloud115_id,url,info_hash,name,size,status,percent,error_message,save_dir_id,create_time,update_time FROM filtered ORDER BY id DESC LIMIT $3 OFFSET $4) p),'[]'::json),
+ to_char(statement_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`
+	var raw []byte
+	result := &domain.OfflineDownloadTaskListResponse{}
+	if err := d.db.QueryRowContext(ctx, query, accountID, status, size, (page-1)*size).Scan(&result.Total, &raw, &result.SnapshotAt); err != nil {
+		return nil, fmt.Errorf("读取云下载快照失败：%w", err)
+	}
+	if err := json.Unmarshal(raw, &result.Data); err != nil {
+		return nil, fmt.Errorf("解析云下载快照失败：%w", err)
+	}
+	return result, nil
 }
 
 // offlineDownloadTaskColumns 查询字段列表（显式列出，避免 SELECT *）

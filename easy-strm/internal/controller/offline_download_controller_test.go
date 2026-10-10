@@ -47,6 +47,27 @@ func (s *stubOfflineDownloadService) DeleteRecord(ctx context.Context, id int64,
 	return s.deleteErr
 }
 
+func (s *stubOfflineDownloadService) ListSnapshot(ctx context.Context, cloud115ID int, status string, page, pageSize int) (*domain.OfflineDownloadTaskListResponse, error) {
+	s.lastListArgs = map[string]interface{}{"snapshot": true, "cloud115_id": cloud115ID, "status": status, "page": page, "page_size": pageSize}
+	return s.listResp, s.listErr
+}
+
+func TestOfflineControllerSnapshotPendingAndExactTotal(t *testing.T) {
+	for _, failure := range []bool{false, true} {
+		stub := &stubOfflineDownloadService{listResp: &domain.OfflineDownloadTaskListResponse{Total: 99, Data: []domain.OfflineDownloadTask{}, SnapshotAt: "快照时间"}}
+		if failure {
+			stub.listErr = errors.New("快照准备中")
+		}
+		response := doOfflineRequest(newOfflineDownloadTestRouter(stub), "GET", "/v1/resource/115-offline/tasks?snapshot=true&page=3&status=failed", nil)
+		if stub.lastListArgs["snapshot"] != true || stub.lastListArgs["page"] != 3 {
+			t.Fatal("轮询未使用显式快照入口")
+		}
+		if failure && response.Code != 503 || !failure && (response.Code != 200 || !strings.Contains(response.Body.String(), `"total":99`)) {
+			t.Fatalf("快照契约错误：%d %s", response.Code, response.Body.String())
+		}
+	}
+}
+
 // newOfflineDownloadTestRouter 构建云下载控制器测试路由。
 func newOfflineDownloadTestRouter(stub *stubOfflineDownloadService) *gin.Engine {
 	gin.SetMode(gin.TestMode)

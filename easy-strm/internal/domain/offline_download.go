@@ -66,6 +66,7 @@ type OfflineDownloadTask struct {
 
 // OfflineDownloadTaskListResponse 云下载记录列表响应（保持 data+total 稳定结构）
 type OfflineDownloadTaskListResponse struct {
-	Data  []OfflineDownloadTask `json:"data"`
-	Total int                   `json:"total"`
+	Data       []OfflineDownloadTask `json:"data"`
+	Total      int                   `json:"total"`
+	SnapshotAt string                `json:"snapshot_at,omitempty"`
 }

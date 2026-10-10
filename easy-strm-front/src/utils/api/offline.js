@@ -9,7 +9,7 @@ export const submitOfflineDownload = (data) => {
   return api.post('/v1/resource/115-offline/submit', data)
 }
 
-// 分页查询云下载记录
+// 分页查询云下载记录；snapshot=true 仅读后台维护的精确统计快照，未就绪返回503。
 export const getOfflineDownloadTasks = (params = {}) => {
   return api.get('/v1/resource/115-offline/tasks', { params })
 }

@@ -68,6 +68,22 @@ func (c *OfflineDownloadController) List(ctx *gin.Context) {
 	status := ctx.Query("status")
 	page, _ := strconv.Atoi(ctx.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(ctx.DefaultQuery("page_size", "20"))
+	if ctx.Query("snapshot") == "true" {
+		reader, ok := c.service.(interface {
+			ListSnapshot(context.Context, int, string, int, int) (*domain.OfflineDownloadTaskListResponse, error)
+		})
+		if !ok {
+			ErrorResp(ctx, http.StatusServiceUnavailable, "云下载快照不可用")
+			return
+		}
+		result, err := reader.ListSnapshot(ctx.Request.Context(), cloud115ID, status, page, pageSize)
+		if err != nil {
+			ErrorResp(ctx, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		SuccessResp(ctx, result)
+		return
+	}
 
 	result, err := c.service.List(ctx.Request.Context(), cloud115ID, status, page, pageSize)
 	if err != nil {

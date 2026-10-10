@@ -65,9 +65,12 @@ type OfflineDownloadService struct {
 	recordDAO   *dao.OfflineDownloadTaskDAO
 	cloud115DAO OfflineAccountStore
 
-	syncMu   sync.Mutex
-	lastSync map[int]time.Time // 账号维度最近一次成功同步115离线状态的时间，用于限频
-	queue    chan offlineDownloadJob
+	syncMu        sync.Mutex
+	lastSync      map[int]time.Time // 账号维度最近一次成功同步115离线状态的时间，用于限频
+	queue         chan offlineDownloadJob
+	snapshots     map[offlineSnapshotKey]*offlineSnapshotEntry
+	snapshotSlots chan struct{}
+	syncing       map[int]*offlineSyncAttempt
 }
 
 // offlineDownloadJob 表示一个已通过入口校验、等待后台分批发送到115的大批量任务。
@@ -540,8 +543,15 @@ func (s *OfflineDownloadService) submitUrlsOneByOne(urls []string, saveDirID str
 // listAllOfflineTasks 分页拉取115离线任务列表（最多 offlineListMaxPage 页），
 // 返回任务列表与是否已完整拉取（complete 用于判断任务是否“已移除”）
 func (s *OfflineDownloadService) listAllOfflineTasks(cloud115ID int, cookie string) ([]*driver.OfflineTask, bool, error) {
+	return s.listAllOfflineTasksContext(context.Background(), cloud115ID, cookie)
+}
+
+func (s *OfflineDownloadService) listAllOfflineTasksContext(ctx context.Context, cloud115ID int, cookie string) ([]*driver.OfflineTask, bool, error) {
 	tasks := make([]*driver.OfflineTask, 0)
 	for page := int64(1); page <= offlineListMaxPage; page++ {
+		if err := ctx.Err(); err != nil {
+			return tasks, false, err
+		}
 		resp, err := s.client.ListOfflineTasks(page, cloud115ID, cookie)
 		if err != nil {
 			return tasks, false, err
@@ -835,6 +845,34 @@ func (s *OfflineDownloadService) noteTrackingTimeout(taskId string) {
 // SyncAccountOfflineTasks 拉取115离线任务列表并刷新该账号下本地活跃记录的状态
 // force 为 false 时受限频控制（offlineSyncMinGap）；返回是否实际执行了同步。
 func (s *OfflineDownloadService) SyncAccountOfflineTasks(ctx context.Context, cloud115ID int, cookie string, force bool) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	s.syncMu.Lock()
+	if s.syncing == nil {
+		s.syncing = make(map[int]*offlineSyncAttempt)
+	}
+	if running := s.syncing[cloud115ID]; running != nil {
+		s.syncMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-running.done:
+			return running.ran, running.err
+		}
+	}
+	running := &offlineSyncAttempt{done: make(chan struct{})}
+	s.syncing[cloud115ID] = running
+	s.syncMu.Unlock()
+	running.ran, running.err = s.syncAccountOfflineTasks(ctx, cloud115ID, cookie, force)
+	s.syncMu.Lock()
+	delete(s.syncing, cloud115ID)
+	close(running.done)
+	s.syncMu.Unlock()
+	return running.ran, running.err
+}
+
+func (s *OfflineDownloadService) syncAccountOfflineTasks(ctx context.Context, cloud115ID int, cookie string, force bool) (bool, error) {
 	if !force {
 		s.syncMu.Lock()
 		last, ok := s.lastSync[cloud115ID]
@@ -845,7 +883,7 @@ func (s *OfflineDownloadService) SyncAccountOfflineTasks(ctx context.Context, cl
 	}
 
 	if strings.TrimSpace(cookie) == "" {
-		account, err := s.cloud115DAO.GetByID(cloud115ID)
+		account, err := s.offlineAccount(ctx, cloud115ID)
 		if err != nil || account == nil {
 			return false, fmt.Errorf("115账号不存在")
 		}
@@ -856,7 +894,7 @@ func (s *OfflineDownloadService) SyncAccountOfflineTasks(ctx context.Context, cl
 	}
 
 	// 分页拉取115离线任务列表，建立info_hash索引
-	allTasks, complete, err := s.listAllOfflineTasks(cloud115ID, cookie)
+	allTasks, complete, err := s.listAllOfflineTasksContext(ctx, cloud115ID, cookie)
 	if err != nil {
 		return false, err
 	}
@@ -872,6 +910,9 @@ func (s *OfflineDownloadService) SyncAccountOfflineTasks(ctx context.Context, cl
 		return false, err
 	}
 	for _, rec := range active {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
 		if rec.InfoHash == "" {
 			continue
 		}
@@ -949,6 +990,7 @@ func (s *OfflineDownloadService) List(ctx context.Context, cloud115ID int, statu
 	}
 
 	s.fillAccountNames(records)
+	s.invalidateOfflineSnapshots()
 	return &domain.OfflineDownloadTaskListResponse{Data: records, Total: total}, nil
 }
 
@@ -975,6 +1017,7 @@ func (s *OfflineDownloadService) DeleteRecord(ctx context.Context, id int64, del
 	if err := s.recordDAO.Delete(ctx, id); err != nil {
 		return fmt.Errorf("删除云下载记录失败: %v", err)
 	}
+	s.invalidateOfflineSnapshots()
 	logger.Infof("[INFO] OfflineDownload | action=delete | recordId=%d | hash=%s | deleteFiles=%v", id, rec.InfoHash, deleteFiles)
 	return nil
 }
@@ -983,6 +1026,10 @@ func (s *OfflineDownloadService) DeleteRecord(ctx context.Context, id int64, del
 
 // fillAccountNames 批量回填账号名称，账号已删除时展示兜底文案
 func (s *OfflineDownloadService) fillAccountNames(records []domain.OfflineDownloadTask) {
+	s.fillAccountNamesContext(context.Background(), records)
+}
+
+func (s *OfflineDownloadService) fillAccountNamesContext(ctx context.Context, records []domain.OfflineDownloadTask) {
 	if len(records) == 0 {
 		return
 	}
@@ -992,7 +1039,7 @@ func (s *OfflineDownloadService) fillAccountNames(records []domain.OfflineDownlo
 		name, ok := names[id]
 		if !ok {
 			name = "账号已删除"
-			if account, err := s.cloud115DAO.GetByID(id); err == nil && account != nil {
+			if account, err := s.offlineAccount(ctx, id); err == nil && account != nil {
 				name = account.Name
 			}
 			names[id] = name
