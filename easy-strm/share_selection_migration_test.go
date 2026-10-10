@@ -12,7 +12,7 @@ func TestV47ManualMigrationConstraints(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := string(raw)
-	for _, required := range []string{"D4 维护窗口", "RESET 必须先重新扫描", "easy_strm.v47_statement_timeout", "lock_timeout", "statement_timeout", "share_media_selection_member_fk", "ON DELETE RESTRICT", "revoked BOOLEAN", "share_export_candidate_discovery_seq", "e.file_id=f.id", "first_seen_seq,c.candidate_id", "share_export_require_baseline()"} {
+	for _, required := range []string{"D4 维护窗口", "v47 缺失：先安装", "v47 已存在：先十表清理", "30min", "easy_strm.v47_statement_timeout", "lock_timeout", "statement_timeout", "share_media_selection_member_fk", "ON DELETE RESTRICT", "revoked BOOLEAN", "share_export_candidate_discovery_seq", "e.file_id=f.id", "first_seen_seq,c.candidate_id", "share_export_require_baseline()"} {
 		if !strings.Contains(script, required) {
 			t.Fatalf("missing %s", required)
 		}

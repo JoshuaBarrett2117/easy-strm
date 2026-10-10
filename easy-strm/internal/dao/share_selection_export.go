@@ -8,7 +8,7 @@ import (
 
 // ResolveSelection 保持有效选择，手选失效报错；仅 auto 失效时按确定性候补重选。
 func (d *ShareRecordDAO) ResolveSelection(ctx context.Context, key string) (domain.ShareSelection, int, error) {
-	transaction, err := d.db.BeginTx(ctx, nil)
+	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return domain.ShareSelection{}, 0, err
 	}
@@ -73,7 +73,7 @@ func (d *ShareRecordDAO) WorkSelectionKeys(ctx context.Context, work string) ([]
 
 // AnchorSelectionPath 在文件发布前固定路径，发布或凭证失败的重试仍使用同一路径。
 func (d *ShareRecordDAO) AnchorSelectionPath(ctx context.Context, key, relative string) (string, error) {
-	transaction, err := d.db.BeginTx(ctx, nil)
+	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return "", err
 	}
@@ -96,7 +96,7 @@ func (d *ShareRecordDAO) AnchorSelectionPath(ctx context.Context, key, relative 
 
 // SaveSelectionExport 在凭证事务中确认锚定路径，旧版本完成不确认新选择。
 func (d *StrmExportDAO) SaveSelectionExport(ctx context.Context, state ExportState, selection domain.ShareSelection, relative string) error {
-	transaction, err := d.Conn.BeginTx(ctx, nil)
+	transaction, err := d.Conn.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}

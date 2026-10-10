@@ -111,7 +111,7 @@ func (d *ShareRecordDAO) SelectionDetail(ctx context.Context, key string) (domai
 
 // ChangeSelection 原子验证成员、CAS 改选并入队，绝不在事务内写文件。
 func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.ShareSelectionChange) error {
-	transaction, err := d.db.BeginTx(ctx, nil)
+	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
