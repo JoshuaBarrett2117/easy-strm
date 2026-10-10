@@ -76,17 +76,13 @@ func (store *incrementalMemory) Prepare(_ context.Context, input domain.ShareExp
 	}
 	return nil
 }
-func (store *incrementalMemory) DirtyBatch(_ context.Context, attempted []string) ([]domain.ShareExportDirty, error) {
+func (store *incrementalMemory) DirtyBatch(_ context.Context, after string) ([]domain.ShareExportDirty, error) {
 	if store.afterBatch != nil {
 		store.afterBatch()
 	}
-	excluded := map[string]bool{}
-	for _, key := range attempted {
-		excluded[key] = true
-	}
 	rows := []domain.ShareExportDirty{}
 	for key, dirty := range store.dirty {
-		if dirty.Revision > store.acked[key] && !excluded[key] {
+		if dirty.Revision > store.acked[key] && key > after {
 			rows = append(rows, dirty)
 		}
 	}

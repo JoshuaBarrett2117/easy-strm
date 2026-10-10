@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"easy-strm/internal/domain"
 	"fmt"
 )
@@ -12,7 +13,12 @@ func NewMediaCategoryDAO() *MediaCategoryDAO {
 }
 
 func (d *MediaCategoryDAO) GetAll() ([]*domain.MediaCategory, error) {
-	rows, err := DB.Query(
+	return d.GetAllContext(context.Background())
+}
+
+// GetAllContext 通过既有分类查询传递取消信号，不新增查询或改变排序语义。
+func (d *MediaCategoryDAO) GetAllContext(ctx context.Context) ([]*domain.MediaCategory, error) {
+	rows, err := DB.QueryContext(ctx,
 		`SELECT id, name, media_type, target_path, match_rules, enabled, create_time, update_time
 		 FROM t_media_category ORDER BY media_type, id ASC`,
 	)
@@ -23,6 +29,9 @@ func (d *MediaCategoryDAO) GetAll() ([]*domain.MediaCategory, error) {
 
 	var list []*domain.MediaCategory
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		cat := &domain.MediaCategory{}
 		var matchRules []byte
 		err := rows.Scan(
@@ -37,7 +46,7 @@ func (d *MediaCategoryDAO) GetAll() ([]*domain.MediaCategory, error) {
 		}
 		list = append(list, cat)
 	}
-	return list, nil
+	return list, rows.Err()
 }
 
 func (d *MediaCategoryDAO) Create(cat *domain.MediaCategory) error {

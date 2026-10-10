@@ -263,13 +263,31 @@ func (t *TaskRedisDAO) GetAll() ([]map[string]interface{}, error) {
 	}
 
 	tasks := make([]map[string]interface{}, 0)
-	for _, taskID := range taskIDs {
-		task, err := t.Get(taskID)
-		if err != nil {
-			continue
+	const batchSize = 500
+	for start := 0; start < len(taskIDs); start += batchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
-		if task != nil {
-			tasks = append(tasks, task)
+		keys := make([]string, 0, min(batchSize, len(taskIDs)-start))
+		for _, taskID := range taskIDs[start:min(start+batchSize, len(taskIDs))] {
+			keys = append(keys, taskKeyPrefix+taskID)
+		}
+		values, err := t.client.MGet(ctx, keys...).Result()
+		if err != nil {
+			return nil, fmt.Errorf("TaskRedisDAO[GetAll] 批量获取失败: %w", err)
+		}
+		for _, value := range values {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			raw, ok := value.(string)
+			if !ok {
+				continue
+			}
+			var task map[string]interface{}
+			if json.Unmarshal([]byte(raw), &task) == nil && task != nil {
+				tasks = append(tasks, task)
+			}
 		}
 	}
 

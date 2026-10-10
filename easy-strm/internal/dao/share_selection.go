@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ErrShareSelectionConflict 表示旧版本或非有效成员，必须刷新后重试。
@@ -17,11 +18,9 @@ var ErrShareSelectionUnavailable = errors.New("选定来源不可用或识别已
 
 const shareSelectionLockSQL = `SELECT pg_advisory_xact_lock(34983,1)`
 const shareSelectionColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path,COALESCE(m.title,s.work_key),
- EXISTS(SELECT 1 FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
- JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_record r ON r.id=f.share_id JOIN t_share_media live ON live.id=f.media_id
+ EXISTS(SELECT 1` + shareSelectionLiveJoin + `
  WHERE i.candidate_id=s.selected_candidate_id AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
- AND NOT i.revoked AND c.available AND c.state='active' AND f.available AND NOT r.share_cancelled AND f.status='identified' AND live.work_key=s.work_key
- AND ((live.media_type='movie' AND s.season_number=0 AND s.episode_number=0) OR (live.media_type='tv' AND EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id AND e.season_number=s.season_number AND e.episode_number=s.episode_number))))`
+ AND ` + shareSelectionLivePredicate + `)`
 const shareSelectionFrom = ` FROM t_share_media_selection s LEFT JOIN t_share_media m ON m.work_key=s.work_key`
 
 func scanShareSelection(row interface{ Scan(...interface{}) error }) (domain.ShareSelection, error) {
@@ -52,15 +51,30 @@ func (d *ShareRecordDAO) ListSelections(ctx context.Context, q domain.ShareSelec
 	defer transaction.Rollback()
 	filter := shareSelectionFrom + ` WHERE ($1='' OR strpos(lower(COALESCE(m.title,'')||s.media_item_key),lower($1))>0)`
 	var total int
-	if err = transaction.QueryRowContext(ctx, `SELECT count(*)`+filter, q.Keyword).Scan(&total); err != nil {
-		return nil, 0, err
+	if !q.SkipCount {
+		if err = transaction.QueryRowContext(ctx, `SELECT count(*)`+filter, q.Keyword).Scan(&total); err != nil {
+			return nil, 0, err
+		}
 	}
-	rows, err := transaction.QueryContext(ctx, `SELECT `+shareSelectionColumns+filter+` ORDER BY s.work_key,s.season_number,s.episode_number LIMIT $2 OFFSET $3`, q.Keyword, q.PageSize, (q.Page-1)*q.PageSize)
+	query := `SELECT ` + shareSelectionColumns + filter
+	args := []interface{}{q.Keyword, q.PageSize}
+	if q.Cursor {
+		query += ` AND (s.work_key,s.season_number,s.episode_number)>($3,$4,$5) ORDER BY s.work_key,s.season_number,s.episode_number LIMIT $2`
+		args = append(args, q.AfterWork, q.AfterSeason, q.AfterEpisode)
+	} else {
+		query += ` ORDER BY s.work_key,s.season_number,s.episode_number LIMIT $2 OFFSET $3`
+		args = append(args, (q.Page-1)*q.PageSize)
+	}
+	rows, err := transaction.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	values := []domain.ShareSelection{}
 	for rows.Next() {
+		if err = ctx.Err(); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
 		value, scanErr := scanShareSelection(rows)
 		if scanErr != nil {
 			rows.Close()
@@ -158,15 +172,20 @@ func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.Shar
 
 // SyncSelections 显式从应用库刷新候选，work 非空时仅同步该作品及其旧候选的新归属。
 func (d *ShareRecordDAO) SyncSelections(ctx context.Context, work string) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
 	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
 	defer transaction.Rollback()
-	if _, err = transaction.ExecContext(ctx, shareSelectionLockSQL); err != nil {
+	if err = lockShareSelection(ctx, transaction); err != nil {
 		return err
 	}
 	for _, query := range shareSelectionSyncSQL {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		args := []interface{}{}
 		if strings.Contains(query, "$1") {
 			args = append(args, work)
@@ -174,6 +193,9 @@ func (d *ShareRecordDAO) SyncSelections(ctx context.Context, work string) error 
 		if _, err = transaction.ExecContext(ctx, query, args...); err != nil {
 			return fmt.Errorf("刷新来源选择：%w", err)
 		}
+	}
+	if err = ctx.Err(); err != nil {
+		return err
 	}
 	return transaction.Commit()
 }
@@ -186,6 +208,9 @@ var shareSelectionSyncSQL = []string{
  COALESCE(m.work_key,'') work_key,m.media_type,COALESCE((SELECT string_agg(e.season_number||':'||e.episode_number,',' ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'') episode_sig
  FROM t_share_media_file f JOIN t_share_record r ON r.id=f.share_id LEFT JOIN t_share_media m ON m.id=f.media_id
  WHERE ($1='' OR m.work_key=$1 OR EXISTS(SELECT 1 FROM t_share_export_candidate c JOIN t_share_export_candidate_item i USING(candidate_id) WHERE c.source_file_id=f.id AND i.work_key=$1))`,
+	`CREATE UNIQUE INDEX ON selection_observed(source_file_id)`,
+	`CREATE INDEX ON selection_observed(work_key)`,
+	`ANALYZE selection_observed`,
 	`DO $identity$ BEGIN
  IF EXISTS(SELECT 1 FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id
  WHERE (c.share_id,c.remote_file_id,c.name_hash) IS DISTINCT FROM (o.share_id,o.remote_file_id,o.name_hash)) THEN
@@ -199,6 +224,8 @@ var shareSelectionSyncSQL = []string{
  UNION SELECT i.work_key FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id) LEFT JOIN selection_observed o ON o.source_file_id=c.source_file_id
  WHERE ($1='' OR i.work_key=$1 OR o.source_file_id IS NOT NULL) AND (o.source_file_id IS NULL AND c.state<>'removed' OR o.source_file_id IS NOT NULL AND ((c.file_version,c.share_version,c.available,c.state,c.episode_sig) IS DISTINCT FROM (o.file_version,o.share_version,o.available,o.state,o.episode_sig) OR i.work_key<>o.work_key))
  ) affected WHERE key<>''`,
+	`CREATE UNIQUE INDEX ON selection_changed(work_key)`,
+	`ANALYZE selection_changed`,
 	`INSERT INTO t_share_export_candidate(share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig)
  SELECT share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig FROM selection_observed ORDER BY source_file_id
  ON CONFLICT DO NOTHING`,

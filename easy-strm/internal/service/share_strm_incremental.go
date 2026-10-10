@@ -27,7 +27,7 @@ type ShareExportCheckpointStore interface {
 	ReadInput(context.Context) (domain.ShareExportInput, error)
 	Prepare(context.Context, domain.ShareExportInput, string) error
 	RequireBaseline(context.Context) error
-	DirtyBatch(context.Context, []string) ([]domain.ShareExportDirty, error)
+	DirtyBatch(context.Context, string) ([]domain.ShareExportDirty, error)
 	ObserveWork(context.Context, string) ([]domain.ShareExportSourceState, error)
 	WorkKeys(context.Context, string) ([]string, error)
 	TargetSnapshot(context.Context, []string) (dao.ExportSnapshot, error)
@@ -146,16 +146,19 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runEr
 }
 
 func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string, input domain.ShareExportInput, fingerprint string, output *StrmOutput) (runErr error) {
+	ctx = logger.WithTaskID(ctx, id)
 	ctx = s.exporter.Coordinator().batchContext(ctx, id)
 	ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
 	if explicit, _ := ctx.Value(shareExplicitFullContext{}).(bool); !explicit && (input.BaselineState != "ready" || !input.LegacyOutputsReconciled || input.PreparedRevision != input.ConfigRevision || input.Fingerprint != fingerprint) {
 		return dao.ErrShareExportBaselineRequired
 	}
-	if err := s.checkpoints.Prepare(ctx, input, fingerprint); err != nil {
+	if err := s.exporter.preparationStage(ctx, "checkpoint-prepare", func(ctx context.Context, _ sharePreparationReport) error {
+		return s.checkpoints.Prepare(ctx, input, fingerprint)
+	}); err != nil {
 		return err
 	}
 	var err error
-	attempted := []string{}
+	after := ""
 	processed, sources, stale := 0, 0, 0
 	written, skippedDedupe := 0, 0
 	failures := []error{}
@@ -174,7 +177,7 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 		if err = s.cancelled(ctx, id); err != nil {
 			return err
 		}
-		batch, batchErr := s.checkpoints.DirtyBatch(ctx, attempted)
+		batch, batchErr := s.checkpoints.DirtyBatch(ctx, after)
 		if batchErr != nil {
 			return batchErr
 		}
@@ -187,7 +190,7 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 					return err
 				}
 			}
-			batch, batchErr = s.checkpoints.DirtyBatch(ctx, attempted)
+			batch, batchErr = s.checkpoints.DirtyBatch(ctx, after)
 			if batchErr != nil {
 				return batchErr
 			}
@@ -196,7 +199,7 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 			if err = s.cancelled(ctx, id); err != nil {
 				return err
 			}
-			attempted = append(attempted, dirty.WorkKey)
+			after = dirty.WorkKey
 			count, marked, result := s.consumeWork(ctx, id, input, dirty)
 			sources += count
 			stale += marked

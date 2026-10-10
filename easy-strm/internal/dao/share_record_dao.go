@@ -66,19 +66,38 @@ func (d *ShareRecordDAO) List(ctx context.Context, q domain.ShareRecordQuery) (d
 	if q.Page < 1 {
 		q.Page = 1
 	}
+	if q.Cursor && q.AfterID > 0 {
+		args = append(args, q.AfterID)
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		where += fmt.Sprintf("s.id<$%d", len(args))
+	}
+	if q.OnlyUnsynced {
+		if where == "" {
+			where = " WHERE "
+		} else {
+			where += " AND "
+		}
+		where += "NOT EXISTS(SELECT 1 FROM t_share_media_file unsynced WHERE unsynced.share_id=s.id)"
+	}
 	if q.PageSize < 1 || q.PageSize > 200 {
 		q.PageSize = 20
 	}
 	var total int
-	if e := d.db.QueryRowContext(ctx, "SELECT count(*) FROM t_share_record s"+where, args...).Scan(&total); e != nil {
-		return domain.ShareRecordPage{}, e
+	if !q.Cursor {
+		if e := d.db.QueryRowContext(ctx, "SELECT count(*) FROM t_share_record s"+where, args...).Scan(&total); e != nil {
+			return domain.ShareRecordPage{}, e
+		}
 	}
 	if q.Summary {
 		return d.listSummaries(ctx, q, where, args, total)
 	}
-	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
+	parents, args := buildShareRecordParents(q, where, args)
 	// 先对分享主表分页，再加载该页分享的全部媒体，避免媒体行占用分享页数并截断媒体列表。
-	rows, e := d.db.QueryContext(ctx, fmt.Sprintf("SELECT s.id,s.media_type,s.name,s.url,s.password,s.note,s.version,s.created_at::text,s.updated_at::text,s.share_cancelled,m.id,m.file_name,m.metadata_source,m.status,m.result,m.error,m.version FROM (SELECT s.id,s.media_type,s.name,s.url,s.password,s.note,s.version,s.created_at,s.updated_at,s.share_cancelled FROM t_share_record s%s ORDER BY s.id DESC LIMIT $%d OFFSET $%d) s LEFT JOIN v_share_media_detail m ON m.share_id=s.id AND m.available ORDER BY s.id DESC,m.id ASC", where, len(args)-1, len(args)), args...)
+	rows, e := d.db.QueryContext(ctx, "SELECT s.id,s.media_type,s.name,s.url,s.password,s.note,s.version,s.created_at::text,s.updated_at::text,s.share_cancelled,m.id,m.file_name,m.metadata_source,m.status,m.result,m.error,m.version FROM ("+parents+") s LEFT JOIN v_share_media_detail m ON m.share_id=s.id AND m.available ORDER BY s.id DESC,m.id ASC", args...)
 	if e != nil {
 		return domain.ShareRecordPage{}, e
 	}
@@ -243,6 +262,9 @@ func (d *ShareRecordDAO) IdentifyBatch(ctx context.Context, media []domain.Share
 	}
 	defer tx.Rollback()
 	for _, m := range media {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
 		if err := identifyShareMediaTx(ctx, tx, m, "identified", m.Result, "", m.Episodes); err != nil {
 			return err
 		}
@@ -380,6 +402,9 @@ func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken s
 		return 0, err
 	}
 	for i := range files {
+		if err = ctx.Err(); err != nil {
+			return 0, err
+		}
 		file := &files[i]
 		var id int
 		var oldSHA string

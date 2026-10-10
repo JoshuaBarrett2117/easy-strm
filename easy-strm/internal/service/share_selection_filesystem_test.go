@@ -17,10 +17,12 @@ import (
 
 type selectedFilesystemStore struct {
 	*strmMemory
-	selection  domain.ShareSelection
-	chosen     int
-	resolveErr error
-	syncs      int
+	selection    domain.ShareSelection
+	chosen       int
+	resolveErr   error
+	syncs        int
+	bulkResolves int
+	sourcePages  int
 }
 
 func (store *selectedFilesystemStore) CheckSelectionSchema(context.Context) error { return nil }
@@ -40,8 +42,13 @@ func (store *selectedFilesystemStore) SyncSelections(context.Context, string) er
 func (store *selectedFilesystemStore) ResolveSelection(context.Context, string) (domain.ShareSelection, int, error) {
 	return store.selection, store.chosen, store.resolveErr
 }
-func (store *selectedFilesystemStore) WorkSelectionKeys(context.Context, string) ([]string, error) {
-	return []string{store.selection.ItemKey}, nil
+func (store *selectedFilesystemStore) ResolveSelections(context.Context, string) (int, error) {
+	store.bulkResolves++
+	return 0, store.resolveErr
+}
+func (store *selectedFilesystemStore) StrmSources(ctx context.Context, q domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
+	store.sourcePages++
+	return store.strmMemory.StrmSources(ctx, q, after)
 }
 func (store *selectedFilesystemStore) AnchorSelectionPath(_ context.Context, key, relative string) (string, error) {
 	if store.selection.RelativePath == "" {
@@ -103,6 +110,9 @@ func TestSelectedExportFirstDiscoveryManualReplaceAndForeignGuard(t *testing.T) 
 	expectSelectedFile(t, mock, store.selection, false, false)
 	if err = service.export(ctx, cfg, domain.ShareLibraryQuery{FileIDs: []int{2}}, "first-discovery"); err != nil {
 		t.Fatal(err)
+	}
+	if store.bulkResolves != 1 || store.sourcePages != 4 {
+		t.Fatalf("preparation must batch and chosen-file export must not rescan work: bulk=%d pages=%d", store.bulkResolves, store.sourcePages)
 	}
 	files := filesystemCollection(t, root)
 	if len(files) != 1 {

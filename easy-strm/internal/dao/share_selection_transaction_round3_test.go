@@ -163,7 +163,7 @@ func newSelectionProbe(t *testing.T, stop bool) (*sql.DB, *selectionProbe) {
 }
 
 func TestSelectionWriteIsolationAndFirstStatement(t *testing.T) {
-	for _, operation := range []string{"sync", "change", "resolve", "save"} {
+	for _, operation := range []string{"sync", "change", "resolve", "batch", "save"} {
 		t.Run(operation, func(t *testing.T) {
 			database, probe := newSelectionProbe(t, true)
 			ctx := context.Background()
@@ -176,6 +176,8 @@ func TestSelectionWriteIsolationAndFirstStatement(t *testing.T) {
 				err = store.ChangeSelection(ctx, domain.ShareSelectionChange{})
 			case "resolve":
 				_, _, err = store.ResolveSelection(ctx, "work:0:0")
+			case "batch":
+				_, err = store.ResolveSelections(ctx, "")
 			case "save":
 				connection, connectionErr := database.Conn(ctx)
 				if connectionErr != nil {

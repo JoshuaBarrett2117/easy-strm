@@ -6,7 +6,10 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
+
+	"github.com/lib/pq"
 )
 
 // ErrStrmOutputBusy 表示输出目录与正在执行的任务重叠，可等待后重试。
@@ -149,15 +152,28 @@ func (d *StrmExportDAO) Snapshot(ctx context.Context, owner string) (ExportSnaps
 
 // FinishSnapshot 仅标记本次未见且运行版本仍等于快照的行。
 func (d *StrmExportDAO) FinishSnapshot(ctx context.Context, owner string, snapshot ExportSnapshot, seen map[string]bool) error {
-	for k, run := range snapshot {
-		if seen[k] {
-			continue
-		}
-		if _, err := d.Conn.ExecContext(ctx, "UPDATE t_strm_export_state SET state='stale' WHERE owner_key=$1 AND export_key=$2 AND last_seen_run_id=$3", owner, k, run); err != nil {
+	keys := make([]string, 0, len(snapshot))
+	for key := range snapshot {
+		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if seen[key] {
+			continue
+		}
+		keys = append(keys, key)
 	}
-	return nil
+	if len(keys) == 0 {
+		return ctx.Err()
+	}
+	sort.Strings(keys)
+	runs := make([]string, 0, len(keys))
+	for _, key := range keys {
+		runs = append(runs, snapshot[key])
+	}
+	_, err := d.Conn.ExecContext(ctx, `UPDATE t_strm_export_state output SET state='stale'
+ FROM unnest($2::text[],$3::text[]) target(export_key,run)
+ WHERE output.owner_key=$1 AND output.export_key=target.export_key AND output.last_seen_run_id=target.run`, owner, pq.Array(keys), pq.Array(runs))
+	return err
 }
 
 // Close 释放连接持有的全部会话锁。
@@ -295,19 +311,20 @@ func (d *StrmExportDAO) MarkMissing(ctx context.Context, paths []string, id stri
 		return e
 	}
 	defer tx.Rollback()
-	for _, p := range paths {
-		if _, e = tx.ExecContext(ctx, `INSERT INTO t_strm_export_state(owner_key,export_key,output_path,state) SELECT owner_key,'legacy:'||output_path,output_path,'missing' FROM t_strm_export_history WHERE output_path=$1 ON CONFLICT DO NOTHING`, p); e != nil {
-			return e
-		}
-		if _, e = tx.ExecContext(ctx, "UPDATE t_strm_export_state SET state='missing' WHERE output_path=$1", p); e != nil {
-			return e
-		}
-		if _, e = tx.ExecContext(ctx, "DELETE FROM t_strm_export_history WHERE output_path=$1", p); e != nil {
-			return e
-		}
+	if _, e = tx.ExecContext(ctx, `INSERT INTO t_strm_export_state(owner_key,export_key,output_path,state) SELECT owner_key,'legacy:'||output_path,output_path,'missing' FROM t_strm_export_history WHERE output_path=ANY($1::text[]) ON CONFLICT DO NOTHING`, pq.Array(paths)); e != nil {
+		return e
+	}
+	if _, e = tx.ExecContext(ctx, "UPDATE t_strm_export_state SET state='missing' WHERE output_path=ANY($1::text[])", pq.Array(paths)); e != nil {
+		return e
+	}
+	if _, e = tx.ExecContext(ctx, "DELETE FROM t_strm_export_history WHERE output_path=ANY($1::text[])", pq.Array(paths)); e != nil {
+		return e
 	}
 	_, e = tx.ExecContext(ctx, "UPDATE t_strm_clear_run SET completed=TRUE WHERE task_id=$1", id)
 	if e != nil {
+		return e
+	}
+	if e = ctx.Err(); e != nil {
 		return e
 	}
 	return tx.Commit()

@@ -126,7 +126,14 @@ func (c *ShareRecordController) List(x *gin.Context) {
 	p, _ := strconv.Atoi(x.DefaultQuery("page", "1"))
 	z, _ := strconv.Atoi(x.DefaultQuery("page_size", "20"))
 	shareID, _ := strconv.Atoi(x.Query("share_id"))
-	v, e := c.s.List(x, domain.ShareRecordQuery{ShareID: shareID, Summary: true, Keyword: x.Query("keyword"), Page: p, PageSize: z})
+	cursor, cursorErr := strconv.ParseBool(x.DefaultQuery("cursor", "false"))
+	after, afterErr := strconv.Atoi(x.DefaultQuery("after_id", "0"))
+	unsynced, unsyncedErr := strconv.ParseBool(x.DefaultQuery("only_unsynced", "false"))
+	if cursorErr != nil || afterErr != nil || after < 0 || unsyncedErr != nil || (!cursor && after != 0) {
+		ErrorResp(x, 400, "分享游标参数无效")
+		return
+	}
+	v, e := c.s.List(x, domain.ShareRecordQuery{ShareID: shareID, Summary: true, Keyword: x.Query("keyword"), Page: p, PageSize: z, Cursor: cursor, AfterID: after, OnlyUnsynced: unsynced})
 	if e != nil {
 		ErrorResp(x, 500, e.Error())
 		return

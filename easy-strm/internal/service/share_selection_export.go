@@ -2,40 +2,48 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type shareSelectionExportStore interface {
 	ShareSelectionStore
 	ResolveSelection(context.Context, string) (domain.ShareSelection, int, error)
-	WorkSelectionKeys(context.Context, string) ([]string, error)
+	ResolveSelections(context.Context, string) (int, error)
 	GetStrmSource(context.Context, int) (domain.ShareStrmSource, error)
 	AnchorSelectionPath(context.Context, string, string) (string, error)
 }
 type shareSelectionReceiptContext struct{}
 
 func (s *ShareStrmService) prepareSelectionWork(ctx context.Context, store shareSelectionExportStore, work string) error {
-	if err := store.CheckSelectionSchema(ctx); err != nil {
+	if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
+		return store.CheckSelectionSchema(ctx)
+	}); err != nil {
 		return err
 	}
-	if err := store.SyncSelections(ctx, work); err != nil {
+	if err := s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
+		return store.SyncSelections(ctx, work)
+	}); err != nil {
 		return err
 	}
-	keys, err := store.WorkSelectionKeys(ctx, work)
-	if err != nil {
+	err := s.preparationStage(ctx, "selection-resolve", func(ctx context.Context, _ sharePreparationReport) error {
+		_, err := store.ResolveSelections(ctx, work)
 		return err
+	})
+	var invalid *dao.ShareSelectionPreparationError
+	if id := logger.TaskID(ctx); id != "" && s.tasks != nil && errors.As(err, &invalid) {
+		persistCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		err = errors.Join(err, s.updateExportMetadata(persistCtx, id, map[string]interface{}{"selection_preparation_report": invalid, "manual_invalid_count": len(invalid.ManualKeys), "auto_unavailable_count": len(invalid.AutoKeys)}))
 	}
-	for _, key := range keys {
-		if _, _, err = store.ResolveSelection(ctx, key); err != nil {
-			return err
-		}
-	}
-	return nil
+	return err
 }
 
 type shareSelectedItemContext struct{}
@@ -56,6 +64,9 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		episodes = []domain.ShareEpisode{{}}
 	}
 	for _, episode := range episodes {
+		if err := ctx.Err(); err != nil {
+			return strmExportResult{Written: result.Written, Err: err}
+		}
 		key := shareStrmIdentity(source, episode)
 		if attempt, _ := ctx.Value(shareIncrementalAttemptContext{}).(*shareIncrementalAttempt); attempt != nil {
 			attempt.keys[source.ID] = append(attempt.keys[source.ID], key)

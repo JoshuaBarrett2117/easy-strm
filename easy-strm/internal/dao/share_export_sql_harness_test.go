@@ -21,7 +21,7 @@ func phase02ExplainSQL() string {
 		{"after_cold_work", "text,integer", shareStrmWorkSourcesSQL, "'[\"tmdb\", \"\", \"movie\", \"200000003\"]',0"},
 		{"after_locked_file", "integer", shareStrmFileSourceSQL, "300000001"},
 		{"after_work_observation", "text", shareExportObservedSQL, "'[\"tmdb\", \"\", \"movie\", \"200000001\"]'"},
-		{"after_dirty", "text[]", shareExportDirtySQL, "ARRAY[]::text[]"},
+		{"after_dirty", "text", shareExportDirtySQL, "''"},
 		{"before_check_path", "text", `SELECT owner_key,export_key FROM t_strm_export_state WHERE output_path=$1 AND state<>'missing' UNION ALL SELECT owner_key,'' FROM t_strm_export_history WHERE output_path=$1`, "'/phase02-synthetic/owned-1.strm'"},
 		{"check_path", "text", strmExportCheckPathSQL, "'/phase02-synthetic/owned-1.strm'"},
 		{"check_history_path", "text", strmExportCheckPathSQL, "'/phase02-synthetic/history-1.strm'"},
@@ -40,7 +40,7 @@ func phase02ExplainSQL() string {
 		for _, query := range queries {
 			fmt.Fprintf(&output, "\\echo %s\nEXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) EXECUTE phase02_%s(%s);\n\\set phase02_plan_file :explain_dir '/%s-%s.json'\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_%s(%s)\n\\g :phase02_plan_file\n", query.name, query.name, query.args, variant, query.name, query.name, query.args)
 		}
-		output.WriteString("SAVEPOINT zero_dirty;\nUPDATE t_share_export_dirty_work SET acked_revision=revision,pending_export_keys='[]';\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_after_dirty(ARRAY[]::text[]);\nDO $$ BEGIN IF EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision>acked_revision) THEN RAISE EXCEPTION 'not zero dirty'; END IF; END $$;\nROLLBACK TO SAVEPOINT zero_dirty;\nSAVEPOINT old_path_indexes;\nDROP INDEX IF EXISTS idx_strm_export_state_path;\nDROP INDEX IF EXISTS idx_strm_export_history_path;\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_before_check_path('/phase02-synthetic/owned-1.strm');\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_before_check_path('/phase02-synthetic/history-1.strm');\nROLLBACK TO SAVEPOINT old_path_indexes;\n")
+		output.WriteString("SAVEPOINT zero_dirty;\nUPDATE t_share_export_dirty_work SET acked_revision=revision,pending_export_keys='[]';\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_after_dirty('');\nDO $$ BEGIN IF EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision>acked_revision) THEN RAISE EXCEPTION 'not zero dirty'; END IF; END $$;\nROLLBACK TO SAVEPOINT zero_dirty;\nSAVEPOINT old_path_indexes;\nDROP INDEX IF EXISTS idx_strm_export_state_path;\nDROP INDEX IF EXISTS idx_strm_export_history_path;\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_before_check_path('/phase02-synthetic/owned-1.strm');\nEXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_before_check_path('/phase02-synthetic/history-1.strm');\nROLLBACK TO SAVEPOINT old_path_indexes;\n")
 		output.WriteString("\\echo affected-100-work-new-and-old\nSELECT format('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_after_work_and_conflicts(%L,0);',work_key) FROM t_share_media WHERE id BETWEEN 200000001 AND 200000100 ORDER BY id\n\\gexec\nSELECT format('EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) EXECUTE phase02_before_work_and_conflicts(%L,0);',work_key) FROM t_share_media WHERE id BETWEEN 200000001 AND 200000100 ORDER BY id\n\\gexec\n")
 		output.WriteString("ROLLBACK;\n")
 	}

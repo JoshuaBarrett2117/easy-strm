@@ -215,15 +215,18 @@ func (d *ShareExportCheckpointDAO) MarkLegacyReconciled(ctx context.Context, rev
 	return nil
 }
 
-// DirtyBatch 按 partial 待办索引读取有限批次，排除本轮已尝试的作品。
-func (d *ShareExportCheckpointDAO) DirtyBatch(ctx context.Context, attempted []string) ([]domain.ShareExportDirty, error) {
-	rows, err := d.db.QueryContext(ctx, shareExportDirtySQL, pq.Array(attempted))
+// DirtyBatch 按稳定作品键游标读取待办，游标前新变化留给下一轮，不重复扫描已尝试前缀。
+func (d *ShareExportCheckpointDAO) DirtyBatch(ctx context.Context, after string) ([]domain.ShareExportDirty, error) {
+	rows, err := d.db.QueryContext(ctx, shareExportDirtySQL, after)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	batch := []domain.ShareExportDirty{}
 	for rows.Next() {
+		if err = ctx.Err(); err != nil {
+			return nil, err
+		}
 		var dirty domain.ShareExportDirty
 		var raw []byte
 		if err = rows.Scan(&dirty.WorkKey, &dirty.Revision, &raw); err != nil {
@@ -237,7 +240,7 @@ func (d *ShareExportCheckpointDAO) DirtyBatch(ctx context.Context, attempted []s
 	return batch, rows.Err()
 }
 
-const shareExportDirtySQL = `SELECT work_key,revision,pending_export_keys FROM t_share_export_dirty_work WHERE revision > acked_revision AND NOT(work_key=ANY($1::text[])) ORDER BY updated_at,work_key LIMIT 100`
+const shareExportDirtySQL = `SELECT work_key,revision,pending_export_keys FROM t_share_export_dirty_work WHERE revision > acked_revision AND work_key>$1 ORDER BY work_key LIMIT 100`
 
 const shareExportAckSQL = `UPDATE t_share_export_dirty_work SET acked_revision=revision,last_seen_run_id=$3,pending_export_keys='[]'::jsonb,updated_at=now() WHERE work_key=$1 AND revision=$2 AND acked_revision<>revision`
 
@@ -335,11 +338,6 @@ func (d *ShareExportCheckpointDAO) TargetSnapshot(ctx context.Context, keys []st
 	return snapshot, rows.Err()
 }
 
-const shareExportStaleSQL = `UPDATE t_strm_export_state output SET state='stale'
- WHERE owner_key='share:default' AND export_key=$2 AND last_seen_run_id=$3
- AND NOT EXISTS(SELECT 1 FROM t_share_export_source_state WHERE state = 'active' AND work_key<>$1 AND export_keys @> to_jsonb($2::text))
- AND NOT EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE pending_export_keys <> '[]'::jsonb AND work_key<>$1 AND pending_export_keys @> to_jsonb($2::text))`
-
 // CompleteWork 在同一短事务中 CAS 检查配置/作品，写检查点、差集失效及 ack。
 func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domain.ShareExportDirty, configRevision int64, run string, states []domain.ShareExportSourceState, snapshot ExportSnapshot) (int, error) {
 	transaction, err := d.db.BeginTx(ctx, nil)
@@ -364,17 +362,22 @@ func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domai
 	newKeys := map[string]bool{}
 	ids := make([]int, 0, len(states))
 	for _, state := range states {
+		if err = ctx.Err(); err != nil {
+			return 0, err
+		}
 		ids = append(ids, state.SourceFileID)
 		if state.State == "active" {
 			for _, key := range state.ExportKeys {
 				newKeys[key] = true
 			}
 		}
-		_, err = transaction.ExecContext(ctx, `INSERT INTO t_share_export_source_state AS source(source_file_id,share_id,media_id,work_key,file_version,share_version,available,cancelled,episode_sig,export_keys,last_seen_run_id,state)
- VALUES($1,$2,NULLIF($3,0),$4,$5,$6,$7,$8,$9,$10::jsonb,$11,$12)
- ON CONFLICT(source_file_id) DO UPDATE SET share_id=EXCLUDED.share_id,media_id=EXCLUDED.media_id,work_key=EXCLUDED.work_key,file_version=EXCLUDED.file_version,share_version=EXCLUDED.share_version,available=EXCLUDED.available,cancelled=EXCLUDED.cancelled,episode_sig=EXCLUDED.episode_sig,
- export_keys=CASE WHEN EXCLUDED.state='stale' THEN source.export_keys ELSE EXCLUDED.export_keys END,last_seen_run_id=EXCLUDED.last_seen_run_id,state=EXCLUDED.state,updated_at=now()`, state.SourceFileID, state.ShareID, state.MediaID, state.WorkKey, state.FileVersion, state.ShareVersion, state.Available, state.Cancelled, state.EpisodeSignature, shareExportKeysJSON(state.ExportKeys), run, state.State)
-		if err != nil {
+	}
+	if len(states) > 0 {
+		payload, payloadErr := buildShareExportSourcesBatch(ctx, states)
+		if payloadErr != nil {
+			return 0, payloadErr
+		}
+		if _, err = transaction.ExecContext(ctx, shareExportSourcesBatchSQL, payload, run); err != nil {
 			return 0, err
 		}
 	}
@@ -389,26 +392,25 @@ func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domai
 		}
 	}
 	sort.Strings(keys)
-	for _, key := range keys {
-		result, execErr := transaction.ExecContext(ctx, shareExportStaleSQL, dirty.WorkKey, key, snapshot[key])
-		if execErr != nil {
-			return 0, execErr
-		}
-		count, countErr := result.RowsAffected()
-		if countErr != nil {
-			return 0, countErr
-		}
-		if count == 0 {
-			var protected bool
-			err = transaction.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM t_share_export_source_state WHERE state = 'active' AND work_key<>$1 AND export_keys @> to_jsonb($2::text)) OR EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE pending_export_keys <> '[]'::jsonb AND work_key<>$1 AND pending_export_keys @> to_jsonb($2::text))`, dirty.WorkKey, key).Scan(&protected)
-			if err != nil {
+	if len(keys) > 0 {
+		targets := make([]shareExportStaleTarget, 0, len(keys))
+		for _, key := range keys {
+			if err = ctx.Err(); err != nil {
 				return 0, err
 			}
-			if !protected {
-				return 0, ErrShareExportChanged
-			}
+			targets = append(targets, shareExportStaleTarget{Key: key, Run: snapshot[key]})
 		}
-		stale += int(count)
+		payload, marshalErr := json.Marshal(targets)
+		if marshalErr != nil {
+			return 0, marshalErr
+		}
+		var expected int
+		if err = transaction.QueryRowContext(ctx, shareExportStaleBatchSQL, dirty.WorkKey, string(payload)).Scan(&stale, &expected); err != nil {
+			return 0, err
+		}
+		if stale != expected {
+			return 0, ErrShareExportChanged
+		}
 	}
 	result, err := transaction.ExecContext(ctx, shareExportAckSQL, dirty.WorkKey, dirty.Revision, run)
 	if err != nil {
@@ -420,6 +422,9 @@ func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domai
 	}
 	if count != 1 {
 		return 0, ErrShareExportChanged
+	}
+	if err = ctx.Err(); err != nil {
+		return 0, err
 	}
 	return stale, transaction.Commit()
 }

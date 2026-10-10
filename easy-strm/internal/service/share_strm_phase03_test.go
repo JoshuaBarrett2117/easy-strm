@@ -174,7 +174,7 @@ func TestShareStrmScheduledActualFullDiscoversOrphanAndDiskDrift(t *testing.T) {
 	}
 	fixture.states["unresolvable-legacy-orphan"] = dao.ExportState{Owner: "share:default", Key: "unresolvable-legacy-orphan", Run: "previous"}
 	phase03ExpectFull(t, fixture, store)
-	fixture.mock.ExpectExec("UPDATE t_strm_export_state SET state='stale'").WithArgs("share:default", "unresolvable-legacy-orphan", "previous").WillReturnResult(sqlmock.NewResult(0, 1))
+	fixture.mock.ExpectExec("UPDATE t_strm_export_state output.*unnest").WithArgs("share:default", `{"unresolvable-legacy-orphan"}`, `{"previous"}`).WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := phase03Run(t, fixture, runner, "reconciliation", "cron_actual_full", context.Background()); err != nil {
 		t.Fatal(err)
 	}

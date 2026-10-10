@@ -39,22 +39,28 @@ type ShareStrmStore interface {
 
 // ShareStrmService 负责资料库导出及按需转存播放，复用现有分类、任务和115能力。
 type ShareStrmService struct {
-	exportDB    *sql.DB
-	store       ShareStrmStore
-	settings    ShareTaskSettingsStore
-	client      Cloud115Client
-	tmdb        *TmdbService
-	organizer   *OrganizeService
-	tasks       *TaskService
-	categories  func() ([]*domain.MediaCategory, error)
-	account     func(int) (*domain.Cloud115, error)
-	directLink  func(string, int, string, string) (string, error)
-	coordOnce   sync.Once
-	coordinator *ShareOperationCoordinator
+	exportDB          *sql.DB
+	store             ShareStrmStore
+	settings          ShareTaskSettingsStore
+	client            Cloud115Client
+	tmdb              *TmdbService
+	organizer         *OrganizeService
+	tasks             *TaskService
+	categories        func() ([]*domain.MediaCategory, error)
+	categoriesContext func(context.Context) ([]*domain.MediaCategory, error)
+	account           func(int) (*domain.Cloud115, error)
+	directLink        func(string, int, string, string) (string, error)
+	coordOnce         sync.Once
+	coordinator       *ShareOperationCoordinator
 }
 
 // SetExportDatabase 注入统一输出清单数据库。
 func (s *ShareStrmService) SetExportDatabase(db *sql.DB) { s.exportDB = db }
+
+// SetCategoryContextReader 注入可取消的分类读取；生产装配使用此入口，旧构造签名保持兼容。
+func (s *ShareStrmService) SetCategoryContextReader(reader func(context.Context) ([]*domain.MediaCategory, error)) {
+	s.categoriesContext = reader
+}
 
 // RunScheduledExport 在调度任务上下文中同步执行，不另建后台任务。
 func (s *ShareStrmService) RunScheduledExport(ctx context.Context, id string) error {

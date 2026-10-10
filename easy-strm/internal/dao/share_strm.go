@@ -41,10 +41,9 @@ func buildShareStrmSourcesQuery(q domain.ShareLibraryQuery, after int) (string, 
 		fileFilter = ` AND m.work_key IN (SELECT selected_media.work_key FROM t_share_media_file selected_file JOIN t_share_media selected_media ON selected_media.id=selected_file.media_id WHERE selected_file.id=ANY($` + fmt.Sprint(len(args)) + `::integer[]))`
 	}
 	args = append(args, after)
-	query := libraryWorks + ` SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id,'_file_version',f.version,'_share_version',s.version,'_file_size',COALESCE(f.file_size,0),'_available',f.available),
-	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json)
-	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
-	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 101`
+	query := shareStrmSourceSelect + ` AND m.work_key IN (SELECT work_key FROM (
+	 SELECT work_key,tmdb_id,title,original_title,media_type library_media_type,media_year,rating,genre_ids,country_codes,TRUE available FROM t_share_media
+	 ) metadata WHERE ` + where + `)` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 101`
 	return query, args
 }
 
@@ -60,6 +59,9 @@ func (d *ShareRecordDAO) scanStrmSources(ctx context.Context, query string, args
 	defer rows.Close()
 	out := []domain.ShareStrmSource{}
 	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		var v domain.ShareStrmSource
 		var raw, episodes []byte
 		if err = rows.Scan(&v.ID, &v.ShareID, &v.ShareName, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes); err != nil {

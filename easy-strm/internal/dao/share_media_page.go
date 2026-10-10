@@ -11,8 +11,7 @@ import (
 )
 
 func (d *ShareRecordDAO) listSummaries(ctx context.Context, q domain.ShareRecordQuery, where string, args []interface{}, total int) (domain.ShareRecordPage, error) {
-	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
-	parents := fmt.Sprintf(`SELECT id,media_type,name,url,password,note,version,created_at,updated_at,share_cancelled FROM t_share_record s%s ORDER BY s.id DESC LIMIT $%d OFFSET $%d`, where, len(args)-1, len(args))
+	parents, args := buildShareRecordParents(q, where, args)
 	query := `SELECT s.id,s.media_type,s.name,s.url,s.password,s.note,s.version,s.created_at::text,s.updated_at::text,s.share_cancelled,
 	 a.file_count,a.identified,a.failed,a.pending,a.unavailable,a.media_count,a.ignored
 	 FROM (` + parents + `) s CROSS JOIN LATERAL (
@@ -32,6 +31,9 @@ func (d *ShareRecordDAO) listSummaries(ctx context.Context, q domain.ShareRecord
 	}
 	defer rows.Close()
 	for rows.Next() {
+		if err = ctx.Err(); err != nil {
+			return out, err
+		}
 		var r domain.ShareRecord
 		if err = rows.Scan(&r.ID, &r.MediaType, &r.Name, &r.URL, &r.Password, &r.Note, &r.Version, &r.CreatedAt, &r.UpdatedAt, &r.ShareCancelled, &r.FileCount, &r.IdentifiedCount, &r.FailedCount, &r.PendingCount, &r.UnavailableCount, &r.MediaCount, &r.MaskedCount); err != nil {
 			return out, err
@@ -42,18 +44,28 @@ func (d *ShareRecordDAO) listSummaries(ctx context.Context, q domain.ShareRecord
 	return out, rows.Err()
 }
 
+func buildShareRecordParents(q domain.ShareRecordQuery, where string, args []interface{}) (string, []interface{}) {
+	args = append(args, q.PageSize)
+	query := fmt.Sprintf(`SELECT id,media_type,name,url,password,note,version,created_at,updated_at,share_cancelled FROM t_share_record s%s ORDER BY s.id DESC LIMIT $%d`, where, len(args))
+	if !q.Cursor {
+		args = append(args, (q.Page-1)*q.PageSize)
+		query += fmt.Sprintf(` OFFSET $%d`, len(args))
+	}
+	return query, args
+}
+
 // ListMedia 按媒体主键聚合海报墙；同一作品在一个分享中只返回一次。
 func (d *ShareRecordDAO) ListMedia(ctx context.Context, id, page, size int, duplicates bool) (domain.ShareMediaPage, error) {
 	out := domain.ShareMediaPage{Data: []domain.ShareMedia{}}
-	query := `WITH ranked AS (
-	 SELECT f.id,m.id media_id,f.share_id,f.file_name,m.metadata_source,'identified' status,m.result,f.version,
-	  count(*) OVER(PARTITION BY m.id) file_count,row_number() OVER(PARTITION BY m.id ORDER BY f.id) ordinal
+	query := `WITH cards AS MATERIALIZED (
+	 SELECT m.id media_id,min(f.id) id,count(*) file_count
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id
-	 WHERE f.share_id=$1 AND f.available AND f.status='identified'
-	), cards AS (SELECT * FROM ranked WHERE ordinal=1)
-	SELECT (SELECT count(*) FROM cards),(SELECT count(*) FROM ranked)-(SELECT count(*) FROM cards),
+	 WHERE f.share_id=$1 AND f.available AND f.status='identified' GROUP BY m.id
+	), page AS (SELECT * FROM cards ORDER BY media_id LIMIT $2 OFFSET $3)
+	SELECT (SELECT count(*) FROM cards),COALESCE((SELECT sum(file_count-1) FROM cards),0),
 	 COALESCE((SELECT json_agg(p) FROM (SELECT id,media_id,share_id,file_name,metadata_source,status,result,version,file_count,TRUE available
-	 FROM cards ORDER BY media_id LIMIT $2 OFFSET $3)p),'[]'::json)`
+	 FROM (SELECT f.id,page.media_id,f.share_id,f.file_name,m.metadata_source,'identified' status,m.result,f.version,page.file_count
+	 FROM page JOIN t_share_media_file f ON f.id=page.id JOIN t_share_media m ON m.id=page.media_id) details ORDER BY media_id)p),'[]'::json)`
 	var data []byte
 	if err := d.db.QueryRowContext(ctx, query, id, size, (page-1)*size).Scan(&out.Total, &out.DuplicateCount, &data); err != nil {
 		return out, err

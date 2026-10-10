@@ -14,12 +14,12 @@ func TestShareMediaPage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mock.ExpectQuery("WITH ranked AS").WithArgs(9, 10, 10).WillReturnRows(sqlmock.NewRows([]string{"total", "duplicates", "data"}).AddRow(25, 3, `[{"id":11,"share_id":9,"result":{"success":true,"media_type":"tv"}}]`))
+		mock.ExpectQuery("WITH cards AS MATERIALIZED").WithArgs(9, 10, 10).WillReturnRows(sqlmock.NewRows([]string{"total", "duplicates", "data"}).AddRow(25, 3, `[{"id":11,"share_id":9,"result":{"success":true,"media_type":"tv"}}]`))
 		got, err := NewShareRecordDAO(db).ListMedia(context.Background(), 9, 2, 10, duplicates)
 		if err != nil || got.Total != 25 || got.DuplicateCount != 3 || len(got.Data) != 1 || got.Data[0].ID != 11 {
 			t.Fatalf("%+v %v", got, err)
 		}
-		mock.ExpectQuery("WITH ranked AS").WithArgs(9, 10, 90).WillReturnRows(sqlmock.NewRows([]string{"total", "duplicates", "data"}).AddRow(25, 3, `[]`))
+		mock.ExpectQuery("WITH cards AS MATERIALIZED").WithArgs(9, 10, 90).WillReturnRows(sqlmock.NewRows([]string{"total", "duplicates", "data"}).AddRow(25, 3, `[]`))
 		got, err = NewShareRecordDAO(db).ListMedia(context.Background(), 9, 10, 10, duplicates)
 		if err != nil || got.Total != 25 || got.Data == nil || len(got.Data) != 0 {
 			t.Fatalf("%+v %v", got, err)

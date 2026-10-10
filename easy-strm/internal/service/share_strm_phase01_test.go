@@ -21,6 +21,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
+	"github.com/lib/pq"
 )
 
 type phaseCounts struct {
@@ -592,16 +593,29 @@ func (fixture *phaseFixture) round(name string, query domain.ShareLibraryQuery, 
 
 func (fixture *phaseFixture) expectFinish() {
 	fixture.finish = false
+	keys := []string{}
 	for key, state := range fixture.states {
 		if state.Run != fixture.run {
-			fixture.mock.ExpectExec("UPDATE t_strm_export_state SET state='stale'").WithArgs("share:default", key, phaseArgument(func(value driver.Value) bool {
-				if value != state.Run {
-					return false
-				}
-				fixture.stale[key] = true
-				return true
-			})).WillReturnResult(sqlmock.NewResult(0, 1))
+			keys = append(keys, key)
 		}
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		runs := []string{}
+		for _, key := range keys {
+			runs = append(runs, fixture.states[key].Run)
+		}
+		keyValue, _ := pq.Array(keys).Value()
+		runValue, _ := pq.Array(runs).Value()
+		fixture.mock.ExpectExec("UPDATE t_strm_export_state output.*unnest").WithArgs("share:default", keyValue, phaseArgument(func(value driver.Value) bool {
+			if value != runValue {
+				return false
+			}
+			for _, key := range keys {
+				fixture.stale[key] = true
+			}
+			return true
+		})).WillReturnResult(sqlmock.NewResult(0, int64(len(keys))))
 	}
 	if fixture.recovery {
 		count := int64(1)

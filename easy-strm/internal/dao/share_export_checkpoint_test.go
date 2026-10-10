@@ -100,10 +100,11 @@ func TestShareExportCheckpointCompleteCASRollbackAndProtectedStale(t *testing.T)
 					if scenario == "protected" || scenario == "stale-race" {
 						count = 0
 					}
-					mock.ExpectExec(regexp.QuoteMeta(shareExportStaleSQL)).WithArgs("work", "old-key", "old-run").WillReturnResult(sqlmock.NewResult(0, count))
-					if count == 0 {
-						mock.ExpectQuery("SELECT EXISTS.*export_keys @>").WithArgs("work", "old-key").WillReturnRows(sqlmock.NewRows([]string{"protected"}).AddRow(scenario == "protected"))
+					expected := 1
+					if scenario == "protected" {
+						expected = 0
 					}
+					mock.ExpectQuery("WITH targets AS MATERIALIZED").WithArgs("work", `[{"export_key":"old-key","run":"old-run"}]`).WillReturnRows(sqlmock.NewRows([]string{"updated", "expected"}).AddRow(count, expected))
 					if scenario != "stale-race" {
 						ackCount := int64(1)
 						if scenario == "ack-zero" {
@@ -138,8 +139,8 @@ func TestShareExportCheckpointDirtyRowsAndObservationErrors(t *testing.T) {
 	}
 	defer db.Close()
 	dao := NewShareExportCheckpointDAO(db)
-	mock.ExpectQuery(regexp.QuoteMeta(shareExportDirtySQL)).WithArgs("{}").WillReturnRows(sqlmock.NewRows([]string{"work", "revision", "pending"}).AddRow("work", 7, `["old","planned"]`))
-	rows, err := dao.DirtyBatch(context.Background(), []string{})
+	mock.ExpectQuery(regexp.QuoteMeta(shareExportDirtySQL)).WithArgs("").WillReturnRows(sqlmock.NewRows([]string{"work", "revision", "pending"}).AddRow("work", 7, `["old","planned"]`))
+	rows, err := dao.DirtyBatch(context.Background(), "")
 	if err != nil || len(rows) != 1 || len(rows[0].PendingKeys) != 2 {
 		t.Fatalf("%+v %v", rows, err)
 	}
@@ -148,8 +149,8 @@ func TestShareExportCheckpointDirtyRowsAndObservationErrors(t *testing.T) {
 	if err != nil || len(states) != 1 || states[0].State != "stale" || !states[0].Cancelled {
 		t.Fatalf("%+v %v", states, err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(shareExportDirtySQL)).WithArgs("{}").WillReturnRows(sqlmock.NewRows([]string{"work", "revision", "pending"}).AddRow("work", 7, `[42]`))
-	if _, err = dao.DirtyBatch(context.Background(), []string{}); err == nil {
+	mock.ExpectQuery(regexp.QuoteMeta(shareExportDirtySQL)).WithArgs("").WillReturnRows(sqlmock.NewRows([]string{"work", "revision", "pending"}).AddRow("work", 7, `[42]`))
+	if _, err = dao.DirtyBatch(context.Background(), ""); err == nil {
 		t.Fatal("非字符串 pending 未被拒绝")
 	}
 	if err = mock.ExpectationsWereMet(); err != nil {

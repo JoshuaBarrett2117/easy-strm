@@ -158,6 +158,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	playbackRecordService := service.NewPlaybackRecordService(dao.NewPlaybackRecordDAO(redisClient))
 	playbackRecordService.SetPosterResolver(tmdbService.ResolvePlaybackMoviePoster)
 	shareStrmController.SetRecordPlayback(playbackRecordService.RecordShare)
+	shareStrmService.SetCategoryContextReader(mediaCategoryDAO.GetAllContext)
 	shareStrmService.SetExportDatabase(dao.DB)
 	registerShareStrmCronHandlers(shareStrmService)
 	r.GET("/share-strm/:id", shareStrmController.Playback)

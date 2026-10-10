@@ -2,7 +2,9 @@ package dao
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -105,17 +107,39 @@ func (d *EmbyMonitorDAO) CloseMissingSessions(serverID int, active []string, bef
 
 // UpsertItems 保存媒体扫描结果，首次基线不会被视为新入库。
 func (d *EmbyMonitorDAO) UpsertItems(serverID int, items []domain.EmbyMonitorItem, baseline bool, now time.Time) error {
+	if len(items) == 0 {
+		return nil
+	}
+	latest := make(map[string]domain.EmbyMonitorItem, len(items))
+	for _, item := range items {
+		latest[item.ItemID] = item
+	}
+	keys := make([]string, 0, len(latest))
+	for key := range latest {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	for _, item := range items {
+	const batchSize = 500
+	for start := 0; start < len(keys); start += batchSize {
+		batch := make([]domain.EmbyMonitorItem, 0, min(batchSize, len(keys)-start))
+		for _, key := range keys[start:min(start+batchSize, len(keys))] {
+			batch = append(batch, latest[key])
+		}
+		payload, marshalErr := json.Marshal(batch)
+		if marshalErr != nil {
+			return marshalErr
+		}
 		_, err = tx.Exec(`INSERT INTO t_emby_monitor_item(server_id,item_id,item_type,name,series_name,production_year,image_tag,date_created,first_seen_at,is_baseline)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+			SELECT $2,item.item_id,item.item_type,item.name,COALESCE(item.series_name,''),COALESCE(item.year,0),COALESCE(item.image_tag,''),item.date_created,$3,$4
+			FROM jsonb_to_recordset($1::jsonb) AS item(item_id text,item_type text,name text,series_name text,year integer,image_tag text,date_created timestamptz)
 			ON CONFLICT(server_id,item_id) DO UPDATE SET item_type=EXCLUDED.item_type,name=EXCLUDED.name,
 			series_name=EXCLUDED.series_name,production_year=EXCLUDED.production_year,image_tag=EXCLUDED.image_tag,date_created=EXCLUDED.date_created`,
-			serverID, item.ItemID, item.ItemType, item.Name, item.SeriesName, item.Year, item.ImageTag, item.DateCreated, now, baseline)
+			string(payload), serverID, now, baseline)
 		if err != nil {
 			return err
 		}

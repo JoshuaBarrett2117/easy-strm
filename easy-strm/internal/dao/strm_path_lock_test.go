@@ -37,7 +37,7 @@ func TestFinishStrmSnapshotDoesNotInvalidateConcurrentWrites(t *testing.T) {
 	c, _ := db.Conn(context.Background())
 	defer c.Close()
 	d := &StrmExportDAO{Conn: c}
-	m.ExpectExec("WHERE owner_key=\\$1 AND export_key=\\$2 AND last_seen_run_id=\\$3").WithArgs("share:default", "old-unseen", "snapshot-run").WillReturnResult(sqlmock.NewResult(0, 0))
+	m.ExpectExec("UPDATE t_strm_export_state output.*unnest").WithArgs("share:default", `{"old-unseen"}`, `{"snapshot-run"}`).WillReturnResult(sqlmock.NewResult(0, 0))
 	if err := d.FinishSnapshot(context.Background(), "share:default", ExportSnapshot{"old-unseen": "snapshot-run", "seen": "other-run"}, map[string]bool{"seen": true}); err != nil {
 		t.Fatal(err)
 	}

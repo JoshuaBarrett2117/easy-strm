@@ -25,10 +25,8 @@ func (d *ShareRecordDAO) ResolveSelection(ctx context.Context, key string) (doma
 			return selection, 0, ErrShareSelectionUnavailable
 		}
 		var candidate int64
-		err = transaction.QueryRowContext(ctx, `SELECT c.candidate_id FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
- JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_record r ON r.id=f.share_id JOIN t_share_media m ON m.id=f.media_id
- WHERE i.work_key=$1 AND i.season_number=$2 AND i.episode_number=$3 AND NOT i.revoked AND c.available AND c.state='active' AND f.available AND NOT r.share_cancelled AND f.status='identified' AND m.work_key=i.work_key
- AND ((m.media_type='movie' AND i.season_number=0 AND i.episode_number=0) OR EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id AND e.season_number=i.season_number AND e.episode_number=i.episode_number))
+		err = transaction.QueryRowContext(ctx, `SELECT c.candidate_id`+shareSelectionLiveJoin+`
+ WHERE i.work_key=$1 AND i.season_number=$2 AND i.episode_number=$3 AND `+shareSelectionLivePredicate+`
  ORDER BY c.file_size DESC,c.share_id,c.source_file_id,c.candidate_id LIMIT 1`, selection.WorkKey, selection.Season, selection.Episode).Scan(&candidate)
 		if err == sql.ErrNoRows {
 			return selection, 0, ErrShareSelectionUnavailable
@@ -51,24 +49,6 @@ func (d *ShareRecordDAO) ResolveSelection(ctx context.Context, key string) (doma
 		return selection, 0, err
 	}
 	return selection, source, transaction.Commit()
-}
-
-// WorkSelectionKeys 读取含失效选择的全部条目，零候选也不能静默确认待办。
-func (d *ShareRecordDAO) WorkSelectionKeys(ctx context.Context, work string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT media_item_key FROM t_share_media_selection WHERE work_key=$1 ORDER BY season_number,episode_number`, work)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	keys := []string{}
-	for rows.Next() {
-		var key string
-		if err = rows.Scan(&key); err != nil {
-			return nil, err
-		}
-		keys = append(keys, key)
-	}
-	return keys, rows.Err()
 }
 
 // AnchorSelectionPath 在文件发布前固定路径，发布或凭证失败的重试仍使用同一路径。

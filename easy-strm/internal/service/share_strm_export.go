@@ -63,46 +63,47 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	}()
 	cfg.DedupeExport = true
 	if selections, ok := s.store.(shareSelectionExportStore); ok {
-		if err := selections.CheckSelectionSchema(ctx); err != nil {
+		if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
+			return selections.CheckSelectionSchema(ctx)
+		}); err != nil {
 			return err
 		}
 		if len(q.FileIDs) > 0 {
-			prepared := map[string]bool{}
-			for _, sourceID := range q.FileIDs {
-				source, err := selections.GetStrmSource(ctx, sourceID)
-				if err != nil {
-					return err
-				}
-				if !prepared[source.WorkKey] {
-					if err := s.prepareSelectionWork(ctx, selections, source.WorkKey); err != nil {
+			if err := s.preparationStage(ctx, "selection-work-discovery", func(ctx context.Context, report sharePreparationReport) error {
+				prepared := map[string]bool{}
+				for index, sourceID := range q.FileIDs {
+					if err := ctx.Err(); err != nil {
 						return err
 					}
-					prepared[source.WorkKey] = true
+					source, err := selections.GetStrmSource(ctx, sourceID)
+					if err != nil {
+						return err
+					}
+					if !prepared[source.WorkKey] {
+						if err := s.prepareSelectionWork(ctx, selections, source.WorkKey); err != nil {
+							return err
+						}
+						prepared[source.WorkKey] = true
+					}
+					report(index+1, len(q.FileIDs))
 				}
+				return nil
+			}); err != nil {
+				return err
 			}
 		} else if q.WorkKey != "" {
 			if err := s.prepareSelectionWork(ctx, selections, q.WorkKey); err != nil {
 				return err
 			}
 		} else {
-			if err := selections.SyncSelections(ctx, ""); err != nil {
-				return err
-			}
 			if isFullShareStrmQuery(q) {
-				for page := 1; ; page++ {
-					values, _, err := selections.ListSelections(ctx, domain.ShareSelectionQuery{Page: page, PageSize: 100})
-					if err != nil {
-						return err
-					}
-					if len(values) == 0 {
-						break
-					}
-					for _, value := range values {
-						if _, _, err = selections.ResolveSelection(ctx, value.ItemKey); err != nil {
-							return err
-						}
-					}
+				if err := s.prepareSelectionWork(ctx, selections, ""); err != nil {
+					return err
 				}
+			} else if err := s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
+				return selections.SyncSelections(ctx, "")
+			}); err != nil {
+				return err
 			}
 		}
 	}
@@ -111,9 +112,14 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	var recoveryRevision int64
 	if s.exportDB != nil {
 		candidate := dao.NewShareExportCheckpointDAO(s.exportDB)
-		if err := candidate.CheckSchema(ctx); err == nil {
-			var revisionErr error
-			recoveryRevision, revisionErr = candidate.RecoveryRevision(ctx)
+		if err := s.preparationStage(ctx, "checkpoint-schema", func(ctx context.Context, _ sharePreparationReport) error {
+			return candidate.CheckSchema(ctx)
+		}); err == nil {
+			revisionErr := s.preparationStage(ctx, "checkpoint-revision", func(ctx context.Context, _ sharePreparationReport) error {
+				var readErr error
+				recoveryRevision, readErr = candidate.RecoveryRevision(ctx)
+				return readErr
+			})
 			if revisionErr != nil {
 				return revisionErr
 			}
@@ -123,16 +129,23 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		}
 	}
 	if s.tasks != nil {
-		if e := s.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath}); e != nil {
-			return e
+		if err := s.preparationStage(ctx, "task-metadata", func(ctx context.Context, _ sharePreparationReport) error {
+			return s.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "export_query": q, "output_path": cfg.OutputPath})
+		}); err != nil {
+			return err
 		}
 	}
 	output, _ := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
 	if s.exportDB != nil && output == nil {
-		var e error
-		output, e = WaitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, func() bool { return s.tasks != nil && s.tasks.IsCancelled(id) })
-		if e != nil {
-			return e
+		if err := s.preparationStage(ctx, "output-lock", func(ctx context.Context, _ sharePreparationReport) error {
+			var lockErr error
+			output, lockErr = WaitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, nil)
+			return lockErr
+		}); err != nil {
+			if output != nil && output.Store != nil {
+				output.Store.Close()
+			}
+			return err
 		}
 		defer output.Store.Close()
 		ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
@@ -141,11 +154,26 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		recovery = recovery.ForOutputConnection(output.Store.Conn)
 		ctx = context.WithValue(ctx, shareExportRecoveryContext{}, recovery)
 	}
-	cats, err := s.categories()
+	var cats []*domain.MediaCategory
+	err := s.preparationStage(ctx, "categories", func(ctx context.Context, _ sharePreparationReport) error {
+		var readErr error
+		if s.categoriesContext != nil {
+			cats, readErr = s.categoriesContext(ctx)
+		} else {
+			cats, readErr = s.categories()
+		}
+		return readErr
+	})
 	if err != nil {
 		return err
 	}
-	conflicts, total, err := s.collectShareStrmConflicts(ctx, q)
+	var conflicts map[string]*shareStrmConflict
+	var total int
+	err = s.preparationStage(ctx, "conflicts", func(ctx context.Context, _ sharePreparationReport) error {
+		var collectErr error
+		conflicts, total, collectErr = s.collectShareStrmConflicts(ctx, q)
+		return collectErr
+	})
 	if err != nil {
 		return err
 	}
@@ -278,6 +306,9 @@ func (s *ShareStrmService) collectShareStrmConflicts(ctx context.Context, q doma
 	result := map[string]*shareStrmConflict{}
 	total := 0
 	for after := 0; ; {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, err
+		}
 		rows, err := s.store.StrmSources(ctx, q, after)
 		if err != nil {
 			return nil, 0, err
@@ -287,7 +318,13 @@ func (s *ShareStrmService) collectShareStrmConflicts(ctx context.Context, q doma
 		}
 		total += len(rows)
 		for _, source := range rows {
+			if err := ctx.Err(); err != nil {
+				return nil, 0, err
+			}
 			after = source.ID
+			if _, authoritative := s.store.(shareSelectionExportStore); authoritative {
+				continue
+			}
 			episodes := source.Episodes
 			if source.Result.MediaType == "movie" {
 				episodes = []domain.ShareEpisode{{}}
@@ -311,6 +348,9 @@ func (s *ShareStrmService) collectShareStrmConflicts(ctx context.Context, q doma
 					conflict.winners[identity] = source.ID
 				}
 			}
+		}
+		if report, ok := ctx.Value(sharePreparationReportKey{}).(sharePreparationReport); ok {
+			report(total, -1)
 		}
 	}
 }
@@ -363,11 +403,13 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 			return strmExportResult{Err: ErrShareUnitSkipped}
 		}
 		source = fresh
-		conflicts, err := s.shareStrmConflicts(ctx, domain.ShareLibraryQuery{WorkKey: source.WorkKey})
-		if err != nil {
-			return strmExportResult{Err: err}
+		if !hasSelection {
+			conflicts, err := s.shareStrmConflicts(ctx, domain.ShareLibraryQuery{WorkKey: source.WorkKey})
+			if err != nil {
+				return strmExportResult{Err: err}
+			}
+			conflictMaps = []map[string]*shareStrmConflict{conflicts}
 		}
-		conflictMaps = []map[string]*shareStrmConflict{conflicts}
 	}
 	output, _ := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
 
@@ -415,6 +457,9 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 		conflicts = conflictMaps[0]
 	}
 	for _, episode := range episodes {
+		if err := ctx.Err(); err != nil {
+			return strmExportResult{Written: result.Written, Err: err}
+		}
 		if hasSelection && (episode.SeasonNumber != selected.selection.Season || episode.EpisodeNumber != selected.selection.Episode) {
 			continue
 		}

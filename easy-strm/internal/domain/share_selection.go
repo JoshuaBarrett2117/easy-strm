@@ -37,9 +37,14 @@ type ShareSelectionDetail struct {
 
 // ShareSelectionQuery 定义分页搜索，不允许读取播放凭据。
 type ShareSelectionQuery struct {
-	Page     int    `form:"page"`
-	PageSize int    `form:"page_size"`
-	Keyword  string `form:"keyword"`
+	Page         int    `form:"page"`
+	PageSize     int    `form:"page_size"`
+	Keyword      string `form:"keyword"`
+	SkipCount    bool   `form:"-"`
+	Cursor       bool   `form:"-"`
+	AfterWork    string `form:"-"`
+	AfterSeason  int    `form:"-"`
+	AfterEpisode int    `form:"-"`
 }
 
 // ShareSelectionChange 使用版本 CAS，改选仅影响下一次导出。

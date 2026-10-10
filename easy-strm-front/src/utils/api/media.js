@@ -76,7 +76,23 @@ export const resetFilenameRecognitionRules = () => api.post('/media/tmdb/filenam
 
 // 批量识别文件
 export const batchIdentifyTmdb = (data) => api.post('/media/tmdb/batch-identify', data)
-export const getShareRecords = (params) => api.get('/media/share-records', { params })
+export const getShareRecords = (params, signal) => api.get('/media/share-records', { params, signal })
+
+export const getUnsyncedShareRecordIDs = async (signal) => {
+  const ids = []
+  let afterID = 0
+  for (;;) {
+    if (signal?.aborted) throw new Error('已取消读取分享列表')
+    const response = await getShareRecords({ cursor: true, after_id: afterID, only_unsynced: true, page_size: 200 }, signal)
+    const payload = response.data?.data || response.data || {}
+    const records = payload.data || []
+    if (!records.length) return ids
+    const nextID = Number(records[records.length - 1].id)
+    if (!Number.isInteger(nextID) || nextID <= 0 || (afterID > 0 && nextID >= afterID)) throw new Error('分享列表游标未推进')
+    ids.push(...records.map(record => record.id))
+    afterID = nextID
+  }
+}
 export const getShareReviewItems = (params) => api.get('/media/share-review', { params })
 // 任务总时限配置，0代表无限制。
 export const getShareTaskSettings = () => api.get('/media/share-task-settings')

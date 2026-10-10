@@ -55,12 +55,15 @@ type ShareEpisode struct {
 
 // ShareRecordQuery 分享分页搜索条件。
 type ShareRecordQuery struct {
-	ShareID  int
-	Summary  bool
-	Keyword  string
-	Status   string
-	Page     int
-	PageSize int
+	ShareID      int
+	Summary      bool
+	Keyword      string
+	Status       string
+	Page         int
+	PageSize     int
+	Cursor       bool
+	AfterID      int
+	OnlyUnsynced bool
 }
 
 // ShareRecordPage 分享分页结果。
