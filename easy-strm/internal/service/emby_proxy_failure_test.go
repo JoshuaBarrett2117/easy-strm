@@ -42,6 +42,8 @@ func captureEmbyProxyLog(t *testing.T) *embyProxyTestLog {
 	t.Helper()
 	output := &embyProxyTestLog{}
 	logger.SetOutputs(output, output, output, output)
+	logger.SetFormat("json")
+	t.Cleanup(func() { logger.SetFormat("") })
 	t.Cleanup(func() { logger.SetOutputs(os.Stderr, os.Stderr, os.Stderr, os.Stderr) })
 	return output
 }
@@ -403,7 +405,7 @@ func TestEmbyProxyNonPlaybackRequestsRemainTransparent(t *testing.T) {
 					t.Error("普通 Emby 请求未透明反代")
 				}
 				body, _ := io.ReadAll(r.Body)
-				if string(body) != tc.body || r.Header.Get("X-Request-ID") == "" || r.Header.Get("X-Request-ID") == "client-id" {
+				if string(body) != tc.body || r.Header.Get("X-Request-ID") != "client-id" {
 					t.Error("请求体或请求标识异常")
 				}
 				w.Header().Set("X-Request-ID", "upstream-id")
@@ -423,8 +425,8 @@ func TestEmbyProxyNonPlaybackRequestsRemainTransparent(t *testing.T) {
 			if response.Code != 200 || calls.Load() != 1 || response.Header().Get("Set-Cookie") != "session=upstream" {
 				t.Fatalf("普通请求被播放识别干扰: code=%d calls=%d", response.Code, calls.Load())
 			}
-			if id := response.Header().Get("X-Request-ID"); id == "" || id == "upstream-id" || id == "client-id" || len(response.Header().Values("X-Request-ID")) != 1 {
-				t.Fatal("请求标识未由反代生成或出现重复")
+			if id := response.Header().Get("X-Request-ID"); id != "client-id" || len(response.Header().Values("X-Request-ID")) != 1 {
+				t.Fatal("请求标识未沿用上游或出现重复")
 			}
 			if output.String() != "" {
 				t.Fatalf("正常请求不应记录失败日志: %s", output.String())

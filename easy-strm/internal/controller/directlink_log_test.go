@@ -17,6 +17,8 @@ func TestDirectLinkRequestLogsIdentifyCallerWithoutSecrets(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var output bytes.Buffer
 	logger.SetOutputs(&output, &output, &output, &output)
+	logger.SetFormat("json")
+	t.Cleanup(func() { logger.SetFormat("") })
 	defer logger.SetOutputs(os.Stderr, os.Stderr, os.Stderr, os.Stderr)
 	c := NewDirectLinkController()
 	c.SetGetCloud115ByID(func(id int) (*Cloud115AccountBrief, error) {

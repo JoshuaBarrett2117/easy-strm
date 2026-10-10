@@ -13,7 +13,6 @@ import (
 
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
-	"github.com/google/uuid"
 )
 
 type embyProxyFailure struct {
@@ -40,9 +39,12 @@ type embyProxyRequestLog struct {
 }
 
 func beginEmbyProxyRequest(r *http.Request, w http.ResponseWriter, playback embyProxyPlaybackRequest) *http.Request {
-	id := uuid.NewString()
-	w.Header().Set("X-Request-ID", id)
-	ctx := logger.WithRequestID(r.Context(), id)
+	ctx, err := logger.HTTPContext(r)
+	if err != nil {
+		logger.WithContext(r.Context(), "emby_proxy").Log(logger.ERROR, "请求标识随机源不可用", nil, err)
+		return r
+	}
+	w.Header().Set("X-Request-ID", logger.RequestID(ctx))
 	ctx = context.WithValue(ctx, embyProxyRequestLogKey{}, embyProxyRequestLog{started: time.Now(), incoming: r, playback: playback})
 	return r.WithContext(ctx)
 }

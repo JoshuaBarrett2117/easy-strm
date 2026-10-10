@@ -22,9 +22,11 @@ func TestRequestLoggingAndRecoveryDoNotDumpUntrustedInput(t *testing.T) {
 	var output bytes.Buffer
 	pkglogger.SetOutputs(&output, &output, &output, &output)
 	pkglogger.SetLevel(pkglogger.DEBUG)
+	pkglogger.SetFormat("json")
 	t.Cleanup(func() {
 		pkglogger.SetOutputs(os.Stdout, os.Stdout, os.Stderr, os.Stderr)
 		pkglogger.SetLevel(pkglogger.INFO)
+		pkglogger.SetFormat("")
 	})
 	router := gin.New()
 	router.Use(requestLoggingMiddleware(), safeRecoveryMiddleware())
@@ -38,7 +40,7 @@ func TestRequestLoggingAndRecoveryDoNotDumpUntrustedInput(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer synthetic-private-auth")
 	request.Header.Set("Cookie", "synthetic-private-cookie")
 	request.Header.Set("User-Agent", "synthetic-private-header")
-	request.Header.Set("X-Request-ID", "synthetic-private-client-id")
+	request.Header.Set("X-Request-ID", "upstream-safe-id")
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != 500 || response.Header().Get("X-Request-ID") == "" {
@@ -69,9 +71,11 @@ func TestDirectoryTreeResponsesNeverReachLogs(t *testing.T) {
 	var output bytes.Buffer
 	pkglogger.SetOutputs(&output, &output, &output, &output)
 	pkglogger.SetLevel(pkglogger.DEBUG)
+	pkglogger.SetFormat("json")
 	t.Cleanup(func() {
 		pkglogger.SetOutputs(os.Stdout, os.Stdout, os.Stderr, os.Stderr)
 		pkglogger.SetLevel(pkglogger.INFO)
+		pkglogger.SetFormat("")
 	})
 	client := &Client{httpClient: &http.Client{Transport: proxyRoundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("synthetic-private-response-body"))}, nil

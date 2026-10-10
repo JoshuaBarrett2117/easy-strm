@@ -17,6 +17,8 @@ func TestLoginControllerLogsExcludeAccountAndCredentials(t *testing.T) {
 	var output bytes.Buffer
 	logger.SetOutputs(&output, &output, &output, &output)
 	logger.SetLevel(logger.DEBUG)
+	logger.SetFormat("json")
+	t.Cleanup(func() { logger.SetFormat("") })
 	t.Cleanup(func() { logger.SetOutputs(os.Stdout, os.Stdout, os.Stderr, os.Stderr); logger.SetLevel(logger.INFO) })
 	for _, branch := range []string{"missing", "mismatch", "success"} {
 		output.Reset()

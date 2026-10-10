@@ -3,18 +3,22 @@ package main
 import (
 	"fmt"
 	"net/http"
+
 	"time"
 
 	pkglogger "easy-strm/internal/pkg/logger"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 func requestLoggingMiddleware() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		id := uuid.NewString()
-		ctx.Request = ctx.Request.WithContext(pkglogger.WithRequestID(ctx.Request.Context(), id))
-		ctx.Header("X-Request-ID", id)
+		requestContext, err := pkglogger.HTTPContext(ctx.Request)
+		if err != nil {
+			ctx.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		ctx.Request = ctx.Request.WithContext(requestContext)
+		ctx.Header("X-Request-ID", pkglogger.RequestID(requestContext))
 		started := time.Now()
 		ctx.Next()
 		pkglogger.WithContext(ctx.Request.Context(), "http").Log(pkglogger.INFO, "请求完成", pkglogger.Fields{

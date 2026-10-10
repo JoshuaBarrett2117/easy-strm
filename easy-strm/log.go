@@ -111,6 +111,7 @@ func InitLogger(config *Config) {
 	// 服务层与主程序共用输出文件和级别，避免系统日志页面遗漏识别等业务日志。
 	pkglogger.SetOutputs(debugOutput, infoOutput, warnOutput, errorOutput)
 	pkglogger.SetLevel(pkglogger.Level(currentLevel))
+	pkglogger.SetFormat(os.Getenv("LOG_FORMAT"))
 	log.SetFlags(0)
 	log.SetOutput(pkglogger.Writer("stdlib"))
 

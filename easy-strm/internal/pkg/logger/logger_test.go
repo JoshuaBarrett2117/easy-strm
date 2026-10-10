@@ -19,15 +19,17 @@ import (
 func captureLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	state.Lock()
-	oldOutputs, oldLevel := state.outputs, state.level
+	oldOutputs, oldLevel, oldFormat := state.outputs, state.level, state.format
 	state.Unlock()
 	t.Cleanup(func() {
 		SetOutputs(oldOutputs[0], oldOutputs[1], oldOutputs[2], oldOutputs[3])
 		SetLevel(oldLevel)
+		SetFormat(oldFormat)
 	})
 	output := &bytes.Buffer{}
 	SetOutputs(output, output, output, output)
 	SetLevel(DEBUG)
+	SetFormat("json")
 	return output
 }
 
@@ -96,14 +98,14 @@ func TestTemplateTimestampAndRequestTaskContext(t *testing.T) {
 	if err := json.Unmarshal(bytes.TrimSpace(output.Bytes()), &template); err != nil {
 		t.Fatal(err)
 	}
-	if len(template) != 8 || template["error_chain"] == nil || template["fields"] == nil {
+	if len(template) != 10 || template["error_chain"] == nil || template["fields"] == nil {
 		t.Fatal("模板字段必须完整，空字段为对象及数组")
 	}
 	output.Reset()
 	WithContext(nil, "startup").Log(INFO, "启动", nil, nil)
 	entry = decodeRecords(t, output)[0]
-	if entry.RequestID != "" || entry.TaskID != "" {
-		t.Fatal("后台上下文应为空")
+	if entry.RequestID != "-" || entry.TaskID != "-" || entry.TraceID != "-" {
+		t.Fatal("后台上下文应使用明确占位符")
 	}
 }
 

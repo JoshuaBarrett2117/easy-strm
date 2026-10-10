@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +38,8 @@ type record struct {
 	Level      string      `json:"level"`
 	RequestID  string      `json:"request_id"`
 	TaskID     string      `json:"task_id"`
+	TraceID    string      `json:"trace_id"`
+	Sequence   uint64      `json:"seq,omitempty"`
 	Module     string      `json:"module"`
 	Message    string      `json:"message"`
 	Fields     interface{} `json:"fields"`
@@ -45,6 +49,7 @@ type record struct {
 var state = struct {
 	sync.Mutex
 	level   Level
+	format  string
 	outputs [4]io.Writer
 }{level: INFO, outputs: [4]io.Writer{os.Stdout, os.Stdout, os.Stderr, os.Stderr}}
 
@@ -63,6 +68,13 @@ func SetLevel(level Level) {
 	state.Lock()
 	defer state.Unlock()
 	state.level = level
+}
+
+// SetFormat 显式选择 json；其余值均使用默认人类可读单行格式。
+func SetFormat(format string) {
+	state.Lock()
+	defer state.Unlock()
+	state.format = strings.ToLower(strings.TrimSpace(format))
 }
 
 // Logger 保存不可变的调用上下文；不同请求不得共享可变 Fields。
@@ -95,23 +107,62 @@ func (entry *Logger) write(level Level, message string, fields Fields, errs []er
 	if fields == nil {
 		fields = Fields{}
 	}
-	line, err := json.Marshal(record{
+	entryRecord := record{
 		Timestamp: time.Now().Format(TimestampLayout), Level: [...]string{"DEBUG", "INFO", "WARN", "ERROR"}[level],
-		RequestID: sanitizeText(RequestID(entry.ctx)), TaskID: sanitizeText(TaskID(entry.ctx)),
+		RequestID: contextLabel(RequestID(entry.ctx)), TaskID: contextLabel(TaskID(entry.ctx)),
+		TraceID: contextLabel(TraceID(entry.ctx)), Sequence: nextSequence(entry.ctx),
 		Module: sanitizeText(entry.module), Message: sanitizeText(message), Fields: sanitizeValue(fields), ErrorChain: chain,
-	})
-	if err != nil {
-		line, _ = json.Marshal(record{Timestamp: time.Now().Format(TimestampLayout), Level: "ERROR", Module: "logger", Message: "日志序列化失败，原始内容已省略", Fields: Fields{}, ErrorChain: []string{}})
 	}
-	line = append(line, '\n')
 	state.Lock()
 	defer state.Unlock()
 	if level < state.level || state.outputs[level] == nil {
 		return
 	}
-	if _, err := state.outputs[level].Write(line); err != nil {
-		_, _ = io.WriteString(os.Stderr, "{\"timestamp\":\""+time.Now().Format(TimestampLayout)+"\",\"level\":\"ERROR\",\"request_id\":\"\",\"task_id\":\"\",\"module\":\"logger\",\"message\":\"日志输出失败，原始错误已省略\",\"fields\":{},\"error_chain\":[]}\n")
+	var line []byte
+	if state.format == "json" {
+		line, _ = json.Marshal(entryRecord)
+	} else {
+		line = humanRecord(entryRecord)
 	}
+	line = append(line, '\n')
+	if _, err := state.outputs[level].Write(line); err != nil {
+		_, _ = io.WriteString(os.Stderr, "["+time.Now().Format(TimestampLayout)+"][ERROR][req=-][task=-][module=logger][trace=-] 日志输出失败，原始错误已省略\n")
+	}
+}
+
+func contextLabel(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return sanitizeText(value)
+}
+
+func humanRecord(entry record) []byte {
+	var output strings.Builder
+	fmt.Fprintf(&output, "[%s][%s][req=%s][task=%s][module=%s][trace=%s] %s", entry.Timestamp, entry.Level, singleLine(entry.RequestID), singleLine(entry.TaskID), singleLine(entry.Module), singleLine(entry.TraceID), singleLine(entry.Message))
+	if entry.Sequence > 0 {
+		fmt.Fprintf(&output, " seq=%d", entry.Sequence)
+	}
+	fields, _ := entry.Fields.(map[string]interface{})
+	keys := make([]string, 0, len(fields))
+	for key := range fields {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value, _ := json.Marshal(fields[key])
+		fmt.Fprintf(&output, " %s=%s", singleLine(key), value)
+	}
+	if len(entry.ErrorChain) > 0 {
+		value, _ := json.Marshal(entry.ErrorChain)
+		fmt.Fprintf(&output, " error_chain=%s", value)
+	}
+	return []byte(output.String())
+}
+
+func singleLine(value string) string {
+	quoted := strconv.Quote(value)
+	return quoted[1 : len(quoted)-1]
 }
 
 func appendErrorChain(chain *[]string, err error, depth int) {

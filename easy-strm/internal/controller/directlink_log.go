@@ -6,17 +6,17 @@ import (
 	"easy-strm/internal/pkg/logger"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // 只记录用于定位来源的字段，不记录完整查询串、Cookie、授权头和带签名的直链。
 func beginDirectLinkRequest(ctx *gin.Context, source string) func() {
-	id := logger.RequestID(ctx.Request.Context())
-	if id == "" {
-		id = uuid.NewString()
+	requestContext, err := logger.HTTPContext(ctx.Request)
+	if err != nil {
+		ctx.AbortWithStatus(503)
+		return func() {}
 	}
-	ctx.Request = ctx.Request.WithContext(logger.WithRequestID(ctx.Request.Context(), id))
-	ctx.Header("X-Request-ID", id)
+	ctx.Request = ctx.Request.WithContext(requestContext)
+	ctx.Header("X-Request-ID", logger.RequestID(requestContext))
 	start := time.Now()
 	entry := logger.WithContext(ctx.Request.Context(), "directlink")
 	entry.Log(logger.INFO, "直链请求开始", logger.Fields{"event": "request", "source": source, "method": ctx.Request.Method, "route": ctx.FullPath()}, nil)
