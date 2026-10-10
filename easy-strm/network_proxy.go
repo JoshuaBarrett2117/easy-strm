@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -13,21 +16,15 @@ const (
 	systemConfigProxyURLKey     = "proxy_url"
 	systemConfigProxyDomainsKey = "proxy_domains"
 	systemConfigTMDBAPIKey      = "tmdb_api_key"
+	proxyDialTimeout            = 10 * time.Second
+	proxyResponseHeaderTimeout  = 15 * time.Second
 )
 
 var proxyDomainAlias = map[string][]string{
 	"tg":       {"telegram.org", "t.me", "api.telegram.org"},
 	"telegram": {"telegram.org", "t.me", "api.telegram.org"},
 	"github":   {"github.com", "api.github.com", "raw.githubusercontent.com", "gist.github.com"},
-	"tmdb":     {"themoviedb.org"},
-}
-
-// defaultProxyDomains 是启用代理后始终通过代理访问的内置站点。
-var defaultProxyDomains = []string{
-	"telegram.org",
-	"t.me",
-	"github.com",
-	"themoviedb.org",
+	"tmdb":     {"themoviedb.org", "image.tmdb.org"},
 }
 
 type NetworkProbeSite struct {
@@ -45,42 +42,123 @@ type NetworkProbeResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
+// NewProxyAwareHTTPClient 按系统白名单选路，代理传输失败时直连一次，保留调用方总超时。
 func NewProxyAwareHTTPClient(timeout time.Duration) *http.Client {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = func(req *http.Request) (*url.URL, error) {
-		proxyURL, domains := loadProxyConfigFromSystem()
-		if !shouldUseProxy(proxyURL, req.URL.Hostname(), domains) {
-			return nil, nil
-		}
-		return proxyURL, nil
-	}
-	// 部分本地代理对 TMDB 的 TLS/HTTP2 连接会返回 EOF；TMDB 请求失败时使用
-	// IPv4 直连兜底，其他站点仍严格沿用原有代理策略。
-	direct := http.DefaultTransport.(*http.Transport).Clone()
+	return newProxyAwareHTTPClient(timeout, loadProxyConfigFromSystem, http.DefaultTransport.(*http.Transport))
+}
+
+func newProxyAwareHTTPClient(timeout time.Duration, loader func() (*url.URL, []string), base *http.Transport) *http.Client {
+	direct := base.Clone()
 	direct.Proxy = nil
-	direct.ForceAttemptHTTP2 = true
-	direct.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		return (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp4", address)
+	tmdbDirect := direct.Clone()
+	tmdbDirect.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		return direct.DialContext(ctx, "tcp4", address)
+	}
+	proxy := direct.Clone()
+	configureProxyTransport(proxy, direct.DialContext, proxyDialTimeout, proxyResponseHeaderTimeout)
+	proxy.Proxy = func(req *http.Request) (*url.URL, error) {
+		proxyURL, _ := req.Context().Value(proxyRouteKey{}).(*url.URL)
+		return proxyURL, nil
 	}
 
 	return &http.Client{
 		Timeout:   timeout,
-		Transport: &tmdbFallbackTransport{primary: transport, direct: direct},
+		Transport: &proxyFallbackTransport{proxy: proxy, direct: direct, tmdbDirect: tmdbDirect, loadProxyConfig: loader},
 	}
 }
 
-// tmdbFallbackTransport 只为 TMDB 的临时代理故障提供直连兜底。
-type tmdbFallbackTransport struct {
-	primary http.RoundTripper
-	direct  http.RoundTripper
+// configureProxyTransport 限制代理拨号与连接建立（包括 CONNECT），GotConn 后解除连接期限以保留流式响应。
+func configureProxyTransport(transport *http.Transport, dial func(context.Context, string, string) (net.Conn, error), dialTimeout, headerTimeout time.Duration) {
+	transport.ResponseHeaderTimeout = headerTimeout
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+		defer cancel()
+		conn, err := dial(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		if headerTimeout > 0 {
+			if err := conn.SetDeadline(time.Now().Add(headerTimeout)); err != nil {
+				conn.Close()
+				return nil, err
+			}
+		}
+		return conn, nil
+	}
 }
 
-func (t *tmdbFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.primary.RoundTrip(req)
-	if err == nil || !isTMDBHost(req.URL.Hostname()) {
+type proxyRouteKey struct{}
+
+// proxyFallbackTransport 仅对实际走代理的传输错误直连一次；请求可能已被服务端执行，重试仍有重复副作用风险。
+type proxyFallbackTransport struct {
+	proxy           http.RoundTripper
+	direct          http.RoundTripper
+	tmdbDirect      http.RoundTripper
+	loadProxyConfig func() (*url.URL, []string)
+}
+
+// RoundTrip 每次请求只读取一次选路配置，保留原始上下文，仅通过 GetBody 重放请求体。
+func (fallback *proxyFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	proxyURL, domains := fallback.loadProxyConfig()
+	if !shouldUseProxy(proxyURL, req.URL.Hostname(), domains) {
+		return fallback.direct.RoundTrip(req)
+	}
+	ctx := context.WithValue(req.Context(), proxyRouteKey{}, proxyURL)
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			if err := info.Conn.SetDeadline(time.Time{}); err != nil {
+				info.Conn.Close()
+			}
+		},
+	})
+	resp, err := fallback.proxy.RoundTrip(req.Clone(ctx))
+	if err == nil {
 		return resp, err
 	}
-	return t.direct.RoundTrip(req)
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	if contextErr := req.Context().Err(); contextErr != nil {
+		return nil, contextErr
+	}
+	retry := req.Clone(req.Context())
+	if req.Body != nil && req.Body != http.NoBody {
+		if req.GetBody == nil {
+			return nil, err
+		}
+		body, replayErr := req.GetBody()
+		if replayErr != nil {
+			if body != nil {
+				body.Close()
+			}
+			return nil, fmt.Errorf("代理请求失败 (%v)，无法重放请求体: %w", err, replayErr)
+		}
+		if body == nil {
+			return nil, fmt.Errorf("无法重放请求体: %w", err)
+		}
+		retry.Body = body
+	}
+	direct := fallback.direct
+	if isTMDBHost(req.URL.Hostname()) {
+		direct = fallback.tmdbDirect
+	}
+	resp, err = direct.RoundTrip(retry)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		return nil, err
+	}
+	return resp, nil
+}
+
+// CloseIdleConnections 释放代理与两类直连传输的空闲连接，不中断正在读取的响应体。
+func (fallback *proxyFallbackTransport) CloseIdleConnections() {
+	for _, transport := range []http.RoundTripper{fallback.proxy, fallback.direct, fallback.tmdbDirect} {
+		if closer, ok := transport.(interface{ CloseIdleConnections() }); ok {
+			closer.CloseIdleConnections()
+		}
+	}
 }
 
 func isTMDBHost(host string) bool {
@@ -193,7 +271,11 @@ func loadProxyConfigFromSystem() (*url.URL, []string) {
 
 // buildProxyDomains 合并内置代理站点与用户追加的自定义站点。
 func buildProxyDomains(raw string) []string {
-	parts := append([]string{}, defaultProxyDomains...)
+	parts := make([]string, 0, len(proxyDomainAlias)+1)
+	for alias := range proxyDomainAlias {
+		parts = append(parts, alias)
+	}
+	sort.Strings(parts)
 	if custom := strings.TrimSpace(raw); custom != "" {
 		parts = append(parts, custom)
 	}
