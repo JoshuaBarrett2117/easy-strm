@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,9 @@ type FileOperationService struct {
 	mediaSourceService *MediaSourceService
 	cloud115DAO        *dao.Cloud115DAO
 	cloud115Client     Cloud115Client
+	requestContext     context.Context
+	preparedSources    map[int]fileOperationSource
+	preparedAccounts   map[int]fileOperationAccount
 }
 
 // NewFileOperationService 创建文件操作服务实例
@@ -59,7 +63,7 @@ func (s *FileOperationService) MoveFile(sourceID int, fileID, targetPath string)
 	}
 
 	// 获取源媒体源
-	source, err := s.mediaSourceService.GetByID(sourceID)
+	source, err := s.operationSource(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取源媒体源失败: %v", err)
 	}
@@ -83,6 +87,9 @@ func (s *FileOperationService) MoveFile(sourceID int, fileID, targetPath string)
 		// 确保目标目录存在
 		if err := os.MkdirAll(filepath.Dir(targetFilePath), 0755); err != nil {
 			return nil, fmt.Errorf("创建目标目录失败: %v", err)
+		}
+		if err := s.operationContext().Err(); err != nil {
+			return nil, err
 		}
 
 		// 移动文件
@@ -144,7 +151,7 @@ func (s *FileOperationService) CopyFile(sourceID, targetID int, fileID, targetPa
 	}
 
 	// 获取源媒体源
-	source, err := s.mediaSourceService.GetByID(sourceID)
+	source, err := s.operationSource(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取源媒体源失败: %v", err)
 	}
@@ -153,7 +160,7 @@ func (s *FileOperationService) CopyFile(sourceID, targetID int, fileID, targetPa
 	}
 
 	// 获取目标媒体源
-	target, err := s.mediaSourceService.GetByID(targetID)
+	target, err := s.operationSource(targetID)
 	if err != nil {
 		return nil, fmt.Errorf("获取目标媒体源失败: %v", err)
 	}
@@ -248,7 +255,7 @@ func (s *FileOperationService) DeleteFile(sourceID int, fileIDs []string) (*doma
 	}
 
 	// 获取源媒体源
-	source, err := s.mediaSourceService.GetByID(sourceID)
+	source, err := s.operationSource(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取源媒体源失败: %v", err)
 	}
@@ -321,7 +328,7 @@ func (s *FileOperationService) getCloud115Account(source *domain.MediaSource) (*
 		return nil, fmt.Errorf("115文件操作客户端未初始化")
 	}
 
-	cloud115, err := s.cloud115DAO.GetByID(*source.Cloud115ID)
+	cloud115, err := s.operationAccount(*source.Cloud115ID)
 	if err != nil {
 		return nil, fmt.Errorf("获取115账号失败: %v", err)
 	}
@@ -376,7 +383,7 @@ func (s *FileOperationService) RenameFile(sourceID int, fileID, newName string) 
 	}
 
 	// 获取源媒体源
-	source, err := s.mediaSourceService.GetByID(sourceID)
+	source, err := s.operationSource(sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("获取源媒体源失败: %v", err)
 	}
@@ -433,7 +440,7 @@ func (s *FileOperationService) RenameFile(sourceID int, fileID, newName string) 
 		}
 
 		// 获取115账号信息
-		cloud115, err := s.cloud115DAO.GetByID(*source.Cloud115ID)
+		cloud115, err := s.operationAccount(*source.Cloud115ID)
 		if err != nil {
 			return nil, fmt.Errorf("获取115账号失败: %v", err)
 		}
@@ -494,67 +501,69 @@ func (s *FileOperationService) RenameFile(sourceID int, fileID, newName string) 
 //   - *domain.BatchOperationResult: 批量操作结果
 //   - error: 错误信息
 func (s *FileOperationService) BatchOperation(operation string, sourceID, targetID int, items []domain.BatchOperationItem) (*domain.BatchOperationResult, error) {
+	return s.BatchOperationContext(context.Background(), operation, sourceID, targetID, items)
+}
+
+// BatchOperationContext 以最多四个协程执行有界批次，复用配置；取消后保留已执行结果，不启动剩余项。
+func (s *FileOperationService) BatchOperationContext(ctx context.Context, operation string, sourceID, targetID int, items []domain.BatchOperationItem) (*domain.BatchOperationResult, error) {
 	result := &domain.BatchOperationResult{
 		Total:   len(items),
-		Results: []domain.FileOperationResult{},
+		Results: make([]domain.FileOperationResult, len(items)),
 	}
-
-	if len(items) == 0 {
-		return nil, errors.New("操作项列表不能为空")
+	if len(items) == 0 || len(items) > FileOperationBatchLimit {
+		return nil, fmt.Errorf("操作项数量需为1至%d", FileOperationBatchLimit)
 	}
-
-	// 获取源媒体源
-	source, err := s.mediaSourceService.GetByID(sourceID)
+	if operation != "move" && operation != "copy" && operation != "delete" && operation != "rename" {
+		return nil, fmt.Errorf("不支持的操作类型: %s", operation)
+	}
+	worker := &FileOperationService{mediaSourceService: s.mediaSourceService, cloud115DAO: s.cloud115DAO, cloud115Client: s.cloud115Client, requestContext: ctx}
+	source, err := worker.operationSource(sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("获取源媒体源失败: %v", err)
+		return nil, fmt.Errorf("获取源媒体源失败: %w", err)
 	}
 	if source == nil {
 		return nil, fmt.Errorf("源媒体源不存在")
 	}
-
-	// 使用 WaitGroup 和 mutex 进行并发控制
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	for _, item := range items {
-		wg.Add(1)
-		go func(item domain.BatchOperationItem) {
-			defer wg.Done()
-
-			var opResult *domain.FileOperationResult
-			var err error
-
-			switch operation {
-			case "move":
-				opResult, err = s.MoveFile(sourceID, item.FileID, item.TargetPath)
-			case "copy":
-				opResult, err = s.CopyFile(sourceID, targetID, item.FileID, item.TargetPath, false)
-			case "delete":
-				opResult, err = s.DeleteFile(sourceID, []string{item.FileID})
-			case "rename":
-				opResult, err = s.RenameFile(sourceID, item.FileID, item.NewName)
-			default:
-				err = fmt.Errorf("不支持的操作类型: %s", operation)
-			}
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if err != nil {
-				result.Failed++
-				result.Results = append(result.Results, domain.FileOperationResult{
-					Success: false,
-					Message: err.Error(),
-					Source:  item.FileID,
-				})
-			} else {
-				result.Success++
-				result.Results = append(result.Results, *opResult)
-			}
-		}(item)
+	worker.preparedSources = map[int]fileOperationSource{sourceID: {source: source}}
+	if operation == "copy" && targetID != sourceID {
+		target, targetErr := s.mediaSourceService.GetByIDContext(ctx, targetID)
+		worker.preparedSources[targetID] = fileOperationSource{source: target, err: targetErr}
 	}
-
-	wg.Wait()
+	worker.preparedAccounts = make(map[int]fileOperationAccount)
+	for _, prepared := range worker.preparedSources {
+		if prepared.source == nil || prepared.source.Cloud115ID == nil {
+			continue
+		}
+		accountID := *prepared.source.Cloud115ID
+		if _, exists := worker.preparedAccounts[accountID]; !exists {
+			account, accountErr := worker.operationAccount(accountID)
+			worker.preparedAccounts[accountID] = fileOperationAccount{account: account, err: accountErr}
+		}
+	}
+	jobs := make(chan int)
+	completed := make([]bool, len(items))
+	var group sync.WaitGroup
+	for workerIndex := 0; workerIndex < min(4, len(items)); workerIndex++ {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for index := range jobs {
+				result.Results[index], completed[index] = worker.runBatchItem(operation, sourceID, targetID, items[index])
+			}
+		}()
+	}
+	for index := range items {
+		jobs <- index
+	}
+	close(jobs)
+	group.Wait()
+	for _, finished := range completed {
+		if finished {
+			result.Success++
+		} else {
+			result.Failed++
+		}
+	}
 
 	logger.Infof("FileOperationService[BatchOperation] 批量操作完成: 类型=%s, 成功=%d, 失败=%d",
 		operation, result.Success, result.Failed)
@@ -569,6 +578,9 @@ func (s *FileOperationService) BatchOperation(operation string, sourceID, target
 // 返回:
 //   - error: 错误信息
 func (s *FileOperationService) copyFile(src, dst string) error {
+	if err := s.operationContext().Err(); err != nil {
+		return err
+	}
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return err
@@ -584,6 +596,9 @@ func (s *FileOperationService) copyFile(src, dst string) error {
 	// 使用缓冲区复制
 	buf := make([]byte, 32*1024) // 32KB buffer
 	for {
+		if err := s.operationContext().Err(); err != nil {
+			return err
+		}
 		n, err := srcFile.Read(buf)
 		if err != nil && err != io.EOF {
 			return err
@@ -604,7 +619,7 @@ func (s *FileOperationService) deleteCloud115Path(source *domain.MediaSource, fi
 		return fmt.Errorf("媒体源未关联115账号")
 	}
 
-	cloud115, err := s.cloud115DAO.GetByID(*source.Cloud115ID)
+	cloud115, err := s.operationAccount(*source.Cloud115ID)
 	if err != nil {
 		return fmt.Errorf("获取115账号失败: %v", err)
 	}

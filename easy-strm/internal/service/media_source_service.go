@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -41,6 +42,11 @@ func NewMediaSourceService(mediaSourceDAO *dao.MediaSourceDAO, cloud115DAO *dao.
 //   - error: 错误信息
 func (s *MediaSourceService) GetByID(id int) (*domain.MediaSource, error) {
 	return s.mediaSourceDAO.GetByID(id)
+}
+
+// GetByIDContext 在入口预算内读取媒体源配置。
+func (s *MediaSourceService) GetByIDContext(ctx context.Context, id int) (*domain.MediaSource, error) {
+	return s.mediaSourceDAO.GetByIDContext(ctx, id)
 }
 
 // GetAll 获取所有媒体源

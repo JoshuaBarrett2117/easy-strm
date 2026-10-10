@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -30,7 +31,12 @@ func scanMediaSource(scanner interface{ Scan(...interface{}) error }) (*domain.M
 }
 
 func (d *MediaSourceDAO) GetByID(id int) (*domain.MediaSource, error) {
-	source, err := scanMediaSource(DB.QueryRow(
+	return d.GetByIDContext(context.Background(), id)
+}
+
+// GetByIDContext 按主键读取媒体源，并将入口取消传递到数据库。
+func (d *MediaSourceDAO) GetByIDContext(ctx context.Context, id int) (*domain.MediaSource, error) {
+	source, err := scanMediaSource(DB.QueryRowContext(ctx,
 		`SELECT `+mediaSourceColumns+` FROM t_media_source WHERE id = $1`,
 		id,
 	))
@@ -38,7 +44,7 @@ func (d *MediaSourceDAO) GetByID(id int) (*domain.MediaSource, error) {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("MediaSourceDAO[GetByID] 查询失败: %v", err)
+		return nil, fmt.Errorf("MediaSourceDAO[GetByID] 查询失败: %w", err)
 	}
 	return source, nil
 }

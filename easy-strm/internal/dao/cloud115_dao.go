@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -15,8 +16,13 @@ func NewCloud115DAO() *Cloud115DAO {
 }
 
 func (c *Cloud115DAO) GetByID(id int) (*domain.Cloud115, error) {
+	return c.GetByIDContext(context.Background(), id)
+}
+
+// GetByIDContext 按主键读取115账号，并将入口取消传递到数据库。
+func (c *Cloud115DAO) GetByIDContext(ctx context.Context, id int) (*domain.Cloud115, error) {
 	cloud115 := &domain.Cloud115{}
-	err := DB.QueryRow(
+	err := DB.QueryRowContext(ctx,
 		`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
@@ -36,7 +42,7 @@ func (c *Cloud115DAO) GetByID(id int) (*domain.Cloud115, error) {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("Cloud115DAO[GetByID] 查询失败: %v", err)
+		return nil, fmt.Errorf("Cloud115DAO[GetByID] 查询失败: %w", err)
 	}
 	return cloud115, nil
 }

@@ -256,6 +256,10 @@ func (c *FileOperationController) BatchOperation(ctx *gin.Context) {
 	}
 
 	// 验证操作类型
+	if len(req.Items) == 0 || len(req.Items) > service.FileOperationBatchLimit {
+		ErrorResp(ctx, http.StatusBadRequest, "单次批量操作需为1至500项")
+		return
+	}
 	validOperations := map[string]bool{
 		"move":   true,
 		"copy":   true,
@@ -268,7 +272,7 @@ func (c *FileOperationController) BatchOperation(ctx *gin.Context) {
 	}
 
 	// 验证源媒体源是否存在
-	source, err := c.mediaSourceService.GetByID(req.SourceID)
+	source, err := c.mediaSourceService.GetByIDContext(ctx.Request.Context(), req.SourceID)
 	if err != nil || source == nil {
 		logger.Errorf("FileOperationController[BatchOperation] 获取源媒体源失败: %v", err)
 		ErrorResp(ctx, http.StatusNotFound, "源媒体源不存在")
@@ -277,7 +281,7 @@ func (c *FileOperationController) BatchOperation(ctx *gin.Context) {
 
 	// 复制操作需要验证目标媒体源
 	if req.Operation == "copy" && req.TargetID > 0 {
-		target, err := c.mediaSourceService.GetByID(req.TargetID)
+		target, err := c.mediaSourceService.GetByIDContext(ctx.Request.Context(), req.TargetID)
 		if err != nil || target == nil {
 			logger.Errorf("FileOperationController[BatchOperation] 获取目标媒体源失败: %v", err)
 			ErrorResp(ctx, http.StatusNotFound, "目标媒体源不存在")
@@ -286,7 +290,7 @@ func (c *FileOperationController) BatchOperation(ctx *gin.Context) {
 	}
 
 	// 执行批量操作
-	result, err := c.fileOperationService.BatchOperation(req.Operation, req.SourceID, req.TargetID, req.Items)
+	result, err := c.fileOperationService.BatchOperationContext(ctx.Request.Context(), req.Operation, req.SourceID, req.TargetID, req.Items)
 	if err != nil {
 		logger.Errorf("FileOperationController[BatchOperation] 批量操作失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
