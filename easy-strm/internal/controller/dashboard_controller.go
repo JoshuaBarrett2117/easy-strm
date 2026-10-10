@@ -28,7 +28,7 @@ func NewDashboardController(dashboardService *service.DashboardService) *Dashboa
 func (c *DashboardController) GetStats(ctx *gin.Context) {
 	logger.Debugf("DashboardController[GetStats] 获取Dashboard统计数据 from %s", ctx.ClientIP())
 
-	stats, err := c.dashboardService.GetDashboardStats()
+	stats, err := c.dashboardService.GetDashboardStatsContext(ctx.Request.Context())
 	if err != nil {
 		logger.Errorf("DashboardController[GetStats] 获取统计数据失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取统计数据失败")
@@ -43,7 +43,7 @@ func (c *DashboardController) GetStats(ctx *gin.Context) {
 func (c *DashboardController) GetOverview(ctx *gin.Context) {
 	logger.Debugf("DashboardController[GetOverview] 获取Dashboard总览 from %s", ctx.ClientIP())
 
-	overview, err := c.dashboardService.GetDashboardOverview()
+	overview, err := c.dashboardService.GetDashboardOverviewContext(ctx.Request.Context())
 	if err != nil {
 		logger.Errorf("DashboardController[GetOverview] 获取总览失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取总览数据失败")
@@ -58,7 +58,7 @@ func (c *DashboardController) GetOverview(ctx *gin.Context) {
 func (c *DashboardController) GetResourceMonitor(ctx *gin.Context) {
 	logger.Debugf("DashboardController[GetResourceMonitor] 获取Dashboard资源监控 from %s", ctx.ClientIP())
 
-	monitor, err := c.dashboardService.GetDashboardResourceMonitor()
+	monitor, err := c.dashboardService.GetDashboardResourceMonitorContext(ctx.Request.Context())
 	if err != nil {
 		logger.Errorf("DashboardController[GetResourceMonitor] 获取资源监控失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, "获取资源监控失败")

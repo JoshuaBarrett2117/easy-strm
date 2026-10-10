@@ -50,6 +50,11 @@ func (d *MediaSourceDAO) GetByIDContext(ctx context.Context, id int) (*domain.Me
 }
 
 func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSource, error) {
+	return d.GetAllContext(context.Background(), sortField, sortOrder)
+}
+
+// GetAllContext 在请求预算内读取小规模媒体源配置，保持已有排序与字段契约。
+func (d *MediaSourceDAO) GetAllContext(ctx context.Context, sortField, sortOrder string) ([]*domain.MediaSource, error) {
 	orderClause := "priority ASC, id ASC"
 	if sortField != "" {
 		orderClause = fmt.Sprintf("%s %s", sortField, sortOrder)
@@ -58,11 +63,11 @@ func (d *MediaSourceDAO) GetAll(sortField, sortOrder string) ([]*domain.MediaSou
 		}
 	}
 
-	rows, err := DB.Query(
+	rows, err := DB.QueryContext(ctx,
 		fmt.Sprintf(`SELECT %s FROM t_media_source ORDER BY %s`, mediaSourceColumns, orderClause),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("MediaSourceDAO[GetAll] 查询失败: %v", err)
+		return nil, fmt.Errorf("MediaSourceDAO[GetAll] 查询失败: %w", err)
 	}
 	defer rows.Close()
 

@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -259,4 +260,12 @@ func (s *StrmFileDAO) GetLastGenerationTime() (*time.Time, error) {
 		return nil, fmt.Errorf("StrmFileDAO[GetLastGenerationTime] 查询失败: %v", err)
 	}
 	return lastTime, nil
+}
+
+// StatsContext 在同一查询中读取精确文件总数和生成时间，仅供短期统计快照刷新。
+func (s *StrmFileDAO) StatsContext(ctx context.Context) (int, *time.Time, error) {
+	var total int
+	var lastTime *time.Time
+	err := DB.QueryRowContext(ctx, `SELECT count(*),max(update_time) FROM t_strm_file`).Scan(&total, &lastTime)
+	return total, lastTime, err
 }

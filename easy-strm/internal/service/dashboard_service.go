@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 	"strings"
@@ -139,6 +140,8 @@ type DashboardService struct {
 	taskRedisDAO    *dao.TaskRedisDAO
 	storageProvider DashboardStorageProvider
 	storageCache    DashboardStorageCache
+	requestState    *dashboardRequestState
+	fileStatsCache  *dashboardFileStatsCache
 }
 
 // NewDashboardService 创建 Dashboard 服务实例
@@ -157,12 +160,27 @@ func NewDashboardService(
 		taskRedisDAO:    taskRedisDAO,
 		storageProvider: storageProvider,
 		storageCache:    storageCache,
+		fileStatsCache:  &dashboardFileStatsCache{},
 	}
 }
 
 // GetDashboardStats 聚合查询所有 Dashboard 统计数据
 // 单次调用聚合多数据源，避免前端发起多次请求
 func (s *DashboardService) GetDashboardStats() (*DashboardStats, error) {
+	return s.GetDashboardStatsContext(context.Background())
+}
+
+// GetDashboardStatsContext 复用请求内账号和任务读取，并限制数据库统计的总预算。
+func (s *DashboardService) GetDashboardStatsContext(ctx context.Context) (*DashboardStats, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	return s.forDashboardRequest(ctx).getDashboardStats()
+}
+
+func (s *DashboardService) getDashboardStats() (*DashboardStats, error) {
+	if err := s.dashboardContext().Err(); err != nil {
+		return nil, err
+	}
 	stats := &DashboardStats{}
 
 	// --- 并行聚合各维度数据，任一失败不影响其他维度 ---
@@ -181,18 +199,29 @@ func (s *DashboardService) GetDashboardStats() (*DashboardStats, error) {
 	if err := s.fillStorageStats(stats); err != nil {
 		logger.Warnf("DashboardService[GetDashboardStats] 获取存储统计失败: %v", err)
 	}
+	if err := s.dashboardContext().Err(); err != nil {
+		return nil, err
+	}
 
 	return stats, nil
 }
 
 // GetDashboardOverview 获取首页总览数据
 func (s *DashboardService) GetDashboardOverview() (*DashboardOverview, error) {
-	stats, err := s.GetDashboardStats()
+	return s.GetDashboardOverviewContext(context.Background())
+}
+
+// GetDashboardOverviewContext 共享统计与总览的同一任务快照，避免重复列表读取。
+func (s *DashboardService) GetDashboardOverviewContext(ctx context.Context) (*DashboardOverview, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	worker := s.forDashboardRequest(ctx)
+	stats, err := worker.getDashboardStats()
 	if err != nil {
 		return nil, err
 	}
 
-	tasks, err := s.taskRedisDAO.GetUnified()
+	tasks, err := worker.dashboardTasks()
 	if err != nil {
 		return nil, fmt.Errorf("查询任务总览失败: %v", err)
 	}
@@ -210,8 +239,24 @@ func (s *DashboardService) GetDashboardOverview() (*DashboardOverview, error) {
 
 // GetDashboardResourceMonitor 获取 Dashboard 资源监控数据
 func (s *DashboardService) GetDashboardResourceMonitor() (*DashboardResourceMonitor, error) {
-	stats, err := s.GetDashboardStats()
-	if err != nil {
+	return s.GetDashboardResourceMonitorContext(context.Background())
+}
+
+// GetDashboardResourceMonitorContext 只读取响应所需维度，不执行STRM计数、生成时间或账号容量请求。
+func (s *DashboardService) GetDashboardResourceMonitorContext(ctx context.Context) (*DashboardResourceMonitor, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	worker := s.forDashboardRequest(ctx)
+	stats := &DashboardStats{}
+	for _, fill := range []func(*DashboardStats) error{worker.fillAccountStats, worker.fillMediaSourceStats, worker.fillTaskStats} {
+		if err := fill(stats); err != nil {
+			logger.Warnf("DashboardService[GetDashboardResourceMonitor] 获取统计失败: %v", err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
@@ -316,7 +361,7 @@ func (s *DashboardService) GetDashboardTrend(kind string, days int) (*DashboardT
 
 // fillAccountStats 填充115账号统计：按状态分组计数
 func (s *DashboardService) fillAccountStats(stats *DashboardStats) error {
-	accounts, err := s.cloud115DAO.GetAll("id", "ASC")
+	accounts, err := s.dashboardAccounts()
 	if err != nil {
 		return fmt.Errorf("查询账号列表失败: %v", err)
 	}
@@ -341,7 +386,7 @@ func (s *DashboardService) fillAccountStats(stats *DashboardStats) error {
 
 // fillMediaSourceStats 填充媒体源统计：按类型和启用状态分组
 func (s *DashboardService) fillMediaSourceStats(stats *DashboardStats) error {
-	sources, err := s.mediaSourceDAO.GetAll("", "")
+	sources, err := s.mediaSourceDAO.GetAllContext(s.dashboardContext(), "", "")
 	if err != nil {
 		return fmt.Errorf("查询媒体源列表失败: %v", err)
 	}
@@ -363,28 +408,14 @@ func (s *DashboardService) fillMediaSourceStats(stats *DashboardStats) error {
 
 // fillStrmFileStats 填充STRM文件统计：总数和最近生成时间
 func (s *DashboardService) fillStrmFileStats(stats *DashboardStats) error {
-	total, err := s.strmFileDAO.CountAll()
-	if err != nil {
-		return fmt.Errorf("统计STRM文件总数失败: %v", err)
-	}
-
-	lastTime, err := s.strmFileDAO.GetLastGenerationTime()
-	if err != nil {
-		return fmt.Errorf("查询最近生成时间失败: %v", err)
-	}
-
-	result := StrmFileStats{Total: total}
-	if lastTime != nil {
-		formatted := lastTime.Format(time.RFC3339)
-		result.LastGenerationTime = &formatted
-	}
+	result, err := s.dashboardFileStats()
 	stats.StrmFiles = result
-	return nil
+	return err
 }
 
 // fillTaskStats 填充任务统计：运行中/今日完成/今日失败
 func (s *DashboardService) fillTaskStats(stats *DashboardStats) error {
-	tasks, err := s.taskRedisDAO.GetAll()
+	tasks, err := s.dashboardTasks()
 	if err != nil {
 		return fmt.Errorf("查询任务列表失败: %v", err)
 	}
@@ -413,13 +444,16 @@ func (s *DashboardService) fillTaskStats(stats *DashboardStats) error {
 
 // fillStorageStats 填充存储空间统计，单个账号查询失败不会阻断其余账号。
 func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
-	accounts, err := s.cloud115DAO.GetAll("id", "ASC")
+	accounts, err := s.dashboardAccounts()
 	if err != nil {
 		return fmt.Errorf("查询账号列表失败: %v", err)
 	}
 
 	var accountStorages []AccountStorage
 	for _, acc := range accounts {
+		if err := s.dashboardContext().Err(); err != nil {
+			return err
+		}
 		storage := AccountStorage{
 			Name: acc.Name,
 			Used: acc.QuotaUsed,

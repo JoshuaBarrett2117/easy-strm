@@ -48,6 +48,11 @@ func (c *Cloud115DAO) GetByIDContext(ctx context.Context, id int) (*domain.Cloud
 }
 
 func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, error) {
+	return c.GetAllContext(context.Background(), sortField, sortOrder)
+}
+
+// GetAllContext 在请求预算内读取小规模账号配置，保持已有排序与字段契约。
+func (c *Cloud115DAO) GetAllContext(ctx context.Context, sortField, sortOrder string) ([]*domain.Cloud115, error) {
 	orderClause := "id ASC"
 	if sortField != "" {
 		orderClause = fmt.Sprintf("%s %s", sortField, sortOrder)
@@ -56,7 +61,7 @@ func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, e
 		}
 	}
 
-	rows, err := DB.Query(
+	rows, err := DB.QueryContext(ctx,
 		fmt.Sprintf(`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
 		COALESCE(account_type, 'resource'), COALESCE(quota_used, 0), COALESCE(priority, 5),
@@ -65,7 +70,7 @@ func (c *Cloud115DAO) GetAll(sortField, sortOrder string) ([]*domain.Cloud115, e
 		create_time, update_time FROM t_cloud_115 ORDER BY %s`, orderClause),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("Cloud115DAO[GetAll] 查询失败: %v", err)
+		return nil, fmt.Errorf("Cloud115DAO[GetAll] 查询失败: %w", err)
 	}
 	defer rows.Close()
 	var list []*domain.Cloud115
