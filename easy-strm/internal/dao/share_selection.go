@@ -201,6 +201,7 @@ func (d *ShareRecordDAO) SyncSelections(ctx context.Context, work string) error 
 }
 
 var shareSelectionSyncSQL = []string{
+	`SET LOCAL lock_timeout='30s'`,
 	`CREATE TEMP TABLE selection_observed ON COMMIT DROP AS
  SELECT f.id source_file_id,f.share_id,COALESCE(f.file_id,'') remote_file_id,CASE WHEN COALESCE(f.file_id,'')='' THEN md5(f.file_name) ELSE '' END name_hash,
  f.version file_version,r.version share_version,COALESCE(f.file_size,0) file_size,f.available AND NOT r.share_cancelled available,
@@ -209,7 +210,7 @@ var shareSelectionSyncSQL = []string{
  FROM t_share_media_file f JOIN t_share_record r ON r.id=f.share_id LEFT JOIN t_share_media m ON m.id=f.media_id
  WHERE ($1='' OR m.work_key=$1 OR EXISTS(SELECT 1 FROM t_share_export_candidate c JOIN t_share_export_candidate_item i USING(candidate_id) WHERE c.source_file_id=f.id AND i.work_key=$1))`,
 	`CREATE UNIQUE INDEX ON selection_observed(source_file_id)`,
-	`CREATE UNIQUE INDEX ON selection_observed(share_id,remote_file_id,name_hash)`,
+	`CREATE INDEX ON selection_observed(share_id,remote_file_id,name_hash)`,
 	`CREATE INDEX ON selection_observed(work_key)`,
 	`ANALYZE selection_observed`,
 	`DO $identity$ BEGIN
