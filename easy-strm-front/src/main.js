@@ -1,4 +1,5 @@
 const ShareLibrary = () => import('./views/ShareLibrary.vue')
+const ShareSelection = () => import('./views/ShareSelection.vue')
 const ScheduledTasks = () => import('./views/ScheduledTasks.vue')
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
@@ -158,6 +159,7 @@ const routes = [
       }
       ,{ path: 'ai-recognition', component: AIRecognition, meta: { title: 'AI 辅助识别', description: '配置模型连接、调用场景和提示词' } }
       ,{ path: 'share-library', component: ShareLibrary, meta: { title: '分享资源库', description: '浏览已识别作品与分享来源' } }
+      ,{ path: 'share-selections', component: ShareSelection, meta: { title: 'STRM 来源选择', description: '按电影和季集管理持久播放来源' } }
       ,{ path: 'scheduled-tasks', component: ScheduledTasks, meta: { title: '定时任务管理', description: '统一管理系统定时任务' } }
       ,{ path: 'share-review', component: ShareReview, meta: { title: '手动核对', description: '集中核对分享媒体' } }
       ,{ path: 'share-records', component: ShareRecords, meta: { title: '分享管理', description: '管理分享记录并批量识别媒体' } }

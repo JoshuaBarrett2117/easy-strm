@@ -207,6 +207,7 @@ const allMenuSections = [
       { path: '/dashboard/share-review', label: '手动核对', icon: SearchOutline },
       { path: '/dashboard/share-records', label: '分享管理', icon: LinkOutline },
       { path: '/dashboard/share-library', label: '分享资源库', icon: LinkOutline },
+      { path: '/dashboard/share-selections', label: 'STRM 来源选择', icon: LinkOutline },
       { path: '/dashboard/scheduled-tasks', label: '定时任务管理', icon: LinkOutline },
       { path: '/dashboard/strm-config', label: 'STRM 配置', icon: DocumentTextOutline },
       { path: '/dashboard/cloud115', label: '115 云管理', icon: CloudOutline },

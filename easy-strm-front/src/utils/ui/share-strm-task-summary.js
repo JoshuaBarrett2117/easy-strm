@@ -21,7 +21,8 @@ export const shareStrmTaskSummary = task => {
     if (metadata.blocked_by_task_id) items.push({ label: '占用任务', value: metadata.blocked_by_task_id })
     return items
   }
-  if (metadata.fallback_reason) items.push({ label: '升级原因', value: metadata.fallback_reason })
+  if (metadata.baseline_required) items.push({ label: '需要操作', value: '请显式运行全量对账；增量不会自动降级' })
+  if (metadata.fallback_reason) items.push({ label: '历史任务升级原因', value: metadata.fallback_reason })
   if (metadata.recovery) items.push({ label: '恢复说明', value: metadata.recovery })
   if (metadata.phase) items.push({ label: '当前阶段', value: ({ preparing: '全量准备', consuming: '作品待办消费' })[metadata.phase] || metadata.phase })
   if (metadata.processed_works !== undefined) items.push({ label: '处理作品', value: metadata.processed_works })

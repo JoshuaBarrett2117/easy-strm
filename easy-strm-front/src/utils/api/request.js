@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { message } from '../ui/feedback'
+import { createActionTrace } from '../ui/action-trace'
 
 export const api = axios.create({
   baseURL: '/api',
@@ -25,6 +26,7 @@ const cookieUtils = {
 export { cookieUtils }
 
 let isRedirectingToLogin = false
+const sessionTraceId = createActionTrace()
 
 const saveCurrentUrl = () => {
   localStorage.setItem('redirectUrl', window.location.href)
@@ -51,6 +53,7 @@ const getResponseErrorMessage = (error) => {
 
 api.interceptors.request.use(
   config => {
+    config.headers['X-Trace-Id'] = config.traceId || config.headers['X-Trace-Id'] || sessionTraceId
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
@@ -94,6 +97,7 @@ export const request = (url, options = {}) => {
   const method = options.method || 'GET'
   const data = options.data || {}
   const requestOptions = {
+    traceId: options.traceId,
     skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
   }
 

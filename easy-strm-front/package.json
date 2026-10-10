@@ -15,7 +15,8 @@
     "e2e:share-review": "node scripts/e2e-share-review.mjs",
     "e2e:emby-monitor": "node scripts/e2e-emby-monitor.mjs",
     "test:share-strm-summary": "node --test scripts/test-share-strm-task-summary.mjs",
-    "e2e:share-strm-stage-a": "node scripts/e2e-share-strm-stage-a.mjs"
+    "e2e:share-strm-stage-a": "node scripts/e2e-share-strm-stage-a.mjs",
+    "e2e:share-selection": "node scripts/e2e-share-selection.mjs"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
