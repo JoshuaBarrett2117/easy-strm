@@ -34,8 +34,7 @@ func TestShareSyncParallelAndDuplicate(t *testing.T) {
 	defer client.Close()
 	dao.InitTaskRedisDAO(client)
 	tasks := NewTaskService(dao.NewTaskRedisDAO(client))
-	mock.ExpectQuery("SELECT count").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery(`FROM \(SELECT`).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(1, "auto", "分享", "https://115.com/s/abc", "", "", 1, "now", "now", false, nil, nil, nil, nil, nil, nil, nil))
+	mock.ExpectQuery(`FROM t_share_record WHERE id=\$1`).WithArgs(1).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled"}).AddRow(1, "auto", "分享", "https://115.com/s/abc", "", "", 1, "now", "now", false))
 	p := &blockedSyncParser{started: make(chan struct{}), release: make(chan struct{})}
 	s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, tasks, p)
 	release, _ := s.Coordinator().acquire(context.Background(), nil, shareResource{key: shareKey(1)}, shareResource{key: fileKey(1), exclusive: true})

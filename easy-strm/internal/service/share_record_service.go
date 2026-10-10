@@ -496,14 +496,11 @@ func (s *ShareRecordService) SyncShareFiles(ctx context.Context, recordID int) (
 	if s.parser == nil {
 		return 0, 0, fmt.Errorf("分享解析服务未初始化")
 	}
-	page, err := s.dao.List(ctx, domain.ShareRecordQuery{ShareID: recordID, Page: 1, PageSize: 1})
+	record, err := s.dao.GetRecord(ctx, recordID)
 	if err != nil {
 		return 0, 0, err
 	}
-	if len(page.Data) != 1 {
-		return 0, 0, sql.ErrNoRows
-	}
-	parsed, err := s.parseRecordShare(ctx, page.Data[0])
+	parsed, err := s.parseRecordShare(ctx, record)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -531,7 +528,7 @@ func (s *ShareRecordService) SyncShareFiles(ctx context.Context, recordID int) (
 	}
 	defer commitRelease()
 	files = s.Coordinator().filterSyncFiles(ctx, recordID, files)
-	count, err := s.dao.SyncFiles(ctx, recordID, token, files, page.Data[0].Version)
+	count, err := s.dao.SyncFiles(ctx, recordID, token, files, record.Version)
 	return count, len(parsed.MaskedDirectories), err
 }
 

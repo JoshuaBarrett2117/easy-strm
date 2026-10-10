@@ -14,6 +14,14 @@ import (
 // ShareRecordDAO 负责分享主表和媒体子表的数据访问。
 type ShareRecordDAO struct{ db *sql.DB }
 
+// GetRecord 仅按主键读取分享配置，不加载媒体、统计或识别 JSON；不存在时返回 sql.ErrNoRows。
+func (d *ShareRecordDAO) GetRecord(ctx context.Context, shareID int) (domain.ShareRecord, error) {
+	var record domain.ShareRecord
+	err := d.db.QueryRowContext(ctx, `SELECT id,media_type,name,url,password,note,version,created_at::text,updated_at::text,share_cancelled FROM t_share_record WHERE id=$1`, shareID).Scan(
+		&record.ID, &record.MediaType, &record.Name, &record.URL, &record.Password, &record.Note, &record.Version, &record.CreatedAt, &record.UpdatedAt, &record.ShareCancelled)
+	return record, err
+}
+
 // SetShareCancelled 保存网盘确认的状态，避免并发编辑链接后将旧检查结果写入新链接。
 func (d *ShareRecordDAO) SetShareCancelled(ctx context.Context, record domain.ShareRecord, cancelled bool) error {
 	result, err := d.db.ExecContext(ctx, "UPDATE t_share_record SET share_cancelled=$1,version=version+1,updated_at=NOW() WHERE id=$2 AND url=$3 AND password=$4", cancelled, record.ID, record.URL, record.Password)

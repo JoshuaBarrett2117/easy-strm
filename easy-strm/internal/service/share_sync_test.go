@@ -20,8 +20,7 @@ func (p shareSyncParser) ParseShareLink(context.Context, string, string) (*domai
 }
 
 func expectSyncRecord(mock sqlmock.Sqlmock) {
-	mock.ExpectQuery("SELECT count").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("FROM \\(SELECT .* FROM t_share_record").WithArgs(7, 1, 0).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled", "mid", "file_name", "source", "status", "result", "error", "mversion"}).AddRow(7, "auto", "分享", "url", "", "", 1, "now", "now", false, nil, nil, nil, nil, nil, nil, nil))
+	mock.ExpectQuery("SELECT id,media_type,name,url,password,note,version,created_at::text,updated_at::text,share_cancelled FROM t_share_record WHERE id=\\$1").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"id", "media_type", "name", "url", "password", "note", "version", "created_at", "updated_at", "share_cancelled"}).AddRow(7, "auto", "分享", "url", "", "", 1, "now", "now", false))
 }
 
 func TestSyncShareFilesStoresOnlyRealVideos(t *testing.T) {
