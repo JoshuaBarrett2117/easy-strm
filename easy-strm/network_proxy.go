@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"easy-strm/internal/dao"
+	pkglogger "easy-strm/internal/pkg/logger"
 	"fmt"
 	"net"
 	"net/http"
@@ -101,7 +102,7 @@ type proxyFallbackTransport struct {
 	loadProxyConfigContext func(context.Context) (*url.URL, []string, error)
 }
 
-// RoundTrip 每次请求只读取一次选路配置，保留原始上下文，仅通过 GetBody 重放请求体。
+// RoundTrip 每次请求只读取一次选路配置，读取失败时丢弃配置并直连，保留原始上下文，仅通过 GetBody 重放请求体。
 func (fallback *proxyFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	var proxyURL *url.URL
 	var domains []string
@@ -109,7 +110,11 @@ func (fallback *proxyFallbackTransport) RoundTrip(req *http.Request) (*http.Resp
 		var err error
 		proxyURL, domains, err = fallback.loadProxyConfigContext(req.Context())
 		if err != nil {
-			return nil, fmt.Errorf("读取代理配置失败: %w", err)
+			pkglogger.WithContext(req.Context(), "network_proxy").Log(pkglogger.WARN, "读取代理配置失败", nil, err)
+			if contextErr := req.Context().Err(); contextErr != nil {
+				return nil, contextErr
+			}
+			return fallback.direct.RoundTrip(req)
 		}
 	} else {
 		proxyURL, domains = fallback.loadProxyConfig()
