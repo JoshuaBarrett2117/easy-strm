@@ -20,7 +20,7 @@ func TestLibraryCombinedQuery(t *testing.T) {
 	if !strings.Contains(where, "genre_ids &&") || !strings.Contains(where, "country_codes &&") || !strings.HasSuffix(where, "AND available") || len(args) != 9 {
 		t.Fatalf("错误的组合条件: %s %v", where, args)
 	}
-	mock.ExpectQuery(`WITH stats AS[\s\S]*ORDER BY rating DESC NULLS LAST,work_key ASC LIMIT \$10 OFFSET \$11`).WithArgs("电影", 100, "movie", 2020, 2026, low, high, "18,35", "CN,US", 24, 24).WillReturnRows(sqlmock.NewRows([]string{"total", "data"}).AddRow(25, `[{"work_key":"tmdb:movie:100"}]`))
+	mock.ExpectQuery(`WITH matched AS[\s\S]*ORDER BY rating DESC NULLS LAST,work_key ASC LIMIT \$10 OFFSET \$11`).WithArgs("电影", 100, "movie", 2020, 2026, low, high, "18,35", "CN,US", 24, 24).WillReturnRows(sqlmock.NewRows([]string{"total", "data"}).AddRow(25, `[{"work_key":"tmdb:movie:100"}]`))
 	got, err := NewShareRecordDAO(database).Library(context.Background(), q)
 	if err != nil || got.Total != 25 {
 		t.Fatalf("%+v %v", got, err)

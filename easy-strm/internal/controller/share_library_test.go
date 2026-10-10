@@ -34,13 +34,13 @@ func TestLibraryControllerSuccessAndDBFailure(t *testing.T) {
 	c := NewShareRecordController(service.NewShareRecordService(dao.NewShareRecordDAO(database), nil, nil, nil))
 	r := gin.New()
 	r.GET("/library", c.Library)
-	mock.ExpectQuery(`WITH stats AS`).WithArgs(24, 0).WillReturnRows(sqlmock.NewRows([]string{"total", "data"}).AddRow(0, `[]`))
+	mock.ExpectQuery(`WITH matched AS`).WithArgs(24, 0).WillReturnRows(sqlmock.NewRows([]string{"total", "data"}).AddRow(0, `[]`))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/library", nil))
 	if w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
-	mock.ExpectQuery(`WITH stats AS`).WillReturnError(errors.New("数据库暂时不可用"))
+	mock.ExpectQuery(`WITH matched AS`).WillReturnError(errors.New("数据库暂时不可用"))
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest("GET", "/library", nil))
 	if w.Code != 500 {

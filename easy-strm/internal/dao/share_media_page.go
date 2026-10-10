@@ -77,13 +77,14 @@ func (d *ShareRecordDAO) ListMedia(ctx context.Context, id, page, size int, dupl
 func (d *ShareRecordDAO) ListFiles(ctx context.Context, id, page, size int) (domain.ShareMediaPage, error) {
 	out := domain.ShareMediaPage{Data: []domain.ShareMedia{}}
 	var data []byte
-	err := d.db.QueryRowContext(ctx, `SELECT count(*),COALESCE((SELECT json_agg(p) FROM (
-	 SELECT f.id,f.media_id,f.share_id,f.file_id remote_file_id,f.file_name,f.file_size,f.sha1,f.pick_code,f.available,
-	  f.metadata_source,f.status,f.result,f.error,f.version,
-	  COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number)
-	   ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json) episodes
-	 FROM t_share_media_file f WHERE f.share_id=$1 ORDER BY f.id LIMIT $2 OFFSET $3)p),'[]'::json)
-	 FROM t_share_media_file WHERE share_id=$1`, id, size, (page-1)*size).Scan(&out.Total, &data)
+	err := d.db.QueryRowContext(ctx, `WITH page AS MATERIALIZED (
+ SELECT f.id,f.media_id,f.share_id,f.file_id remote_file_id,f.file_name,f.file_size,f.sha1,f.pick_code,f.available,f.metadata_source,f.status,f.result,f.error,f.version
+ FROM t_share_media_file f WHERE f.share_id=$1 ORDER BY f.id LIMIT $2 OFFSET $3),
+ episodes AS (SELECT e.file_id,json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) episodes
+ FROM t_share_media_file_episode e JOIN page p ON p.id=e.file_id GROUP BY e.file_id)
+ SELECT (SELECT count(*) FROM t_share_media_file WHERE share_id=$1),COALESCE((SELECT json_agg(p) FROM (
+ SELECT page.id,page.media_id,page.share_id,page.remote_file_id,page.file_name,page.file_size,page.sha1,page.pick_code,page.available,page.metadata_source,page.status,page.result,page.error,page.version,
+ COALESCE(episodes.episodes,'[]'::json) episodes FROM page LEFT JOIN episodes ON episodes.file_id=page.id ORDER BY page.id)p),'[]'::json)`, id, size, (page-1)*size).Scan(&out.Total, &data)
 	if err != nil {
 		return out, err
 	}

@@ -68,7 +68,15 @@ func libraryWhere(q domain.ShareLibraryQuery) (string, []interface{}) {
 
 // Library 查询全局媒体主数据，文件只负责来源和可用性统计。
 func (d *ShareRecordDAO) Library(ctx context.Context, q domain.ShareLibraryQuery) (domain.ShareLibraryPage, error) {
-	where, args := libraryWhere(q)
+	query, args := buildShareLibraryQuery(q)
+	return d.libraryPage(ctx, query, args...)
+}
+
+func buildShareLibraryQuery(q domain.ShareLibraryQuery) (string, []interface{}) {
+	metadataQuery := q
+	metadataQuery.Available = false
+	where, args := libraryWhere(metadataQuery)
+	where = strings.ReplaceAll(where, "library_media_type", "media_type")
 	sort := map[string]string{"created": "collected_at", "year": "media_year", "rating": "rating", "title": "title"}[q.Sort]
 	if sort == "" {
 		sort = "collected_at"
@@ -78,10 +86,33 @@ func (d *ShareRecordDAO) Library(ctx context.Context, q domain.ShareLibraryQuery
 		direction = "ASC"
 	}
 	args = append(args, q.PageSize, (q.Page-1)*q.PageSize)
-	query := libraryWorks + `,filtered AS (SELECT * FROM works WHERE ` + where + `) SELECT (SELECT count(*) FROM filtered),
-	 COALESCE((SELECT json_agg(p) FROM (SELECT work_key,tmdb_id,title,library_media_type AS media_type,media_year AS "year",rating,poster_path,genre_ids,country_codes,source_count,file_count,available,collected_at
-	 FROM filtered ORDER BY ` + sort + ` ` + direction + ` NULLS LAST,work_key ASC LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args)) + `) p),'[]'::json)`
-	return d.libraryPage(ctx, query, args...)
+	order := sort + ` ` + direction + ` NULLS LAST,work_key ASC`
+	pageClause := ` ORDER BY ` + order + ` LIMIT $` + fmt.Sprint(len(args)-1) + ` OFFSET $` + fmt.Sprint(len(args))
+	query := `WITH matched AS MATERIALIZED (
+ SELECT id,work_key,tmdb_id,title,original_title,media_type library_media_type,media_year,rating,poster_path,genre_ids,country_codes
+ FROM t_share_media WHERE ` + where + `)`
+	stats := ` SELECT f.media_id,count(DISTINCT f.share_id) FILTER(WHERE f.available AND NOT s.share_cancelled) source_count,
+ count(*) FILTER(WHERE f.available AND NOT s.share_cancelled) file_count,max(f.created_at) collected_at
+ FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id JOIN `
+	projection := `work_key,tmdb_id,title,library_media_type AS media_type,media_year AS "year",rating,poster_path,genre_ids,country_codes,source_count,file_count,(source_count>0) available,collected_at`
+	metadataColumns := `m.id,m.work_key,m.tmdb_id,m.title,m.original_title,m.library_media_type,m.media_year,m.rating,m.poster_path,m.genre_ids,m.country_codes`
+	if sort == "collected_at" {
+		query += `,stats AS (` + stats + `matched m ON m.id=f.media_id WHERE f.status='identified' AND f.media_id IS NOT NULL GROUP BY f.media_id),
+ filtered AS (SELECT ` + metadataColumns + `,st.source_count,st.file_count,st.collected_at FROM matched m JOIN stats st ON st.media_id=m.id`
+		if q.Available {
+			query += ` WHERE st.source_count>0`
+		}
+		query += `) SELECT (SELECT count(*) FROM filtered),COALESCE((SELECT json_agg(p) FROM (SELECT ` + projection + ` FROM filtered` + pageClause + `) p),'[]'::json)`
+	} else {
+		query += `,filtered AS MATERIALIZED (SELECT ` + metadataColumns + ` FROM matched m WHERE EXISTS(
+ SELECT 1 FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id WHERE f.media_id=m.id AND f.status='identified'`
+		if q.Available {
+			query += ` AND f.available AND NOT s.share_cancelled`
+		}
+		query += `)),page AS MATERIALIZED (SELECT id,work_key,tmdb_id,title,original_title,library_media_type,media_year,rating,poster_path,genre_ids,country_codes FROM filtered` + pageClause + `),stats AS (` + stats + `page m ON m.id=f.media_id WHERE f.status='identified' AND f.media_id IS NOT NULL GROUP BY f.media_id)
+ SELECT (SELECT count(*) FROM filtered),COALESCE((SELECT json_agg(p) FROM (SELECT ` + projection + ` FROM page JOIN stats ON stats.media_id=page.id ORDER BY ` + order + `) p),'[]'::json)`
+	}
+	return query, args
 }
 
 func (d *ShareRecordDAO) libraryPage(ctx context.Context, query string, args ...interface{}) (domain.ShareLibraryPage, error) {
@@ -94,11 +125,14 @@ func (d *ShareRecordDAO) libraryPage(ctx context.Context, query string, args ...
 
 // LibrarySources 返回作品的真实文件来源以及持久化季集映射。
 func (d *ShareRecordDAO) LibrarySources(ctx context.Context, key string, page, size int) (domain.ShareLibraryPage, error) {
-	return d.libraryPage(ctx, `WITH sources AS (
-	 SELECT f.id,f.share_id,f.file_id remote_file_id,f.file_name,f.file_size,f.available,f.status,s.name,s.url,s.password,s.share_cancelled,
-	  COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json) episodes
-	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id WHERE m.work_key=$1)
-	 SELECT (SELECT count(*) FROM sources),COALESCE((SELECT json_agg(p) FROM (SELECT * FROM sources ORDER BY available DESC,share_id DESC,id LIMIT $2 OFFSET $3)p),'[]'::json)`, key, size, (page-1)*size)
+	return d.libraryPage(ctx, `WITH sources AS NOT MATERIALIZED (
+ SELECT f.id,f.share_id,f.file_id remote_file_id,f.file_name,f.file_size,f.available,f.status,s.name,s.url,s.password,s.share_cancelled
+ FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id WHERE m.work_key=$1),
+ page AS MATERIALIZED (SELECT id,share_id,remote_file_id,file_name,file_size,available,status,name,url,password,share_cancelled FROM sources ORDER BY available DESC,share_id DESC,id LIMIT $2 OFFSET $3),
+ episodes AS (SELECT e.file_id,json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) episodes
+ FROM t_share_media_file_episode e JOIN page p ON p.id=e.file_id GROUP BY e.file_id)
+ SELECT (SELECT count(*) FROM sources),COALESCE((SELECT json_agg(p) FROM (SELECT page.id,page.share_id,page.remote_file_id,page.file_name,page.file_size,page.available,page.status,page.name,page.url,page.password,page.share_cancelled,
+ COALESCE(episodes.episodes,'[]'::json) episodes FROM page LEFT JOIN episodes ON episodes.file_id=page.id ORDER BY page.available DESC,page.share_id DESC,page.id)p),'[]'::json)`, key, size, (page-1)*size)
 }
 
 // LibraryTVMedia 查询剧集的服务端身份，避免调用方直接指定外部媒体 ID。
