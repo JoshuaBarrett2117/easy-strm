@@ -38,7 +38,7 @@ func NewCacheAdminController(cacheAdminService *service.CacheAdminService) *Cach
 func (c *CacheAdminController) GetOverview(ctx *gin.Context) {
 	logger.Debug("CacheAdminController[GetOverview] 获取缓存总览")
 
-	overview, err := c.cacheAdminService.GetOverview()
+	overview, err := c.cacheAdminService.GetOverviewContext(ctx.Request.Context())
 	if err != nil {
 		logger.Errorf("CacheAdminController[GetOverview] 获取失败: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

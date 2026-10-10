@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"easy-strm/internal/dao"
@@ -32,6 +33,7 @@ type CacheOverview struct {
 	RedisTotalKeys int64                `json:"redis_total_keys"`
 	RedisMemory    string               `json:"redis_memory"`
 	Groups         []CacheGroupOverview `json:"groups"`
+	GeneratedAt    string               `json:"generated_at,omitempty"`
 }
 
 type cacheGroupDefinition struct {
@@ -63,8 +65,11 @@ type CacheDetailsPage struct {
 
 // CacheAdminService 提供缓存管理能力。
 type CacheAdminService struct {
-	db          *sql.DB
-	redisClient *redis.Client
+	db             *sql.DB
+	redisClient    *redis.Client
+	requestContext context.Context
+	overviewMu     sync.Mutex
+	overview       *cacheOverviewSnapshot
 }
 
 // NewCacheAdminService 创建缓存管理服务。
@@ -169,13 +174,17 @@ func (s *CacheAdminService) groupDefinitions() []cacheGroupDefinition {
 
 // GetOverview 获取缓存概览。
 func (s *CacheAdminService) GetOverview() (*CacheOverview, error) {
+	return s.GetOverviewContext(context.Background())
+}
+
+func (s *CacheAdminService) loadOverview() (*CacheOverview, error) {
 	overview := &CacheOverview{
 		RedisMemory: "未连接",
 		Groups:      make([]CacheGroupOverview, 0),
 	}
 
 	if s.redisClient != nil {
-		ctx := context.Background()
+		ctx := s.overviewContext()
 		if pong, err := s.redisClient.Ping(ctx).Result(); err == nil && strings.EqualFold(pong, "PONG") {
 			overview.RedisConnected = true
 			if totalKeys, err := s.redisClient.DBSize(ctx).Result(); err == nil {
@@ -209,6 +218,10 @@ func (s *CacheAdminService) GetOverview() (*CacheOverview, error) {
 		})
 	}
 
+	if err := s.overviewContext().Err(); err != nil {
+		return nil, err
+	}
+	overview.GeneratedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	return overview, nil
 }
 
@@ -299,6 +312,7 @@ func cacheGroupStatus(group cacheGroupDefinition, count int64, redisConnected bo
 
 // ClearGroup 清理指定缓存分组。
 func (s *CacheAdminService) ClearGroup(scope string) (int64, error) {
+	defer s.invalidateOverview()
 	scope = strings.TrimSpace(scope)
 	if scope == "" {
 		return 0, fmt.Errorf("清理范围不能为空")
@@ -380,8 +394,8 @@ func (s *CacheAdminService) countTableRows(tableName, whereClause string) (int64
 	}
 
 	var count int64
-	if err := s.db.QueryRow(query).Scan(&count); err != nil {
-		return 0, fmt.Errorf("CacheAdminService[countTableRows] 查询 %s 失败: %v", tableName, err)
+	if err := s.db.QueryRowContext(s.overviewContext(), query).Scan(&count); err != nil {
+		return 0, fmt.Errorf("CacheAdminService[countTableRows] 查询 %s 失败: %w", tableName, err)
 	}
 	return count, nil
 }
