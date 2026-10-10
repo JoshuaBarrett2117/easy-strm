@@ -45,9 +45,9 @@ func TestShareStrmIncrementalMappedSharedKeys(t *testing.T) {
 	ctx := context.WithValue(context.Background(), shareIncrementalAttemptContext{}, attempt)
 	seen := map[string]bool{shareStrmIdentity(first, first.Episodes[0]): true}
 	for _, source := range []domain.ShareStrmSource{first, second} {
-		written, err := service.exportLocalStrm(ctx, domain.ShareStrmSettings{OutputPath: t.TempDir()}, source, nil, seen, map[string]*shareStrmConflict{})
-		if err != nil || written {
-			t.Fatalf("共享键去重不正确：%v %v", written, err)
+		result := service.exportLocalStrm(ctx, domain.ShareStrmSettings{OutputPath: t.TempDir()}, source, nil, seen, map[string]*shareStrmConflict{})
+		if result.Err != nil || result.Written != 0 {
+			t.Fatalf("共享键去重不正确：%+v", result)
 		}
 		if !reflect.DeepEqual(attempt.keys[source.ID], []string{"1:1:1"}) {
 			t.Fatalf("source %d 未记录实际映射键：%v", source.ID, attempt.keys)
@@ -68,9 +68,9 @@ func TestShareStrmIncrementalWrittenSharedKeys(t *testing.T) {
 	ctx := context.WithValue(context.Background(), shareIncrementalAttemptContext{}, attempt)
 	cfg := domain.ShareStrmSettings{OutputPath: t.TempDir(), BaseURL: "https://media.example.test"}
 	seen := map[string]bool{}
-	written, err := service.exportLocalStrm(ctx, cfg, first, nil, seen, map[string]*shareStrmConflict{})
-	if err != nil || !written || len(store.files) != 1 {
-		t.Fatalf("首次写盘失败：%v %v，文件清单：%v", written, err, store.files)
+	result := service.exportLocalStrm(ctx, cfg, first, nil, seen, map[string]*shareStrmConflict{})
+	if result.Err != nil || result.Written != 1 || len(store.files) != 1 {
+		t.Fatalf("首次写盘失败：%+v，文件清单：%v", result, store.files)
 	}
 	var outputPath string
 	for filePath := range store.files {
@@ -80,9 +80,9 @@ func TestShareStrmIncrementalWrittenSharedKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err = service.exportLocalStrm(ctx, cfg, second, nil, seen, map[string]*shareStrmConflict{})
-	if err != nil || written || len(store.files) != 1 {
-		t.Fatalf("共享键去重不正确：%v %v，文件清单：%v", written, err, store.files)
+	result = service.exportLocalStrm(ctx, cfg, second, nil, seen, map[string]*shareStrmConflict{})
+	if result.Err != nil || result.Written != 0 || len(store.files) != 1 {
+		t.Fatalf("共享键去重不正确：%+v，文件清单：%v", result, store.files)
 	}
 	after, err := os.ReadFile(outputPath)
 	if err != nil || string(before) != string(after) {

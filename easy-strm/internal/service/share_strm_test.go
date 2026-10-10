@@ -484,9 +484,9 @@ func TestShareStrmLocalDirectoryDoesNotTriggerScan(t *testing.T) {
 	s, _, _ := strmFixture(t)
 	s.client = nil
 	cfg, _ := s.Settings()
-	created, err := s.exportLocalStrm(context.Background(), cfg, domain.ShareStrmSource{ID: 1, FileName: "Show/Season 02"}, nil, map[string]bool{})
-	if created || err == nil || !strings.Contains(err.Error(), "缺少具体视频") {
-		t.Fatalf("目录不能补扫：%v %v", created, err)
+	result := s.exportLocalStrm(context.Background(), cfg, domain.ShareStrmSource{ID: 1, FileName: "Show/Season 02"}, nil, map[string]bool{})
+	if result.Written != 0 || result.Err == nil || !strings.Contains(result.Err.Error(), "缺少具体视频") {
+		t.Fatalf("目录不能补扫：%+v", result)
 	}
 }
 

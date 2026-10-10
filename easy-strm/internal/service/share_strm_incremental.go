@@ -141,13 +141,14 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 	var err error
 	attempted := []string{}
 	processed, sources, stale := 0, 0, 0
+	written, skippedDedupe := 0, 0
 	failures := []error{}
 	persist := func() error {
 		if s.exporter.tasks == nil {
 			return nil
 		}
 		progressErr := s.exporter.tasks.UpdateProgress(id, processed, processed, processed-len(failures), len(failures))
-		metadataErr := s.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts})
+		metadataErr := s.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "processed_works": processed, "affected_sources": sources, "stale_marked": stale, "pending_works": len(failures), "config_revision": input.ConfigRevision, "added": output.Added, "updated": output.Updated, "skipped": output.Skipped, "conflicts": output.Conflicts, "exported_files": written, "written": written, "written_unit": shareStrmWrittenUnit, "skipped_dedupe": skippedDedupe, "skipped_dedupe_unit": shareStrmSkippedDedupeUnit, "conflict_policy": shareStrmConflictPolicy})
 		return errors.Join(progressErr, metadataErr)
 	}
 	defer func() { runErr = errors.Join(runErr, persist()) }()
@@ -167,9 +168,12 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 				return err
 			}
 			attempted = append(attempted, dirty.WorkKey)
-			count, marked, workErr := s.consumeWork(ctx, id, input, dirty)
+			count, marked, result := s.consumeWork(ctx, id, input, dirty)
 			sources += count
 			stale += marked
+			written += result.Written
+			skippedDedupe += result.SkippedDedupe
+			workErr := result.Err
 			processed++
 			if workErr != nil {
 				failures = append(failures, fmt.Errorf("作品 %s：%w", dirty.WorkKey, workErr))
@@ -205,21 +209,22 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 	return nil
 }
 
-func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string, input domain.ShareExportInput, dirty domain.ShareExportDirty) (int, int, error) {
+func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string, input domain.ShareExportInput, dirty domain.ShareExportDirty) (int, int, strmExportResult) {
+	result := strmExportResult{}
 	states, err := s.checkpoints.ObserveWork(ctx, dirty.WorkKey)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, strmExportResult{Err: err}
 	}
 	oldKeys, err := s.checkpoints.WorkKeys(ctx, dirty.WorkKey)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, strmExportResult{Err: err}
 	}
 	if err = s.checkpoints.RecordPlannedKeys(ctx, dirty.WorkKey, dirty.Revision, oldKeys); err != nil {
-		return 0, 0, err
+		return 0, 0, strmExportResult{Err: err}
 	}
 	snapshot, err := s.checkpoints.TargetSnapshot(ctx, oldKeys)
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, strmExportResult{Err: err}
 	}
 	attempt := &shareIncrementalAttempt{keys: map[int][]string{}, record: func(ctx context.Context, key string) error {
 		return s.checkpoints.RecordPlannedKeys(ctx, dirty.WorkKey, dirty.Revision, []string{key})
@@ -231,28 +236,35 @@ func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string
 	if _, rereads := s.exporter.store.(shareStrmSourceReader); !rereads {
 		conflicts, err = s.exporter.shareStrmConflicts(ctx, domain.ShareLibraryQuery{WorkKey: dirty.WorkKey})
 		if err != nil {
-			return 0, 0, err
+			return 0, 0, strmExportResult{Err: err}
 		}
 	}
 	for {
 		rows, readErr := s.exporter.store.StrmSources(ctx, domain.ShareLibraryQuery{WorkKey: dirty.WorkKey}, after)
 		if readErr != nil {
-			return processed, 0, readErr
+			result.Err = readErr
+			return processed, 0, result
 		}
 		if len(rows) == 0 {
 			break
 		}
 		for _, source := range rows {
 			if err = s.cancelled(ctx, id); err != nil {
-				return processed, 0, err
+				result.Err = err
+				return processed, 0, result
 			}
 			if source.ID <= after || source.WorkKey != dirty.WorkKey {
-				return processed, 0, fmt.Errorf("作品来源分页或归属不一致")
+				result.Err = fmt.Errorf("作品来源分页或归属不一致")
+				return processed, 0, result
 			}
 			after = source.ID
 			processed++
-			if _, err = s.exporter.exportLocalStrm(ctx, input.Settings, source, input.Categories, seen, conflicts); err != nil {
-				return processed, 0, err
+			sourceResult := s.exporter.exportLocalStrm(ctx, input.Settings, source, input.Categories, seen, conflicts)
+			result.Written += sourceResult.Written
+			result.SkippedDedupe += sourceResult.SkippedDedupe
+			if sourceResult.Err != nil {
+				result.Err = sourceResult.Err
+				return processed, 0, result
 			}
 		}
 	}
@@ -260,13 +272,16 @@ func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string
 		if states[index].State == "active" {
 			states[index].ExportKeys = attempt.keys[states[index].SourceFileID]
 			if len(states[index].ExportKeys) == 0 {
-				return processed, 0, dao.ErrShareExportChanged
+				result.Err = dao.ErrShareExportChanged
+				return processed, 0, result
 			}
 		}
 	}
 	if err = s.cancelled(ctx, id); err != nil {
-		return processed, 0, err
+		result.Err = err
+		return processed, 0, result
 	}
 	marked, err := s.checkpoints.CompleteWork(ctx, dirty, input.ConfigRevision, id, states, snapshot)
-	return processed, marked, err
+	result.Err = err
+	return processed, marked, result
 }

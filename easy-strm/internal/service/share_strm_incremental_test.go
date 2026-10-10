@@ -5,8 +5,10 @@ import (
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -250,6 +252,116 @@ func runIncrementalFixture(t *testing.T, fixture *phaseFixture, service *ShareSt
 		t.Fatalf("增量连接未释放：%+v", fixture.db.Stats())
 	}
 	return err
+}
+
+// TestShareStrmIncrementalDedupeCountsAndRecovery 验证淘汰来源不中断增量、逐集映射选优键，登记失败保留计数并可恢复。
+func TestShareStrmIncrementalDedupeCountsAndRecovery(t *testing.T) {
+	for _, reread := range []bool{false, true} {
+		for _, failRegistration := range []bool{false, true} {
+			t.Run(fmt.Sprintf("reread=%t/fail-registration=%t", reread, failRegistration), func(t *testing.T) {
+				fixture, checkpoints, service := newIncrementalFixture(t)
+				client := setupTaskRedisMock(t)
+				t.Cleanup(func() { _ = client.Close() })
+				fixture.service.tasks = NewTaskService(dao.NewTaskRedisDAO(client))
+				loser := filesystemSource(11001, 501, 100, filesystemEpisode(1, 1), filesystemEpisode(2, 1), filesystemEpisode(2, 1))
+				mixed := filesystemSource(11002, 502, 300, filesystemEpisode(1, 1), filesystemEpisode(1, 2), filesystemEpisode(2, 1), filesystemEpisode(2, 2))
+				winner := filesystemSource(11003, 503, 400, filesystemEpisode(1, 1), filesystemEpisode(2, 1))
+				loser.MediaID, mixed.MediaID, winner.MediaID = 8801, 8802, 8803
+				fixture.store.sources = []domain.ShareStrmSource{loser, mixed, winner}
+				memory := &strmMemory{sources: fixture.store.sources, entries: map[string]domain.ShareStrmEntry{}}
+				fault := &filesystemFaultStore{strmMemory: memory, failure: errors.New("增量清单登记故障")}
+				if failRegistration {
+					fault.failAt = 2
+				}
+				fixture.service.store = fault
+				if reread {
+					fixture.service.store = filesystemFaultReader{filesystemFaultStore: fault}
+				}
+				fixture.cfg.DedupeExport = true
+				checkpoints.input.Settings = fixture.cfg
+				checkpoints.input.Fingerprint, _ = shareExportFingerprint(checkpoints.input)
+				checkpoints.bump(loser.WorkKey)
+				want := map[string][]byte{filesystemPath(1, 2, ""): filesystemContent(mixed), filesystemPath(2, 2, ""): filesystemContent(mixed)}
+				run := func(id string, written, skipped int, wantFailure bool) {
+					t.Helper()
+					fixture.expectPaths(domain.ShareStrmEntry{Episodes: []domain.ShareEpisode{filesystemEpisode(1, 2), filesystemEpisode(2, 2)}})
+					if !wantFailure {
+						fixture.expectPaths(domain.ShareStrmEntry{Episodes: winner.Episodes})
+					}
+					if err := fixture.service.tasks.Create(id, "strm_generate", "增量去重回归"); err != nil {
+						t.Fatal(err)
+					}
+					connection, err := fixture.db.Conn(context.Background())
+					if err != nil {
+						t.Fatal(err)
+					}
+					output := &StrmOutput{Store: &dao.StrmExportDAO{Conn: connection}, Root: fixture.cfg.OutputPath, Owner: "share:default", Run: id, Paths: map[string]bool{}}
+					err = service.runPrepared(context.Background(), id, checkpoints.input, checkpoints.input.Fingerprint, output)
+					if closeErr := connection.Close(); closeErr != nil {
+						t.Fatal(closeErr)
+					}
+					if expectationErr := fixture.mock.ExpectationsWereMet(); expectationErr != nil {
+						t.Fatalf("SQL模拟未消费：%v；导出错误：%v", expectationErr, err)
+					}
+					if wantFailure != (err != nil) || wantFailure && !errors.Is(err, fault.failure) {
+						t.Fatalf("增量导出错误不符合预期：%v", err)
+					}
+					task, err := fixture.service.tasks.Get(id)
+					if err != nil {
+						t.Fatal(err)
+					}
+					metadata := task["metadata"].(map[string]interface{})
+					assertFilesystemMetadata(t, metadata, written, skipped)
+					pending, affected := float64(0), float64(3)
+					if wantFailure {
+						pending, affected = 1, 2
+						if checkpoints.completions != 0 || len(checkpoints.dirty[loser.WorkKey].PendingKeys) != 2 {
+							t.Fatal("失败任务提交了检查点或丢失计划键")
+						}
+					}
+					if metadata["pending_works"] != pending || metadata["affected_sources"] != affected || task["failed_files"] != pending {
+						t.Fatalf("普通去重被误计为失败，或失败来源计数丢失：%v / %v", task, metadata)
+					}
+				}
+				if failRegistration {
+					run("registration-failure", 2, 4, true)
+					assertFilesystemCollection(t, fixture.cfg.OutputPath, want)
+					fault.failAt = 0
+				}
+				written := 4
+				if failRegistration {
+					written = 2
+				}
+				run("complete", written, 4, false)
+				want[filesystemPath(1, 1, "")] = filesystemContent(winner)
+				want[filesystemPath(2, 1, "")] = filesystemContent(winner)
+				assertFilesystemCollection(t, fixture.cfg.OutputPath, want)
+				wantKeys := map[int][]string{
+					loser.ID:  {"8803:1:1", "8803:2:1"},
+					mixed.ID:  {"8803:1:1", "8802:1:2", "8803:2:1", "8802:2:2"},
+					winner.ID: {"8803:1:1", "8803:2:1"},
+				}
+				for sourceID, keys := range wantKeys {
+					if got := checkpoints.states[sourceID].ExportKeys; !reflect.DeepEqual(got, keys) {
+						t.Fatalf("来源%d没有映射实际选优键：got=%v want=%v", sourceID, got, keys)
+					}
+				}
+				if checkpoints.completions != 1 || len(checkpoints.dirty[loser.WorkKey].PendingKeys) != 0 {
+					t.Fatal("去重后没有完成并清理作品检查点")
+				}
+				checkpoints.bump(loser.WorkKey)
+				run("unchanged", 0, 4, false)
+				assertFilesystemCollection(t, fixture.cfg.OutputPath, want)
+			})
+		}
+	}
+}
+
+type filesystemFaultReader struct{ *filesystemFaultStore }
+
+// GetStrmSource 为登记故障模拟叠加内存重读能力，覆盖生产导出的来源重读分支。
+func (store filesystemFaultReader) GetStrmSource(ctx context.Context, id int) (domain.ShareStrmSource, error) {
+	return (filesystemReader{store.strmMemory}).GetStrmSource(ctx, id)
 }
 
 func TestShareStrmIncrementalInitialBaselineRequiresExplicitFull(t *testing.T) {
