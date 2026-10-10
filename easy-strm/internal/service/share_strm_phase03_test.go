@@ -86,8 +86,8 @@ func phase03Run(t *testing.T, fixture *phaseFixture, runner *ShareStrmScheduledS
 	return err
 }
 
-func TestShareStrmScheduledUntrustedPromotesExplicitReconciliation(t *testing.T) {
-	for _, reason := range []string{"legacy", "required", "fingerprint", "revision"} {
+func TestShareStrmScheduledUntrustedNeverPromotesReconciliation(t *testing.T) {
+	for _, reason := range []string{"legacy", "required", "building", "fingerprint", "revision"} {
 		t.Run(reason, func(t *testing.T) {
 			fixture, store, runner := phase03Fixture(t)
 			switch reason {
@@ -95,20 +95,22 @@ func TestShareStrmScheduledUntrustedPromotesExplicitReconciliation(t *testing.T)
 				store.input.LegacyOutputsReconciled = false
 			case "required":
 				store.input.BaselineState = "required"
+			case "building":
+				store.input.BaselineState = "building"
 			case "fingerprint":
 				store.input.Fingerprint = "untrusted"
 			case "revision":
 				store.input.ConfigRevision++
 			}
-			if err := phase03Run(t, fixture, runner, "incremental", "cron_fallback", context.Background()); err != nil {
-				t.Fatal(err)
+			if err := phase03Run(t, fixture, runner, "incremental", "cron_fallback", context.Background()); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+				t.Fatalf("增量应明确失败：%v", err)
 			}
-			if store.fulls != 1 || store.fanouts != 1 || store.input.BaselineState != "ready" {
+			if store.fulls != 0 || store.fanouts != 0 || store.completions != 0 {
 				t.Fatalf("full=%d seed=%d state=%s", store.fulls, store.fanouts, store.input.BaselineState)
 			}
 			task, _ := fixture.service.tasks.Get("cron_fallback")
 			metadata := task["metadata"].(map[string]interface{})
-			if metadata["requested_mode"] != "incremental" || metadata["effective_mode"] != "reconciliation" || metadata["fallback_reason"] == "" {
+			if metadata["requested_mode"] != "incremental" || metadata["effective_mode"] != "incremental" || metadata["baseline_required"] != true {
 				t.Fatal(metadata)
 			}
 		})
@@ -286,7 +288,7 @@ func TestShareStrmScheduledCancellationAfterCompletedWorkResumesPending(t *testi
 		t.Fatalf("lost completed-boundary progress: %v %v", task, taskErr)
 	}
 	store.afterComplete = nil
-	if err = phase03Run(t, fixture, runner, "incremental", "cron_resume_boundary", context.Background()); err != nil {
+	if err = phase03Run(t, fixture, runner, "reconciliation", "cron_resume_boundary", context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if store.fulls != 1 || store.fanouts != 1 || store.completions != 2 {
@@ -323,7 +325,7 @@ func TestShareStrmScheduledUnpreparedRetryDoesNotRepeatedlyInvalidate(t *testing
 		t.Fatal("false prepared baseline")
 	}
 	store.fullErr = nil
-	if err := phase03Run(t, fixture, runner, "incremental", "cron_prepare_retry", context.Background()); err != nil {
+	if err := phase03Run(t, fixture, runner, "reconciliation", "cron_prepare_retry", context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if store.input.ConfigRevision != revision || store.requirements != 1 || store.fanouts != 1 || store.fulls != 2 {
@@ -352,18 +354,10 @@ func TestShareStrmIncrementalRebuildResumesBuildingWithoutReseeding(t *testing.T
 		t.Fatal(err)
 	}
 	revision := store.input.ConfigRevision
-	for directory := fixture.cfg.OutputPath; ; directory = filepath.Dir(directory) {
-		fixture.mock.ExpectQuery("SELECT pg_try_advisory_lock_shared").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
-		if filepath.Dir(directory) == directory {
-			break
-		}
+	if err := worker.Rebuild(context.Background(), "rebuild_resumed"); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+		t.Fatalf("不具备显式对账能力不得自行播种：%v", err)
 	}
-	fixture.mock.ExpectQuery("SELECT pg_try_advisory_lock\\(hashtextextended\\('share:default',34982\\)\\)").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
-	fixture.mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
-	if err := worker.Rebuild(context.Background(), "rebuild_resumed"); err != nil {
-		t.Fatal(err)
-	}
-	if store.input.ConfigRevision != revision || store.fanouts != 1 || store.completions != 1 {
+	if store.input.ConfigRevision != revision || store.fanouts != 1 || store.completions != 0 {
 		t.Fatal("Rebuild invalidated and reseeded prepared revision")
 	}
 	if err := fixture.mock.ExpectationsWereMet(); err != nil {

@@ -15,6 +15,9 @@ func NewSystemConfigDAO() *SystemConfigDAO {
 
 // GetByKey 根据Key获取配置
 func (d *SystemConfigDAO) GetByKey(key string) (*domain.SystemConfig, error) {
+	if key == "share_strm_incremental_watermark" {
+		return nil, nil
+	}
 	config := &domain.SystemConfig{}
 	err := DB.QueryRow(
 		`SELECT id, config_key, config_val, create_time, update_time 
@@ -33,7 +36,7 @@ func (d *SystemConfigDAO) GetByKey(key string) (*domain.SystemConfig, error) {
 
 // GetAll 获取所有配置
 func (d *SystemConfigDAO) GetAll() ([]*domain.SystemConfig, error) {
-	rows, err := DB.Query("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config")
+	rows, err := DB.Query("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config WHERE config_key<>'share_strm_incremental_watermark'")
 	if err != nil {
 		return nil, fmt.Errorf("SystemConfigDAO[GetAll] 查询失败: %v", err)
 	}
@@ -53,6 +56,9 @@ func (d *SystemConfigDAO) GetAll() ([]*domain.SystemConfig, error) {
 
 // Upsert 更新或插入配置
 func (d *SystemConfigDAO) Upsert(key, val string) error {
+	if key == "share_strm_incremental_watermark" {
+		return fmt.Errorf("内部水位不可通过配置接口修改")
+	}
 	_, err := DB.Exec(
 		`INSERT INTO t_system_config (config_key, config_val, update_time)
 		 VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -67,6 +73,9 @@ func (d *SystemConfigDAO) Upsert(key, val string) error {
 
 // BatchUpsert 批量更新或插入配置
 func (d *SystemConfigDAO) BatchUpsert(configs map[string]string) error {
+	if _, present := configs["share_strm_incremental_watermark"]; present {
+		return fmt.Errorf("内部水位不可通过配置接口修改")
+	}
 	tx, err := DB.Begin()
 	if err != nil {
 		return err

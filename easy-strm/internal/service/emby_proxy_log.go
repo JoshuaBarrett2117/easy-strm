@@ -38,15 +38,15 @@ type embyProxyRequestLog struct {
 	playback embyProxyPlaybackRequest
 }
 
-func beginEmbyProxyRequest(r *http.Request, w http.ResponseWriter, playback embyProxyPlaybackRequest) *http.Request {
+func beginEmbyProxyRequest(r *http.Request, w http.ResponseWriter, playback embyProxyPlaybackRequest) (*http.Request, error) {
 	ctx, err := logger.HTTPContext(r)
 	if err != nil {
 		logger.WithContext(r.Context(), "emby_proxy").Log(logger.ERROR, "请求标识随机源不可用", nil, err)
-		return r
+		return nil, err
 	}
 	w.Header().Set("X-Request-ID", logger.RequestID(ctx))
 	ctx = context.WithValue(ctx, embyProxyRequestLogKey{}, embyProxyRequestLog{started: time.Now(), incoming: r, playback: playback})
-	return r.WithContext(ctx)
+	return r.WithContext(ctx), nil
 }
 
 func writeEmbyProxyFailure(server *domain.EmbyServer, w http.ResponseWriter, r *http.Request, failure *embyProxyFailure) {

@@ -201,7 +201,12 @@ func (s *StrmOutput) Write(ctx context.Context, key, p, content, mapping, playba
 		s.Skipped++
 	}
 	state := dao.ExportState{Owner: s.Owner, Key: key, Path: p, Content: fmt.Sprintf("%x", sha256.Sum256([]byte(p+"\x00"+content))), Mapping: fmt.Sprintf("%x", sha256.Sum256([]byte(mapping))), Playback: playback, Run: s.Run}
-	if e = s.Store.Save(ctx, state); e != nil {
+	if save, ok := ctx.Value(shareSelectionReceiptContext{}).(func(context.Context, dao.ExportState) error); ok {
+		e = save(ctx, state)
+	} else {
+		e = s.Store.Save(ctx, state)
+	}
+	if e != nil {
 		return changed, fmt.Errorf("文件已处理但登记失败：%w", e)
 	}
 	s.Paths[p] = true
@@ -232,7 +237,7 @@ func (s *StrmOutput) Clear(ctx context.Context) (clearErr error) {
 		return e
 	}
 	defer func() {
-		if err := s.Store.SharedDirectory(context.Background(), s.Root); err != nil {
+		if err := s.Store.SharedDirectory(context.WithoutCancel(ctx), s.Root); err != nil {
 			s.Store.Close()
 			clearErr = errors.Join(clearErr, fmt.Errorf("恢复目录共享占用失败: %w", err))
 		}

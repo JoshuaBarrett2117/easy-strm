@@ -1,7 +1,10 @@
 -- 更新日期：2026-10-10；维护者：Codex。DBA 手工执行；禁止启动嵌入。
+-- 仅在 D4 维护窗口、派生/选择表已清空且已停分享写入时执行；先验证备份与只读清理清单。
+-- REBUILD 保留识别缓存；RESET 必须先重新扫描/识别分享源，再 v47，再显式手动全量对账。
+-- 大回填默认 30min；DBA 可在同会话 SET easy_strm.v47_statement_timeout='60min' 覆盖，按库量评估锁等待。
 BEGIN;
 SET LOCAL lock_timeout = '30s';
-SET LOCAL statement_timeout = '5min';
+SELECT set_config('statement_timeout', COALESCE(NULLIF(current_setting('easy_strm.v47_statement_timeout', true), ''), '30min'), true);
 DO $pre$
 BEGIN
  IF to_regclass('t_share_media') IS NULL OR to_regclass('t_share_media_file') IS NULL

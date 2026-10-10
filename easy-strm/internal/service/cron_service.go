@@ -7,6 +7,7 @@ import (
 	"easy-strm/internal/pkg/logger"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/robfig/cron/v3"
 	"sort"
 	"strings"
@@ -388,6 +389,11 @@ func cronTaskKind(handler string) string {
 
 // Run 统一手动和定时触发，返回任务中心执行ID。
 func (s *CronService) Run(id int, trigger string) (string, error) {
+	return s.RunContext(context.Background(), id, trigger)
+}
+
+// RunContext 手动执行保留 HTTP 标识；调度执行以密码学随机任务标识关联，禁止定时全量。
+func (s *CronService) RunContext(parent context.Context, id int, trigger string) (string, error) {
 	s.mu.Lock()
 	t, err := s.GetByID(id)
 	if err != nil {
@@ -397,6 +403,10 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 	if t == nil {
 		s.mu.Unlock()
 		return "", fmt.Errorf("任务不存在")
+	}
+	if t.Handler == "share_strm_full_reconciliation" && trigger != "manual" {
+		s.mu.Unlock()
+		return "", fmt.Errorf("分享库全量对账仅允许手动触发，禁止定时全量")
 	}
 	if trigger == "scheduled" && t.Status != "enabled" {
 		s.mu.Unlock()
@@ -411,7 +421,12 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 		s.mu.Unlock()
 		return "", fmt.Errorf("任务中心未初始化")
 	}
-	taskID := fmt.Sprintf("cron_%d_%d", id, time.Now().UnixNano())
+	generated, err := uuid.NewV7()
+	if err != nil {
+		s.mu.Unlock()
+		return "", err
+	}
+	taskID := fmt.Sprintf("cron_%d_%s", id, generated.String())
 	keys := []string{fmt.Sprintf("task:%d", id)}
 	if t.StrmConfigID > 0 {
 		keys = append(keys, fmt.Sprintf("strm:%d", t.StrmConfigID))
@@ -472,7 +487,7 @@ func (s *CronService) Run(id int, trigger string) (string, error) {
 		_ = s.cronTaskDAO.FinishRun(taskID, "failed", err.Error())
 		return "", err
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
 	s.tasks.RegisterCancel(taskID, cancel)
 	if e := s.tasks.UpdateMetadata(taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
 		cancel()

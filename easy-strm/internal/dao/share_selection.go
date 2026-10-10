@@ -158,7 +158,7 @@ func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.Shar
 
 // SyncSelections 显式从应用库刷新候选，work 非空时仅同步该作品及其旧候选的新归属。
 func (d *ShareRecordDAO) SyncSelections(ctx context.Context, work string) error {
-	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead})
+	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return err
 	}
@@ -186,6 +186,11 @@ var shareSelectionSyncSQL = []string{
  COALESCE(m.work_key,'') work_key,m.media_type,COALESCE((SELECT string_agg(e.season_number||':'||e.episode_number,',' ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'') episode_sig
  FROM t_share_media_file f JOIN t_share_record r ON r.id=f.share_id LEFT JOIN t_share_media m ON m.id=f.media_id
  WHERE ($1='' OR m.work_key=$1 OR EXISTS(SELECT 1 FROM t_share_export_candidate c JOIN t_share_export_candidate_item i USING(candidate_id) WHERE c.source_file_id=f.id AND i.work_key=$1))`,
+	`DO $identity$ BEGIN
+ IF EXISTS(SELECT 1 FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id
+ WHERE (c.share_id,c.remote_file_id,c.name_hash) IS DISTINCT FROM (o.share_id,o.remote_file_id,o.name_hash)) THEN
+ RAISE EXCEPTION '候选源身份已变化；禁止静默重定向，请 DBA 核对旧手选与新源身份后重建';
+ END IF; END $identity$`,
 	`CREATE TEMP TABLE selection_changed ON COMMIT DROP AS
  SELECT DISTINCT key work_key FROM (
  SELECT o.work_key key FROM selection_observed o LEFT JOIN t_share_export_candidate c ON c.share_id=o.share_id AND c.remote_file_id=o.remote_file_id AND c.name_hash=o.name_hash
@@ -195,11 +200,10 @@ var shareSelectionSyncSQL = []string{
  WHERE ($1='' OR i.work_key=$1 OR o.source_file_id IS NOT NULL) AND (o.source_file_id IS NULL AND c.state<>'removed' OR o.source_file_id IS NOT NULL AND ((c.file_version,c.share_version,c.available,c.state,c.episode_sig) IS DISTINCT FROM (o.file_version,o.share_version,o.available,o.state,o.episode_sig) OR i.work_key<>o.work_key))
  ) affected WHERE key<>''`,
 	`INSERT INTO t_share_export_candidate(share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig)
- SELECT share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig FROM selection_observed WHERE remote_file_id<>'' ORDER BY source_file_id
- ON CONFLICT(share_id,remote_file_id) WHERE remote_file_id<>'' DO UPDATE SET source_file_id=EXCLUDED.source_file_id,file_version=EXCLUDED.file_version,share_version=EXCLUDED.share_version,file_size=EXCLUDED.file_size,available=EXCLUDED.available,state=EXCLUDED.state,episode_sig=EXCLUDED.episode_sig,updated_at=now()`,
-	`INSERT INTO t_share_export_candidate(share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig)
- SELECT share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig FROM selection_observed WHERE remote_file_id='' ORDER BY source_file_id
- ON CONFLICT(share_id,name_hash) WHERE remote_file_id='' DO UPDATE SET source_file_id=EXCLUDED.source_file_id,file_version=EXCLUDED.file_version,share_version=EXCLUDED.share_version,file_size=EXCLUDED.file_size,available=EXCLUDED.available,state=EXCLUDED.state,episode_sig=EXCLUDED.episode_sig,updated_at=now()`,
+ SELECT share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig FROM selection_observed ORDER BY source_file_id
+ ON CONFLICT DO NOTHING`,
+	`UPDATE t_share_export_candidate c SET source_file_id=o.source_file_id,file_version=o.file_version,share_version=o.share_version,file_size=o.file_size,available=o.available,state=o.state,episode_sig=o.episode_sig,updated_at=now()
+ FROM selection_observed o WHERE c.share_id=o.share_id AND c.remote_file_id=o.remote_file_id AND c.name_hash=o.name_hash`,
 	`UPDATE t_share_export_candidate c SET state='removed',available=false,updated_at=now() WHERE NOT EXISTS(SELECT 1 FROM t_share_media_file f WHERE f.id=c.source_file_id)
  AND ($1='' OR EXISTS(SELECT 1 FROM t_share_export_candidate_item i WHERE i.candidate_id=c.candidate_id AND i.work_key=$1)) AND c.state<>'removed'`,
 	`UPDATE t_share_export_candidate_item i SET revoked=true,updated_at=now() WHERE NOT i.revoked AND ($1='' OR i.work_key=$1 OR EXISTS(SELECT 1 FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id WHERE c.candidate_id=i.candidate_id))

@@ -180,6 +180,11 @@ func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, media
 }
 
 func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
+	return s.PreviewOrganizeContext(context.Background(), sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+}
+
+// PreviewOrganizeContext 将异步预览的识别子调用关联到入口上下文。
+func (s *OrganizeService) PreviewOrganizeContext(ctx context.Context, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
 	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_id=%d, source_path=%s, target_path=%s", sourceID, sourcePath, targetPath)
 
 	// 获取媒体源
@@ -190,7 +195,7 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 	if source == nil {
 		return nil, fmt.Errorf("媒体源不存在")
 	}
-	return s.previewOrganizeForSource(source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	return s.previewOrganizeForSourceContext(ctx, source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 }
 
 // previewOrganizeForSource 预览整理（直接消费已构造的 *MediaSource，不调用 GetByID）。
@@ -453,7 +458,7 @@ func (s *OrganizeService) organizeDirectoryInternal(ctx context.Context, source 
 	if s.postOrganizeSuccessHook != nil && source != nil && source.SourceType == domain.SourceTypeCloud115 && successCount > 0 {
 		resultCopy := append([]OrganizeResult(nil), results...)
 		sourceCopy := *source
-		go s.postOrganizeSuccessHook(context.Background(), &sourceCopy, resultCopy)
+		go s.postOrganizeSuccessHook(context.WithoutCancel(ctx), &sourceCopy, resultCopy)
 	}
 	return results, nil
 }

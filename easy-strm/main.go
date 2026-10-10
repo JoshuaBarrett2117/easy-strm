@@ -22,7 +22,7 @@ func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-Id, X-Trace-Id, traceparent")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 		c.Writer.Header().Set("Access-Control-Max-Age", "86400")
 
@@ -130,7 +130,7 @@ func main() {
 	// rs.SetupRoutes(authService)
 
 	// 启动服务器
-	Info("Gin server starting on http://localhost:8082")
+	logServerLifecycle("startup", nil)
 	server := &http.Server{Addr: ":8082", Handler: r, ReadHeaderTimeout: 15 * time.Second, ErrorLog: log.New(pkglogger.Writer("http_server"), "", 0)}
 	shutdownSignal, stopSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignal()
@@ -142,11 +142,12 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
-			Error("HTTP 服务关闭失败: %v", err)
+			logServerLifecycle("shutdown_error", err)
 		}
+		logServerLifecycle("shutdown", nil)
 	}()
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		Error("HTTP 服务启动失败: %v", err)
+		logServerLifecycle("startup_error", err)
 	}
 	if shutdownSignal.Err() != nil {
 		<-shutdownDone

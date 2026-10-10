@@ -178,7 +178,7 @@ func TestShareStrmPaginationIterationAndExactProgress(t *testing.T) {
 						t.Fatalf("最终进度: %v %v", task, taskErr)
 					}
 					written, skipped := count-failed, 0
-					if dedupe && written > 0 {
+					if written > 0 {
 						skipped, written = written-1, 1
 					}
 					metadata := task["metadata"].(map[string]interface{})

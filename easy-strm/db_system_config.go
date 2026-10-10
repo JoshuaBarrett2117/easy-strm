@@ -1,6 +1,11 @@
 package main
 
+import "fmt"
+
 func GetSystemConfigByKey(key string) (*SystemConfig, error) {
+	if key == "share_strm_incremental_watermark" {
+		return nil, nil
+	}
 	Debug("Getting system config by key: %s", key)
 	config := &SystemConfig{}
 	err := db.QueryRow("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config WHERE config_key = $1", key).Scan(
@@ -16,6 +21,9 @@ func GetSystemConfigByKey(key string) (*SystemConfig, error) {
 // UpsertSystemConfig 创建或更新系统配置
 
 func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
+	if key == "share_strm_incremental_watermark" {
+		return nil, fmt.Errorf("内部水位不可通过配置接口修改")
+	}
 	Debug("Upserting system config: %s", key)
 	config := &SystemConfig{}
 	err := db.QueryRow(`
@@ -36,7 +44,7 @@ func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
 
 func GetAllSystemConfig() ([]*SystemConfig, error) {
 	Debug("Getting all system configs")
-	rows, err := db.Query("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config")
+	rows, err := db.Query("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config WHERE config_key<>'share_strm_incremental_watermark'")
 	if err != nil {
 		Error("Failed to get all system configs: %v", err)
 		return nil, err

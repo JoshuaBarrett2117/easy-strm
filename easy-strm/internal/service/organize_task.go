@@ -118,6 +118,11 @@ func (s *OrganizeService) persistCandidateTask(ctx context.Context, taskKey stri
 }
 
 func (s *OrganizeService) StartCandidateTask(sourceID int, sourcePath, mediaType string, fileIDs []string) (string, error) {
+	return s.StartCandidateTaskContext(context.Background(), sourceID, sourcePath, mediaType, fileIDs)
+}
+
+// StartCandidateTaskContext 将候选扫描与发起请求关联，后台执行不受 HTTP 结束影响。
+func (s *OrganizeService) StartCandidateTaskContext(parent context.Context, sourceID int, sourcePath, mediaType string, fileIDs []string) (string, error) {
 	if s.redisClient == nil {
 		return "", fmt.Errorf("候选扫描任务存储未初始化")
 	}
@@ -136,18 +141,17 @@ func (s *OrganizeService) StartCandidateTask(sourceID int, sourcePath, mediaType
 		UpdatedAt:  time.Now(),
 	}
 
-	ctx := context.Background()
+	ctx := logger.WithTaskID(context.WithoutCancel(parent), taskID)
 	if err := s.persistCandidateTask(ctx, taskKey, &task); err != nil {
 		return "", fmt.Errorf("保存候选扫描任务失败: %v", err)
 	}
 
-	go s.runCandidateTask(taskID, sourceID, sourcePath, mediaType, fileIDs)
+	go s.runCandidateTask(ctx, taskID, sourceID, sourcePath, mediaType, fileIDs)
 	return taskID, nil
 }
 
-func (s *OrganizeService) runCandidateTask(taskID string, sourceID int, sourcePath, mediaType string, fileIDs []string) {
+func (s *OrganizeService) runCandidateTask(ctx context.Context, taskID string, sourceID int, sourcePath, mediaType string, fileIDs []string) {
 	taskKey := fmt.Sprintf("organize:task:%s", taskID)
-	ctx := context.Background()
 
 	taskJSON, err := s.redisClient.Get(ctx, taskKey).Result()
 	if err != nil {
@@ -244,6 +248,11 @@ func (s *OrganizeService) GetCandidateTaskStatus(taskID string) (*OrganizeCandid
 // StartPreviewTask 启动异步预览任务
 
 func (s *OrganizeService) StartPreviewTask(sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) (string, error) {
+	return s.StartPreviewTaskContext(context.Background(), sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+}
+
+// StartPreviewTaskContext 保留预览任务请求标识与独立后台生命周期。
+func (s *OrganizeService) StartPreviewTaskContext(parent context.Context, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) (string, error) {
 	if s.redisClient == nil {
 		return "", fmt.Errorf("预览任务存储未初始化")
 	}
@@ -265,21 +274,20 @@ func (s *OrganizeService) StartPreviewTask(sourceID int, sourcePath, targetPath,
 		UpdatedAt:  time.Now(),
 	}
 
-	ctx := context.Background()
+	ctx := logger.WithTaskID(context.WithoutCancel(parent), taskID)
 	if err := s.persistPreviewTask(ctx, taskKey, &task); err != nil {
 		return "", fmt.Errorf("保存任务失败: %v", err)
 	}
 
-	go s.runPreviewTask(taskID, sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	go s.runPreviewTask(ctx, taskID, sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 
 	return taskID, nil
 }
 
 // runPreviewTask 后台运行预览任务
 
-func (s *OrganizeService) runPreviewTask(taskID string, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) {
+func (s *OrganizeService) runPreviewTask(ctx context.Context, taskID string, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) {
 	taskKey := fmt.Sprintf("organize:task:%s", taskID)
-	ctx := context.Background()
 
 	task := OrganizePreviewTask{
 		TaskID:     taskID,
@@ -325,7 +333,7 @@ func (s *OrganizeService) runPreviewTask(taskID string, sourceID int, sourcePath
 		logger.Errorf("OrganizeService[runPreviewTask] 更新任务状态失败: %v", err)
 	}
 
-	previews, err := s.PreviewOrganize(sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
+	previews, err := s.PreviewOrganizeContext(ctx, sourceID, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 	if err != nil {
 		task.Status = "failed"
 		task.Error = err.Error()

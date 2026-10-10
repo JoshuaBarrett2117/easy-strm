@@ -72,6 +72,7 @@ type OfflineDownloadService struct {
 
 // offlineDownloadJob 表示一个已通过入口校验、等待后台分批发送到115的大批量任务。
 type offlineDownloadJob struct {
+	ctx         context.Context
 	taskID      string
 	cloud115ID  int
 	accountName string
@@ -156,7 +157,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		directory = offlineDefaultDir
 	}
 	if len(urls)+len(invalidUrls) > offlineBatchSize {
-		return s.enqueueLargeSubmission(executorID, targetID, account, directory, urls, invalidUrls)
+		return s.enqueueLargeSubmission(ctx, executorID, targetID, account, directory, urls, invalidUrls)
 	}
 	saveDirID, err := s.client.MkdirAll115(directory, executorID, account.Cookie)
 	if err != nil || strings.TrimSpace(saveDirID) == "" {
@@ -233,7 +234,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=submit | recordInsertErr=%v", taskId, err)
 	}
 
-	go s.trackBatch(context.Background(), taskId, executorID, account.Cookie, targetID)
+	go s.trackBatch(logger.WithTaskID(context.WithoutCancel(ctx), taskId), taskId, executorID, account.Cookie, targetID)
 
 	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=submit | result=OK | accepted=%d | rejected=%d | dir=%s",
 		taskId, accepted, len(urls)+len(invalidUrls)-accepted, directory)
@@ -249,7 +250,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 
 // enqueueLargeSubmission 为超过115单批上限的请求创建任务并放入后台队列。
 // 入队响应只表示 easy-strm 已接收任务，不把尚未发送到115的链接误报为已受理。
-func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID, targetID int, account *domain.Cloud115, directory string, urls, invalidURLs []string) (*domain.OfflineDownloadSubmitResponse, error) {
+func (s *OfflineDownloadService) enqueueLargeSubmission(ctx context.Context, cloud115ID, targetID int, account *domain.Cloud115, directory string, urls, invalidURLs []string) (*domain.OfflineDownloadSubmitResponse, error) {
 	taskID := offlineTaskIDPrefix + uuid.New().String()
 	total := len(urls) + len(invalidURLs)
 	if err := s.taskDAO.Create(taskID, string(domain.TaskTypeOfflineDownload), fmt.Sprintf("115云下载 - %d个任务", total)); err != nil {
@@ -266,6 +267,7 @@ func (s *OfflineDownloadService) enqueueLargeSubmission(cloud115ID, targetID int
 	s.taskDAO.UpdateStatus(taskID, domain.TaskStatusRunning)
 
 	job := offlineDownloadJob{
+		ctx:         logger.WithTaskID(context.WithoutCancel(ctx), taskID),
 		taskID:      taskID,
 		cloud115ID:  cloud115ID,
 		accountName: account.Name,
@@ -302,6 +304,10 @@ func (s *OfflineDownloadService) runSubmissionQueue() {
 
 // processQueuedSubmission 将一个大批量任务按115单批上限拆分、顺序发送并持久化结果。
 func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob) {
+	ctx := job.ctx
+	if ctx == nil {
+		ctx = logger.WithTaskID(context.Background(), job.taskID)
+	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueWorker | panic=%v", job.taskID, recovered)
@@ -335,7 +341,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 		}
 		accepted += batchAccepted
 		rejected += len(batch) - batchAccepted
-		if insertErr := s.recordDAO.BatchInsert(context.Background(), records); insertErr != nil {
+		if insertErr := s.recordDAO.BatchInsert(ctx, records); insertErr != nil {
 			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsert | batchStart=%d | err=%v", job.taskID, start, insertErr)
 		}
 		s.taskDAO.UpdateProgress(job.taskID, len(job.urls)+len(job.invalidURLs), end+len(job.invalidURLs), accepted, rejected+len(job.invalidURLs))
@@ -343,7 +349,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 
 	if len(job.invalidURLs) > 0 {
 		invalidRecords := buildQueuedFailureRecords(job, job.invalidURLs, saveDirID, "链接格式无效，仅支持 ed2k/magnet/http/https/ftp")
-		if insertErr := s.recordDAO.BatchInsert(context.Background(), invalidRecords); insertErr != nil {
+		if insertErr := s.recordDAO.BatchInsert(ctx, invalidRecords); insertErr != nil {
 			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsertInvalid | err=%v", job.taskID, insertErr)
 		}
 	}
@@ -361,7 +367,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 		return
 	}
 	s.taskDAO.UpdateProgress(job.taskID, accepted, 0, 0, 0)
-	go s.trackBatch(context.Background(), job.taskID, job.cloud115ID, job.cookie, job.targetID)
+	go s.trackBatch(ctx, job.taskID, job.cloud115ID, job.cookie, job.targetID)
 	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueSubmitted | accepted=%d | rejected=%d", job.taskID, accepted, rejected+len(job.invalidURLs))
 }
 

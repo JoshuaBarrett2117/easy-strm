@@ -21,7 +21,9 @@ func (d *ShareRecordDAO) ShareDeleteURL(ctx context.Context, id int) (string, er
 
 // ShareDeleteEntries 获取同一分享码的所有播放映射，包括清空媒体记录后留下的映射。
 func (d *ShareRecordDAO) ShareDeleteEntries(ctx context.Context, code string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, "SELECT id FROM t_share_strm WHERE payload->>'share_code'=$1", code)
+	rows, err := d.db.QueryContext(ctx, `SELECT id FROM t_share_strm WHERE payload->>'share_code'=$1
+ AND NOT EXISTS(SELECT 1 FROM t_strm_export_state e JOIN t_share_media_selection s ON s.media_item_key=e.export_key
+ WHERE e.owner_key='share:default' AND e.share_strm_id=t_share_strm.id)`, code)
 	if err != nil {
 		return nil, err
 	}

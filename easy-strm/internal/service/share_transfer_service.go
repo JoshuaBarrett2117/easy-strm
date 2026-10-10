@@ -593,7 +593,7 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 	s.taskDAO.UpdateStatus(taskId, transferStatusQueued)
 
 	// 8. 启动goroutine执行转存
-	go s.executeTransfer(context.Background(), taskId, req, targetAccount)
+	go s.executeTransfer(logger.WithTaskID(context.WithoutCancel(ctx), taskId), taskId, req, targetAccount)
 
 	return &domain.TransferResponse{
 		TaskId:        taskId,
@@ -772,7 +772,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 	// 终态后触发转存后自动整理/刮削（向后兼容：仅当 auto_organize 为真且非 failed/cancelled 时）
 	// failed：不触发；partial_failed：仍触发（只整理实际落盘文件）；cancelled：不触发。
 	if (finalStatus == transferStatusCompleted || finalStatus == transferStatusPartialFail) && req.AutoOrganize {
-		go s.runPostTransferOrganize(context.Background(), taskId, req, targetAccount, targetDirCID, successFids)
+		go s.runPostTransferOrganize(context.WithoutCancel(ctx), taskId, req, targetAccount, targetDirCID, successFids)
 	}
 
 	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=execute | done | status=%s | success=%d | failed=%d | duration=%s",
@@ -1015,7 +1015,7 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 
 	// 更新任务状态并重新执行
 	s.taskDAO.UpdateStatus(taskId, transferStatusTransferring)
-	go s.executeTransfer(context.Background(), taskId, retryReq, targetAccount)
+	go s.executeTransfer(logger.WithTaskID(context.WithoutCancel(ctx), taskId), taskId, retryReq, targetAccount)
 
 	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=retry | retriedFiles=%d", taskId, len(retryFiles))
 

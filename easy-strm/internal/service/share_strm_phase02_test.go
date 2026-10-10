@@ -18,7 +18,7 @@ func TestShareStrmIncrementalEmptyBatchCancellation(t *testing.T) {
 	if err := fixture.service.tasks.Create("zero-cancel", "strm_generate", "zero-cancel"); err != nil {
 		t.Fatal(err)
 	}
-	store.input.BaselineState = "building"
+	store.input.BaselineState = "ready"
 	store.afterBatch = func() {
 		if err := fixture.service.tasks.Cancel("zero-cancel"); err != nil {
 			t.Fatal(err)
@@ -27,7 +27,7 @@ func TestShareStrmIncrementalEmptyBatchCancellation(t *testing.T) {
 	if err := runIncrementalFixture(t, fixture, service, "zero-cancel"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("零待办取消未传播：%v", err)
 	}
-	if store.input.BaselineState != "building" || store.completions != 0 || store.reads != 0 {
+	if store.input.BaselineState != "ready" || store.completions != 0 || store.reads != 0 {
 		t.Fatal("取消任务发布了 ready 或扫描了来源")
 	}
 }
@@ -229,11 +229,7 @@ func TestShareStrmIncrementalSourceChanges(t *testing.T) {
 					second.ShareID, second.URL = 2, "https://115.com/s/share2"
 				}
 				fixture.store.sources = []domain.ShareStrmSource{source, second, phaseSource(99)}
-				if scenario == "same-share-files" {
-					expectedKeys = []string{"1:1:1:file:1"}
-				} else {
-					expectedKeys = []string{"1:1:1:share:1"}
-				}
+				expectedKeys = []string{"1:1:1"}
 			}
 			store.bump(source.WorkKey)
 			if err := runIncrementalFixture(t, fixture, service, scenario); err != nil {
@@ -257,7 +253,7 @@ func TestShareStrmIncrementalSourceChanges(t *testing.T) {
 			} else if !reflect.DeepEqual(sortedIncrementalKeys(store.states[1].ExportKeys), expectedKeys) || store.states[1].FileVersion != source.FileVersion || store.states[1].ShareVersion != source.ShareVersion {
 				t.Fatalf("观察或实际输出键未提交：%+v", store.states[1])
 			}
-			if scenario == "same-share-files" && !reflect.DeepEqual(store.states[2].ExportKeys, []string{"1:1:1:file:2"}) {
+			if scenario == "same-share-files" && !reflect.DeepEqual(store.states[2].ExportKeys, []string{"1:1:1"}) {
 				t.Fatal("同分享多文件未整作品重算")
 			}
 			if scenario == "same-named-shares" {

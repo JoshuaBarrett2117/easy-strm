@@ -51,10 +51,14 @@ func TestShareStrmCronMutualExclusionAcrossIDs(t *testing.T) {
 				return "", errors.New("must skip")
 			}})
 			expectCronRead(mock, 11, 0, firstHandler, "enabled", false)
-			mock.ExpectExec(`INSERT INTO t_cron_task_run`).WithArgs(11, sqlmock.AnyArg(), "scheduled", "pending").WillReturnResult(sqlmock.NewResult(1, 1))
+			trigger := "scheduled"
+			if firstHandler == "share_strm_full_reconciliation" {
+				trigger = "manual"
+			}
+			mock.ExpectExec(`INSERT INTO t_cron_task_run`).WithArgs(11, sqlmock.AnyArg(), trigger, "pending").WillReturnResult(sqlmock.NewResult(1, 1))
 			mock.ExpectExec(`UPDATE t_cron_task_run SET status='running'`).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), nil, "running", "", 11).WillReturnResult(sqlmock.NewResult(0, 1))
-			active, err := scheduler.Run(11, "scheduled")
+			active, err := scheduler.Run(11, trigger)
 			if err != nil {
 				t.Fatal(err)
 			}

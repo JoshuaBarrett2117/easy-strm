@@ -95,6 +95,11 @@ func (s *WeComCallbackService) VerifyURL(signature, timestamp, nonce, echo strin
 
 // Receive 解密并接收企业微信推送；业务回复异步发送，接口可立即返回 success。
 func (s *WeComCallbackService) Receive(signature, timestamp, nonce string, body []byte) error {
+	return s.ReceiveContext(context.Background(), signature, timestamp, nonce, body)
+}
+
+// ReceiveContext 异步回复沿用回调请求标识，日志不记录成员账号和原始消息。
+func (s *WeComCallbackService) ReceiveContext(ctx context.Context, signature, timestamp, nonce string, body []byte) error {
 	config, err := s.getEnabledConfig()
 	if err != nil {
 		return err
@@ -117,9 +122,9 @@ func (s *WeComCallbackService) Receive(signature, timestamp, nonce string, body 
 		return nil
 	}
 	if strings.EqualFold(message.MsgType, "text") {
-		go s.replyToText(config, message.FromUserName, message.Content)
+		go s.replyToTextContext(context.WithoutCancel(ctx), config, message.FromUserName, message.Content)
 	} else if strings.EqualFold(message.MsgType, "event") && strings.EqualFold(message.Event, "click") {
-		go s.replyToText(config, message.FromUserName, message.EventKey)
+		go s.replyToTextContext(context.WithoutCancel(ctx), config, message.FromUserName, message.EventKey)
 	}
 	return nil
 }
@@ -166,7 +171,11 @@ func (s *WeComCallbackService) claimMessage(message WeComIncomingMessage, plain 
 }
 
 func (s *WeComCallbackService) replyToText(config WeComConfig, userID, content string) {
-	ctx, cancel := context.WithTimeout(context.Background(), s.replyTimeout)
+	s.replyToTextContext(context.Background(), config, userID, content)
+}
+
+func (s *WeComCallbackService) replyToTextContext(parent context.Context, config WeComConfig, userID, content string) {
+	ctx, cancel := context.WithTimeout(parent, s.replyTimeout)
 	defer cancel()
 	card, err := s.buildReply(ctx, content)
 	if err != nil {
@@ -177,10 +186,10 @@ func (s *WeComCallbackService) replyToText(config WeComConfig, userID, content s
 	replyConfig := config
 	replyConfig.DetailURL = ""
 	if err := s.replies.SendWeComCardToUser(replyConfig, userID, card); err != nil {
-		logger.Warnf("[WeComCallbackService] 回复成员 %s 失败: %v", userID, err)
+		logger.WithContext(ctx, "wecom_callback").Log(logger.WARN, "回复成员失败，账号与消息内容已省略", nil, err)
 		return
 	}
-	logger.Infof("[WeComCallbackService] 已回复成员 %s: %s", userID, card.Title)
+	logger.WithContext(ctx, "wecom_callback").Log(logger.INFO, "已回复成员，账号与消息内容已省略", nil, nil)
 }
 
 func (s *WeComCallbackService) buildReply(ctx context.Context, content string) (NotificationCard, error) {

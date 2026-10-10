@@ -26,7 +26,7 @@ func TestShareExportCheckpointMissingSchemaFailsClosed(t *testing.T) {
 }
 
 func TestShareExportCheckpointPrepareFanoutAndFingerprintAtomic(t *testing.T) {
-	for _, failure := range []string{"none", "revision", "fanout", "fingerprint", "commit", "resume"} {
+	for _, failure := range []string{"none", "revision", "required", "fingerprint", "commit", "resume"} {
 		t.Run(failure, func(t *testing.T) {
 			db, mock, err := sqlmock.New()
 			if err != nil {
@@ -34,8 +34,15 @@ func TestShareExportCheckpointPrepareFanoutAndFingerprintAtomic(t *testing.T) {
 			}
 			defer db.Close()
 			mock.ExpectBegin()
-			revision, prepared := int64(2), int64(0)
-			fingerprint, state := "old", "required"
+			revision, prepared := int64(2), int64(2)
+			fingerprint, state := "new", "ready"
+			if failure == "required" {
+				prepared = 0
+				state = "required"
+			}
+			if failure == "fingerprint" {
+				fingerprint = "old"
+			}
 			if failure == "revision" {
 				revision = 3
 			}
@@ -45,22 +52,7 @@ func TestShareExportCheckpointPrepareFanoutAndFingerprintAtomic(t *testing.T) {
 				state = "building"
 			}
 			mock.ExpectQuery("SELECT config_revision,prepared_revision.*legacy_outputs_reconciled.*FOR UPDATE").WillReturnRows(sqlmock.NewRows([]string{"revision", "prepared", "fingerprint", "state", "protocol", "reconciled"}).AddRow(revision, prepared, fingerprint, state, 1, true))
-			if failure != "revision" && failure != "resume" {
-				fanout := mock.ExpectExec(regexp.QuoteMeta(shareExportFanoutSQL))
-				if failure == "fanout" {
-					fanout.WillReturnError(errors.New("fanout failure"))
-				} else {
-					fanout.WillReturnResult(sqlmock.NewResult(0, 1))
-				}
-				if failure != "fanout" {
-					update := mock.ExpectExec("UPDATE t_share_export_consumer SET config_fingerprint").WithArgs("new")
-					if failure == "fingerprint" {
-						update.WillReturnError(errors.New("fingerprint failure"))
-					} else {
-						update.WillReturnResult(sqlmock.NewResult(0, 1))
-					}
-				}
-			}
+
 			if failure == "none" || failure == "resume" {
 				mock.ExpectCommit()
 			} else if failure == "commit" {

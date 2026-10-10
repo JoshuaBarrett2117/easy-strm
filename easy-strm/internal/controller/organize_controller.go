@@ -80,7 +80,7 @@ func (c *OrganizeController) StartCandidateTaskAsync(ctx *gin.Context) {
 		req.MediaType = "all"
 	}
 
-	taskID, err := c.organizeService.StartCandidateTask(req.SourceID, req.SourcePath, req.MediaType, req.FileIDs)
+	taskID, err := c.organizeService.StartCandidateTaskContext(ctx.Request.Context(), req.SourceID, req.SourcePath, req.MediaType, req.FileIDs)
 	if err != nil {
 		logger.Errorf("OrganizeController[StartCandidateTaskAsync] 启动任务失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
@@ -195,7 +195,7 @@ func (c *OrganizeController) StartPreviewTaskAsync(ctx *gin.Context) {
 		return
 	}
 
-	taskID, err := c.organizeService.StartPreviewTask(req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.FileIDs, req.UseCategory, req.ManualItems)
+	taskID, err := c.organizeService.StartPreviewTaskContext(ctx.Request.Context(), req.SourceID, req.SourcePath, req.TargetPath, req.MediaType, req.Template, req.FileIDs, req.UseCategory, req.ManualItems)
 	if err != nil {
 		logger.Errorf("OrganizeController[StartPreviewTaskAsync] 启动任务失败: %v", err)
 		ErrorResp(ctx, http.StatusInternalServerError, err.Error())

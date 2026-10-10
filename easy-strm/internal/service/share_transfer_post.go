@@ -243,7 +243,7 @@ func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, task
 
 	// 整理成功且开启 auto_scrape → 触发刮削（仅对成功且未跳过的文件）
 	if req.AutoScrape {
-		go s.runPostTransferScrape(context.Background(), taskId, req, organizeTaskID, source, results)
+		go s.runPostTransferScrape(context.WithoutCancel(ctx), taskId, req, organizeTaskID, source, results)
 	}
 }
 

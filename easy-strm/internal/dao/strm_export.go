@@ -206,7 +206,14 @@ func (d *StrmExportDAO) Save(ctx context.Context, s ExportState) error {
 		return e
 	}
 	defer tx.Rollback()
-	_, e = tx.ExecContext(ctx, `INSERT INTO t_strm_export_history SELECT owner_key,output_path,'路径变化' FROM t_strm_export_state WHERE owner_key=$1 AND export_key=$2 AND output_path<>$3 ON CONFLICT DO NOTHING`, s.Owner, s.Key, s.Path)
+	if e = saveStrmExportState(ctx, tx, s); e != nil {
+		return e
+	}
+	return tx.Commit()
+}
+
+func saveStrmExportState(ctx context.Context, tx *sql.Tx, s ExportState) error {
+	_, e := tx.ExecContext(ctx, `INSERT INTO t_strm_export_history SELECT owner_key,output_path,'路径变化' FROM t_strm_export_state WHERE owner_key=$1 AND export_key=$2 AND output_path<>$3 ON CONFLICT DO NOTHING`, s.Owner, s.Key, s.Path)
 	if e != nil {
 		return e
 	}
@@ -214,7 +221,7 @@ func (d *StrmExportDAO) Save(ctx context.Context, s ExportState) error {
 	if e != nil {
 		return e
 	}
-	return tx.Commit()
+	return nil
 }
 
 // LegacyPaths 获取历史文件清单用于运行系统上的路径归一化。

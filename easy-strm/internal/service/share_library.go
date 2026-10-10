@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -244,6 +245,11 @@ func (s *ShareRecordService) LibraryOptions(ctx context.Context) (json.RawMessag
 
 // StartLibraryEnrichment 按作品补齐历史元数据；每次执行只重试仍缺失的项目。
 func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
+	return s.StartLibraryEnrichmentContext(context.Background())
+}
+
+// StartLibraryEnrichmentContext 保留历史补全入口请求上下文，后台任务独立取消。
+func (s *ShareRecordService) StartLibraryEnrichmentContext(parent context.Context) (string, error) {
 	if s.tasks == nil || s.tmdb == nil {
 		return "", fmt.Errorf("任务或元数据服务未初始化")
 	}
@@ -255,6 +261,7 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 		s.enrichMu.Unlock()
 		return "", err
 	}
+	ctx := logger.WithTaskID(context.WithoutCancel(parent), id)
 	go func() {
 		defer s.enrichMu.Unlock()
 		defer func() {
@@ -263,7 +270,7 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 			}
 		}()
 		_ = s.tasks.UpdateStatus(id, "running")
-		total, err := s.dao.CountLibraryIncomplete(context.Background())
+		total, err := s.dao.CountLibraryIncomplete(ctx)
 		if err != nil {
 			_ = s.tasks.SetError(id, err.Error())
 			return
@@ -276,7 +283,7 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 				_ = s.tasks.UpdateStatus(id, "cancelled")
 				return
 			}
-			key, media, err := s.dao.LibraryIncomplete(context.Background(), after)
+			key, media, err := s.dao.LibraryIncomplete(ctx, after)
 			if err == sql.ErrNoRows {
 				break
 			}
@@ -299,7 +306,7 @@ func (s *ShareRecordService) StartLibraryEnrichment() (string, error) {
 				mergeLibraryMetadata(m.Result, &r)
 				err = detailErr
 				if err == nil {
-					err = s.dao.UpdateMediaMetadata(context.Background(), m)
+					err = s.dao.UpdateMediaMetadata(ctx, m)
 				}
 				if err == nil && (m.Result.VoteAverage == nil || len(m.Result.GenreIDs) == 0 || len(m.Result.Countries) == 0 || m.Result.Year == 0 || m.Result.Title == "") {
 					err = fmt.Errorf("元数据源未提供完整年份、标题、评分、题材或国家信息")

@@ -163,7 +163,7 @@ func (c *CronController) RunImmediately(x *gin.Context) {
 	if !ok {
 		return
 	}
-	taskID, e := c.cronService.Run(id, "manual")
+	taskID, e := c.cronService.RunContext(x.Request.Context(), id, "manual")
 	if e != nil {
 		ErrorResp(x, 400, e.Error())
 		return

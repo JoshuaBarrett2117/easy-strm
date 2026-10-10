@@ -12,6 +12,7 @@ import (
 )
 
 type shareIncrementalAttemptContext struct{}
+type shareExplicitFullContext struct{}
 
 type shareIncrementalAttempt struct {
 	record     func(context.Context, string) error
@@ -46,13 +47,14 @@ func NewShareStrmIncrementalService(exporter *ShareStrmService, checkpoints Shar
 }
 
 func shareExportFingerprint(input domain.ShareExportInput) (string, error) {
+	input.Settings.DedupeExport = true
 	raw, err := json.Marshal(struct {
 		Protocol   int
 		Naming     string
 		Settings   domain.ShareStrmSettings
 		Templates  map[string]string
 		Categories []*domain.MediaCategory
-	}{1, "share-fixed-path-v1", input.Settings, input.Templates, input.Categories})
+	}{1, "share-item-selection-v2", input.Settings, input.Templates, input.Categories})
 	if err != nil {
 		return "", err
 	}
@@ -64,26 +66,11 @@ func (s *ShareStrmIncrementalService) Rebuild(ctx context.Context, id string) er
 	if s == nil || s.checkpoints == nil || s.exporter == nil {
 		return fmt.Errorf("分享增量导出未初始化")
 	}
-	if err := s.checkpoints.CheckSchema(ctx); err != nil {
-		return err
-	}
-	input, err := s.checkpoints.ReadInput(ctx)
-	if err != nil {
-		return err
-	}
-	if !input.LegacyOutputsReconciled {
+	store, ok := s.checkpoints.(ShareReconciliationCheckpointStore)
+	if !ok {
 		return dao.ErrShareExportBaselineRequired
 	}
-	fingerprint, err := shareExportFingerprint(input)
-	if err != nil {
-		return err
-	}
-	if input.BaselineState != "required" && !(input.BaselineState == "building" && input.PreparedRevision == input.ConfigRevision && input.Fingerprint == fingerprint) {
-		if err = s.checkpoints.RequireBaseline(ctx); err != nil {
-			return err
-		}
-	}
-	return s.Run(ctx, id)
+	return NewShareStrmScheduledService(s.exporter, store).Run(ctx, "reconciliation", id)
 }
 
 func (s *ShareStrmIncrementalService) cancelled(ctx context.Context, id string) error {
@@ -100,7 +87,11 @@ func (s *ShareStrmIncrementalService) cancelled(ctx context.Context, id string) 
 func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runErr error) {
 	ctx = logger.WithTaskID(ctx, id)
 	entry := logger.WithContext(ctx, "share_incremental")
-	entry.Log(logger.INFO, "分享 STRM 增量导出开始", logger.Fields{"event": "export_start"}, nil)
+	origin := "scheduled"
+	if logger.RequestID(ctx) != "" {
+		origin = "http"
+	}
+	entry.Log(logger.INFO, "分享 STRM 增量导出开始", logger.Fields{"event": "export_start", "origin": origin}, nil)
 	defer func() {
 		level, message := logger.INFO, "分享 STRM 增量导出完成"
 		if runErr != nil {
@@ -113,6 +104,13 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runEr
 	}
 	if err := s.checkpoints.CheckSchema(ctx); err != nil {
 		return err
+	}
+	if reader, ok := s.checkpoints.(interface {
+		ReadWatermark(context.Context) (*domain.ShareIncrementalWatermark, error)
+	}); ok {
+		if _, err := reader.ReadWatermark(ctx); err != nil {
+			return err
+		}
 	}
 	input, err := s.checkpoints.ReadInput(ctx)
 	if err != nil {
@@ -135,6 +133,9 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runEr
 	if err != nil {
 		return err
 	}
+	if input.BaselineState != "ready" || input.PreparedRevision != input.ConfigRevision || input.ProtocolVersion != 1 || input.Fingerprint != fingerprint {
+		return dao.ErrShareExportBaselineRequired
+	}
 	output, err := waitStrmOutput(ctx, s.exporter.exportDB, input.Settings.OutputPath, "share:default", id, func() bool { return s.cancelled(ctx, id) != nil }, false)
 	if err != nil {
 		return err
@@ -146,6 +147,9 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runEr
 func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string, input domain.ShareExportInput, fingerprint string, output *StrmOutput) (runErr error) {
 	ctx = s.exporter.Coordinator().batchContext(ctx, id)
 	ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
+	if explicit, _ := ctx.Value(shareExplicitFullContext{}).(bool); !explicit && (input.BaselineState != "ready" || !input.LegacyOutputsReconciled || input.PreparedRevision != input.ConfigRevision || input.Fingerprint != fingerprint) {
+		return dao.ErrShareExportBaselineRequired
+	}
 	if err := s.checkpoints.Prepare(ctx, input, fingerprint); err != nil {
 		return err
 	}
@@ -173,6 +177,17 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 		}
 		if len(batch) == 0 {
 			break
+		}
+		if selections, ok := s.exporter.store.(shareSelectionExportStore); ok {
+			for _, dirty := range batch {
+				if err = s.exporter.prepareSelectionWork(ctx, selections, dirty.WorkKey); err != nil {
+					return err
+				}
+			}
+			batch, batchErr = s.checkpoints.DirtyBatch(ctx, attempted)
+			if batchErr != nil {
+				return batchErr
+			}
 		}
 		for _, dirty := range batch {
 			if err = s.cancelled(ctx, id); err != nil {

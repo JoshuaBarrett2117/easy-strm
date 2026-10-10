@@ -201,12 +201,19 @@ func TestShareStrmFilesystemLegacySuffixes(t *testing.T) {
 				want[filesystemPath(1, 1, "-分享合集-分享502")] = filesystemContent(second)
 			}
 			service, _, cfg := newStrmFilesystemFixture(t, sources, false)
+			winner := sources[0]
+			for _, source := range sources[1:] {
+				if betterShareStrmSource(source, winner) {
+					winner = source
+				}
+			}
+			want = map[string][]byte{filesystemPath(1, 1, ""): filesystemContent(winner)}
 			metadata, err := runFilesystemExport(t, service, cfg, "legacy")
 			if err != nil {
 				t.Fatal(err)
 			}
 			assertFilesystemCollection(t, cfg.OutputPath, want)
-			assertFilesystemMetadata(t, metadata, len(want), 0)
+			assertFilesystemMetadata(t, metadata, 1, len(sources)-1)
 		})
 	}
 }
@@ -317,9 +324,7 @@ func TestShareStrmFilesystemDuplicateWinnerEpisodes(t *testing.T) {
 				t.Fatal(err)
 			}
 			suffix := ""
-			if !dedupe {
-				suffix = "-文件11001"
-			}
+
 			assertFilesystemCollection(t, cfg.OutputPath, map[string][]byte{filesystemPath(1, 1, suffix): filesystemContent(source), filesystemPath(2, 1, ""): filesystemContent(source)})
 			assertFilesystemMetadata(t, metadata, 2, 0)
 		})

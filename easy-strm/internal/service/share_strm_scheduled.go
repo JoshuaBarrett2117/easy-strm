@@ -78,7 +78,7 @@ func shareReconciliationReason(input domain.ShareExportInput, fingerprint string
 	return ""
 }
 
-// Run 在调度任务内同步执行；不可信检查点升级为显式全量模式，building 重试只消费未确认作品。
+// Run 只消费可信增量或显式手动全量；缺少基线报错，不自动降级全量。
 func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id string) error {
 	ctx = logger.WithTaskID(ctx, id)
 	if s == nil || s.store == nil || s.worker == nil || s.worker.exporter == nil || s.worker.exporter.exportDB == nil || id == "" {
@@ -92,6 +92,13 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 	}
 	if err := s.store.CheckSchema(ctx); err != nil {
 		return err
+	}
+	if reader, ok := s.store.(interface {
+		ReadWatermark(context.Context) (*domain.ShareIncrementalWatermark, error)
+	}); ok {
+		if _, err := reader.ReadWatermark(ctx); err != nil {
+			return err
+		}
 	}
 	if s.worker.exporter.exportDB.Stats().MaxOpenConnections == 1 {
 		return fmt.Errorf("分享调度导出需要至少两个数据库连接")
@@ -118,8 +125,9 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 	reason := shareReconciliationReason(input, fingerprint)
 	resume := reason == "" && input.BaselineState == "building"
 	effective := requested
-	if reason != "" || resume {
-		effective = "reconciliation"
+	if requested == "incremental" && (reason != "" || input.BaselineState != "ready") {
+		_ = s.worker.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "incremental": true, "requested_mode": requested, "effective_mode": requested, "baseline_required": true, "fallback_reason": "", "recovery": "请显式运行分享库 STRM 全量对账，增量不会自动扫描或播种"})
+		return dao.ErrShareExportBaselineRequired
 	}
 	metadata := map[string]interface{}{"share_export": true, "incremental": effective == "incremental", "requested_mode": requested, "effective_mode": effective, "fallback_reason": reason, "recovery": "", "phase": "consuming", "output_path": output.Root, "config_revision": input.ConfigRevision}
 	if resume {
@@ -160,6 +168,9 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 		}
 	}
 	ctx = s.worker.exporter.Coordinator().batchContext(ctx, id)
+	if requested == "reconciliation" {
+		ctx = context.WithValue(ctx, shareExplicitFullContext{}, true)
+	}
 	ctx = context.WithValue(ctx, shareExportOutputContext{}, output)
 	if effective == "reconciliation" && !resume {
 		if err = s.worker.cancelled(ctx, id); err != nil {
@@ -207,15 +218,15 @@ func (s *ShareStrmScheduledService) reconcile(ctx context.Context, input domain.
 	return nil
 }
 
-// RegisterShareStrmCronHandlers 注册独立增量与每周对账入口；两个处理器在 CronService 内共享互斥。
+// RegisterShareStrmCronHandlers 注册定时增量与仅手动全量入口，两者共享执行互斥。
 func RegisterShareStrmCronHandlers(cron *CronService, exporter *ShareStrmService) {
 	runner := NewShareStrmScheduledService(exporter, dao.NewShareExportCheckpointDAO(exporter.exportDB))
 	for _, mode := range []string{"incremental", "reconciliation"} {
 		key, name := "share_strm_incremental_export", "分享库 STRM 增量导出（每日多次）"
 		expression := "0 */6 * * *"
 		if mode == "reconciliation" {
-			key, name = "share_strm_full_reconciliation", "分享库 STRM 全量对账（每周）"
-			expression = "0 3 * * 0"
+			key, name = "share_strm_full_reconciliation", "分享库 STRM 全量对账（仅手动）"
+			expression = ""
 		}
 		cron.Register(CronHandler{Key: key, Name: name, DefaultCron: expression, Parameters: []CronParameter{}, Execute: func(ctx context.Context, task *domain.CronTask, id string) (string, error) {
 			if err := runner.Run(ctx, mode, id); err != nil {

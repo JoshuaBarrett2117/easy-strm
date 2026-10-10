@@ -66,7 +66,15 @@ func (c *ShareStrmController) Export(x *gin.Context) {
 		ErrorResp(x, 400, "筛选参数无效")
 		return
 	}
-	id, err := c.s.StartExport(q)
+	var id string
+	var err error
+	if contextual, ok := c.s.(interface {
+		StartExportContext(context.Context, domain.ShareLibraryQuery) (string, error)
+	}); ok {
+		id, err = contextual.StartExportContext(x.Request.Context(), q)
+	} else {
+		id, err = c.s.StartExport(q)
+	}
 	if err != nil {
 		ErrorResp(x, 400, err.Error())
 		return

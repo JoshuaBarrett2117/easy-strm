@@ -149,7 +149,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		return link.Url.Url, nil
 	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
-	shareRecordService.SetAutoStrmExport(shareStrmService.StartAutoExport)
+	shareRecordService.SetAutoStrmExportContext(shareStrmService.StartAutoExportContext)
 	shareRecordService.SetStrmDeleteGuard(shareStrmService)
 	if err := shareRecordService.RecoverOperations(context.Background()); err != nil {
 		panic(fmt.Errorf("恢复分享操作队列失败: %w", err))

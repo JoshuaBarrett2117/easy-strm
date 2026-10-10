@@ -170,12 +170,14 @@ func (c *NotificationController) ReceiveWeComCallback(ctx *gin.Context) {
 		ctx.String(http.StatusBadRequest, "读取企业微信消息失败")
 		return
 	}
-	if err := c.weComCallback.Receive(
-		ctx.Query("msg_signature"),
-		ctx.Query("timestamp"),
-		ctx.Query("nonce"),
-		body,
-	); err != nil {
+	if contextual, ok := c.weComCallback.(interface {
+		ReceiveContext(context.Context, string, string, string, []byte) error
+	}); ok {
+		err = contextual.ReceiveContext(ctx.Request.Context(), ctx.Query("msg_signature"), ctx.Query("timestamp"), ctx.Query("nonce"), body)
+	} else {
+		err = c.weComCallback.Receive(ctx.Query("msg_signature"), ctx.Query("timestamp"), ctx.Query("nonce"), body)
+	}
+	if err != nil {
 		ctx.String(http.StatusBadRequest, err.Error())
 		return
 	}

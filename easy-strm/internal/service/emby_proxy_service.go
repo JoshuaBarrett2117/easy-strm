@@ -232,7 +232,12 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		playback, matched := embyPlaybackRequest(r)
-		r = beginEmbyProxyRequest(r, w, playback)
+		contextual, err := beginEmbyProxyRequest(r, w, playback)
+		if err != nil {
+			http.Error(w, "请求标识随机源不可用", http.StatusServiceUnavailable)
+			return
+		}
+		r = contextual
 		if !matched {
 			proxy.ServeHTTP(w, r)
 			return

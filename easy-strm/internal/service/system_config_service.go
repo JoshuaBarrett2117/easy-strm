@@ -134,7 +134,7 @@ func (s *SystemConfigService) BatchUpsert(configs map[string]string) map[string]
 
 func isRemovedSystemConfigKey(key string) bool {
 	// 全局 API 密钥只能通过专用接口访问，避免通用设置接口泄露明文。
-	return key == AIRecognitionConfigKey || key == "alist_url" || key == "alist_token" || key == GlobalAPIKeyKey || key == GlobalAPIEnabledKey || key == GlobalAPIBaseURLKey
+	return key == "share_strm_incremental_watermark" || key == AIRecognitionConfigKey || key == "alist_url" || key == "alist_token" || key == GlobalAPIKeyKey || key == GlobalAPIEnabledKey || key == GlobalAPIBaseURLKey
 }
 
 // GetLogSaveDayLimit 获取日志保留天数，配置不存在时返回默认值 1。

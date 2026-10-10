@@ -291,9 +291,16 @@ func phaseMockDatabase(test testing.TB, counts *phaseCounts) (*sql.DB, sqlmock.S
 }
 
 type phaseSQLStore struct {
-	*dao.ShareRecordDAO
-	fixture *phaseFixture
-	mock    sqlmock.Sqlmock
+	ShareRecordDAO *dao.ShareRecordDAO
+	fixture        *phaseFixture
+	mock           sqlmock.Sqlmock
+}
+
+func (store *phaseSQLStore) GetStrmEntry(ctx context.Context, id string) (domain.ShareStrmEntry, error) {
+	return store.ShareRecordDAO.GetStrmEntry(ctx, id)
+}
+func (store *phaseSQLStore) LockStrmPlayback(ctx context.Context, key string) (func(), error) {
+	return store.ShareRecordDAO.LockStrmPlayback(ctx, key)
 }
 
 func (store *phaseSQLStore) expectSources(query domain.ShareLibraryQuery, after int) int {
@@ -364,7 +371,31 @@ func phaseSource(id int) domain.ShareStrmSource {
 
 func (fixture *phaseFixture) expectPaths(entry domain.ShareStrmEntry) {
 	fixture.entries++
-	for range entry.Episodes {
+	for _, episode := range entry.Episodes {
+		var source domain.ShareStrmSource
+		fixture.service.Coordinator().mu.Lock()
+		for _, candidate := range fixture.store.sources {
+			holder := fixture.service.Coordinator().holders[fileKey(candidate.ID)]
+			if holder != nil && holder.writer != "" {
+				source = candidate
+				break
+			}
+		}
+		fixture.service.Coordinator().mu.Unlock()
+		loser := false
+		for _, candidate := range fixture.store.sources {
+			if candidate.WorkKey != source.WorkKey || candidate.ID == source.ID {
+				continue
+			}
+			for _, candidateEpisode := range candidate.Episodes {
+				if candidateEpisode == episode && betterShareStrmSource(candidate, source) {
+					loser = true
+				}
+			}
+		}
+		if loser {
+			continue
+		}
 		fixture.mock.ExpectQuery(`SELECT pg_try_advisory_lock\(`).WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 		if fixture.recovery {
 			var work string
@@ -626,12 +657,12 @@ func phaseScenarios(test testing.TB) []phaseResult {
 	second.ID, second.ShareID, second.ShareName, second.URL = 3, 3, "第二分享", "https://115.com/s/second"
 	fixture.store.sources = append(fixture.store.sources, second)
 	result = run("second_share", domain.ShareLibraryQuery{}, true)
-	if result.Processed != 3 || result.Added != 2 || !fixture.stale["1:2:3"] {
+	if result.Processed != 3 || result.Added != 0 || fixture.stale["1:2:3"] {
 		test.Fatalf("后缀改变: %+v", result)
 	}
 	fixture.cfg.BaseURL = "https://changed.example.test"
 	result = run("content_changed", domain.ShareLibraryQuery{}, true)
-	if result.Updated != 3 || result.Counts.Rewrites != 3 {
+	if result.Updated != 2 || result.Counts.Rewrites != 2 {
 		test.Fatalf("真实改写: %+v", result)
 	}
 	result = run("filtered", domain.ShareLibraryQuery{WorkKey: "tmdb:tv:2"}, false)
@@ -639,18 +670,18 @@ func phaseScenarios(test testing.TB) []phaseResult {
 		test.Fatalf("筛选: %+v", result)
 	}
 	result = run("file_ids_expanded", domain.ShareLibraryQuery{FileIDs: []int{3}}, false)
-	if result.Processed != 2 || result.Skipped != 2 {
+	if result.Processed != 2 || result.Skipped != 1 {
 		test.Fatalf("文件筛选未扩展同作品: %+v", result)
 	}
 	fixture.store.strmMemory.fileErr = errors.New("清单登记失败")
 	result = run("failed", domain.ShareLibraryQuery{}, false)
-	if result.Failed != 3 || len(result.Errors) != 3 || result.Error == "" || result.Skipped != 3 {
+	if result.Failed != 2 || len(result.Errors) != 2 || result.Error == "" || result.Skipped != 2 {
 		test.Fatalf("部分失败: %+v", result)
 	}
 	fixture.store.strmMemory.fileErr = nil
 	fixture.foreign = true
 	result = run("ownership_rejected", domain.ShareLibraryQuery{}, false)
-	if result.Conflicts != 3 || result.Failed != 3 || result.Counts.Rewrites != 0 {
+	if result.Conflicts != 2 || result.Failed != 2 || result.Counts.Rewrites != 0 {
 		test.Fatalf("归属拒绝: %+v", result)
 	}
 	fixture.foreign = false
@@ -662,7 +693,7 @@ func phaseScenarios(test testing.TB) []phaseResult {
 	fixture.service = NewShareStrmService(phaseReader{fixture.store}, nil, nil, nil, &OrganizeService{}, fixture.service.tasks, fixture.service.categories, nil, nil)
 	fixture.service.SetExportDatabase(fixture.db)
 	result = run("restart_rerun", domain.ShareLibraryQuery{}, true)
-	if result.Processed != 3 || result.Skipped != 3 || result.Counts.Rewrites != 0 {
+	if result.Processed != 3 || result.Skipped != 2 || result.Counts.Rewrites != 0 {
 		test.Fatalf("重启是重跑: %+v", result)
 	}
 	fixture.store.cancelAfter, fixture.store.flagCancel = 1, true
@@ -785,7 +816,7 @@ func TestShareStrmPhase01FallbackAndLockedRevalidation(t *testing.T) {
 			results = append(results, result)
 			switch scenario {
 			case "fallback":
-				if result.Added != 2 {
+				if result.Added != 1 {
 					t.Fatalf("回退预扫缺失: %+v", result)
 				}
 			case "fresh_episode":
@@ -801,7 +832,7 @@ func TestShareStrmPhase01FallbackAndLockedRevalidation(t *testing.T) {
 					t.Fatalf("重读错误丢失: %+v", result)
 				}
 			case "conflict_refresh":
-				if _, ok := result.States["1:1:1:share:1"]; !ok {
+				if _, ok := result.States["1:1:1"]; !ok {
 					t.Fatalf("未持锁重算冲突: %+v", result)
 				}
 			}

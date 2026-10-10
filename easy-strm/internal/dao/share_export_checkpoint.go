@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,7 +20,7 @@ var ErrShareExportSchemaMissing = errors.New("分享增量检查点未安装，�
 var ErrShareExportChanged = errors.New("分享来源或配置已改变，请重试增量任务")
 
 // ErrShareExportBaselineRequired 表示需先通过既有完整分享导出建立历史输出对账凭证。
-var ErrShareExportBaselineRequired = errors.New("请先运行既有完整分享导出进行全量对账，再执行分享增量重建")
+var ErrShareExportBaselineRequired = errors.New("分享增量需要可信且已完成的基线；请显式运行“分享库 STRM 全量对账”后重试，增量不会自动全量扫描或播种")
 
 // ShareExportCheckpointDAO 持久化独立来源检查点、作品待办与配置基线。
 type ShareExportCheckpointDAO struct {
@@ -145,12 +146,7 @@ func (d *ShareExportCheckpointDAO) Prepare(ctx context.Context, input domain.Sha
 		return ErrShareExportBaselineRequired
 	}
 	if prepared != revision || stored != fingerprint || state == "required" || protocol != 1 {
-		if _, err = transaction.ExecContext(ctx, shareExportFanoutSQL); err != nil {
-			return err
-		}
-		if _, err = transaction.ExecContext(ctx, `UPDATE t_share_export_consumer SET config_fingerprint=$1,prepared_revision=config_revision,protocol_version=1,baseline_state='building',updated_at=now() WHERE consumer='share:default'`, fingerprint); err != nil {
-			return err
-		}
+		return ErrShareExportBaselineRequired
 	}
 	return transaction.Commit()
 }
@@ -430,10 +426,51 @@ func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domai
 
 // FinishBaseline 仅在配置一致且不存在任何待办时标记 ready；不使用 seq 或时间水位。
 func (d *ShareExportCheckpointDAO) FinishBaseline(ctx context.Context, revision int64) (bool, error) {
-	result, err := d.db.ExecContext(ctx, `UPDATE t_share_export_consumer SET completed_revision=config_revision,baseline_state='ready',updated_at=now() WHERE consumer='share:default' AND config_revision=$1 AND prepared_revision=config_revision AND NOT EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision > acked_revision)`, revision)
+	transaction, err := d.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer transaction.Rollback()
+	var current int64
+	if err = transaction.QueryRowContext(ctx, `SELECT config_revision FROM t_share_export_consumer WHERE consumer='share:default' FOR UPDATE`).Scan(&current); err != nil {
+		return false, err
+	}
+	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "读取成功消费快照版本", logger.Fields{"config_revision": current, "requested_revision": revision}, nil)
+	if current != revision {
+		return false, ErrShareExportChanged
+	}
+	result, err := transaction.ExecContext(ctx, `UPDATE t_share_export_consumer SET completed_revision=config_revision,baseline_state='ready',updated_at=now() WHERE consumer='share:default' AND config_revision=$1 AND prepared_revision=config_revision AND legacy_outputs_reconciled AND NOT EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision > acked_revision)`, revision)
 	if err != nil {
 		return false, err
 	}
 	count, err := result.RowsAffected()
-	return count == 1, err
+	if err != nil || count != 1 {
+		return false, err
+	}
+	result, err = transaction.ExecContext(ctx, shareWatermarkMirrorSQL, logger.TaskID(ctx))
+	if err != nil {
+		return false, err
+	}
+	count, err = result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if count != 1 {
+		return false, ErrShareExportChanged
+	}
+	if err = ctx.Err(); err != nil {
+		return false, err
+	}
+	if err = transaction.Commit(); err != nil {
+		return false, err
+	}
+	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "同事务刷新成功水位镜像", logger.Fields{"config_revision": revision, "same_revision_refresh": true}, nil)
+	return true, nil
 }
+
+const shareWatermarkMirrorSQL = `INSERT INTO t_system_config(config_key,config_val,update_time)
+ SELECT 'share_strm_incremental_watermark',jsonb_build_object('protocol_version',protocol_version,'config_revision',config_revision,
+ 'prepared_revision',prepared_revision,'completed_revision',completed_revision,'config_fingerprint',config_fingerprint,'run_id',$1::text,'last_success_at',clock_timestamp())::text,clock_timestamp()
+ FROM t_share_export_consumer WHERE consumer='share:default'
+ ON CONFLICT(config_key) DO UPDATE SET config_val=EXCLUDED.config_val,update_time=EXCLUDED.update_time
+ WHERE (t_system_config.config_val::jsonb->>'config_revision')::bigint <= (EXCLUDED.config_val::jsonb->>'config_revision')::bigint`

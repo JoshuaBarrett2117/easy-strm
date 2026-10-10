@@ -33,7 +33,7 @@ type strmExportResult struct {
 }
 
 const (
-	shareStrmConflictPolicy    = "按可用性、文件大小、分享ID、文件ID确定性选优；按每个来源内不重复的作品、季、集统计去重跳过"
+	shareStrmConflictPolicy    = "每个作品季集一个STRM；首次发现默认、手选粘性、有效自动选择保持；仅自动失效按可用性、大小降序、分享ID及文件ID升序候补"
 	shareStrmWrittenUnit       = "个STRM文件（实际落盘；登记失败仍计入，未改写跳过不计入）"
 	shareStrmSkippedDedupeUnit = "个来源内不重复的作品、季、集"
 )
@@ -47,8 +47,58 @@ type shareReconciliationCompletionContext struct{}
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
 func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
 	ctx = logger.WithTaskID(ctx, id)
+	cfg.DedupeExport = true
+	if selections, ok := s.store.(shareSelectionExportStore); ok {
+		if err := selections.CheckSelectionSchema(ctx); err != nil {
+			return err
+		}
+		if len(q.FileIDs) > 0 {
+			prepared := map[string]bool{}
+			for _, sourceID := range q.FileIDs {
+				source, err := selections.GetStrmSource(ctx, sourceID)
+				if err != nil {
+					return err
+				}
+				if !prepared[source.WorkKey] {
+					if err := s.prepareSelectionWork(ctx, selections, source.WorkKey); err != nil {
+						return err
+					}
+					prepared[source.WorkKey] = true
+				}
+			}
+		} else if q.WorkKey != "" {
+			if err := s.prepareSelectionWork(ctx, selections, q.WorkKey); err != nil {
+				return err
+			}
+		} else {
+			if err := selections.SyncSelections(ctx, ""); err != nil {
+				return err
+			}
+			if isFullShareStrmQuery(q) {
+				for page := 1; ; page++ {
+					values, _, err := selections.ListSelections(ctx, domain.ShareSelectionQuery{Page: page, PageSize: 100})
+					if err != nil {
+						return err
+					}
+					if len(values) == 0 {
+						break
+					}
+					for _, value := range values {
+						if _, _, err = selections.ResolveSelection(ctx, value.ItemKey); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
+	ctx = logger.WithTaskID(ctx, id)
 	logEntry := logger.WithContext(ctx, "share_export")
-	logEntry.Log(logger.INFO, "分享 STRM 导出开始", logger.Fields{"event": "export_start"}, nil)
+	origin := "scheduled"
+	if logger.RequestID(ctx) != "" {
+		origin = "http"
+	}
+	logEntry.Log(logger.INFO, "分享 STRM 导出开始", logger.Fields{"event": "export_start", "origin": origin}, nil)
 	defer func() {
 		level, message := logger.INFO, "分享 STRM 导出完成"
 		if exportErr != nil {
@@ -276,7 +326,9 @@ func betterShareStrmSource(candidate, current domain.ShareStrmSource) bool {
 	return candidate.ID < current.ID
 }
 
-func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (result strmExportResult) {
+func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (result strmExportResult) {
+	cfg.DedupeExport = true
+	selected, hasSelection := ctx.Value(shareSelectedItemContext{}).(shareSelectedItem)
 	logEntry := logger.WithContext(ctx, "share_export")
 	defer func() {
 		if result.Err != nil && !errors.Is(result.Err, ErrShareUnitSkipped) {
@@ -361,6 +413,9 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		conflicts = conflictMaps[0]
 	}
 	for _, episode := range episodes {
+		if hasSelection && (episode.SeasonNumber != selected.selection.Season || episode.EpisodeNumber != selected.selection.Episode) {
+			continue
+		}
 		current := source
 		current.Result.SeasonNumber = episode.SeasonNumber
 		current.Result.EpisodeNumber = episode.EpisodeNumber
@@ -371,7 +426,7 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		visited[identity] = true
 		conflict := conflicts[identity]
 		shareID := shareStrmSourceID(source)
-		if cfg.DedupeExport && conflict != nil && conflict.winners[identity] != source.ID {
+		if !hasSelection && cfg.DedupeExport && conflict != nil && conflict.winners[identity] != source.ID {
 			result.SkippedDedupe++
 			if attempt != nil {
 				winner := conflict.sources[conflict.winners[identity]]
@@ -396,11 +451,17 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 			seenIdentity += fmt.Sprintf(":file:%d", source.ID)
 		}
 		relative, pathErr := s.strmRelativePath(current, file, cats, suffix)
+		if hasSelection {
+			relative = selected.relative
+		}
 		if pathErr != nil {
 			result.Err = pathErr
 			return result
 		}
 		exportKey := shareStrmExportKey(source, episode, conflict, cfg.DedupeExport)
+		if hasSelection {
+			exportKey = selected.selection.ItemKey
+		}
 		if seen[seenIdentity] {
 			if cfg.DedupeExport {
 				result.SkippedDedupe++

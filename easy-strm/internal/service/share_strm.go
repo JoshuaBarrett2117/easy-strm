@@ -87,27 +87,18 @@ func (s *ShareStrmService) Settings() (domain.ShareStrmSettings, error) {
 	}
 	err = json.Unmarshal([]byte(row.ConfigVal), &v)
 	if err == nil {
-		var raw map[string]json.RawMessage
-		if json.Unmarshal([]byte(row.ConfigVal), &raw) == nil {
-			if _, present := raw["strm_dedupe_export"]; !present {
-				v.DedupeExport = true
-			}
-		}
+		v.DedupeExport = true
 	}
 	return v, err
 }
 
-// normalizeShareStrmSettings 为旧配置补齐安全默认值；显式 false 仍可回退旧行为。
+// normalizeShareStrmSettings 保留旧字段兼容，但禁止恢复按来源分裂输出。
 func normalizeShareStrmSettings(v *domain.ShareStrmSettings, raw []byte) {
-	var fields map[string]json.RawMessage
-	if json.Unmarshal(raw, &fields) == nil {
-		if _, present := fields["strm_dedupe_export"]; !present {
-			v.DedupeExport = true
-		}
-	}
+	v.DedupeExport = true
 }
 
 func validateShareStrmSettings(v *domain.ShareStrmSettings) error {
+	v.DedupeExport = true
 	v.OutputPath = strings.TrimSpace(v.OutputPath)
 	v.BaseURL = strings.TrimRight(strings.TrimSpace(v.BaseURL), "/")
 	v.TransferPath = strings.TrimSpace(v.TransferPath)
@@ -148,6 +139,11 @@ func (s *ShareStrmService) SaveSettings(v domain.ShareStrmSettings) error {
 
 // StartExport 为当前筛选的全部作品创建导出任务，分页条件不限制导出范围。
 func (s *ShareStrmService) StartExport(q domain.ShareLibraryQuery) (string, error) {
+	return s.StartExportContext(context.Background(), q)
+}
+
+// StartExportContext 保留 HTTP 请求与动作标识，异步任务脱离请求取消但仍受任务取消控制。
+func (s *ShareStrmService) StartExportContext(parent context.Context, q domain.ShareLibraryQuery) (string, error) {
 	if err := ValidateLibraryQuery(&q); err != nil {
 		return "", err
 	}
@@ -168,15 +164,20 @@ func (s *ShareStrmService) StartExport(q domain.ShareLibraryQuery) (string, erro
 		Config domain.ShareStrmSettings
 	}{q, q.FileIDs, cfg})
 	key := "export:" + string(raw)
-	id := "share_strm_" + uuid.NewString()
-	taskID, created, err := s.Coordinator().registerRequest(context.Background(), key, id, func() error { return s.tasks.Create(id, "strm_generate", "分享资料库STRM导出") })
+	generated, err := uuid.NewV7()
+	if err != nil {
+		return "", err
+	}
+	id := "share_strm_" + generated.String()
+	parent = logger.WithTaskID(context.WithoutCancel(parent), id)
+	taskID, created, err := s.Coordinator().registerRequest(parent, key, id, func() error { return s.tasks.Create(id, "strm_generate", "分享资料库STRM导出") })
 	if err != nil {
 		return "", err
 	}
 	if !created {
 		return taskID, nil
 	}
-	ctx, cancel := context.WithCancel(s.Coordinator().batchContext(context.Background(), id))
+	ctx, cancel := context.WithCancel(s.Coordinator().batchContext(parent, id))
 	s.tasks.RegisterCancel(id, cancel)
 	go func() {
 		defer s.Coordinator().finishRequest(key, id)
@@ -207,6 +208,11 @@ func (s *ShareStrmService) StartExport(q domain.ShareLibraryQuery) (string, erro
 
 // StartAutoExport 已配置分享库输出目录时，为刚识别完成的文件创建独立增量导出任务。
 func (s *ShareStrmService) StartAutoExport(fileIDs []int) (string, bool, error) {
+	return s.StartAutoExportContext(context.Background(), fileIDs)
+}
+
+// StartAutoExportContext 自动导出沿用识别任务关联标识，不丢失最初 HTTP 请求。
+func (s *ShareStrmService) StartAutoExportContext(ctx context.Context, fileIDs []int) (string, bool, error) {
 	if len(fileIDs) == 0 {
 		return "", false, nil
 	}
@@ -217,7 +223,7 @@ func (s *ShareStrmService) StartAutoExport(fileIDs []int) (string, bool, error) 
 	if strings.TrimSpace(cfg.OutputPath) == "" {
 		return "", false, nil
 	}
-	id, err := s.StartExport(domain.ShareLibraryQuery{FileIDs: append([]int(nil), fileIDs...)})
+	id, err := s.StartExportContext(ctx, domain.ShareLibraryQuery{FileIDs: append([]int(nil), fileIDs...)})
 	return id, err == nil, err
 }
 
@@ -304,6 +310,9 @@ func (s *ShareStrmService) strmSeasonEpisode(title, filename string) (int, int) 
 }
 
 func writeShareStrm(target, content string) error {
+	if strings.TrimSpace(content) == "" || strings.ContainsAny(content, "\r\n\x00") {
+		return fmt.Errorf("STRM 内容必须为非空单行")
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
@@ -321,10 +330,29 @@ func writeShareStrm(target, content string) error {
 		_ = f.Close()
 		return err
 	}
+	if err = f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
 	if err = f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(f.Name(), target)
+	validated, err := os.ReadFile(f.Name())
+	if err != nil {
+		return err
+	}
+	if string(validated) != content+"\n" {
+		return fmt.Errorf("临时 STRM 内容校验失败，未替换目标")
+	}
+	if err = os.Rename(f.Name(), target); err != nil {
+		return err
+	}
+	directory, err := os.Open(filepath.Dir(target))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 // Playback 仅转存映射指定的一个文件，复用目标目录中的文件后获取即时直链。

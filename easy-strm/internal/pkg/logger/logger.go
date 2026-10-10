@@ -91,7 +91,7 @@ func WithContext(ctx context.Context, module string) *Logger {
 	return &Logger{ctx: ctx, module: module}
 }
 
-// Log 按统一 JSON 模板输出一行，递归脱敏字段并展开包装及多分支错误链。
+// Log 按统一单行模板输出，递归脱敏并展开错误链；JSON 需显式启用。
 func (entry *Logger) Log(level Level, message string, fields Fields, err error) {
 	entry.write(level, message, fields, []error{err})
 }
@@ -205,19 +205,19 @@ func legacy(level Level, format string, values ...interface{}) {
 	WithContext(nil, module).write(level, fmt.Sprintf(format, values...), nil, errs)
 }
 
-// Debug 兼容旧格式化调用，输出 DEBUG JSON。
+// Debug 兼容旧格式化调用，使用统一 DEBUG 模板。
 func Debug(format string, values ...interface{}) { legacy(DEBUG, format, values...) }
 
 // Debugf 是 Debug 的兼容别名。
 func Debugf(format string, values ...interface{}) { legacy(DEBUG, format, values...) }
 
-// Info 兼容旧格式化调用，输出 INFO JSON。
+// Info 兼容旧格式化调用，使用统一 INFO 模板。
 func Info(format string, values ...interface{}) { legacy(INFO, format, values...) }
 
 // Infof 是 Info 的兼容别名。
 func Infof(format string, values ...interface{}) { legacy(INFO, format, values...) }
 
-// Warn 兼容旧格式化调用，输出 WARN JSON。
+// Warn 兼容旧格式化调用，使用统一 WARN 模板。
 func Warn(format string, values ...interface{}) { legacy(WARN, format, values...) }
 
 // Warnf 是 Warn 的兼容别名。

@@ -224,7 +224,8 @@ func runIncrementalFixture(t *testing.T, fixture *phaseFixture, service *ShareSt
 	if inputErr != nil {
 		t.Fatal(inputErr)
 	}
-	if !input.LegacyOutputsReconciled {
+	fingerprint, _ := shareExportFingerprint(input)
+	if !input.LegacyOutputsReconciled || input.BaselineState != "ready" || input.PreparedRevision != input.ConfigRevision || input.Fingerprint != fingerprint {
 		err := service.Run(context.Background(), id)
 		if expectationErr := fixture.mock.ExpectationsWereMet(); expectationErr != nil {
 			t.Fatal(expectationErr)
@@ -430,14 +431,15 @@ func TestShareStrmIncrementalBuildingResumeDoesNotRepeatFanout(t *testing.T) {
 	if err := runIncrementalFixture(t, fixture, service, "building"); err == nil {
 		t.Fatal("忽略计划键失败")
 	}
-	if store.fanouts != 1 || store.input.BaselineState != "building" {
-		t.Fatal("基线状态未持久化")
+	if store.fanouts != 0 || store.input.BaselineState != "required" {
+		t.Fatal("增量擅自创建基线")
 	}
 	store.planErr = nil
-	if err := runIncrementalFixture(t, fixture, service, "resume"); err != nil {
-		t.Fatal(err)
+	store.input.BaselineState = "building"
+	if err := runIncrementalFixture(t, fixture, service, "resume"); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+		t.Fatalf("building 必须显式全量：%v", err)
 	}
-	if store.fanouts != 1 || store.input.BaselineState != "ready" {
+	if store.fanouts != 0 || store.input.BaselineState != "building" {
 		t.Fatal("恢复期间重复全量 fanout")
 	}
 }
@@ -475,10 +477,10 @@ func TestShareStrmIncrementalTargetedNoChangeAndConflictRenaming(t *testing.T) {
 	if err := runIncrementalFixture(t, fixture, service, "conflict"); err != nil {
 		t.Fatal(err)
 	}
-	if !fixture.stale["1:1:1"] || len(store.states) != 2 {
+	if fixture.stale["1:1:1"] || len(store.states) != 2 {
 		t.Fatalf("旧键未 targeted stale：%v", fixture.stale)
 	}
-	if len(phaseFiles(t, fixture.cfg.OutputPath)) != 3 {
+	if len(phaseFiles(t, fixture.cfg.OutputPath)) != 1 {
 		t.Fatal("stale 文件被删除或冲突后缀未生成")
 	}
 	fixture.store.sources = []domain.ShareStrmSource{first}
@@ -486,7 +488,7 @@ func TestShareStrmIncrementalTargetedNoChangeAndConflictRenaming(t *testing.T) {
 	if err := runIncrementalFixture(t, fixture, service, "restore"); err != nil {
 		t.Fatal(err)
 	}
-	if !fixture.stale["1:1:1:share:1"] || !fixture.stale["1:1:1:share:2"] || fixture.stale["1:1:1"] {
+	if fixture.stale["1:1:1"] || len(phaseFiles(t, fixture.cfg.OutputPath)) != 1 {
 		t.Fatalf("恢复单源键不正确：%v", fixture.stale)
 	}
 }
@@ -563,7 +565,18 @@ func TestShareStrmIncrementalEmptyWorkInvalidationAndConfigBaseline(t *testing.T
 	store.input.ConfigRevision++
 	store.input.BaselineState = "required"
 	store.input.Settings.BaseURL = "https://new.example.test"
-	if err := runIncrementalFixture(t, fixture, service, "config"); err != nil {
+	if err := runIncrementalFixture(t, fixture, service, "config"); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+		t.Fatalf("配置变化必须显式全量：%v", err)
+	}
+	if store.fanouts != 0 {
+		t.Fatal("增量配置失效不得播种")
+	}
+	fingerprint, _ := shareExportFingerprint(store.input)
+	if err := store.Prepare(context.Background(), store.input, fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	store.input.BaselineState = "ready"
+	if err := runIncrementalFixture(t, fixture, service, "explicit-baseline-fixture"); err != nil {
 		t.Fatal(err)
 	}
 	if store.fanouts != 1 || store.input.BaselineState != "ready" {

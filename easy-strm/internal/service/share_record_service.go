@@ -33,6 +33,7 @@ type ShareRecordService struct {
 	tasks             *TaskService
 	parser            ShareRecordParser
 	autoExport        func([]int) (string, bool, error)
+	autoExportContext func(context.Context, []int) (string, bool, error)
 }
 
 // ShareRecordParser 获取分享中的文件列表。
@@ -47,6 +48,11 @@ func NewShareRecordService(d *dao.ShareRecordDAO, t *TmdbService, tasks *TaskSer
 // SetAutoStrmExport 注入分享识别完成后的增量导出入口。
 func (s *ShareRecordService) SetAutoStrmExport(export func([]int) (string, bool, error)) {
 	s.autoExport = export
+}
+
+// SetAutoStrmExportContext 注入保留请求与任务上下文的自动导出入口。
+func (s *ShareRecordService) SetAutoStrmExportContext(export func(context.Context, []int) (string, bool, error)) {
+	s.autoExportContext = export
 }
 func (s *ShareRecordService) List(ctx context.Context, q domain.ShareRecordQuery) (domain.ShareRecordPage, error) {
 	page, err := s.dao.List(ctx, q)
@@ -572,7 +578,7 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 	if !created {
 		return id, nil
 	}
-	batchCtx := context.WithValue(s.Coordinator().batchContext(context.Background(), taskID), shareTaskSettingsContext{}, settings)
+	batchCtx := context.WithValue(s.Coordinator().batchContext(logger.WithTaskID(context.WithoutCancel(ctx), taskID), taskID), shareTaskSettingsContext{}, settings)
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"record_ids": recordIDs, "phase": "准备同步"})
 	go func() {
 		defer s.Coordinator().finishRequest(key, taskID)
@@ -748,7 +754,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 	if !created {
 		return id, nil
 	}
-	batchCtx := context.WithValue(s.Coordinator().batchContext(context.Background(), taskID), shareTaskSettingsContext{}, settings)
+	batchCtx := context.WithValue(s.Coordinator().batchContext(logger.WithTaskID(context.WithoutCancel(ctx), taskID), taskID), shareTaskSettingsContext{}, settings)
 	_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 	go func() {
 		defer s.Coordinator().finishRequest(key, taskID)
@@ -903,8 +909,12 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 		_ = s.tasks.SetError(taskID, fmt.Sprintf("识别完成，但有 %d 项失败", failed))
 		return
 	}
-	if s.autoExport != nil && len(identifiedFileIDs) > 0 {
-		exportID, started, exportErr := s.autoExport(identifiedFileIDs)
+	autoExport := s.autoExport
+	if s.autoExportContext != nil {
+		autoExport = func(ids []int) (string, bool, error) { return s.autoExportContext(ctx, ids) }
+	}
+	if autoExport != nil && len(identifiedFileIDs) > 0 {
+		exportID, started, exportErr := autoExport(identifiedFileIDs)
 		if exportErr != nil {
 			logger.Warnf("ShareRecordService[runBatchIdentify] task=%s 自动导出STRM失败: %v", taskID, exportErr)
 			_ = s.tasks.UpdateMetadata(taskID, map[string]interface{}{"strm_export_error": exportErr.Error()})

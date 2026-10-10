@@ -103,7 +103,7 @@ func (c *ShareRecordController) LibraryOptions(x *gin.Context) {
 
 // EnrichLibrary 创建可取消的历史补全任务。
 func (c *ShareRecordController) EnrichLibrary(x *gin.Context) {
-	id, err := c.s.StartLibraryEnrichment()
+	id, err := c.s.StartLibraryEnrichmentContext(x.Request.Context())
 	if err != nil {
 		ErrorResp(x, 500, err.Error())
 		return
