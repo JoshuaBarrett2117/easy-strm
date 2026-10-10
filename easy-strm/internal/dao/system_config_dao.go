@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
@@ -11,6 +12,11 @@ type SystemConfigDAO struct{}
 
 func NewSystemConfigDAO() *SystemConfigDAO {
 	return &SystemConfigDAO{}
+}
+
+// GetHotConfigs 在入口预算内读取关联配置快照，不返回可变的缓存对象。
+func (d *SystemConfigDAO) GetHotConfigs(ctx context.Context, keys ...string) (map[string]string, error) {
+	return ReadSystemConfigSnapshot(ctx, DB, keys)
 }
 
 // GetByKey 根据Key获取配置
@@ -59,6 +65,7 @@ func (d *SystemConfigDAO) Upsert(key, val string) error {
 	if key == "share_strm_incremental_watermark" {
 		return fmt.Errorf("内部水位不可通过配置接口修改")
 	}
+	defer InvalidateSystemConfigCache(DB)
 	_, err := DB.Exec(
 		`INSERT INTO t_system_config (config_key, config_val, update_time)
 		 VALUES ($1, $2, CURRENT_TIMESTAMP)
@@ -76,6 +83,7 @@ func (d *SystemConfigDAO) BatchUpsert(configs map[string]string) error {
 	if _, present := configs["share_strm_incremental_watermark"]; present {
 		return fmt.Errorf("内部水位不可通过配置接口修改")
 	}
+	defer InvalidateSystemConfigCache(DB)
 	tx, err := DB.Begin()
 	if err != nil {
 		return err
@@ -93,7 +101,10 @@ func (d *SystemConfigDAO) BatchUpsert(configs map[string]string) error {
 			return err
 		}
 	}
-	return tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // EnsureTable 确保表存在 (如果数据库初始化逻辑中已包含则可选)

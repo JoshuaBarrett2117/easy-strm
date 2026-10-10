@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"easy-strm/internal/dao"
 	"fmt"
 	"net"
 	"net/http"
@@ -44,7 +45,9 @@ type NetworkProbeResult struct {
 
 // NewProxyAwareHTTPClient 按系统白名单选路，代理传输失败时直连一次，保留调用方总超时。
 func NewProxyAwareHTTPClient(timeout time.Duration) *http.Client {
-	return newProxyAwareHTTPClient(timeout, loadProxyConfigFromSystem, http.DefaultTransport.(*http.Transport))
+	client := newProxyAwareHTTPClient(timeout, loadProxyConfigFromSystem, http.DefaultTransport.(*http.Transport))
+	client.Transport.(*proxyFallbackTransport).loadProxyConfigContext = loadProxyConfigFromSystemContext
+	return client
 }
 
 func newProxyAwareHTTPClient(timeout time.Duration, loader func() (*url.URL, []string), base *http.Transport) *http.Client {
@@ -91,15 +94,26 @@ type proxyRouteKey struct{}
 
 // proxyFallbackTransport 仅对实际走代理的传输错误直连一次；请求可能已被服务端执行，重试仍有重复副作用风险。
 type proxyFallbackTransport struct {
-	proxy           http.RoundTripper
-	direct          http.RoundTripper
-	tmdbDirect      http.RoundTripper
-	loadProxyConfig func() (*url.URL, []string)
+	proxy                  http.RoundTripper
+	direct                 http.RoundTripper
+	tmdbDirect             http.RoundTripper
+	loadProxyConfig        func() (*url.URL, []string)
+	loadProxyConfigContext func(context.Context) (*url.URL, []string, error)
 }
 
 // RoundTrip 每次请求只读取一次选路配置，保留原始上下文，仅通过 GetBody 重放请求体。
 func (fallback *proxyFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	proxyURL, domains := fallback.loadProxyConfig()
+	var proxyURL *url.URL
+	var domains []string
+	if fallback.loadProxyConfigContext != nil {
+		var err error
+		proxyURL, domains, err = fallback.loadProxyConfigContext(req.Context())
+		if err != nil {
+			return nil, fmt.Errorf("读取代理配置失败: %w", err)
+		}
+	} else {
+		proxyURL, domains = fallback.loadProxyConfig()
+	}
 	if !shouldUseProxy(proxyURL, req.URL.Hostname(), domains) {
 		return fallback.direct.RoundTrip(req)
 	}
@@ -248,25 +262,23 @@ func redactNetworkProbeSecret(message, secret string) string {
 }
 
 func loadProxyConfigFromSystem() (*url.URL, []string) {
-	var proxyURL *url.URL
-	var domains []string
+	proxyURL, domains, _ := loadProxyConfigFromSystemContext(context.Background())
+	return proxyURL, domains
+}
 
-	if config, err := GetSystemConfigByKey(systemConfigProxyURLKey); err == nil && config != nil {
-		raw := strings.TrimSpace(config.ConfigVal)
-		if raw != "" {
-			if parsed, parseErr := url.Parse(raw); parseErr == nil && parsed.Scheme != "" && parsed.Host != "" {
-				proxyURL = parsed
-			}
+func loadProxyConfigFromSystemContext(ctx context.Context) (*url.URL, []string, error) {
+	values, err := dao.ReadSystemConfigSnapshot(ctx, db, []string{systemConfigProxyURLKey, systemConfigProxyDomainsKey})
+	if err != nil {
+		return nil, buildProxyDomains(""), err
+	}
+	var proxyURL *url.URL
+	raw := strings.TrimSpace(values[systemConfigProxyURLKey])
+	if raw != "" {
+		if parsed, parseErr := url.Parse(raw); parseErr == nil && parsed.Scheme != "" && parsed.Host != "" {
+			proxyURL = parsed
 		}
 	}
-
-	if config, err := GetSystemConfigByKey(systemConfigProxyDomainsKey); err == nil && config != nil {
-		domains = buildProxyDomains(config.ConfigVal)
-	} else {
-		domains = buildProxyDomains("")
-	}
-
-	return proxyURL, domains
+	return proxyURL, buildProxyDomains(values[systemConfigProxyDomainsKey]), nil
 }
 
 // buildProxyDomains 合并内置代理站点与用户追加的自定义站点。

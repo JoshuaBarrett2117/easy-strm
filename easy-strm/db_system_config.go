@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"easy-strm/internal/dao"
+	"fmt"
+)
 
 func GetSystemConfigByKey(key string) (*SystemConfig, error) {
 	if key == "share_strm_incremental_watermark" {
@@ -24,6 +27,7 @@ func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
 	if key == "share_strm_incremental_watermark" {
 		return nil, fmt.Errorf("内部水位不可通过配置接口修改")
 	}
+	defer dao.InvalidateSystemConfigCache(db)
 	Debug("Upserting system config: %s", key)
 	config := &SystemConfig{}
 	err := db.QueryRow(`

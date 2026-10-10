@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -95,10 +96,20 @@ func (s *GlobalAPIService) Regenerate() (GlobalAPIConfigView, string, error) {
 }
 
 func (s *GlobalAPIService) ValidateAPIKey(candidate string) (bool, error) {
-	enabled, _, key, err := s.values()
+	return s.ValidateAPIKeyContext(context.Background(), candidate)
+}
+
+// ValidateAPIKeyContext 仅从同一快照读取启用状态与密钥；查询故障或取消时拒绝认证。
+func (s *GlobalAPIService) ValidateAPIKeyContext(ctx context.Context, candidate string) (bool, error) {
+	if candidate == "" {
+		return false, nil
+	}
+	values, err := s.configs.GetHotConfigs(ctx, GlobalAPIEnabledKey, GlobalAPIKeyKey)
 	if err != nil {
 		return false, err
 	}
+	enabled := strings.EqualFold(strings.TrimSpace(values[GlobalAPIEnabledKey]), "true")
+	key := strings.TrimSpace(values[GlobalAPIKeyKey])
 	if !enabled || key == "" || candidate == "" {
 		return false, nil
 	}

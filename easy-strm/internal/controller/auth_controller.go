@@ -211,7 +211,7 @@ func (c *AuthController) JWTMiddleware() gin.HandlerFunc {
 				}
 			}
 			if candidate != "" {
-				valid, err := c.globalAPIService.ValidateAPIKey(candidate)
+				valid, err := c.globalAPIService.ValidateAPIKeyContext(ctx.Request.Context(), candidate)
 				if err != nil {
 					ctx.JSON(http.StatusUnauthorized, gin.H{"error": "API key validation failed"})
 					ctx.Abort()
