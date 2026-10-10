@@ -218,5 +218,6 @@ var shareSelectionSyncSQL = []string{
  SELECT DISTINCT ON(i.work_key,i.season_number,i.episode_number) i.work_key,i.season_number,i.episode_number,c.candidate_id FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
  WHERE NOT i.revoked AND c.state='active' AND c.available AND ($1='' OR i.work_key=$1 OR i.work_key IN(SELECT work_key FROM selection_changed))
  ORDER BY i.work_key,i.season_number,i.episode_number,c.first_seen_seq,c.candidate_id ON CONFLICT DO NOTHING`,
-	`SELECT share_export_enqueue(ARRAY(SELECT work_key FROM selection_changed ORDER BY work_key),'selection-sync') WHERE $1 IS NOT NULL`,
+	// 显式声明 text 避免 PostgreSQL 无法推断参数类型；work 即使为空字符串也必须始终将变更作品入队，不能改为非空过滤。
+	`SELECT share_export_enqueue(ARRAY(SELECT work_key FROM selection_changed ORDER BY work_key),'selection-sync') WHERE $1::text IS NOT NULL`,
 }
