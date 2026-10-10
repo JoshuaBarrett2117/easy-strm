@@ -6,6 +6,7 @@ import (
 	"easy-strm/internal/pkg/logger"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ShareSelectionStore 定义选择管理所需能力，不包含播放凭据访问。
@@ -62,6 +63,11 @@ func (s *ShareSelectionService) Change(ctx context.Context, change domain.ShareS
 
 // Refresh 显式从应用库刷新发现，不访问分享网络或文件系统。
 func (s *ShareSelectionService) Refresh(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := s.store.CheckSelectionSchema(ctx); err != nil {
 		return err
 	}

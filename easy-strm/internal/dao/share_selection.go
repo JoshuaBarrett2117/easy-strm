@@ -209,6 +209,7 @@ var shareSelectionSyncSQL = []string{
  FROM t_share_media_file f JOIN t_share_record r ON r.id=f.share_id LEFT JOIN t_share_media m ON m.id=f.media_id
  WHERE ($1='' OR m.work_key=$1 OR EXISTS(SELECT 1 FROM t_share_export_candidate c JOIN t_share_export_candidate_item i USING(candidate_id) WHERE c.source_file_id=f.id AND i.work_key=$1))`,
 	`CREATE UNIQUE INDEX ON selection_observed(source_file_id)`,
+	`CREATE UNIQUE INDEX ON selection_observed(share_id,remote_file_id,name_hash)`,
 	`CREATE INDEX ON selection_observed(work_key)`,
 	`ANALYZE selection_observed`,
 	`DO $identity$ BEGIN
@@ -230,7 +231,8 @@ var shareSelectionSyncSQL = []string{
  SELECT share_id,remote_file_id,source_file_id,name_hash,file_version,share_version,file_size,available,state,episode_sig FROM selection_observed ORDER BY source_file_id
  ON CONFLICT DO NOTHING`,
 	`UPDATE t_share_export_candidate c SET source_file_id=o.source_file_id,file_version=o.file_version,share_version=o.share_version,file_size=o.file_size,available=o.available,state=o.state,episode_sig=o.episode_sig,updated_at=now()
- FROM selection_observed o WHERE c.share_id=o.share_id AND c.remote_file_id=o.remote_file_id AND c.name_hash=o.name_hash`,
+ FROM selection_observed o WHERE c.share_id=o.share_id AND c.remote_file_id=o.remote_file_id AND c.name_hash=o.name_hash
+ AND (c.source_file_id,c.file_version,c.share_version,c.file_size,c.available,c.state,c.episode_sig) IS DISTINCT FROM (o.source_file_id,o.file_version,o.share_version,o.file_size,o.available,o.state,o.episode_sig)`,
 	`UPDATE t_share_export_candidate c SET state='removed',available=false,updated_at=now() WHERE NOT EXISTS(SELECT 1 FROM t_share_media_file f WHERE f.id=c.source_file_id)
  AND ($1='' OR EXISTS(SELECT 1 FROM t_share_export_candidate_item i WHERE i.candidate_id=c.candidate_id AND i.work_key=$1)) AND c.state<>'removed'`,
 	`UPDATE t_share_export_candidate_item i SET revoked=true,updated_at=now() WHERE NOT i.revoked AND ($1='' OR i.work_key=$1 OR EXISTS(SELECT 1 FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id WHERE c.candidate_id=i.candidate_id))
@@ -239,7 +241,7 @@ var shareSelectionSyncSQL = []string{
 	`INSERT INTO t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number)
  SELECT c.candidate_id,o.work_key,0,0 FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id WHERE o.media_type='movie' AND o.work_key<>''
  UNION SELECT c.candidate_id,o.work_key,e.season_number,e.episode_number FROM selection_observed o JOIN t_share_export_candidate c ON c.source_file_id=o.source_file_id JOIN t_share_media_file_episode e ON e.file_id=o.source_file_id WHERE o.media_type='tv' AND o.work_key<>''
- ON CONFLICT(candidate_id,work_key,season_number,episode_number) DO UPDATE SET revoked=false,updated_at=now()`,
+ ON CONFLICT(candidate_id,work_key,season_number,episode_number) DO UPDATE SET revoked=false,updated_at=now() WHERE t_share_export_candidate_item.revoked`,
 	`DELETE FROM t_share_export_candidate_item i WHERE i.revoked AND NOT EXISTS(SELECT 1 FROM t_share_media_selection s WHERE s.selected_candidate_id=i.candidate_id AND s.work_key=i.work_key AND s.season_number=i.season_number AND s.episode_number=i.episode_number) AND ($1='' OR i.work_key=$1 OR i.work_key IN(SELECT work_key FROM selection_changed))`,
 	`INSERT INTO t_share_media_selection(work_key,season_number,episode_number,selected_candidate_id)
  SELECT DISTINCT ON(i.work_key,i.season_number,i.episode_number) i.work_key,i.season_number,i.episode_number,c.candidate_id FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
