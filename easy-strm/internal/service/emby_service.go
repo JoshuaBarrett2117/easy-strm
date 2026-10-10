@@ -126,8 +126,7 @@ func (s *EmbyService) CheckConnection() (bool, *EmbySystemInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return false, nil, fmt.Errorf("Emby返回非200状态码: %d, body: %s", resp.StatusCode, string(body))
+		return false, nil, fmt.Errorf("Emby返回非200状态码: %d", resp.StatusCode)
 	}
 
 	var info EmbySystemInfo
@@ -166,8 +165,7 @@ func (s *EmbyService) ListLibraries() ([]EmbyVirtualFolderInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Emby返回非200状态码: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("Emby返回非200状态码: %d", resp.StatusCode)
 	}
 
 	var libraries []EmbyVirtualFolderInfo
@@ -201,8 +199,7 @@ func (s *EmbyService) RefreshLibrary(libraryID string) (*EmbyLibraryRefreshResul
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		errMsg := fmt.Sprintf("Emby返回非200状态码: %d, body: %s", resp.StatusCode, string(body))
+		errMsg := fmt.Sprintf("Emby返回非200状态码: %d", resp.StatusCode)
 		return &EmbyLibraryRefreshResult{Success: false, Message: errMsg}, nil
 	}
 
@@ -245,8 +242,7 @@ func (s *EmbyService) RefreshAll() ([]EmbyLibraryRefreshResult, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("Emby返回非200状态码: %d, body: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("Emby返回非200状态码: %d", resp.StatusCode)
 	}
 
 	logger.Infof("EmbyService[RefreshAll] 全部媒体库刷新请求已发送")

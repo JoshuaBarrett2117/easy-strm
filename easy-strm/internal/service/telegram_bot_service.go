@@ -154,7 +154,7 @@ func (s *TelegramBotService) Reload() error {
 		}
 		s.mu.Unlock()
 	}(instance)
-	logger.Infof("[TelegramBotService] 机器人 @%s 已启动", me.Username)
+	logger.Infof("[TelegramBotService] 机器人已启动")
 	return nil
 }
 

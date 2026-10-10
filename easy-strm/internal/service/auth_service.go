@@ -56,7 +56,7 @@ func (s *AuthService) GenerateToken(userID int) (string, error) {
 
 func (s *AuthService) VerifyToken(tokenString string) (*JWTClaims, error) {
 	logger.Debugf("VerifyToken 被调用, tokenString长度: %d", len(tokenString))
-	logger.Debugf("使用JWT secret: %s (长度: %d)", s.jwtSecret, len(s.jwtSecret))
+	logger.Debugf("使用配置的 JWT 校验凭据")
 
 	token, err := jwt.ParseWithClaims(tokenString, &JWTClaims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -89,7 +89,7 @@ func (s *AuthService) Login(name, password string) (*domain.User, string, error)
 
 	// 前端已经对密码进行了MD5哈希，直接比较即可，避免双重哈希
 	if user.Password != password {
-		logger.Warnf("AuthService[Login] 密码不匹配: 输入=%s, 数据库=%s", password, user.Password)
+		logger.Warnf("AuthService[Login] 密码不匹配")
 		return nil, "", fmt.Errorf("密码错误")
 	}
 
@@ -99,7 +99,7 @@ func (s *AuthService) Login(name, password string) (*domain.User, string, error)
 		return nil, "", fmt.Errorf("生成token失败")
 	}
 
-	logger.Infof("AuthService[Login] 用户登录成功: %s", name)
+	logger.Infof("AuthService[Login] 用户登录成功: ID=%d", user.ID)
 	return user, token, nil
 }
 

@@ -24,14 +24,14 @@ func GetCloud115ByID(id int) (*Cloud115, error) {
 		Error("Failed to get cloud_115 by ID %d: %v", id, err)
 		return nil, err
 	}
-	Debug("Found cloud_115 by ID %d: %s", id, cloud115.Name)
+	Debug("Found cloud_115 by ID %d", id)
 	return cloud115, nil
 }
 
 // GetCloud115ByName 根据名称获取115云账号
 
 func GetCloud115ByName(name string) (*Cloud115, error) {
-	Debug("Getting cloud_115 by name: %s", name)
+	Debug("Getting cloud_115 by name")
 	cloud115 := &Cloud115{}
 	err := db.QueryRow(`SELECT id, name, cookie, COALESCE(cookie_source, ''), refresh_token, access_token, expires_in,
 		COALESCE(transfer_account_id, 0), COALESCE(transfer_directory, ''),
@@ -47,10 +47,10 @@ func GetCloud115ByName(name string) (*Cloud115, error) {
 		&cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken,
 		&cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
-		Debug("Cloud_115 not found by name: %s", name)
+		Debug("Cloud_115 not found by name")
 		return nil, err
 	}
-	Debug("Found cloud_115 by name %s: ID %d", name, cloud115.ID)
+	Debug("Found cloud_115: ID %d", cloud115.ID)
 	return cloud115, nil
 }
 
@@ -108,7 +108,7 @@ func GetAllCloud115(sortField, sortOrder string) ([]*Cloud115, error) {
 // CreateCloud115 创建115云账号
 
 func CreateCloud115(name, cookie, cookieSource, refreshToken, accessToken string, expiresIn, transferAccountID int, transferDirectory string, accountType string, priority int, transferMethod string, alistUrl string, alistToken string) (*Cloud115, error) {
-	Debug("Creating new cloud_115 account: %s", name)
+	Debug("Creating new cloud_115 account")
 	if accountType == "" {
 		accountType = "resource"
 	}
@@ -131,10 +131,10 @@ func CreateCloud115(name, cookie, cookieSource, refreshToken, accessToken string
 		name, cookie, cookieSource, refreshToken, accessToken, expiresIn, transferAccountID, transferDirectory, accountType, priority, transferMethod, alistUrl, alistToken,
 	).Scan(&cloud115.ID, &cloud115.Name, &cloud115.Cookie, &cloud115.CookieSource, &cloud115.RefreshToken, &cloud115.AccessToken, &cloud115.ExpiresIn, &cloud115.TransferAccountID, &cloud115.TransferDirectory, &cloud115.AccountType, &cloud115.QuotaUsed, &cloud115.Priority, &cloud115.Status, &cloud115.CoolingStartTime, &cloud115.TransferMethod, &cloud115.AlistUrl, &cloud115.AlistToken, &cloud115.CreateTime, &cloud115.UpdateTime)
 	if err != nil {
-		Error("Failed to create cloud_115 account %s: %v", name, err)
+		Error("Failed to create cloud_115 account: error_type=%T", err)
 		return nil, err
 	}
-	Info("Created new cloud_115 account: %s (ID: %d)", name, cloud115.ID)
+	Info("Created new cloud_115 account (ID: %d)", cloud115.ID)
 	return cloud115, nil
 }
 
@@ -157,7 +157,7 @@ func UpdateCloud115(id int, name, cookie, cookieSource, refreshToken, accessToke
 		Error("Failed to update cloud_115 account with ID %d: %v", id, err)
 		return nil, err
 	}
-	Info("Updated cloud_115 account: %s (ID: %d)", cloud115.Name, cloud115.ID)
+	Info("Updated cloud_115 account (ID: %d)", cloud115.ID)
 	return cloud115, nil
 }
 

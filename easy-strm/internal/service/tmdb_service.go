@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -236,8 +235,7 @@ func (s *TmdbService) searchMovieTMDBContext(ctx context.Context, query string, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf("TmdbService[SearchMovie] API 返回错误: %s", string(body))
+		logger.Errorf("TmdbService[SearchMovie] API 返回错误: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("TMDB API 返回错误: %d", resp.StatusCode)
 	}
 
@@ -341,8 +339,7 @@ func (s *TmdbService) searchTVContext(ctx context.Context, query string, year in
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		logger.Errorf("TmdbService[SearchTV] API 返回错误: %s", string(body))
+		logger.Errorf("TmdbService[SearchTV] API 返回错误: status=%d", resp.StatusCode)
 		return nil, fmt.Errorf("TMDB API 返回错误: %d", resp.StatusCode)
 	}
 

@@ -50,12 +50,12 @@ func TestDirectLinkRequestLogsIdentifyCallerWithoutSecrets(t *testing.T) {
 		}
 		ids[id] = true
 		logs := output.String()
-		for _, want := range []string{"event=request request_id=" + id, "event=resolve request_id=" + id, "event=complete request_id=" + id, "source=strm_playback", "method=" + test.method, `path="/direct-link"`, `client_ip="192.0.2.10"`, `remote_addr="192.0.2.10:4567"`, `ua="Emby/4.9"`, `range="bytes=0-1023"`, "duration_ms="} {
+		for _, want := range []string{`"event":"request"`, `"event":"resolve"`, `"event":"complete"`, `"request_id":"` + id + `"`, `"source":"strm_playback"`, `"method":"` + test.method + `"`, `"route":"/direct-link"`, `"duration_ms":`} {
 			if !strings.Contains(logs, want) {
 				t.Errorf("日志缺少 %q: %s", want, logs)
 			}
 		}
-		for _, secret := range []string{"private-cookie", "private-auth", "private-token", "private-signature"} {
+		for _, secret := range []string{"private-cookie", "private-auth", "private-token", "private-signature", "Emby/4.9", "bytes=0-1023", "192.0.2.10"} {
 			if strings.Contains(logs, secret) {
 				t.Errorf("日志泄露敏感字段 %q", secret)
 			}

@@ -422,7 +422,7 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
-	logger.Infof("[DirectLink] event=resolve request_id=%s source=share_strm_playback entry_id=%q cloud115_id=%d pickcode=%q effective_ua=%q", logger.RequestID(ctx), id, account.ID, pick, ua)
+	logger.WithContext(ctx, "share_playback").Log(logger.INFO, "解析播放来源", logger.Fields{"event": "resolve", "source": "share_strm_playback", "source_id": account.ID}, nil)
 	link, err := s.directLink(pick, account.ID, account.Cookie, ua)
 	if err != nil {
 		return "", fmt.Errorf("获取115直链失败：%w", err)

@@ -26,20 +26,20 @@ func NewTaskService(taskRedisDAO *dao.TaskRedisDAO) *TaskService {
 // Create 创建新任务（默认优先级5）
 func (s *TaskService) Create(taskID string, taskType, taskName string) error {
 	if err := s.taskRedisDAO.Create(taskID, taskType, taskName); err != nil {
-		logger.Errorf("TaskService[Create] 创建任务失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
 		return fmt.Errorf("创建任务失败: %v", err)
 	}
-	logger.Infof("TaskService[Create] 创建任务成功: %s, type: %s", taskID, taskType)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType}, nil)
 	return nil
 }
 
 // CreateWithPriority 创建带优先级的任务
 func (s *TaskService) CreateWithPriority(taskID string, taskType, taskName string, priority int) error {
 	if err := s.taskRedisDAO.CreateWithPriority(taskID, taskType, taskName, priority); err != nil {
-		logger.Errorf("TaskService[CreateWithPriority] 创建任务失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
 		return fmt.Errorf("创建任务失败: %v", err)
 	}
-	logger.Infof("TaskService[CreateWithPriority] 创建任务成功: %s, type: %s, priority: %d", taskID, taskType, priority)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType, "priority": priority}, nil)
 	return nil
 }
 
@@ -56,7 +56,7 @@ func (s *TaskService) Get(taskID string) (map[string]interface{}, error) {
 // UpdateStatus 更新任务状态
 func (s *TaskService) UpdateStatus(taskID, status string) error {
 	if err := s.taskRedisDAO.UpdateStatus(taskID, status); err != nil {
-		logger.Errorf("TaskService[UpdateStatus] 更新状态失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务状态失败", nil, err)
 		return fmt.Errorf("更新任务状态失败: %v", err)
 	}
 	return nil
@@ -65,7 +65,7 @@ func (s *TaskService) UpdateStatus(taskID, status string) error {
 // UpdateProgress 更新任务进度
 func (s *TaskService) UpdateProgress(taskID string, totalFiles, processedFiles, successFiles, failedFiles int) error {
 	if err := s.taskRedisDAO.UpdateProgress(taskID, totalFiles, processedFiles, successFiles, failedFiles); err != nil {
-		logger.Errorf("TaskService[UpdateProgress] 更新进度失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务进度失败", nil, err)
 		return fmt.Errorf("更新任务进度失败: %v", err)
 	}
 	return nil
@@ -82,7 +82,7 @@ func (s *TaskService) UpdateProgressPercent(taskID string, progress int) error {
 // SetError 设置任务错误信息
 func (s *TaskService) SetError(taskID, errMsg string) error {
 	if err := s.taskRedisDAO.SetError(taskID, errMsg); err != nil {
-		logger.Errorf("TaskService[SetError] 设置错误失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "设置任务错误失败", nil, err)
 		return fmt.Errorf("设置任务错误失败: %v", err)
 	}
 	return nil
@@ -91,7 +91,7 @@ func (s *TaskService) SetError(taskID, errMsg string) error {
 // UpdateMetadata 更新任务元数据
 func (s *TaskService) UpdateMetadata(taskID string, metadata map[string]interface{}) error {
 	if err := s.taskRedisDAO.UpdateMetadata(taskID, metadata); err != nil {
-		logger.Errorf("TaskService[UpdateMetadata] 更新元数据失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "更新任务元数据失败", nil, err)
 		return fmt.Errorf("更新任务元数据失败: %v", err)
 	}
 	return nil
@@ -107,7 +107,7 @@ func (s *TaskService) Delete(taskID string) error {
 	// 先尝试取消运行中的任务
 	s.CancelContext(taskID)
 	if err := s.taskRedisDAO.Delete(taskID); err != nil {
-		logger.Errorf("TaskService[Delete] 删除任务失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "删除任务失败", nil, err)
 		return fmt.Errorf("删除任务失败: %v", err)
 	}
 	return nil
@@ -159,7 +159,7 @@ func (s *TaskService) RecoverInterruptedTasks() {
 			continue
 		}
 		if err := s.SetError(taskID, "服务重启导致任务中断，请重新执行"); err != nil {
-			logger.Warnf("TaskService[RecoverInterruptedTasks] task=%s 更新失败: %v", taskID, err)
+			logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.WARN, "恢复中断任务状态失败", nil, err)
 		}
 	}
 }
@@ -183,16 +183,16 @@ func (s *TaskService) Cancel(taskID string) error {
 
 	// 设置 Redis 取消标记，让轮询检查的 goroutine 也能感知
 	if err := s.taskRedisDAO.SetCancelFlag(taskID); err != nil {
-		logger.Warnf("TaskService[Cancel] 设置取消标记失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.WARN, "设置任务取消标记失败", nil, err)
 	}
 
 	// 再更新 Redis 中的任务状态
 	if err := s.taskRedisDAO.Cancel(taskID); err != nil {
-		logger.Errorf("TaskService[Cancel] 取消任务失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "取消任务失败", nil, err)
 		return fmt.Errorf("取消任务失败: %v", err)
 	}
 
-	logger.Infof("TaskService[Cancel] 取消任务成功: %s", taskID)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "取消任务成功", nil, nil)
 	return nil
 }
 
@@ -214,10 +214,10 @@ func (s *TaskService) Resume(taskID string) error {
 		}
 	}
 	if err := s.taskRedisDAO.Resume(taskID); err != nil {
-		logger.Errorf("TaskService[Resume] 恢复任务失败: %v", err)
+		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "恢复任务失败", nil, err)
 		return fmt.Errorf("恢复任务失败: %v", err)
 	}
-	logger.Infof("TaskService[Resume] 恢复任务成功: %s", taskID)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "恢复任务成功", nil, nil)
 	return nil
 }
 
@@ -240,7 +240,7 @@ func (s *TaskService) IsFileProcessed(taskID string, fileID string) bool {
 // 在启动长时间运行的 goroutine 时调用，将 cancel 函数存储以便外部取消
 func (s *TaskService) RegisterCancel(taskID string, cancel context.CancelFunc) {
 	s.cancelFuncs.Store(taskID, cancel)
-	logger.Debugf("TaskService[RegisterCancel] 注册取消函数: %s", taskID)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.DEBUG, "注册任务取消函数", nil, nil)
 }
 
 // CancelContext 调用已注册的 cancel 函数来中断任务 goroutine
@@ -248,7 +248,7 @@ func (s *TaskService) CancelContext(taskID string) {
 	if cancelFn, ok := s.cancelFuncs.LoadAndDelete(taskID); ok {
 		if fn, ok := cancelFn.(context.CancelFunc); ok {
 			fn()
-			logger.Infof("TaskService[CancelContext] 已调用取消函数: %s", taskID)
+			logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "已调用任务取消函数", nil, nil)
 		}
 	}
 }

@@ -157,7 +157,7 @@ func (c *DirectLinkController) GetDirectLink(ctx *gin.Context) {
 		cachedPickcode, err := c.redisGet(pickcodeCacheKey)
 		if err == nil && cachedPickcode != "" {
 			pickcode = cachedPickcode
-			logger.Debugf("DirectLinkController[GetDirectLink] 从缓存获取pickcode: %s", pickcode)
+			logger.Debugf("DirectLinkController[GetDirectLink] 命中直链缓存")
 		} else {
 			pickcode, err = c.getPickCodeByPath(decodedPath, cloud115.ID, cloud115.Cookie)
 			if err != nil {
@@ -260,10 +260,10 @@ func (c *DirectLinkController) handleTransferAndRedirect(ctx *gin.Context, cloud
 // NOTE: 返回值类型为 interface{}，由回调函数负责返回具体的直链数据结构
 // 回调函数应返回包含 Url.Url 字段的结构体，或直接返回 gin.H 格式
 func (c *DirectLinkController) getDirectLinkAndRedirect(ctx *gin.Context, cloud115ID int, cookie, pickcode, clientUA string) {
-	logger.Infof("[DirectLink] event=resolve request_id=%s source=strm_playback cloud115_id=%d pickcode=%q effective_ua=%q", logger.RequestID(ctx.Request.Context()), cloud115ID, pickcode, clientUA)
+	logger.WithContext(ctx.Request.Context(), "directlink").Log(logger.INFO, "解析播放来源", logger.Fields{"event": "resolve", "source": "strm_playback", "source_id": cloud115ID}, nil)
 	result, err := c.getFileDirectLink(0, pickcode, cloud115ID, cookie, clientUA)
 	if err != nil {
-		logger.Errorf("DirectLinkController[getDirectLink] 获取直链失败: %v", err)
+		logger.WithContext(ctx.Request.Context(), "directlink").Log(logger.ERROR, "获取直链失败", nil, err)
 		ctx.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
@@ -273,7 +273,7 @@ func (c *DirectLinkController) getDirectLinkAndRedirect(ctx *gin.Context, cloud1
 	if redirectURL, ok := result.(string); ok {
 		// 如果回调返回的是 URL 字符串，直接重定向
 		if redirectURL == "" || !strings.HasPrefix(redirectURL, "http") {
-			logger.Errorf("DirectLinkController[getDirectLink] 无效的直链URL: %s", redirectURL)
+			logger.WithContext(ctx.Request.Context(), "directlink").Log(logger.ERROR, "无效的直链地址，内容已省略", nil, nil)
 			ctx.JSON(500, gin.H{"error": "Failed to get valid direct link"})
 			return
 		}

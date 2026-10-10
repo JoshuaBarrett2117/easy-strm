@@ -9,14 +9,14 @@ func GetSystemConfigByKey(key string) (*SystemConfig, error) {
 		Debug("System config not found by key: %s", key)
 		return nil, err
 	}
-	Debug("Found system config by key %s: %s", key, config.ConfigVal)
+	Debug("Found system config by key %s", key)
 	return config, nil
 }
 
 // UpsertSystemConfig 创建或更新系统配置
 
 func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
-	Debug("Upserting system config: %s = %s", key, value)
+	Debug("Upserting system config: %s", key)
 	config := &SystemConfig{}
 	err := db.QueryRow(`
 		INSERT INTO t_system_config (config_key, config_val)
@@ -28,7 +28,7 @@ func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
 		Error("Failed to upsert system config %s: %v", key, err)
 		return nil, err
 	}
-	Info("Upserted system config: %s = %s", key, value)
+	Info("Upserted system config: %s", key)
 	return config, nil
 }
 

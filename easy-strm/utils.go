@@ -71,7 +71,7 @@ func BuildApiUrl(baseUrl string, endpoint string, params map[string]string) stri
 		}
 	}
 
-	Debug("Built API URL: %s", fullUrl)
+	Debug("Built API URL; address omitted")
 	return fullUrl
 }
 

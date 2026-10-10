@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"easy-strm/internal/dao"
+	pkglogger "easy-strm/internal/pkg/logger"
 
 	"github.com/gin-gonic/gin"
 )
@@ -57,17 +59,18 @@ func main() {
 	// 加载配置
 	config := LoadConfig()
 
-	// 设置gin为debug模式
-	gin.SetMode(gin.DebugMode)
-	// 创建gin引擎
-	r := gin.Default()
+	InitLogger(config)
+	gin.SetMode(gin.ReleaseMode)
+	gin.DefaultWriter = pkglogger.Writer("gin")
+	gin.DefaultErrorWriter = pkglogger.Writer("gin")
+	r := gin.New()
+	r.Use(requestLoggingMiddleware(), safeRecoveryMiddleware())
 
 	// 添加CORS中间件
 	r.Use(CORSMiddleware())
 
 	// 初始化日志系统
-	InitLogger(config)
-	Info("Loaded configuration successfully")
+	pkglogger.WithContext(nil, "startup").Log(pkglogger.INFO, "配置加载完成", pkglogger.Fields{"event": "startup"}, nil)
 
 	// 创建115 open客户端
 	client := NewClient(config)
@@ -76,7 +79,7 @@ func main() {
 	// 初始化数据库连接
 	err := InitDB(config)
 	if err != nil {
-		Error("Failed to initialize database: %v", err)
+		Error("Failed to initialize database: error_type=%T", err)
 		return
 	}
 	Info("Database connected successfully")
@@ -128,7 +131,7 @@ func main() {
 
 	// 启动服务器
 	Info("Gin server starting on http://localhost:8082")
-	server := &http.Server{Addr: ":8082", Handler: r, ReadHeaderTimeout: 15 * time.Second}
+	server := &http.Server{Addr: ":8082", Handler: r, ReadHeaderTimeout: 15 * time.Second, ErrorLog: log.New(pkglogger.Writer("http_server"), "", 0)}
 	shutdownSignal, stopSignal := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignal()
 	shutdownDone := make(chan struct{})

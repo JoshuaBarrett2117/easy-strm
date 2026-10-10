@@ -134,7 +134,7 @@ func (sg *StrmGenerator) buildStrmContent(video VideoFile) string {
 	// 格式：{serverURL}/api/direct-link?path={encodedPath}
 	directLinkURL := fmt.Sprintf("%s/api/direct-link?path=%s", sg.ServerURL, encodedPath)
 
-	Debug("Generated STRM content for %s: %s", fullPath, directLinkURL)
+	Debug("Generated STRM file; playback address omitted")
 	return directLinkURL
 }
 

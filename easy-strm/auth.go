@@ -658,7 +658,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		logController.SetLogDir(logger.logDir)
 		logController.SetKeepDaysUpdater(func(days int) {
 			if logger != nil {
-				logger.keepDays = days
+				logger.keepDays.Store(int64(days))
 			}
 		})
 	}

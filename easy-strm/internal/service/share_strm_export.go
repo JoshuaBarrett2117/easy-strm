@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -45,6 +46,16 @@ type shareReconciliationCompletionContext struct{}
 
 // export 仅以本地t_share_media及关联分享记录生成STRM，不访问115分享或元数据网络接口。
 func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSettings, q domain.ShareLibraryQuery, id string) (exportErr error) {
+	ctx = logger.WithTaskID(ctx, id)
+	logEntry := logger.WithContext(ctx, "share_export")
+	logEntry.Log(logger.INFO, "分享 STRM 导出开始", logger.Fields{"event": "export_start"}, nil)
+	defer func() {
+		level, message := logger.INFO, "分享 STRM 导出完成"
+		if exportErr != nil {
+			level, message = logger.ERROR, "分享 STRM 导出未完成"
+		}
+		logEntry.Log(level, message, logger.Fields{"event": "export_complete"}, exportErr)
+	}()
 	completion, scheduled := ctx.Value(shareReconciliationCompletionContext{}).(func(context.Context) error)
 	var recovery *dao.ShareExportCheckpointDAO
 	var recoveryRevision int64
@@ -266,6 +277,12 @@ func betterShareStrmSource(candidate, current domain.ShareStrmSource) bool {
 }
 
 func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (result strmExportResult) {
+	logEntry := logger.WithContext(ctx, "share_export")
+	defer func() {
+		if result.Err != nil && !errors.Is(result.Err, ErrShareUnitSkipped) {
+			logEntry.Log(logger.ERROR, "分享 STRM 文件导出失败", logger.Fields{"event": "export_single_error", "source_id": source.ID, "media_id": source.MediaID}, result.Err)
+		}
+	}()
 	resources := []shareResource{{key: shareKey(source.ShareID)}, {key: fmt.Sprintf("share-config:%d", source.ShareID)}, {key: fileKey(source.ID), exclusive: true}}
 	matchesForLock := shareCodeRe.FindStringSubmatch(source.URL)
 	if len(matchesForLock) > 1 {
@@ -464,6 +481,7 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		}
 		finishPath()
 		seen[seenIdentity] = true
+		logEntry.Log(logger.INFO, "分享 STRM 文件处理完成", logger.Fields{"event": "export_single", "source_id": source.ID, "media_id": source.MediaID, "season": episode.SeasonNumber, "episode": episode.EpisodeNumber, "written": changed}, nil)
 	}
 	return result
 }

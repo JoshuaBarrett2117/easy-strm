@@ -427,28 +427,28 @@ func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 		if s.storageCache != nil {
 			used, total, found, cacheErr := s.storageCache.GetAccountStorage(acc.ID)
 			if cacheErr != nil {
-				logger.Warnf("DashboardService[fillStorageStats] 读取账号 %s 容量缓存失败: %v", acc.Name, cacheErr)
+				logger.Warnf("DashboardService[fillStorageStats] 读取账号 ID=%d 容量缓存失败: %v", acc.ID, cacheErr)
 			} else if found {
 				accountStorages = append(accountStorages, buildAccountStorage(acc.Name, used, total))
 				continue
 			}
 		}
 		if s.storageProvider == nil {
-			logger.Warnf("DashboardService[fillStorageStats] 账号 %s 未配置容量查询能力", acc.Name)
+			logger.Warnf("DashboardService[fillStorageStats] 账号 ID=%d 未配置容量查询能力", acc.ID)
 			accountStorages = append(accountStorages, storage)
 			continue
 		}
 
 		used, total, storageErr := s.storageProvider.GetAccountStorage(acc.ID, acc.Cookie)
 		if storageErr != nil {
-			logger.Warnf("DashboardService[fillStorageStats] 查询账号 %s 容量失败: %v", acc.Name, storageErr)
+			logger.Warnf("DashboardService[fillStorageStats] 查询账号 ID=%d 容量失败: %v", acc.ID, storageErr)
 			accountStorages = append(accountStorages, storage)
 			continue
 		}
 		storage = buildAccountStorage(acc.Name, used, total)
 		if s.storageCache != nil {
 			if cacheErr := s.storageCache.SetAccountStorage(acc.ID, used, total); cacheErr != nil {
-				logger.Warnf("DashboardService[fillStorageStats] 写入账号 %s 容量缓存失败: %v", acc.Name, cacheErr)
+				logger.Warnf("DashboardService[fillStorageStats] 写入账号 ID=%d 容量缓存失败: %v", acc.ID, cacheErr)
 			}
 		}
 		accountStorages = append(accountStorages, storage)

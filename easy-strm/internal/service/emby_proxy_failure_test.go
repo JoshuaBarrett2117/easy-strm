@@ -87,7 +87,7 @@ func TestEmbyProxySTRMDoesNotFallbackAfterRedirect(t *testing.T) {
 				t.Fatal("请求标识缺失或重复")
 			}
 			logs := output.String()
-			for _, required := range []string{"[ERROR]", "[EmbyProxy]", "request_id=" + requestID, "server_id=7", "proxy_port=8097", `item_id="42"`, `media_source_id="s1"`, "reason=strm_fallback_blocked", "fallback_blocked=true", "已禁止回源"} {
+			for _, required := range []string{`"level":"ERROR"`, `"module":"emby_proxy"`, `"request_id":"` + requestID + `"`, `"server_id":7`, `"proxy_port":8097`, `"item_id":"42"`, `"media_source_id":"s1"`, `"reason":"strm_fallback_blocked"`, `"fallback_blocked":true`, "已禁止回源"} {
 				if !strings.Contains(logs, required) {
 					t.Errorf("失败日志缺少 %q: %s", required, logs)
 				}
@@ -131,7 +131,7 @@ func TestEmbyProxyLocalPathFromSTRMNeverFallsBack(t *testing.T) {
 			if response.Code != 502 || videoCalls.Load() != 0 {
 				t.Fatalf("STRM 被误当成本地文件回源: code=%d calls=%d", response.Code, videoCalls.Load())
 			}
-			if !strings.Contains(output.String(), "fallback_blocked=true") {
+			if !strings.Contains(output.String(), `"fallback_blocked":true`) {
 				t.Fatalf("没有禁止回源日志: %s", output.String())
 			}
 		})
@@ -163,15 +163,15 @@ func TestEmbyProxyPlaybackFailureLogsWithoutSecrets(t *testing.T) {
 		t.Fatal("上游失败不应回源")
 	}
 	logs := output.String()
-	for _, required := range []string{"[ERROR]", "request_id=" + response.Header().Get("X-Request-ID"), "server_id=7", "proxy_port=8097", `item_id="42"`, `media_source_id="s1"`, "method=GET", `path="/emby/Videos/42/stream"`, `client_ip="192.0.2.5"`, `ua="EmbyPlayer/1.0"`, `range="bytes=0-1023"`, "stage=playback_info", "status=502", "upstream_status=503", "duration_ms=", "fallback_blocked=true"} {
+	for _, required := range []string{`"level":"ERROR"`, `"request_id":"` + response.Header().Get("X-Request-ID") + `"`, `"server_id":7`, `"proxy_port":8097`, `"item_id":"42"`, `"media_source_id":"s1"`, `"method":"GET"`, `"stage":"playback_info"`, `"status":502`, `"upstream_status":503`, `"duration_ms":`, `"fallback_blocked":true`} {
 		if !strings.Contains(logs, required) {
 			t.Errorf("日志缺少 %q: %s", required, logs)
 		}
 	}
-	if strings.Count(logs, "[ERROR]") != 1 {
+	if strings.Count(logs, `"level":"ERROR"`) != 1 {
 		t.Errorf("应只记录一次主要失败: %s", logs)
 	}
-	for _, secret := range []string{"private-query-token", "private-auth", "private-cookie", "private-api-key", "private-upstream-body"} {
+	for _, secret := range []string{"private-query-token", "private-auth", "private-cookie", "private-api-key", "private-upstream-body", "EmbyPlayer/1.0", "bytes=0-1023"} {
 		if strings.Contains(logs, secret) || strings.Contains(response.Body.String(), secret) {
 			t.Errorf("泄露敏感信息 %s", secret)
 		}
@@ -235,12 +235,12 @@ func TestEmbyProxyFailsClosedForUnknownOrInvalidMedia(t *testing.T) {
 				}
 			}
 			logs := output.String()
-			for _, want := range []string{"stage=" + tc.stage, "reason=" + tc.reason, "upstream_status=" + fmt.Sprint(tc.upstreamStatus), "fallback_blocked=true"} {
+			for _, want := range []string{`"stage":"` + tc.stage + `"`, `"reason":"` + tc.reason + `"`, `"upstream_status":` + fmt.Sprint(tc.upstreamStatus), `"fallback_blocked":true`} {
 				if !strings.Contains(logs, want) {
 					t.Errorf("日志缺少 %q: %s", want, logs)
 				}
 			}
-			if strings.Count(logs, "[ERROR]") != 2 || strings.Contains(logs, "private-secret") {
+			if strings.Count(logs, `"level":"ERROR"`) != 2 || strings.Contains(logs, "private-secret") {
 				t.Fatalf("失败日志次数或脱敏错误: %s", logs)
 			}
 		})
@@ -338,7 +338,7 @@ func TestEmbyProxyMetadataTimeoutLogsOnce(t *testing.T) {
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest("GET", "/Videos/42/stream?api_key=private-token", nil))
 	logs := output.String()
-	if response.Code != 502 || videoCalls.Load() != 0 || strings.Count(logs, "[ERROR]") != 1 || !strings.Contains(logs, "超时") || strings.Contains(logs, "private-token") {
+	if response.Code != 502 || videoCalls.Load() != 0 || strings.Count(logs, `"level":"ERROR"`) != 1 || !strings.Contains(logs, "超时") || strings.Contains(logs, "private-token") {
 		t.Fatalf("超时处理或日志错误: %d %s", response.Code, logs)
 	}
 }
@@ -361,7 +361,7 @@ func TestEmbyProxyTransportErrorDoesNotLeakURL(t *testing.T) {
 		}
 	}
 	logs := output.String()
-	if strings.Count(logs, "[ERROR]") != 2 {
+	if strings.Count(logs, `"level":"ERROR"`) != 2 {
 		t.Fatalf("每个失败请求应只记录一次: %s", logs)
 	}
 	for _, secret := range []string{"private-token", "private-signature", "private-key", "private-upstream-error"} {
@@ -445,10 +445,10 @@ func TestEmbyProxyOrdinaryUpstreamFailureLogsOnce(t *testing.T) {
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest("GET", "/System/Info?api_key=private-token", nil))
 	logs := output.String()
-	if response.Code != 503 || response.Body.String() != "private-upstream-body" || strings.Count(logs, "[ERROR]") != 1 {
+	if response.Code != 503 || response.Body.String() != "private-upstream-body" || strings.Count(logs, `"level":"ERROR"`) != 1 {
 		t.Fatalf("普通上游失败应保持响应并记录一次: %d %s", response.Code, logs)
 	}
-	for _, want := range []string{"request_id=" + response.Header().Get("X-Request-ID"), "stage=proxy", "status=503", "upstream_status=503", "fallback_blocked=false"} {
+	for _, want := range []string{`"request_id":"` + response.Header().Get("X-Request-ID") + `"`, `"stage":"proxy"`, `"status":503`, `"upstream_status":503`, `"fallback_blocked":false`} {
 		if !strings.Contains(logs, want) {
 			t.Errorf("日志缺少 %q: %s", want, logs)
 		}

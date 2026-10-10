@@ -249,7 +249,7 @@ func (s *MediaSourceService) Create(name, sourceType, path, watchPath string, cl
 		if err != nil {
 			return nil, err
 		}
-		logger.Infof("MediaSourceService[Create] 验证115账号成功: cloud115_id=%d, name=%s", *cloud115ID, cloud115.Name)
+		logger.Infof("MediaSourceService[Create] 验证115账号成功: cloud115_id=%d", *cloud115ID)
 	}
 
 	// 创建媒体源

@@ -20,21 +20,20 @@ func InitDB(config *Config) error {
 		config.PostgreSQL.Database,
 	)
 
-	Debug("Connecting to database with connection string: host=%s port=%d user=%s dbname=%s",
-		config.PostgreSQL.Host, config.PostgreSQL.Port, config.PostgreSQL.User, config.PostgreSQL.Database)
+	Debug("Connecting to database")
 
 	// 连接数据库
 	var err error
 	db, err = sql.Open("postgres", connStr)
 	if err != nil {
-		Error("Failed to open database connection: %v", err)
+		Error("Failed to open database connection: error_type=%T", err)
 		return err
 	}
 
 	// 测试连接
 	err = db.Ping()
 	if err != nil {
-		Error("Failed to ping database: %v", err)
+		Error("Failed to ping database: error_type=%T", err)
 		return err
 	}
 

@@ -36,7 +36,7 @@ func generateToken(fileID, fileSize, userID, timeStamp, signKey, signVal, appVer
 func (c *Client) RapidTransferFile(sourcePickCode string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (newPickCode string, err error) {
 	Info("=== Rapid Transfer Start ===")
 	Info("Source account ID: %d, Target account ID: %d", sourceCloud115ID, targetCloud115ID)
-	Info("Source pickcode: %s, Target directory: %s", sourcePickCode, targetDirID)
+	Info("Target directory: %s", targetDirID)
 
 	// 1. 获取源文件信息（包括SHA1）
 	sourceFile, err := c.GetFileInfo(sourcePickCode, sourceCloud115ID, sourceCookie)
@@ -213,7 +213,7 @@ func (c *Client) rapidTransferFile(sourceFile *driver.File, sourceCloud115ID int
 				return "", fmt.Errorf("parse response failed: %v", err)
 			}
 
-			Info("Response parsed - Status: %d, PickCode: %s, ErrorCode: %d", result.Status, result.PickCode, result.ErrorCode)
+			Info("Response parsed - Status: %d, ErrorCode: %d", result.Status, result.ErrorCode)
 
 			if result.Status == 7 {
 				// 需要文件内容校验，跨账号场景无法满足
@@ -221,7 +221,7 @@ func (c *Client) rapidTransferFile(sourceFile *driver.File, sourceCloud115ID int
 			}
 
 			if result.Status == 2 {
-				Info("Rapid transfer successful with AppID=%s: file %s, new pickcode: %s", cfg.AppID, fileName, result.PickCode)
+				Info("Rapid transfer successful with AppID=%s", cfg.AppID)
 				return result.PickCode, nil
 			}
 
@@ -261,7 +261,7 @@ func (c *Client) RapidTransferByMethod(sourcePickCode string, sourceFilePath str
 	Info("=== Rapid Transfer By Method ===")
 	Info("Transfer method: %s", method)
 	Info("Source account ID: %d, Target account ID: %d", sourceCloud115ID, targetCloud115ID)
-	Info("Source pickcode: %s, Source file path: %s, Target directory: %s", sourcePickCode, sourceFilePath, targetDirID)
+	Info("Target directory: %s", targetDirID)
 
 	switch method {
 	case TransferMethodGo115:
@@ -282,7 +282,7 @@ func (c *Client) RapidTransferByMethod(sourcePickCode string, sourceFilePath str
 func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string) (newPickCode string, err error) {
 	Info("=== Go115 Rapid Transfer Start ===")
 	Info("Source account ID: %d, Target account ID: %d", sourceCloud115ID, targetCloud115ID)
-	Info("Source pickcode: %s, Target directory: %s", sourcePickCode, targetDirID)
+	Info("Target directory: %s", targetDirID)
 
 	// 1. 获取源文件信息（包括SHA1）
 	sourceFile, err := c.GetFileInfo(sourcePickCode, sourceCloud115ID, sourceCookie)
@@ -446,14 +446,14 @@ func (c *Client) rapidTransferGo115(sourcePickCode string, sourceCloud115ID int,
 				return "", fmt.Errorf("parse response failed: %v", err)
 			}
 
-			Info("Response parsed - Status: %d, PickCode: %s, ErrorCode: %d", result.Status, result.PickCode, result.ErrorCode)
+			Info("Response parsed - Status: %d, ErrorCode: %d", result.Status, result.ErrorCode)
 
 			if result.Status == 7 {
 				return "", fmt.Errorf("server requires file content verification (status=7), cross-account transfer not supported")
 			}
 
 			if result.Status == 2 {
-				Info("Go115 rapid transfer successful: file %s, new pickcode: %s", fileName, result.PickCode)
+				Info("Go115 rapid transfer successful")
 				return result.PickCode, nil
 			}
 
@@ -535,7 +535,7 @@ func (c *Client) RapidTransferFileByMetadata(sourceFileID, sourcePickCode, sourc
 func (c *Client) rapidTransferAlist(sourcePickCode string, sourceFilePath string, sourceCloud115ID int, sourceCookie string, targetDirID string, targetCloud115ID int, targetCookie string, fileName string, alistUrl string, alistToken string) (newPickCode string, err error) {
 	Info("=== Alist Rapid Transfer Start (using elevengo API) ===")
 	Info("Source account ID: %d, Target account ID: %d", sourceCloud115ID, targetCloud115ID)
-	Info("Source pickcode: %s, Source file path: %s, Target directory: %s", sourcePickCode, sourceFilePath, targetDirID)
+	Info("Target directory: %s", targetDirID)
 
 	sourceCr := parseCookieToCredential(sourceCookie)
 	targetCr := parseCookieToCredential(targetCookie)

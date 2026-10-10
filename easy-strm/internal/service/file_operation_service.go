@@ -614,7 +614,7 @@ func (s *FileOperationService) deleteCloud115Path(source *domain.MediaSource, fi
 
 	cred := &driver.Credential{}
 	if err := cred.FromCookie(cloud115.Cookie); err != nil {
-		return fmt.Errorf("解析115 Cookie失败: %v", err)
+		return fmt.Errorf("解析115 Cookie失败: error_type=%T", err)
 	}
 
 	client := driver.New(driver.UA(driver.UA115Browser)).ImportCredential(cred)

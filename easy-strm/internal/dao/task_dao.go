@@ -97,7 +97,7 @@ func (t *TaskRedisDAO) CreateWithPriority(taskID string, taskType, taskName stri
 		return fmt.Errorf("TaskRedisDAO[CreateWithPriority] 添加到列表失败: %v", err)
 	}
 
-	logger.Infof("TaskRedisDAO[CreateWithPriority] 创建任务成功: %s, type: %s, name: %s, priority: %d", taskID, taskType, taskName, priority)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task_dao").Log(logger.INFO, "创建任务记录成功", logger.Fields{"type": taskType, "priority": priority}, nil)
 	return nil
 }
 
@@ -237,7 +237,7 @@ func (t *TaskRedisDAO) Delete(taskID string) error {
 		return fmt.Errorf("TaskRedisDAO[Delete] 从列表移除失败: %v", err)
 	}
 
-	logger.Infof("TaskRedisDAO[Delete] 删除任务成功: %s", taskID)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task_dao").Log(logger.INFO, "删除任务记录成功", nil, nil)
 	return nil
 }
 

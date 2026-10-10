@@ -298,7 +298,7 @@ func (s *NotificationService) doWeComJSON(request *http.Request, target interfac
 		return err
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", response.StatusCode, truncateRunes(string(body), 300))
+		return fmt.Errorf("HTTP %d，响应正文已省略", response.StatusCode)
 	}
 	if err := json.Unmarshal(body, target); err != nil {
 		return fmt.Errorf("响应解析失败: %v", err)

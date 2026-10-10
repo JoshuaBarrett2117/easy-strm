@@ -38,7 +38,7 @@ func (c *Client) ExportDirectoryTree115(fileIds string, target string, cookie st
 	params.Add("file_ids", fileIds)
 	params.Add("target", target)
 
-	Debug("Sending POST request to %s", apiURL)
+	Debug("Sending directory tree export POST request")
 	req, err := http.NewRequest("POST", apiURL, strings.NewReader(params.Encode()))
 	if err != nil {
 		Error("Failed to create request: %v", err)
@@ -68,12 +68,12 @@ func (c *Client) ExportDirectoryTree115(fileIds string, target string, cookie st
 		Error("Failed to read response body: %v", err)
 		return nil, fmt.Errorf("read response body failed: %v", err)
 	}
-	Debug("Received response: %s", string(body))
+	Debug("Received directory tree export response: status=%d", resp.StatusCode)
 
 	var result ExportDirResponse
 	if err := json.Unmarshal(body, &result); err != nil {
-		Error("Failed to unmarshal response: %v, body: %s", err, string(body))
-		return nil, fmt.Errorf("unmarshal response failed: %v, body: %s", err, string(body))
+		Error("Failed to unmarshal directory tree response: error_type=%T", err)
+		return nil, fmt.Errorf("unmarshal response failed: error_type=%T", err)
 	}
 
 	Info("Export directory tree response with state: %v, export_id: %s", result.State, result.Data.ExportID.String())
@@ -114,7 +114,7 @@ func (c *Client) GetExportDirectoryTreeStatus(exportId string, cookie string) (*
 	params.Add("export_id", exportId)
 
 	fullURL := apiURL + "?" + params.Encode()
-	Debug("Sending GET request to %s", fullURL)
+	Debug("Sending directory tree status GET request")
 
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
@@ -144,7 +144,7 @@ func (c *Client) GetExportDirectoryTreeStatus(exportId string, cookie string) (*
 		Error("Failed to read response body: %v", err)
 		return nil, fmt.Errorf("read response body failed: %v", err)
 	}
-	Debug("Received response: %s", string(body))
+	Debug("Received directory tree status response: status=%d", resp.StatusCode)
 
 	var rawResult struct {
 		State   bool        `json:"state"`
@@ -156,8 +156,8 @@ func (c *Client) GetExportDirectoryTreeStatus(exportId string, cookie string) (*
 		Data    interface{} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &rawResult); err != nil {
-		Error("Failed to unmarshal response: %v, body: %s", err, string(body))
-		return nil, fmt.Errorf("unmarshal response failed: %v, body: %s", err, string(body))
+		Error("Failed to unmarshal directory tree response: error_type=%T", err)
+		return nil, fmt.Errorf("unmarshal response failed: error_type=%T", err)
 	}
 
 	result := &ExportDirStatusResponse{
@@ -237,7 +237,7 @@ func (c *Client) GetExportDirectoryTreeStatus(exportId string, cookie string) (*
 
 	data := result.GetFirstData()
 	if data != nil {
-		Info("Export directory tree status response with state: %v, status: %d, pick_code: %s", result.State, data.Status, data.PickCode)
+		Info("Export directory tree status response with state: %v, status: %d", result.State, data.Status)
 	} else {
 		Info("Export directory tree status response with state: %v, no data yet", result.State)
 	}
@@ -359,7 +359,7 @@ func (c *Client) ExportDirectoryTree(tree *DirectoryNode, filePath string) error
 }
 
 func (c *Client) DownloadDirectoryTreeFile(pickCode string, cloud115ID int, cookie string) ([]byte, error) {
-	Debug("Downloading directory tree file with pick_code: %s, cloud115_id: %d", pickCode, cloud115ID)
+	Debug("Downloading directory tree file, cloud115_id: %d", cloud115ID)
 
 	// 使用 getOrCreateDriver 获取独立的 driver 实例，避免并发时 cookie 混淆
 	d, err := getOrCreateDriver(cloud115ID, cookie)
@@ -385,7 +385,7 @@ func downloadDirectoryTreeFile(provider directoryTreeDownloadURLProvider, httpCl
 		return nil, fmt.Errorf("get download info failed: empty download URL")
 	}
 
-	Debug("Download info - Size: %d, Name: %s, URL: %s", downloadInfo.FileSize, downloadInfo.FileName, downloadInfo.Url.Url)
+	Debug("Download info - Size: %d; address omitted", downloadInfo.FileSize)
 
 	req, err := http.NewRequest(http.MethodGet, downloadInfo.Url.Url, nil)
 	if err != nil {
@@ -509,7 +509,7 @@ func Parse115DirTreeFile(content []byte) ([]DirTreeEntry, error) {
 			// 可能不是树状结构，跳过
 			if len(lineTrimmed) > 0 && lineTrimmed[0] == '|' {
 				// 有些行只有 | 但是没有 |-
-				fmt.Printf("Skipping line because no |- found: %s\n", lineTrimmed)
+				Debug("Skipping directory tree line because no |- found")
 			}
 			continue
 		}

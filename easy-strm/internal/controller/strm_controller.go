@@ -409,7 +409,7 @@ func (c *StrmController) GenerateFull(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Cloud115 account not found"})
 		return
 	}
-	logger.Infof("StrmController[GenerateFull] 使用115账号 ID %d: %s", cloud115.ID, cloud115.Name)
+	logger.Infof("StrmController[GenerateFull] 使用115账号 ID %d", cloud115.ID)
 
 	// 创建任务ID和任务名称
 	taskID := uuid.New().String()

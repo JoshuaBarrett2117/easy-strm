@@ -50,7 +50,7 @@ func (s *Cloud115Service) Create(name, cookie, cookieSource, refreshToken, acces
 		logger.Errorf("Cloud115Service[Create] 创建账号失败: %v", err)
 		return nil, fmt.Errorf("创建账号失败: %v", err)
 	}
-	logger.Infof("Cloud115Service[Create] 创建账号成功: %s (ID: %d)", name, cloud115.ID)
+	logger.Infof("Cloud115Service[Create] 创建账号成功 (ID: %d)", cloud115.ID)
 	return cloud115, nil
 }
 
@@ -66,7 +66,7 @@ func (s *Cloud115Service) Update(id int, name, cookie, cookieSource, refreshToke
 		logger.Errorf("Cloud115Service[Update] 更新账号失败: %v", err)
 		return nil, fmt.Errorf("更新账号失败: %v", err)
 	}
-	logger.Infof("Cloud115Service[Update] 更新账号成功: %s (ID: %d)", name, id)
+	logger.Infof("Cloud115Service[Update] 更新账号成功 (ID: %d)", id)
 	return cloud115, nil
 }
 
@@ -179,7 +179,7 @@ func (s *Cloud115Service) CheckAndRecoverCoolingAccounts() error {
 				continue
 			}
 			recoveredCount++
-			logger.Infof("Cloud115Service[CheckAndRecoverCoolingAccounts] 恢复账号 %s (ID: %d) - 无冷却开始时间", account.Name, account.ID)
+			logger.Infof("Cloud115Service[CheckAndRecoverCoolingAccounts] 恢复账号 ID: %d - 无冷却开始时间", account.ID)
 			continue
 		}
 
@@ -191,7 +191,7 @@ func (s *Cloud115Service) CheckAndRecoverCoolingAccounts() error {
 				continue
 			}
 			recoveredCount++
-			logger.Infof("Cloud115Service[CheckAndRecoverCoolingAccounts] 恢复账号 %s (ID: %d) - 冷却时间 %.0f 分钟", account.Name, account.ID, coolingElapsed.Minutes())
+			logger.Infof("Cloud115Service[CheckAndRecoverCoolingAccounts] 恢复账号 ID: %d - 冷却时间 %.0f 分钟", account.ID, coolingElapsed.Minutes())
 		}
 	}
 

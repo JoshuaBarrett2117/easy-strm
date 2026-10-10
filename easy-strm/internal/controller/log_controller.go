@@ -60,7 +60,7 @@ func (lc *LogController) GetFileList(ctx *gin.Context) {
 	logger.Debug("LogController[GetFileList] 获取日志文件列表")
 
 	// 验证 admin 权限
-	userName, isAdmin := lc.checkAdmin(ctx)
+	_, isAdmin := lc.checkAdmin(ctx)
 	if !isAdmin {
 		return
 	}
@@ -110,7 +110,7 @@ func (lc *LogController) GetFileList(ctx *gin.Context) {
 		logFiles[i], logFiles[j] = logFiles[j], logFiles[i]
 	}
 
-	logger.Infof("LogController[GetFileList] admin用户 %s 访问日志文件列表", userName)
+	logger.Infof("LogController[GetFileList] admin访问日志文件列表")
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": logFiles,
 	})
@@ -124,7 +124,7 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 	logger.Debugf("LogController[GetFileContent] 获取日志内容, filename: %s", filename)
 
 	// 验证 admin 权限
-	userName, isAdmin := lc.checkAdmin(ctx)
+	_, isAdmin := lc.checkAdmin(ctx)
 	if !isAdmin {
 		return
 	}
@@ -180,7 +180,7 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("LogController[GetFileContent] admin用户 %s 访问日志: %s", userName, filename)
+	logger.Infof("LogController[GetFileContent] admin访问日志: %s", filename)
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": map[string]interface{}{
 			"filename": filename,
@@ -218,7 +218,7 @@ func (lc *LogController) UpdateConfig(ctx *gin.Context) {
 	logger.Debug("LogController[UpdateConfig] 更新日志配置")
 
 	// 验证 admin 权限
-	userName, isAdmin := lc.checkAdmin(ctx)
+	_, isAdmin := lc.checkAdmin(ctx)
 	if !isAdmin {
 		return
 	}
@@ -244,7 +244,7 @@ func (lc *LogController) UpdateConfig(ctx *gin.Context) {
 		lc.keepDaysUpdater(configData.Value)
 	}
 
-	logger.Infof("LogController[UpdateConfig] admin用户 %s 更新日志保留天数为 %d", userName, configData.Value)
+	logger.Infof("LogController[UpdateConfig] admin更新日志保留天数为 %d", configData.Value)
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Log config updated successfully",
 		"data": map[string]interface{}{

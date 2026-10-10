@@ -153,8 +153,7 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 	// 1. 正则提取shareCode
 	matches := shareCodeRe.FindStringSubmatch(url)
 	if len(matches) < 2 {
-		logger.Warnf("[INFO] ShareTransfer | url=%s*** | action=parse | result=INVALID_URL | duration=%s",
-			truncateStr(url, 8), time.Since(startTime).String())
+		logger.WithContext(ctx, "share_transfer").Log(logger.WARN, "分享地址格式无效，内容已省略", logger.Fields{"event": "parse", "duration_ms": time.Since(startTime).Milliseconds()}, nil)
 		return nil, fmt.Errorf("无效的115分享链接，请确认链接格式正确")
 	}
 	shareCode := matches[1]

@@ -4,6 +4,7 @@ import (
 	"context"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"fmt"
 )
 
@@ -79,6 +80,7 @@ func shareReconciliationReason(input domain.ShareExportInput, fingerprint string
 
 // Run 在调度任务内同步执行；不可信检查点升级为显式全量模式，building 重试只消费未确认作品。
 func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id string) error {
+	ctx = logger.WithTaskID(ctx, id)
 	if s == nil || s.store == nil || s.worker == nil || s.worker.exporter == nil || s.worker.exporter.exportDB == nil || id == "" {
 		return fmt.Errorf("分享调度导出未初始化或任务ID为空")
 	}

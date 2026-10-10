@@ -54,7 +54,7 @@ func getOrCreateDriver(cloud115ID int, cookie string) (*driver.Pan115Client, err
 	// 115driver 的 SetHttpClient 会重建 Resty 客户端；若先设置UA，离线加密接口会因UA丢失返回 decode fail。
 	cred := &driver.Credential{}
 	if err := cred.FromCookie(cookie); err != nil {
-		return nil, fmt.Errorf("parse cookie failed: %v", err)
+		return nil, fmt.Errorf("parse cookie failed: error_type=%T", err)
 	}
 	// 115 Driver 默认使用无超时的 resty 客户端；网络异常时会让文件传输任务永久停留在 running。
 	// 注入项目统一的代理感知客户端，确保移动、复制等 API 请求最终能够返回错误。
@@ -89,12 +89,12 @@ func (c *Client) GetQRCode() (*driver.QRCodeSession, error) {
 		Error("Failed to get QR code: %v", err)
 		return nil, fmt.Errorf("get QR code failed: %v", err)
 	}
-	Info("Got QR code session with uid: %s", session.UID)
+	Info("Got QR code session; identifier omitted")
 	return session, nil
 }
 
 func (c *Client) CheckLoginStatus(session *driver.QRCodeSession) (*driver.QRCodeStatus, error) {
-	Debug("Checking login status for uid: %s", session.UID)
+	Debug("Checking QR code login status")
 	status, err := c.driver.QRCodeStatus(session)
 	if err != nil {
 		Error("Failed to check login status: %v", err)
@@ -105,7 +105,7 @@ func (c *Client) CheckLoginStatus(session *driver.QRCodeSession) (*driver.QRCode
 }
 
 func (c *Client) QRCodeLogin(session *driver.QRCodeSession) (*driver.Credential, error) {
-	Debug("Performing QR code login for uid: %s", session.UID)
+	Debug("Performing QR code login")
 	cred, err := c.driver.QRCodeLogin(session)
 	if err != nil {
 		Error("Failed to login with QR code: %v", err)
@@ -118,7 +118,7 @@ func (c *Client) QRCodeLogin(session *driver.QRCodeSession) (*driver.Credential,
 // QRCodeLoginWithApp 使用指定渠道进行二维码登录
 // app: 登录渠道，可选值: web, android, ios, tv, alipaymini, wechatmini, qandroid
 func (c *Client) QRCodeLoginWithApp(session *driver.QRCodeSession, app driver.LoginApp) (*driver.Credential, error) {
-	Debug("Performing QR code login for uid: %s with app: %s", session.UID, app)
+	Debug("Performing QR code login with app: %s", app)
 	cred, err := c.driver.QRCodeLoginWithApp(session, app)
 	if err != nil {
 		Error("Failed to login with QR code (app: %s): %v", app, err)
@@ -132,8 +132,8 @@ func (c *Client) ImportCredential(cookie string) error {
 	Debug("Importing credential from cookie")
 	cred := &driver.Credential{}
 	if err := cred.FromCookie(cookie); err != nil {
-		Error("Failed to parse cookie: %v", err)
-		return fmt.Errorf("parse cookie failed: %v", err)
+		Error("Failed to parse cookie: error_type=%T", err)
+		return fmt.Errorf("parse cookie failed: error_type=%T", err)
 	}
 	c.driver = c.driver.ImportCredential(cred)
 	Info("Credential imported successfully")
@@ -184,7 +184,7 @@ func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud1
 }
 
 func (c *Client) GetFileDirectLink(cid int, pickCode string, cloud115ID int, cookie string, ua string) (*driver.DownloadInfo, error) {
-	Debug("[DirectLink] Getting 115 cloud file direct link, cloud115_id: %d, pickcode: %s", cloud115ID, pickCode)
+	Debug("[DirectLink] Getting 115 cloud file direct link, cloud115_id: %d", cloud115ID)
 
 	d, err := getOrCreateDriver(cloud115ID, cookie)
 	if err != nil {
@@ -195,7 +195,7 @@ func (c *Client) GetFileDirectLink(cid int, pickCode string, cloud115ID int, coo
 	// 使用传入的 client UA，确保 115 CDN 的签名 (k=) 与重定向后的客户端匹配
 	downloadInfo, err := d.DownloadWithUAByAndroidAPI(pickCode, ua)
 	if err != nil {
-		Error("[DirectLink] Failed to get download info for pickcode %s from cloud115_id %d: %v", pickCode, cloud115ID, err)
+		Error("[DirectLink] Failed to get download info from cloud115_id %d: %v", cloud115ID, err)
 		return nil, fmt.Errorf("get download info failed: %v", err)
 	}
 
@@ -216,7 +216,7 @@ func (c *Client) GetUser(cookie string) (*driver.UserInfo, error) {
 		return nil, fmt.Errorf("get user info failed: %v", err)
 	}
 
-	Info("Got user info for user: %s", userInfo.UserName)
+	Info("Got user info")
 	return userInfo, nil
 }
 
@@ -238,11 +238,7 @@ func (c *Client) GetAccountStorage(cloud115ID int, cookie string) (int64, int64,
 // 调用 115 官方接口 POST https://webapi.115.com/share/receive
 // 基于分享文件的 file_id（fid）而非 pickcode，避免跨账号秒传的 status=7 内容校验问题
 func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string, targetCloud115ID int, targetCookie string) error {
-	masked := shareCode
-	if len(masked) > 4 {
-		masked = masked[:4] + "***"
-	}
-	Debug("[ReceiveShare] start | shareCode=%s | files=%s | targetCID=%s", masked, fileIDs, targetCID)
+	Debug("[ReceiveShare] start | target_id=%d", targetCloud115ID)
 
 	d, err := getOrCreateDriver(targetCloud115ID, targetCookie)
 	if err != nil {
@@ -270,12 +266,12 @@ func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string,
 		Errmsg string `json:"errmsg"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
-		return fmt.Errorf("parse share receive response failed: %v (raw: %s)", err, string(bodyBytes))
+		return fmt.Errorf("parse share receive response failed: error_type=%T", err)
 	}
 	if !result.State {
-		return fmt.Errorf("share receive failed: %s (errno=%d)", result.Errmsg, result.Errno)
+		return fmt.Errorf("share receive failed (errno=%d)", result.Errno)
 	}
-	Info("[ReceiveShare] success | shareCode=%s | files=%s", masked, fileIDs)
+	Info("[ReceiveShare] success | target_id=%d", targetCloud115ID)
 	return nil
 }
 

@@ -67,7 +67,8 @@ func LoadConfig() *Config {
 		if err == nil {
 			err := yaml.Unmarshal(data, config)
 			if err != nil {
-				panic(err)
+				Error("配置解析失败，原始配置内容已省略")
+				panic("配置解析失败")
 			}
 		}
 	}

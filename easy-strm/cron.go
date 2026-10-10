@@ -73,7 +73,7 @@ func InitCronScheduler() error {
 		if logger == nil {
 			return "", fmt.Errorf("日志服务未初始化")
 		}
-		days := logger.keepDays
+		days := int(logger.keepDays.Load())
 		cfg, e := GetSystemConfigByKey("log_save_day_limit")
 		if e != nil {
 			return "", e

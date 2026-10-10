@@ -123,7 +123,7 @@ func extractVideoFiles(node *DirectoryNode, currentPath string, netDiskPath stri
 			}
 
 			collection.Videos = append(collection.Videos, videoFile)
-			Debug("Added video file: %s (PickCode: %s, Size: %d, cloud115_id: %d)", netDiskFullPath, filePickCode, file.Size, cloud115Id)
+			Debug("Added video file (Size: %d, cloud115_id: %d)", file.Size, cloud115Id)
 		}
 	}
 

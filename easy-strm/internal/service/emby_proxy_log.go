@@ -66,19 +66,15 @@ func logEmbyProxyFailure(server *domain.EmbyServer, r *http.Request, failure *em
 		incoming = info.incoming
 		elapsed = time.Since(info.started).Milliseconds()
 	}
-	clientIP, _, err := net.SplitHostPort(incoming.RemoteAddr)
-	if err != nil {
-		clientIP = incoming.RemoteAddr
-	}
 	sourceID := failure.mediaSourceID
 	if sourceID == "" {
 		sourceID = embyQuery(incoming.URL.Query(), "MediaSourceId")
 	}
-	// 不读取完整 URL、授权头、Cookie、响应体和媒体 Path，避免记录签名直链及身份凭据。
-	logger.Errorf("[EmbyProxy] event=failed request_id=%s server_id=%d proxy_port=%d item_id=%q media_source_id=%q method=%s path=%q client_ip=%q remote_addr=%q ua=%q range=%q stage=%s reason=%s status=%d upstream_status=%d duration_ms=%d fallback_blocked=%t message=%q detail=%q",
-		logger.RequestID(r.Context()), server.ID, server.ProxyPort, info.playback.itemID, sourceID, incoming.Method, incoming.URL.Path,
-		clientIP, incoming.RemoteAddr, incoming.UserAgent(), incoming.Header.Get("Range"), failure.stage, failure.reason, failure.status,
-		failure.upstreamStatus, elapsed, failure.blocked, failure.message, failure.detail)
+	logger.WithContext(r.Context(), "emby_proxy").Log(logger.ERROR, failure.message, logger.Fields{
+		"event": "failed", "server_id": server.ID, "proxy_port": server.ProxyPort, "item_id": info.playback.itemID, "media_source_id": sourceID,
+		"method": incoming.Method, "stage": failure.stage, "reason": failure.reason, "status": failure.status,
+		"upstream_status": failure.upstreamStatus, "duration_ms": elapsed, "fallback_blocked": failure.blocked, "detail": failure.detail,
+	}, nil)
 }
 
 // 仅输出可控的诊断信息；url.Error 的完整文本包含查询 Token，任意上游错误文本也可能包含直链。

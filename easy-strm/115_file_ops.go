@@ -43,7 +43,7 @@ func (c *Client) CopyFile(fileID, targetDirID string, cloud115ID int, cookie str
 // cloud115ID: 115账号ID
 // cookie: 115账号Cookie
 func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*driver.File, error) {
-	Debug("Getting file info for pickcode: %s, cloud115_id: %d", pickCode, cloud115ID)
+	Debug("Getting file info, cloud115_id: %d", cloud115ID)
 
 	d, err := getOrCreateDriver(cloud115ID, cookie)
 	if err != nil {
@@ -52,7 +52,7 @@ func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*d
 
 	// Driver.GetFile 接收的是 file_id，不能传 pick_code，否则115返回990002参数错误。
 	// 115搜索响应中的offset可能是字符串，不能直接使用Driver中固定为int的SearchResult。
-	Info("Getting file info using Search API for pickcode: %s", pickCode)
+	Info("Getting file info using Search API")
 	searchResult := struct {
 		driver.BasicResp
 		Files  []driver.FileInfo `json:"data"`
@@ -67,7 +67,7 @@ func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*d
 		ForceContentType("application/json;charset=UTF-8")
 	resp, requestErr := req.Get(driver.ApiFileSearch)
 	if err := driver.CheckErr(requestErr, &searchResult, resp); err != nil {
-		Error("Failed to get file info for %s: %v", pickCode, err)
+		Error("Failed to get file info: %v", err)
 		return nil, fmt.Errorf("get file info failed: %v", err)
 	}
 	files := make([]driver.File, 0, len(searchResult.Files))
@@ -84,7 +84,7 @@ func (c *Client) GetFileInfo(pickCode string, cloud115ID int, cookie string) (*d
 		fileInfo.Sha1 = strings.ToUpper(fileInfo.Sha1)
 	}
 
-	Info("Got file info: name=%s, sha1=%s, pickcode=%s, size=%d", fileInfo.Name, fileInfo.Sha1, fileInfo.PickCode, fileInfo.Size)
+	Info("Got file info: size=%d", fileInfo.Size)
 	return fileInfo, nil
 }
 
@@ -201,7 +201,7 @@ func getCIDByPathWithDriver(d *driver.Pan115Client, path string) (string, error)
 			Error("Directory not found: %s in path %s (current CID: %s), checked %d files", part, path, currentCID, len(allFiles))
 			// 详细日志帮助调试
 			for _, file := range allFiles {
-				Debug("  File in list: name=%s, pickcode=%s, isDir=%v", file.Name, file.PickCode, file.IsDir())
+				Debug("  File in list: isDir=%v", file.IsDir())
 			}
 			return "", fmt.Errorf("directory not found: %s", part)
 		}
@@ -255,13 +255,13 @@ func (c *Client) GetPickCodeByPath(filePath string, cloud115ID int, cookie strin
 	// 调试：列出目录下的所有文件
 	Debug("Listing files in directory CID=%s (requested path: %s, file: %s), total files: %d", cid, filePath, fileName, len(*files))
 	for _, file := range *files {
-		Debug("  File in list: name=%s, pickcode=%s, isDir=%v", file.Name, file.PickCode, file.IsDir())
+		Debug("  File in list: isDir=%v", file.IsDir())
 	}
 
 	// 查找匹配的文件
 	for _, file := range *files {
 		if file.Name == fileName && !file.IsDir() {
-			Debug("Found file %s with pickcode %s", fileName, file.PickCode)
+			Debug("Found file with resolved pickcode")
 			return file.PickCode, nil
 		}
 	}

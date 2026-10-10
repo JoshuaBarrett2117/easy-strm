@@ -110,7 +110,7 @@ func (c *AuthController) Login(ctx *gin.Context) {
 	}
 
 	if err := ctx.ShouldBindJSON(&loginData); err != nil {
-		logger.Warnf("AuthController[Login] 无效的登录请求体 from %s: %v", ctx.ClientIP(), err)
+		logger.WithContext(ctx.Request.Context(), "auth").Log(logger.WARN, "登录请求格式无效，原始内容已省略", nil, nil)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
@@ -124,16 +124,16 @@ func (c *AuthController) Login(ctx *gin.Context) {
 	// 验证用户名
 	user, err := c.getUserByName(loginData.Name)
 	if err != nil {
-		logger.Warnf("AuthController[Login] 用户 %s 未找到 from %s", loginData.Name, ctx.ClientIP())
+		logger.WithContext(ctx.Request.Context(), "auth").Log(logger.WARN, "登录账号未找到", nil, nil)
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return
 	}
-	logger.Infof("AuthController[Login] 找到用户 %s from %s", loginData.Name, ctx.ClientIP())
+	logger.WithContext(ctx.Request.Context(), "auth").Log(logger.DEBUG, "登录账号已找到", nil, nil)
 
 	// 验证密码
 	err = c.verifyPassword(user.Password, loginData.Password)
 	if err != nil {
-		logger.Warnf("AuthController[Login] 用户 %s 密码错误 from %s", loginData.Name, ctx.ClientIP())
+		logger.WithContext(ctx.Request.Context(), "auth").Log(logger.WARN, "登录密码错误", nil, nil)
 		ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return
 	}
@@ -154,7 +154,7 @@ func (c *AuthController) Login(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("AuthController[Login] 用户 %s 登录成功 from %s", loginData.Name, ctx.ClientIP())
+	logger.WithContext(ctx.Request.Context(), "auth").Log(logger.INFO, "登录成功", logger.Fields{"user_id": user.ID}, nil)
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Login successful",
 		"token":   token,

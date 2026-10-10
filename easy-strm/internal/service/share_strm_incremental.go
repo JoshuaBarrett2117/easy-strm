@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,7 +97,17 @@ func (s *ShareStrmIncrementalService) cancelled(ctx context.Context, id string) 
 }
 
 // Run 执行可信基线或有界待办消费；每作品失败保留 pending，不按 seq/时间跳过变更。
-func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) error {
+func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runErr error) {
+	ctx = logger.WithTaskID(ctx, id)
+	entry := logger.WithContext(ctx, "share_incremental")
+	entry.Log(logger.INFO, "分享 STRM 增量导出开始", logger.Fields{"event": "export_start"}, nil)
+	defer func() {
+		level, message := logger.INFO, "分享 STRM 增量导出完成"
+		if runErr != nil {
+			level, message = logger.ERROR, "分享 STRM 增量导出未完成"
+		}
+		entry.Log(level, message, logger.Fields{"event": "export_complete"}, runErr)
+	}()
 	if s == nil || id == "" || s.exporter == nil || s.checkpoints == nil || s.exporter.exportDB == nil {
 		return fmt.Errorf("分享增量导出未初始化或任务ID为空")
 	}
