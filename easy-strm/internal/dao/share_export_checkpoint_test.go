@@ -194,13 +194,13 @@ func TestShareExportTargetedStrmSourcesAndLockedFileRead(t *testing.T) {
 	}
 	defer db.Close()
 	store := NewShareRecordDAO(db)
-	columns := []string{"id", "share", "name", "work", "url", "password", "file", "remote", "result", "episodes", "remaining"}
-	mock.ExpectQuery(regexp.QuoteMeta(shareStrmWorkSourcesSQL)).WithArgs("work", 0).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 2, "name", "work", "url", "", "a.mkv", "remote", `{"_media_id":3,"_file_version":4,"_share_version":5}`, `[]`, 1))
+	columns := []string{"id", "share", "name", "work", "url", "password", "file", "remote", "result", "episodes"}
+	mock.ExpectQuery(regexp.QuoteMeta(shareStrmWorkSourcesSQL)).WithArgs("work", 0).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 2, "name", "work", "url", "", "a.mkv", "remote", `{"_media_id":3,"_file_version":4,"_share_version":5}`, `[]`))
 	rows, err := store.StrmWorkSources(context.Background(), "work", 0)
 	if err != nil || len(rows) != 1 || rows[0].FileVersion != 4 {
 		t.Fatalf("%+v %v", rows, err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(shareStrmFileSourceSQL)).WithArgs(1).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 2, "name", "work", "url", "", "a.mkv", "remote", `{"_media_id":3}`, `[]`, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(shareStrmFileSourceSQL)).WithArgs(1).WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 2, "name", "work", "url", "", "a.mkv", "remote", `{"_media_id":3}`, `[]`))
 	if _, err = store.GetStrmSource(context.Background(), 1); err != nil {
 		t.Fatal(err)
 	}

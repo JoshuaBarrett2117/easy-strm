@@ -11,19 +11,19 @@ import (
 )
 
 const shareStrmSourceSelect = `SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id,'_file_version',f.version,'_share_version',s.version,'_file_size',COALESCE(f.file_size,0),'_available',f.available),
- COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
+ COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json)
  FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id
  WHERE f.available AND NOT s.share_cancelled AND f.status='identified'`
 
-const shareStrmWorkSourcesSQL = shareStrmSourceSelect + ` AND m.work_key=$1 AND f.id>$2 ORDER BY f.id LIMIT 100`
+const shareStrmWorkSourcesSQL = shareStrmSourceSelect + ` AND m.work_key=$1 AND f.id>$2 ORDER BY f.id LIMIT 101`
 const shareStrmFileSourceSQL = shareStrmSourceSelect + ` AND f.id=$1`
 
-// StrmWorkSources 仅点查一个作品的全部有效来源，避免全库统计聚合。
+// StrmWorkSources 仅点查一个作品的有效来源；每页最多100行，调用方以末行ID继续读至空页。
 func (d *ShareRecordDAO) StrmWorkSources(ctx context.Context, key string, after int) ([]domain.ShareStrmSource, error) {
 	return d.scanStrmSources(ctx, shareStrmWorkSourcesSQL, key, after)
 }
 
-// StrmSources 按当前作品筛选条件遍历有效来源；分页采用来源ID游标。
+// StrmSources 按筛选条件以来源ID游标返回最多100行；前瞻行不返回，Remaining为0表示未计数。
 func (d *ShareRecordDAO) StrmSources(ctx context.Context, q domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
 	if q.WorkKey != "" && isOnlyStrmWorkQuery(q) {
 		return d.StrmWorkSources(ctx, q.WorkKey, after)
@@ -42,9 +42,9 @@ func buildShareStrmSourcesQuery(q domain.ShareLibraryQuery, after int) (string, 
 	}
 	args = append(args, after)
 	query := libraryWorks + ` SELECT f.id,f.share_id,s.name,m.work_key,s.url,s.password,f.file_name,f.file_id,m.result || jsonb_build_object('_media_id',m.id,'_file_version',f.version,'_share_version',s.version,'_file_size',COALESCE(f.file_size,0),'_available',f.available),
-	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json),count(*) OVER()
+	 COALESCE((SELECT json_agg(json_build_object('season_number',e.season_number,'episode_number',e.episode_number) ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),'[]'::json)
 	 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id JOIN works w ON w.work_key=m.work_key
-	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 100`
+	 WHERE w.work_key IN (SELECT work_key FROM works WHERE ` + where + `) AND f.available AND NOT s.share_cancelled AND f.status='identified'` + fileFilter + ` AND f.id>$` + fmt.Sprint(len(args)) + ` ORDER BY f.id LIMIT 101`
 	return query, args
 }
 
@@ -62,7 +62,7 @@ func (d *ShareRecordDAO) scanStrmSources(ctx context.Context, query string, args
 	for rows.Next() {
 		var v domain.ShareStrmSource
 		var raw, episodes []byte
-		if err = rows.Scan(&v.ID, &v.ShareID, &v.ShareName, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes, &v.Remaining); err != nil {
+		if err = rows.Scan(&v.ID, &v.ShareID, &v.ShareName, &v.WorkKey, &v.URL, &v.Password, &v.FileName, &v.RemoteFileID, &raw, &episodes); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &v.Result); err != nil {
@@ -85,6 +85,9 @@ func (d *ShareRecordDAO) scanStrmSources(ctx context.Context, query string, args
 			return nil, err
 		}
 		out = append(out, v)
+	}
+	if len(out) > 100 {
+		out = out[:100]
 	}
 	return out, rows.Err()
 }

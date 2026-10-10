@@ -297,7 +297,7 @@ type phaseSQLStore struct {
 }
 
 func (store *phaseSQLStore) expectSources(query domain.ShareLibraryQuery, after int) int {
-	rows := sqlmock.NewRows([]string{"id", "share_id", "share_name", "work_key", "url", "password", "file_name", "remote_id", "result", "episodes", "remaining"})
+	rows := sqlmock.NewRows([]string{"id", "share_id", "share_name", "work_key", "url", "password", "file_name", "remote_id", "result", "episodes"})
 	sources := []domain.ShareStrmSource{}
 	for _, source := range store.fixture.store.sources {
 		if source.ID > after && (query.WorkKey == "" || source.WorkKey == query.WorkKey) {
@@ -305,8 +305,8 @@ func (store *phaseSQLStore) expectSources(query domain.ShareLibraryQuery, after 
 		}
 	}
 	remaining := len(sources)
-	if len(sources) > 100 {
-		sources = sources[:100]
+	if len(sources) > 101 {
+		sources = sources[:101]
 	}
 	for _, source := range sources {
 		raw, err := json.Marshal(source.Result)
@@ -326,7 +326,7 @@ func (store *phaseSQLStore) expectSources(query domain.ShareLibraryQuery, after 
 		if err != nil {
 			store.fixture.test.Fatal(err)
 		}
-		rows.AddRow(source.ID, source.ShareID, source.ShareName, source.WorkKey, source.URL, source.Password, source.FileName, source.RemoteFileID, raw, episodes, remaining)
+		rows.AddRow(source.ID, source.ShareID, source.ShareName, source.WorkKey, source.URL, source.Password, source.FileName, source.RemoteFileID, raw, episodes)
 	}
 	store.mock.ExpectQuery("SELECT f.id,f.share_id").WillReturnRows(rows)
 	return remaining

@@ -84,12 +84,12 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if err != nil {
 		return err
 	}
-	conflicts, err := s.shareStrmConflicts(ctx, q)
+	conflicts, total, err := s.collectShareStrmConflicts(ctx, q)
 	if err != nil {
 		return err
 	}
 	after, processed, written, failed, skipped, skippedDedupe := 0, 0, 0, 0, 0, 0
-	total, pending := 0, 0
+	pending := 0
 	sourceErrors := []string{}
 	flushProgress := func() error {
 		if pending == 0 || s.tasks == nil {
@@ -119,7 +119,6 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		if len(rows) == 0 {
 			break
 		}
-		total = processed + max(rows[0].Remaining, len(rows))
 		for _, source := range rows {
 			if err = ctx.Err(); err != nil {
 				return err
@@ -208,15 +207,22 @@ func (s *ShareStrmService) shareStrmSourceLabel(source domain.ShareStrmSource) s
 
 // shareStrmConflicts 先统计同作品同季集涉及的不同分享，保证首个来源也能得到稳定后缀。
 func (s *ShareStrmService) shareStrmConflicts(ctx context.Context, q domain.ShareLibraryQuery) (map[string]*shareStrmConflict, error) {
+	conflicts, _, err := s.collectShareStrmConflicts(ctx, q)
+	return conflicts, err
+}
+
+func (s *ShareStrmService) collectShareStrmConflicts(ctx context.Context, q domain.ShareLibraryQuery) (map[string]*shareStrmConflict, int, error) {
 	result := map[string]*shareStrmConflict{}
+	total := 0
 	for after := 0; ; {
 		rows, err := s.store.StrmSources(ctx, q, after)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if len(rows) == 0 {
-			return result, nil
+			return result, total, nil
 		}
+		total += len(rows)
 		for _, source := range rows {
 			after = source.ID
 			episodes := source.Episodes
