@@ -145,7 +145,8 @@ func baselineFixtureMappingBag(test *testing.T, transaction *sql.Tx, query strin
 		}
 		weight := int64(1)
 		if grouped {
-			targets = append(targets, &weight)
+			var exportKey string
+			targets = append(targets, &exportKey, &weight)
 		}
 		if err := rows.Scan(targets...); err != nil {
 			test.Fatal(err)
@@ -307,6 +308,73 @@ func TestShareBaselinePostgresEquivalence(test *testing.T) {
 				if (err == nil) != (scenario.name == "benign-media-only") {
 					test.Fatalf("benign/remaining acceptance differs: %v", err)
 				}
+			}
+		})
+	}
+}
+
+func TestShareBaselinePostgresItemMappings(test *testing.T) {
+	database := baselineIsolatedPostgres(test)
+	for _, scenario := range []struct {
+		name, row, payload         string
+		allowance                  int64
+		mediaDiff, mixed, accepted bool
+	}{
+		{"valid-item", "item", "item", 0, false, false, true},
+		{"valid-legacy", "legacy", "legacy", 0, false, false, true},
+		{"legacy-row-item-payload", "legacy", "item", 0, false, false, false},
+		{"item-row-legacy-payload", "item", "legacy", 0, false, false, false},
+		{"unknown-consistent-id", "unknown", "unknown", 0, false, false, false},
+		{"wrong-item-id", "other-item", "other-item", 0, false, false, false},
+		{"strict-media", "item", "item", 0, true, false, false},
+		{"exact-allowance", "item", "item", 1, true, false, true},
+		{"wrong-allowance", "item", "item", 2, true, false, false},
+		{"mixed-item-legacy", "item", "item", 0, false, true, true},
+		{"mixed-exact-allowance", "item", "item", 1, true, true, true},
+	} {
+		test.Run(scenario.name, func(test *testing.T) {
+			transaction := baselineFixtureTransaction(test, database)
+			source := domain.ShareStrmSource{ID: 11, MediaID: 7, URL: "https://115.com/s/selected?password=url-code", Password: "explicit", FileName: "Show/episode.mkv", RemoteFileID: "file"}
+			legacy, err := domain.BuildShareStrmEntry(source)
+			if err != nil {
+				test.Fatal(err)
+			}
+			item, err := domain.BuildShareWorkReexportEntry(source, "work:0:0")
+			if err != nil {
+				test.Fatal(err)
+			}
+			otherItem, err := domain.BuildShareWorkReexportEntry(source, "work:1:2")
+			if err != nil {
+				test.Fatal(err)
+			}
+			unknown := legacy
+			unknown.ID = "9bd490fc-7797-4ff8-a47c-8cd5b0fdf2a0"
+			entries := map[string]domain.ShareStrmEntry{"legacy": legacy, "item": item, "other-item": otherItem, "unknown": unknown}
+			mappingID, entry := entries[scenario.row].ID, entries[scenario.payload]
+			if scenario.mediaDiff {
+				entry.MediaID = 8
+			}
+			if scenario.mixed {
+				baselineFixtureExec(test, transaction, baselineMultiEpisodeFixtureSQL)
+			}
+			payload, err := json.Marshal(entry)
+			if err != nil {
+				test.Fatal(err)
+			}
+			baselineFixtureExec(test, transaction, `INSERT INTO t_share_strm VALUES($1,$2) ON CONFLICT(id) DO UPDATE SET payload=EXCLUDED.payload`, mappingID, string(payload))
+			baselineFixtureExec(test, transaction, `UPDATE t_strm_export_state SET share_strm_id=$1 WHERE export_key='work:0:0'`, mappingID)
+			oldBag := baselineFixtureMappingBag(test, transaction, legacyShareBaselineMappingsSQL, false)
+			newBag := baselineFixtureMappingBag(test, transaction, shareBaselineMappingsSQL, true)
+			if !reflect.DeepEqual(oldBag, newBag) {
+				test.Fatalf("mapping multiset differs: old=%v new=%v", oldBag, newBag)
+			}
+			count := int64(1)
+			if scenario.mixed {
+				count++
+			}
+			err = validateShareBaselineMappings(context.Background(), transaction, count, scenario.allowance)
+			if (err == nil) != scenario.accepted {
+				test.Fatalf("accepted=%v error=%v", scenario.accepted, err)
 			}
 		})
 	}

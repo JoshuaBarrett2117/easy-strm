@@ -47,7 +47,7 @@ func TestShareBaselineMappingGroupMultiplicity(test *testing.T) {
 				test.Fatal(err)
 			}
 			mock.ExpectBegin()
-			mock.ExpectQuery(regexp.QuoteMeta(shareBaselineMappingsSQL)).WillReturnRows(sqlmock.NewRows([]string{"source", "name", "file", "media", "url", "password", "mapping", "payload", "multiplicity"}).AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, entry.ID, payload, scenario.weight))
+			mock.ExpectQuery(regexp.QuoteMeta(shareBaselineMappingsSQL)).WillReturnRows(sqlmock.NewRows([]string{"source", "name", "file", "media", "url", "password", "mapping", "payload", "export_key", "multiplicity"}).AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, entry.ID, payload, "work:1:1", scenario.weight))
 			mock.ExpectRollback()
 			transaction, err := database.Begin()
 			if err != nil {

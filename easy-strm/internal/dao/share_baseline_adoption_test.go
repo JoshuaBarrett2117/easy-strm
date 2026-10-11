@@ -146,9 +146,9 @@ func testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T, allow
 				if scenario == "mapping-read-failed" {
 					query.WillReturnError(failure)
 				} else {
-					rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload", "multiplicity"})
+					rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload", "export_key", "multiplicity"})
 					for index := int64(0); index < selectedCount; index++ {
-						rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, entry.ID, payload, 1)
+						rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, entry.ID, payload, "work:0:0", 1)
 					}
 					query.WillReturnRows(rows)
 				}

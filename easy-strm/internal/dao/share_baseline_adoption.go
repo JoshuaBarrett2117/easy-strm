@@ -106,13 +106,13 @@ SELECT
  OR (m.media_type='tv' AND (episodes.file_id IS NULL OR uncovered.file_id IS NOT NULL)))`
 
 var shareBaselineMappingsSQL = `WITH ` + shareBaselineLiveRowsSQL + `, ` + shareBaselineOwnedOutputsSQL + `
- SELECT live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id::text,output.payload,count(*) multiplicity
+ SELECT live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id::text,output.payload,output.export_key,count(*) multiplicity
  FROM t_share_media_selection s
  JOIN owned_outputs output ON output.owner_key='share:default' AND output.export_key=s.media_item_key AND output.state='active'
  JOIN live_rows live ON live.candidate_id=s.selected_candidate_id AND live.work_key=s.work_key
  AND live.season_number=s.season_number AND live.episode_number=s.episode_number
  WHERE output.mapping_id IS NOT NULL
- GROUP BY live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id,output.payload`
+ GROUP BY live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id,output.payload,output.export_key`
 
 const shareBaselineSourcesSQL = `WITH ` + shareBaselineEpisodeSetSQL + `, episode_signatures AS MATERIALIZED (
  SELECT e.file_id,string_agg(e.season_number::text||':'||e.episode_number::text,',' ORDER BY e.season_number,e.episode_number) episode_sig
@@ -325,18 +325,28 @@ func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, exp
 	var count, mediaIDDifferences int64
 	for rows.Next() {
 		var source domain.ShareStrmSource
-		var mappingID string
+		var mappingID, exportKey string
 		var payload []byte
 		var multiplicity int64
-		if err := rows.Scan(&source.ID, &source.FileName, &source.RemoteFileID, &source.MediaID, &source.URL, &source.Password, &mappingID, &payload, &multiplicity); err != nil {
+		if err := rows.Scan(&source.ID, &source.FileName, &source.RemoteFileID, &source.MediaID, &source.URL, &source.Password, &mappingID, &payload, &exportKey, &multiplicity); err != nil {
 			return err
 		}
 		if multiplicity <= 0 || multiplicity > expectedCount-count {
 			return fmt.Errorf("采纳映射覆盖数量异常：已验证=%d 本组=%d 预期=%d", count, multiplicity, expectedCount)
 		}
-		expected, err := domain.BuildShareStrmEntry(source)
+		legacyExpected, err := domain.BuildShareStrmEntry(source)
 		if err != nil {
 			return fmt.Errorf("采纳选中来源 %d 的映射构造失败：%w", source.ID, err)
+		}
+		expected := legacyExpected
+		if exportKey != "" {
+			itemExpected, err := domain.BuildShareWorkReexportEntry(source, exportKey)
+			if err != nil {
+				return fmt.Errorf("采纳选中来源 %d 的 item 映射构造失败：%w", source.ID, err)
+			}
+			if mappingID == itemExpected.ID {
+				expected = itemExpected
+			}
 		}
 		var actual domain.ShareStrmEntry
 		if err := json.Unmarshal(payload, &actual); err != nil {
