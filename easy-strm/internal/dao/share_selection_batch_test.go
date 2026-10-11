@@ -163,7 +163,7 @@ func TestSelectionInternalCursorSkipsCountUIRetainsTotal(t *testing.T) {
 	database, mock, _ := sqlmock.New()
 	defer database.Close()
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT s.media_item_key.*\(s.work_key,s.season_number,s.episode_number\)>\(\$3,\$4,\$5\).*LIMIT \$2$`).WithArgs("", 100, "work", 1, 2).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}))
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSelectionListSQL(true))).WithArgs("", 100, "work", 1, 2).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}))
 	mock.ExpectCommit()
 	rows, total, err := NewShareRecordDAO(database).ListSelections(context.Background(), domain.ShareSelectionQuery{Cursor: true, SkipCount: true, PageSize: 100, AfterWork: "work", AfterSeason: 1, AfterEpisode: 2})
 	if err != nil || len(rows) != 0 || total != 0 {

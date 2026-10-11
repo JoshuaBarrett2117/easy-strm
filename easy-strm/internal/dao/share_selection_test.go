@@ -98,7 +98,7 @@ func TestSelectionReadsDoNotDiscover(t *testing.T) {
 	defer database.Close()
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT count").WithArgs("film").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("SELECT s.media_item_key").WithArgs("film", 20, 20).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}).AddRow("w:0:0", "w", 0, 0, 9, "manual", 3, 2, "movie/name.strm", "film", false))
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSelectionListSQL(false))).WithArgs("film", 20, 20).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}).AddRow("w:0:0", "w", 0, 0, 9, "manual", 3, 2, "movie/name.strm", "film", false))
 	mock.ExpectCommit()
 	rows, total, err := NewShareRecordDAO(database).ListSelections(context.Background(), domain.ShareSelectionQuery{Keyword: "film", Page: 2, PageSize: 20})
 	if err != nil || total != 1 || len(rows) != 1 || rows[0].Valid {

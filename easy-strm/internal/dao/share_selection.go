@@ -17,10 +17,12 @@ var ErrShareSelectionConflict = errors.New("来源选择版本已变化或候选
 var ErrShareSelectionUnavailable = errors.New("选定来源不可用或识别已改变，保留原文件；请明确改选有效来源后重试")
 
 const shareSelectionLockSQL = `SELECT pg_advisory_xact_lock(34983,1)`
-const shareSelectionColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path,COALESCE(m.title,s.work_key),
+const shareSelectionScalarColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path`
+const shareSelectionValidSQL = `
  EXISTS(SELECT 1` + shareSelectionLiveJoin + `
  WHERE i.candidate_id=s.selected_candidate_id AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
  AND ` + shareSelectionLivePredicate + `)`
+const shareSelectionColumns = shareSelectionScalarColumns + `,COALESCE(m.title,s.work_key),` + shareSelectionValidSQL
 const shareSelectionFrom = ` FROM t_share_media_selection s LEFT JOIN t_share_media m ON m.work_key=s.work_key`
 
 func scanShareSelection(row interface{ Scan(...interface{}) error }) (domain.ShareSelection, error) {
@@ -56,7 +58,7 @@ func (d *ShareRecordDAO) ListSelections(ctx context.Context, q domain.ShareSelec
 			return nil, 0, err
 		}
 	}
-	query := `SELECT ` + shareSelectionColumns + filter
+	query := `WITH selection_page AS MATERIALIZED (SELECT ` + shareSelectionScalarColumns + `,COALESCE(m.title,s.work_key) AS title` + filter
 	args := []interface{}{q.Keyword, q.PageSize}
 	if q.Cursor {
 		query += ` AND (s.work_key,s.season_number,s.episode_number)>($3,$4,$5) ORDER BY s.work_key,s.season_number,s.episode_number LIMIT $2`
@@ -65,6 +67,7 @@ func (d *ShareRecordDAO) ListSelections(ctx context.Context, q domain.ShareSelec
 		query += ` ORDER BY s.work_key,s.season_number,s.episode_number LIMIT $2 OFFSET $3`
 		args = append(args, (q.Page-1)*q.PageSize)
 	}
+	query += `) SELECT ` + shareSelectionScalarColumns + `,s.title,` + shareSelectionValidSQL + ` FROM selection_page s ORDER BY s.work_key,s.season_number,s.episode_number`
 	rows, err := transaction.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, err
