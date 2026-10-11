@@ -28,6 +28,7 @@ type p0SelectionStore struct {
 	syncWorks        []string
 	onSync           func()
 	onSyncWork       func(string) error
+	onResolveWork    func(string) error
 	resolveWorks     []string
 	prepareErr       error
 }
@@ -53,6 +54,11 @@ func (store *p0SelectionStore) SyncSelections(ctx context.Context, work string) 
 func (store *p0SelectionStore) ResolveSelections(ctx context.Context, work string) (int, error) {
 	store.resolves++
 	store.resolveWorks = append(store.resolveWorks, work)
+	if store.onResolveWork != nil {
+		if err := store.onResolveWork(work); err != nil {
+			return 0, err
+		}
+	}
 	return 0, ctx.Err()
 }
 
@@ -151,8 +157,9 @@ func TestShareStrmP0WorkScopedPreparationAcrossPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	wanted := []string{"work:00", "work:01", "work:02", "work:03", "work:04"}
-	if !reflect.DeepEqual(selections.syncWorks, wanted) || !reflect.DeepEqual(selections.resolveWorks, wanted) || selections.checks != 1 {
-		t.Fatalf("仅准备目标作品，schema 每次运行一次：sync=%v schema=%d resolve=%v", selections.syncWorks, selections.checks, selections.resolveWorks)
+	// 候选同步按页摊销，但必须保留逐作品解析与一次 schema 检查。
+	if !reflect.DeepEqual(selections.syncWorks, []string{"", "", ""}) || !reflect.DeepEqual(selections.resolveWorks, wanted) || selections.checks != 1 {
+		t.Fatalf("每轮同步一次，仅解析目标作品：sync=%v schema=%d resolve=%v", selections.syncWorks, selections.checks, selections.resolveWorks)
 	}
 	_, metadata := p0Metadata(t, fixture, "p0-pages")
 	if store.completions != 5 || metadata["consumed_works"] != float64(5) || metadata["pending_works"] != float64(0) || metadata["phase"] != "completed" {
@@ -175,17 +182,18 @@ func TestShareStrmP0PreparationCanEmptyQueue(t *testing.T) {
 func TestShareStrmP0PreparationRereadsDirtyRevisions(t *testing.T) {
 	fixture, store, selections, runner := p0Fixture(t)
 	store.bump("work:a")
-	selections.onSyncWork = func(work string) error {
-		store.bump(work)
-		if work == "work:a" {
+	selections.onSync = func() {
+		if len(selections.syncWorks) == 1 {
+			store.bump("work:a")
+			store.bump("work:b")
+		} else {
 			store.bump("work:b")
 		}
-		return nil
 	}
 	if err := phase03Run(t, fixture, runner, "incremental", "p0-revisions", context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if store.acked["work:a"] != 2 || store.acked["work:b"] != 2 || !reflect.DeepEqual(selections.syncWorks, []string{"work:a", "work:b"}) {
+	if store.acked["work:a"] != 2 || store.acked["work:b"] != 2 || !reflect.DeepEqual(selections.syncWorks, []string{"", ""}) || !reflect.DeepEqual(selections.resolveWorks, []string{"work:a", "work:b"}) {
 		t.Fatalf("准备生成的 dirty revision/新作品丢失：acked=%v sync=%v", store.acked, selections.syncWorks)
 	}
 }
@@ -211,7 +219,7 @@ func TestShareStrmP0ProgressReportsBoundedPendingProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, metadata := p0Metadata(t, fixture, "p0-progress")
-	if !checked || metadata["consumed_works"] != float64(205) || metadata["round_consumed_works"] != float64(5) || metadata["pending_works_exact"] != true || len(selections.syncWorks) != 205 {
+	if !checked || metadata["consumed_works"] != float64(205) || metadata["round_consumed_works"] != float64(5) || metadata["pending_works_exact"] != true || len(selections.syncWorks) != 3 || selections.resolves != 205 {
 		t.Fatalf("消费进度未按有界页推进：%v", metadata)
 	}
 }
@@ -225,7 +233,7 @@ func TestShareStrmP0DisappearingBatchAdvancesCursor(t *testing.T) {
 	if err := phase03Run(t, fixture, runner, "incremental", "p0-disappeared", context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if store.completions != 1 || store.acked["work:b"] != 1 || !reflect.DeepEqual(selections.syncWorks, []string{"work:a", "work:b"}) {
+	if store.completions != 1 || store.acked["work:b"] != 1 || !reflect.DeepEqual(selections.syncWorks, []string{"", ""}) || !reflect.DeepEqual(selections.resolveWorks, []string{"work:a", "work:b"}) {
 		t.Fatalf("消失页阻塞后续游标：completed=%d sync=%v", store.completions, selections.syncWorks)
 	}
 }
@@ -381,7 +389,8 @@ func TestShareStrmP0UnrelatedInvalidManualSelectionIsIsolated(t *testing.T) {
 				store.input.BaselineState = "building"
 			}
 			store.bump("work:target")
-			selections.onSyncWork = func(work string) error {
+			// 手选不可用属于解析语义，SQL 候选同步不校验无关手选。
+			selections.onResolveWork = func(work string) error {
 				if work != "work:target" {
 					return dao.ErrShareSelectionUnavailable
 				}
@@ -390,8 +399,8 @@ func TestShareStrmP0UnrelatedInvalidManualSelectionIsIsolated(t *testing.T) {
 			if err := phase03Run(t, fixture, runner, mode, "p0-isolation", context.Background()); err != nil {
 				t.Fatalf("无关手选失效不应阻止目标消费：%v", err)
 			}
-			if !reflect.DeepEqual(selections.syncWorks, []string{"work:target"}) || !reflect.DeepEqual(selections.resolveWorks, []string{"work:target"}) || store.fulls != 0 {
-				t.Fatalf("增量/恢复扩大作品范围：sync=%v resolve=%v", selections.syncWorks, selections.resolveWorks)
+			if !reflect.DeepEqual(selections.syncWorks, []string{""}) || !reflect.DeepEqual(selections.resolveWorks, []string{"work:target"}) || store.fulls != 0 {
+				t.Fatalf("增量/恢复扩大手选解析范围：sync=%v resolve=%v", selections.syncWorks, selections.resolveWorks)
 			}
 		})
 	}
@@ -400,10 +409,9 @@ func TestShareStrmP0UnrelatedInvalidManualSelectionIsIsolated(t *testing.T) {
 func TestShareStrmP0PreparationNewPrefixRemainsPending(t *testing.T) {
 	fixture, store, selections, runner := p0Fixture(t)
 	store.bump("work:b")
-	selections.onSyncWork = func(work string) error {
-		store.bump(work)
+	selections.onSync = func() {
+		store.bump("work:b")
 		store.bump("work:a")
-		return nil
 	}
 	err := phase03Run(t, fixture, runner, "incremental", "p0-new-prefix", context.Background())
 	if !errors.Is(err, dao.ErrShareExportChanged) || store.acked["work:b"] != 2 || store.acked["work:a"] != 0 {
@@ -416,7 +424,7 @@ func TestShareStrmP0ReportsProgressDuringPreparation(t *testing.T) {
 	for index := 0; index < 20; index++ {
 		store.bump(fmt.Sprintf("work:%02d", index))
 	}
-	selections.onSyncWork = func(work string) error {
+	selections.onResolveWork = func(work string) error {
 		if work == "work:10" {
 			_, metadata := p0Metadata(t, fixture, "p0-small-progress")
 			if metadata["consumed_works"] != float64(10) || metadata["round_consumed_works"] != float64(10) {

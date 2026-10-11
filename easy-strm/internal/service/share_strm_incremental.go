@@ -247,6 +247,23 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 		}
 		rounds++
 		roundConsumed = 0
+		var roundStates map[string][]domain.ShareExportSourceState
+		if !selectionPrepared {
+			if selections, ok := s.exporter.store.(shareSelectionExportStore); ok {
+				if !selectionSchemaChecked {
+					if err = s.exporter.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
+						return selections.CheckSelectionSchema(ctx)
+					}); err != nil {
+						return err
+					}
+					selectionSchemaChecked = true
+				}
+				roundStates, err = s.prepareSelectionRound(ctx, id, selections, batch)
+				if err != nil {
+					return err
+				}
+			}
+		}
 		for _, dirty := range batch {
 			if err = s.cancelled(ctx, id); err != nil {
 				return err
@@ -259,17 +276,9 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 			var preparedStates []domain.ShareExportSourceState
 			if !selectionPrepared {
 				if selections, ok := s.exporter.store.(shareSelectionExportStore); ok {
-					if !selectionSchemaChecked {
-						if err = s.exporter.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
-							return selections.CheckSelectionSchema(ctx)
-						}); err != nil {
-							return err
-						}
-						selectionSchemaChecked = true
-						ctx = context.WithValue(ctx, shareSelectionSchemaCheckedContext{}, true)
-					}
+					preparedStates = roundStates[dirty.WorkKey]
 					var found bool
-					dirty, preparedStates, found, err = s.prepareDirtyWork(ctx, selections, dirty, previous)
+					dirty, found, err = s.prepareDirtyWork(ctx, selections, dirty, previous)
 					if err != nil {
 						return err
 					}
@@ -327,27 +336,43 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 	return nil
 }
 
-func (s *ShareStrmIncrementalService) prepareDirtyWork(ctx context.Context, selections shareSelectionExportStore, dirty domain.ShareExportDirty, previous string) (domain.ShareExportDirty, []domain.ShareExportSourceState, bool, error) {
-	states, err := s.checkpoints.ObserveWork(ctx, dirty.WorkKey)
-	if err != nil {
-		return dirty, nil, false, err
+func (s *ShareStrmIncrementalService) prepareSelectionRound(ctx context.Context, id string, selections shareSelectionExportStore, batch []domain.ShareExportDirty) (map[string][]domain.ShareExportSourceState, error) {
+	// 同步前观察整页来源，防止后续作品在同步期间变化后被空输出确认；只保留本轮有界观察。
+	observed := make(map[string][]domain.ShareExportSourceState, len(batch))
+	for _, dirty := range batch {
+		if err := s.cancelled(ctx, id); err != nil {
+			return nil, err
+		}
+		states, err := s.checkpoints.ObserveWork(ctx, dirty.WorkKey)
+		if err != nil {
+			return nil, err
+		}
+		if states == nil {
+			states = []domain.ShareExportSourceState{}
+		}
+		observed[dirty.WorkKey] = states
 	}
-	if states == nil {
-		states = []domain.ShareExportSourceState{}
+	// SQL 候选同步不解析手选；每轮仅执行一次全局同步，手选校验仍按待办作品隔离。
+	if err := s.exporter.syncSelectionWork(ctx, selections, ""); err != nil {
+		return nil, err
 	}
-	if err = s.exporter.prepareSelectionWork(ctx, selections, dirty.WorkKey); err != nil {
-		return dirty, nil, false, err
+	return observed, nil
+}
+
+func (s *ShareStrmIncrementalService) prepareDirtyWork(ctx context.Context, selections shareSelectionExportStore, dirty domain.ShareExportDirty, previous string) (domain.ShareExportDirty, bool, error) {
+	if err := s.exporter.resolveSelectionWork(ctx, selections, dirty.WorkKey); err != nil {
+		return dirty, false, err
 	}
 	refreshed, err := s.checkpoints.DirtyBatch(ctx, previous)
 	if err != nil {
-		return dirty, nil, false, err
+		return dirty, false, err
 	}
 	for _, candidate := range refreshed {
 		if candidate.WorkKey == dirty.WorkKey {
-			return candidate, states, true, nil
+			return candidate, true, nil
 		}
 	}
-	return dirty, states, false, nil
+	return dirty, false, nil
 }
 
 func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string, input domain.ShareExportInput, dirty domain.ShareExportDirty, preparedStates []domain.ShareExportSourceState) (int, int, strmExportResult) {

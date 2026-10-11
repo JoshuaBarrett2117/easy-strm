@@ -31,11 +31,19 @@ func (s *ShareStrmService) prepareSelectionWork(ctx context.Context, store share
 			return err
 		}
 	}
-	if err := s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
-		return store.SyncSelections(ctx, work)
-	}); err != nil {
+	if err := s.syncSelectionWork(ctx, store, work); err != nil {
 		return err
 	}
+	return s.resolveSelectionWork(ctx, store, work)
+}
+
+func (s *ShareStrmService) syncSelectionWork(ctx context.Context, store shareSelectionExportStore, work string) error {
+	return s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
+		return store.SyncSelections(ctx, work)
+	})
+}
+
+func (s *ShareStrmService) resolveSelectionWork(ctx context.Context, store shareSelectionExportStore, work string) error {
 	err := s.preparationStage(ctx, "selection-resolve", func(ctx context.Context, _ sharePreparationReport) error {
 		_, err := store.ResolveSelections(ctx, work)
 		return err
