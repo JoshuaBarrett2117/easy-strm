@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"easy-strm/internal/domain"
@@ -21,7 +22,10 @@ const shareBaselineTablesLockSQL = `LOCK TABLE t_share_media_file,t_share_media_
  IN SHARE ROW EXCLUSIVE MODE NOWAIT`
 const shareBaselineConsumerSQL = `SELECT config_revision,prepared_revision,completed_revision,config_fingerprint,baseline_state,protocol_version,legacy_outputs_reconciled FROM t_share_export_consumer WHERE consumer='share:default' FOR UPDATE NOWAIT`
 
-const shareBaselineCountsSQL = `SELECT
+const shareBaselineCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineMediaIDMatchSQL + shareBaselineCountsSuffixSQL
+const shareBaselineBenignCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineCountsSuffixSQL
+const shareBaselineMediaIDMatchSQL = ` AND (mapping.payload->>'media_id')::integer=live.id`
+const shareBaselineCountsPrefixSQL = `SELECT
  (SELECT count(*) FROM t_share_media_selection),
  (SELECT count(*) FROM t_strm_export_state WHERE owner_key='share:default' AND state='active'),
  (SELECT count(*) FROM t_share_export_dirty_work WHERE revision>acked_revision),
@@ -37,7 +41,8 @@ const shareBaselineCountsSQL = `SELECT
  OR NOT EXISTS(SELECT 1 FROM t_share_media WHERE id=(mapping.payload->>'media_id')::integer)
  OR NOT EXISTS(SELECT 1` + shareSelectionLiveJoin + ` WHERE i.candidate_id=s.selected_candidate_id
  AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
- AND (mapping.payload->>'media_id')::integer=live.id AND ` + shareSelectionLivePredicate + `))
+`
+const shareBaselineCountsSuffixSQL = ` AND ` + shareSelectionLivePredicate + `))
  + (SELECT count(*) FROM t_share_export_dirty_work WHERE revision<acked_revision OR work_key='' OR (revision>acked_revision AND scope<>'baseline'))
  + (SELECT count(*) FROM t_strm_export_state WHERE owner_key='share:default' AND state='active' AND (output_path='' OR COALESCE(share_strm_id,'')='' OR content_fingerprint='' OR mapping_fingerprint=''))
  + (SELECT count(*) FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record r ON r.id=f.share_id
@@ -138,7 +143,13 @@ func (store *ShareExportCheckpointDAO) AdoptBaseline(ctx context.Context, reques
 	if err = guardShareBaselineCommit(ctx, beforeCommit); err != nil {
 		return result, err
 	}
-	return result, transaction.Commit()
+	if err = transaction.Commit(); err != nil {
+		return result, err
+	}
+	if request.AllowKnownBenignInvalid > 0 {
+		logger.WithContext(logger.WithTaskID(ctx, taskID), "share_baseline_adoption").Log(logger.WARN, "人工确认采纳：已提交仅 MediaID 差异的良性放行", logger.Fields{"event": "manual_baseline_benign_allowance", "allowance_count": request.AllowKnownBenignInvalid, "actor_user_id": request.ActorUserID}, nil)
+	}
+	return result, nil
 }
 
 func guardShareBaselineCommit(ctx context.Context, guards []func() error) error {
@@ -215,23 +226,40 @@ func validateShareBaselineCounts(ctx context.Context, transaction *sql.Tx, reque
 			return fmt.Errorf("采纳快照护栏不匹配：%s 实际=%d 预期=%d；请重新独立核验", key, value, request.Expected[key])
 		}
 	}
-	if invalid != 0 || result.SelectionCount == 0 || result.OutputCount != result.SelectionCount {
+	var allowance int64
+	if request.AllowKnownBenignInvalid > 0 && int64(request.AllowKnownBenignInvalid) == invalid && request.AllowKnownBenignInvalid <= domain.ShareBaselineBenignInvalidHardCap && strings.TrimSpace(request.BenignAttestation) != "" {
+		allowance = invalid
+	}
+	if (invalid != 0 && allowance == 0) || (request.AllowKnownBenignInvalid > 0 && allowance == 0) || result.SelectionCount == 0 || result.OutputCount != result.SelectionCount {
 		return fmt.Errorf("采纳一致性校验失败：selection=%d output=%d invalid=%d", result.SelectionCount, result.OutputCount, invalid)
 	}
-	if err := validateShareBaselineMappings(ctx, transaction, result.SelectionCount); err != nil {
+	if allowance > 0 {
+		var rechecked [5]int64
+		var remaining int64
+		if err := transaction.QueryRowContext(ctx, shareBaselineBenignCountsSQL, request.ExpectedOutputPath).Scan(&rechecked[0], &rechecked[1], &rechecked[2], &rechecked[3], &rechecked[4], &remaining); err != nil {
+			return err
+		}
+		if rechecked != [5]int64{result.SelectionCount, result.OutputCount, pending, dirtySum, selectionSum} {
+			return ErrShareExportChanged
+		}
+		if remaining != 0 {
+			return fmt.Errorf("采纳良性放行校验失败：仍有非 MediaID 差异 invalid=%d", remaining)
+		}
+	}
+	if err := validateShareBaselineMappings(ctx, transaction, result.SelectionCount, allowance); err != nil {
 		return err
 	}
 	result.AcknowledgedWorks = pending
 	return nil
 }
 
-func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, expectedCount int64) error {
+func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, expectedCount, allowance int64) error {
 	rows, err := transaction.QueryContext(ctx, shareBaselineMappingsSQL)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	var count int64
+	var count, mediaIDDifferences int64
 	for rows.Next() {
 		var source domain.ShareStrmSource
 		var mappingID string
@@ -248,9 +276,12 @@ func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, exp
 			return fmt.Errorf("采纳选中来源 %d 的映射格式无效：%w", source.ID, err)
 		}
 		if mappingID != expected.ID || actual.ID != expected.ID || actual.ShareCode != expected.ShareCode || actual.Password != expected.Password ||
-			actual.FilePath != expected.FilePath || actual.FileName != expected.FileName || actual.MediaID != expected.MediaID ||
+			actual.FilePath != expected.FilePath || actual.FileName != expected.FileName || (actual.MediaID != expected.MediaID && allowance == 0) ||
 			(expected.FileID != "" && actual.FileID != expected.FileID) {
 			return fmt.Errorf("采纳映射与选中来源 %d 不一致；保留现有输出，请重新独立核验", source.ID)
+		}
+		if actual.MediaID != expected.MediaID {
+			mediaIDDifferences++
 		}
 		count++
 	}
@@ -259,6 +290,9 @@ func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, exp
 	}
 	if count != expectedCount {
 		return fmt.Errorf("采纳映射覆盖不完整：实际=%d 预期=%d", count, expectedCount)
+	}
+	if allowance > 0 && mediaIDDifferences != allowance {
+		return fmt.Errorf("采纳良性放行数量不匹配：仅 MediaID 差异=%d 预期=%d", mediaIDDifferences, allowance)
 	}
 	return nil
 }

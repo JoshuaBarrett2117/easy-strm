@@ -1,14 +1,19 @@
 package dao
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"os"
 	"regexp"
+	"strings"
 	"testing"
+	"time"
 
 	"easy-strm/internal/domain"
+	"easy-strm/internal/pkg/logger"
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
@@ -21,6 +26,25 @@ func adoptionRequest() domain.ShareBaselineAdoptionRequest {
 }
 
 func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
+	testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test, 0)
+}
+
+func TestShareBaselineAdoptionBenignAllowanceAtomicRollbackAndReadyNoAck(test *testing.T) {
+	testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test, 68)
+}
+
+type baselineCommitWarning struct {
+	bytes.Buffer
+	mock         sqlmock.Sqlmock
+	beforeCommit error
+}
+
+func (warning *baselineCommitWarning) Write(payload []byte) (int, error) {
+	warning.beforeCommit = warning.mock.ExpectationsWereMet()
+	return warning.Buffer.Write(payload)
+}
+
+func testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T, allowance int) {
 	for _, scenario := range []string{"success", "ready-new-pending", "counts-changed", "inconsistent", "mapping-mismatch", "mapping-read-failed", "seed-failed", "ack-failed", "finish-failed", "audit-failed", "commit-failed", "producer-busy", "owner-busy", "selection-busy", "revision-changed", "ack-count-changed", "trust-zero", "finish-zero", "mirror-zero", "audit-zero", "fingerprint-changed", "protocol-changed", "required", "completed-changed", "ready-untrusted", "commit-guard-failed"} {
 		test.Run(scenario, func(test *testing.T) {
 			database, mock, err := sqlmock.New()
@@ -29,6 +53,17 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 			}
 			defer database.Close()
 			request := adoptionRequest()
+			attestation := ""
+			if allowance > 0 {
+				attestation = "  核验原文\nMediaID-only  "
+				request = baselineAllowanceRequest(test, allowance, attestation)
+				request.Expected["selection_count"], request.Expected["output_count"], request.Expected["selection_revision_sum"] = int64(allowance), int64(allowance), int64(allowance)
+			}
+			selectedCount := request.Expected["selection_count"]
+			warning := &baselineCommitWarning{mock: mock}
+			logger.SetOutputs(nil, nil, warning, nil)
+			test.Cleanup(func() { logger.SetOutputs(os.Stdout, os.Stdout, os.Stderr, os.Stderr) })
+			started := time.Now().UTC()
 			failure := errors.New("isolated injected failure")
 			mock.ExpectBegin()
 			for _, ancestor := range []string{"/", "/isolated"} {
@@ -78,15 +113,18 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 				proceed = scenario != "ready-new-pending" && scenario != "revision-changed" && scenario != "fingerprint-changed" && scenario != "protocol-changed" && scenario != "required" && scenario != "completed-changed" && scenario != "ready-untrusted"
 			}
 			if proceed {
-				count, invalid := int64(2), int64(0)
+				count, invalid := selectedCount, int64(allowance)
 				if scenario == "counts-changed" {
 					count = 3
 				}
 				if scenario == "inconsistent" {
 					invalid = 1
 				}
-				mock.ExpectQuery(regexp.QuoteMeta(shareBaselineCountsSQL)).WithArgs("/isolated/output").WillReturnRows(sqlmock.NewRows([]string{"selection", "output", "pending", "dirty_sum", "selection_sum", "invalid"}).AddRow(count, 2, 1, 2, 2, invalid))
+				mock.ExpectQuery(regexp.QuoteMeta(shareBaselineCountsSQL)).WithArgs("/isolated/output").WillReturnRows(sqlmock.NewRows([]string{"selection", "output", "pending", "dirty_sum", "selection_sum", "invalid"}).AddRow(count, selectedCount, 1, 2, selectedCount, invalid))
 				proceed = scenario != "counts-changed" && scenario != "inconsistent"
+				if proceed && allowance > 0 {
+					mock.ExpectQuery(regexp.QuoteMeta(baselineAllowanceRecheckSQL())).WithArgs(request.ExpectedOutputPath).WillReturnRows(sqlmock.NewRows([]string{"selection", "output", "pending", "dirty_sum", "selection_sum", "invalid"}).AddRow(selectedCount, selectedCount, 1, 2, selectedCount, 0))
+				}
 			}
 			if proceed {
 				source := domain.ShareStrmSource{ID: 11, MediaID: 7, URL: "https://115.com/s/selected", Password: "selected-code", FileName: "Show/episode.mkv", RemoteFileID: "selected-file"}
@@ -97,6 +135,9 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 				if scenario == "mapping-mismatch" {
 					entry.ShareCode, entry.FileID = "unselected", "unselected-file"
 				}
+				if allowance > 0 {
+					entry.MediaID++
+				}
 				payload, err := json.Marshal(entry)
 				if err != nil {
 					test.Fatal(err)
@@ -106,7 +147,7 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 					query.WillReturnError(failure)
 				} else {
 					rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload"})
-					for index := 0; index < 2; index++ {
+					for index := int64(0); index < selectedCount; index++ {
 						rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, entry.ID, payload)
 					}
 					query.WillReturnRows(rows)
@@ -127,7 +168,7 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 					{shareBaselineTrustSQL, nil, 1, ""},
 					{shareExportFinishBaselineSQL, []driver.Value{int64(3)}, 1, "finish-failed"},
 					{shareWatermarkMirrorSQL, []driver.Value{"task"}, 1, ""},
-					{shareBaselineAuditSQL, []driver.Value{baselineAuditArgument{}}, 1, "audit-failed"},
+					{shareBaselineAuditSQL, []driver.Value{baselineAuditArgument{allowance: allowance, attestation: attestation, earliest: started}}, 1, "audit-failed"},
 				}
 				for _, step := range steps {
 					expectation := mock.ExpectExec(regexp.QuoteMeta(step.query)).WithArgs(step.args...)
@@ -170,6 +211,13 @@ func TestShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T) {
 			}
 			if err := mock.ExpectationsWereMet(); err != nil {
 				test.Fatal(err)
+			}
+			if allowance > 0 && scenario == "success" {
+				if warning.beforeCommit != nil || !strings.Contains(warning.String(), "[WARN]") || !strings.Contains(warning.String(), "manual_baseline_benign_allowance") || !strings.Contains(warning.String(), "allowance_count=68") {
+					test.Fatalf("missing post-commit allowance WARN: %q premature=%v", warning.String(), warning.beforeCommit)
+				}
+			} else if warning.Len() != 0 {
+				test.Fatalf("failure, ready no-op or default must not log allowance: %q", warning.String())
 			}
 		})
 	}

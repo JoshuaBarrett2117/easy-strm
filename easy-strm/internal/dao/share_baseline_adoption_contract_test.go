@@ -7,11 +7,16 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"strings"
 	"testing"
+	"time"
 )
 
-type baselineAuditArgument struct{}
+type baselineAuditArgument struct {
+	allowance   int
+	attestation string
+	earliest    time.Time
+}
 
-func (baselineAuditArgument) Match(value driver.Value) bool {
+func (argument baselineAuditArgument) Match(value driver.Value) bool {
 	text, ok := value.(string)
 	if !ok {
 		return false
@@ -24,7 +29,39 @@ func (baselineAuditArgument) Match(value driver.Value) bool {
 	if !ok {
 		return false
 	}
-	return receipt["task_id"] == "task" && receipt["confirmed_by"] == float64(1) && receipt["confirmed_at"] != nil && request["manual_confirmation"] == "人工确认采纳" && request["reason"] == "独立核验后确认" && request["dba_attestation"] == "DBA-review-42" && request["expected"] != nil
+	confirmedAt, ok := receipt["confirmed_at"].(string)
+	if !ok {
+		return false
+	}
+	confirmedTime, err := time.Parse(time.RFC3339Nano, confirmedAt)
+	if err != nil || confirmedTime.IsZero() || confirmedTime.Before(argument.earliest) || confirmedTime.After(time.Now().UTC()) {
+		return false
+	}
+	return receipt["task_id"] == "task" && receipt["confirmed_by"] == float64(1) && request["manual_confirmation"] == "人工确认采纳" && request["reason"] == "独立核验后确认" && request["dba_attestation"] == "DBA-review-42" && request["expected"] != nil && request["allow_known_benign_invalid"] == float64(argument.allowance) && request["benign_attestation"] == argument.attestation
+}
+
+func TestShareBaselineAdoptionBenignRecheckSQLContract(test *testing.T) {
+	predicate := " AND (mapping.payload->>'media_id')::integer=live.id"
+	if strings.Count(shareBaselineCountsSQL, predicate) != 1 || shareBaselineBenignCountsSQL != strings.Replace(shareBaselineCountsSQL, predicate, "", 1) {
+		test.Fatal("benign recheck must omit ONLY the live MediaID equality predicate")
+	}
+	for _, fragment := range []string{
+		"s.stable_relative_path=''", "s.stable_relative_path LIKE '/%'", `s.stable_relative_path ~ '(^|/)\.\.(/|$)'`,
+		"output.owner_key='share:default'", "output.export_key=s.media_item_key", "output.state='active'",
+		"mapping.id::text=output.share_strm_id", "output.export_key IS NULL", "output.output_path<>rtrim($1,'/')||'/'||s.stable_relative_path",
+		"COALESCE(mapping.payload->>'file_name','')=''", "COALESCE(mapping.payload->>'media_id','')=''", "COALESCE(mapping.payload->>'share_code','')=''",
+		"(COALESCE(mapping.payload->>'file_id','')='' AND COALESCE(mapping.payload->>'file_path','')='')",
+		"NOT EXISTS(SELECT 1 FROM t_share_media WHERE id=(mapping.payload->>'media_id')::integer)",
+		shareSelectionLiveJoin, shareSelectionLivePredicate, "i.candidate_id=s.selected_candidate_id", "i.work_key=s.work_key",
+		"i.season_number=s.season_number", "i.episode_number=s.episode_number", "revision<acked_revision", "work_key=''", "scope<>'baseline'",
+		"output_path=''", "COALESCE(share_strm_id,'')=''", "content_fingerprint=''", "mapping_fingerprint=''",
+		"m.media_type IS NULL", "m.media_type NOT IN ('movie','tv')", "s.work_key=m.work_key", "e.file_id=f.id",
+		"s.season_number=e.season_number", "s.episode_number=e.episode_number",
+	} {
+		if !strings.Contains(shareBaselineBenignCountsSQL, fragment) {
+			test.Fatalf("benign recheck weakened strict predicate: %s", fragment)
+		}
+	}
 }
 
 func TestShareBaselineAdoptionCheckpointAndLockSQLContract(test *testing.T) {
