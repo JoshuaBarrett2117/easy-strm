@@ -6,7 +6,7 @@ import (
 )
 
 func TestShareBaselineAdoptionRetainsAllLiveContributorKeys(test *testing.T) {
-	for _, fragment := range []string{"LEFT JOIN LATERAL", "f.available AND NOT r.share_cancelled AND f.status='identified'", "s.work_key=m.work_key", "e.file_id=f.id AND e.season_number=s.season_number AND e.episode_number=s.episode_number"} {
+	for _, fragment := range []string{"episode_set AS MATERIALIZED", "f.available AND NOT r.share_cancelled AND f.status='identified'", "s.work_key=f.work_key", "s.season_number=e.season_number AND s.episode_number=e.episode_number", "UNION ALL", "ORDER BY s.media_item_key"} {
 		if !strings.Contains(shareBaselineSourcesSQL, fragment) {
 			test.Fatalf("adoption must checkpoint every live source's represented media items, not only selected candidates: missing %s", fragment)
 		}

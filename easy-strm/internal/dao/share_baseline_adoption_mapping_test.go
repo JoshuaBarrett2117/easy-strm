@@ -78,16 +78,16 @@ func TestShareBaselineAdoptionSelectedMappingIdentity(test *testing.T) {
 			request.Expected["selection_count"], request.Expected["output_count"] = 1, 1
 			mock.ExpectBegin()
 			mock.ExpectQuery(regexp.QuoteMeta(shareBaselineCountsSQL)).WithArgs(request.ExpectedOutputPath).WillReturnRows(sqlmock.NewRows([]string{"selection", "output", "pending", "dirty_sum", "selection_sum", "invalid"}).AddRow(1, 1, 1, 2, 2, 0))
-			query := mock.ExpectQuery(`(?s)^SELECT .*mapping\.payload.*FROM t_share_media_selection s.*i.candidate_id=s.selected_candidate_id`)
+			query := mock.ExpectQuery(regexp.QuoteMeta(shareBaselineMappingsSQL))
 			failure := errors.New("isolated mapping read failure")
 			if scenario == "query-failed" {
 				query.WillReturnError(failure)
 			} else {
-				rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload"})
+				rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload", "multiplicity"})
 				if scenario == "scan-failed" {
-					rows.AddRow("invalid-source-id", source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, raw)
+					rows.AddRow("invalid-source-id", source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, raw, 1)
 				} else if scenario != "missing-row" {
-					rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, raw)
+					rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, raw, 1)
 				}
 				if scenario == "rows-failed" {
 					rows.RowError(0, failure)

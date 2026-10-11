@@ -4,12 +4,14 @@ package domain
 const ShareBaselineBenignInvalidHardCap = 200
 
 // ShareBaselineAdoptionRequest 接受人工确认、独立核验引用和完整快照护栏；良性放行默认关闭，不包含凭据。
+// TimeoutMinutes 省略或 null 时采用系统配置（缺省20分钟），0为无限制，允许范围为0至43200。
 type ShareBaselineAdoptionRequest struct {
 	ManualConfirmation      string           `json:"manual_confirmation"`
 	Reason                  string           `json:"reason"`
 	DBAAttestation          string           `json:"dba_attestation"`
 	AllowKnownBenignInvalid int              `json:"allow_known_benign_invalid"`
 	BenignAttestation       string           `json:"benign_attestation"`
+	TimeoutMinutes          *int             `json:"timeout_minutes,omitempty"`
 	ExpectedOutputPath      string           `json:"expected_output_path"`
 	Expected                map[string]int64 `json:"expected"`
 	ActorUserID             int              `json:"-"`

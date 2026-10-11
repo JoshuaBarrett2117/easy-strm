@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
@@ -23,6 +23,11 @@ type ShareBaselineAdoptionStore interface {
 
 // ValidateShareBaselineAdoption 要求逐项明确的快照护栏、确认短语和 DBA 核验引用。
 func ValidateShareBaselineAdoption(request domain.ShareBaselineAdoptionRequest) error {
+	if request.TimeoutMinutes != nil {
+		if err := validateShareBaselineTimeout(*request.TimeoutMinutes); err != nil {
+			return err
+		}
+	}
 	if request.ManualConfirmation != "人工确认采纳" || strings.TrimSpace(request.Reason) == "" || strings.TrimSpace(request.DBAAttestation) == "" || len(request.Reason) > 2000 || len(request.DBAAttestation) > 500 {
 		return fmt.Errorf("必须明确填写人工确认采纳、理由及 DBA 独立核验引用（理由≤2000字节，引用≤500字节）")
 	}
@@ -98,6 +103,14 @@ func (exporter *ShareStrmService) StartBaselineAdoptionContext(parent context.Co
 }
 
 func (exporter *ShareStrmService) startBaselineAdoptionContext(parent context.Context, request domain.ShareBaselineAdoptionRequest, store ShareBaselineAdoptionStore) (string, error) {
+	minutes, err := exporter.baselineAdoptionTimeout(parent, request)
+	if err != nil {
+		return "", err
+	}
+	if request.TimeoutMinutes != nil {
+		override := *request.TimeoutMinutes
+		request.TimeoutMinutes = &override
+	}
 	expected := make(map[string]int64, len(request.Expected))
 	for key, value := range request.Expected {
 		expected[key] = value
@@ -112,12 +125,12 @@ func (exporter *ShareStrmService) startBaselineAdoptionContext(parent context.Co
 	if err = exporter.tasks.CreateContext(parent, id, "share_baseline_adopt", "人工确认采纳分享 STRM 基线"); err != nil {
 		return "", err
 	}
-	metadata := map[string]interface{}{"manual_confirmation": "人工确认采纳", "adoption_request": request, "confirmed_by": request.ActorUserID}
+	metadata := map[string]interface{}{"manual_confirmation": "人工确认采纳", "adoption_request": request, "confirmed_by": request.ActorUserID, "timeout_minutes": minutes}
 	if err = exporter.tasks.UpdateMetadataContext(parent, id, metadata); err != nil {
 		_ = exporter.tasks.SetErrorContext(parent, id, err.Error())
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(parent, 5*time.Minute)
+	ctx, cancel := newShareTaskContext(parent, minutes)
 	var finalizationMutex sync.Mutex
 	finalizing := false
 	exporter.tasks.RegisterCancelGuard(id, func() error {
@@ -184,4 +197,55 @@ func (exporter *ShareStrmService) startBaselineAdoptionContext(parent context.Co
 		}
 	}()
 	return id, nil
+}
+
+const shareBaselineTimeoutKey = "share_strm_baseline_adoption_timeout_minutes"
+const defaultShareBaselineTimeoutMinutes = 20
+const maxShareBaselineTimeoutMinutes = 43200
+
+func validateShareBaselineTimeout(minutes int) error {
+	if minutes < 0 || minutes > maxShareBaselineTimeoutMinutes {
+		return fmt.Errorf("人工采纳 timeout_minutes 需为0至43200的整数；0表示不设总时限")
+	}
+	return nil
+}
+
+func (exporter *ShareStrmService) baselineAdoptionTimeout(ctx context.Context, request domain.ShareBaselineAdoptionRequest) (int, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	minutes := defaultShareBaselineTimeoutMinutes
+	if request.TimeoutMinutes != nil {
+		minutes = *request.TimeoutMinutes
+	} else if exporter.settings != nil {
+		value, present, err := exporter.readBaselineTimeoutSetting(ctx)
+		if err != nil {
+			return 0, err
+		}
+		if present {
+			minutes, err = strconv.Atoi(value)
+			if err != nil {
+				return 0, fmt.Errorf("人工采纳超时配置无效：%w", err)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	return minutes, validateShareBaselineTimeout(minutes)
+}
+
+func (exporter *ShareStrmService) readBaselineTimeoutSetting(ctx context.Context) (string, bool, error) {
+	if reader, supported := exporter.settings.(interface {
+		GetHotConfigs(context.Context, ...string) (map[string]string, error)
+	}); supported {
+		values, err := reader.GetHotConfigs(ctx, shareBaselineTimeoutKey)
+		value, present := values[shareBaselineTimeoutKey]
+		return value, present, err
+	}
+	row, err := exporter.settings.GetByKey(shareBaselineTimeoutKey)
+	if row == nil || err != nil {
+		return "", false, err
+	}
+	return row.ConfigVal, true, nil
 }

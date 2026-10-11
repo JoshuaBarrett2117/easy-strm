@@ -27,7 +27,7 @@ func baselineAllowanceRequest(test *testing.T, requested int, attestation string
 }
 
 func baselineAllowanceRecheckSQL() string {
-	return strings.Replace(shareBaselineCountsSQL, " AND (mapping.payload->>'media_id')::integer=live.id", "", 1)
+	return strings.Replace(shareBaselineCountsSQL, shareBaselineMediaIDMatchSQL, "", 1)
 }
 
 func TestShareBaselineAdoptionBenignAllowanceCounts(test *testing.T) {
@@ -110,7 +110,7 @@ func TestShareBaselineAdoptionBenignAllowanceCounts(test *testing.T) {
 					query.WillReturnRows(sqlmock.NewRows([]string{"selection", "output", "pending", "dirty_sum", "selection_sum", "invalid"}).AddRow(selection, output, 1, 2, selection, remaining))
 				}
 				if remaining == 0 && !strings.HasPrefix(scenario.name, "recheck-") {
-					rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload"})
+					rows := sqlmock.NewRows([]string{"source_id", "file_name", "file_id", "media_id", "url", "password", "mapping_id", "payload", "multiplicity"})
 					differences := scenario.requested
 					if scenario.name == "difference-under" {
 						differences--
@@ -152,7 +152,7 @@ func TestShareBaselineAdoptionBenignAllowanceCounts(test *testing.T) {
 						if err != nil {
 							test.Fatal(err)
 						}
-						rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, payload)
+						rows.AddRow(source.ID, source.FileName, source.RemoteFileID, source.MediaID, source.URL, source.Password, mappingID, payload, 1)
 					}
 					mock.ExpectQuery(regexp.QuoteMeta(shareBaselineMappingsSQL)).WillReturnRows(rows)
 				}

@@ -22,57 +22,120 @@ const shareBaselineTablesLockSQL = `LOCK TABLE t_share_media_file,t_share_media_
  IN SHARE ROW EXCLUSIVE MODE NOWAIT`
 const shareBaselineConsumerSQL = `SELECT config_revision,prepared_revision,completed_revision,config_fingerprint,baseline_state,protocol_version,legacy_outputs_reconciled FROM t_share_export_consumer WHERE consumer='share:default' FOR UPDATE NOWAIT`
 
-const shareBaselineCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineMediaIDMatchSQL + shareBaselineCountsSuffixSQL
-const shareBaselineBenignCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineCountsSuffixSQL
-const shareBaselineMediaIDMatchSQL = ` AND (mapping.payload->>'media_id')::integer=live.id`
-const shareBaselineCountsPrefixSQL = `SELECT
+const shareBaselineEpisodeExistsSQL = `EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id AND e.season_number=i.season_number AND e.episode_number=i.episode_number)`
+
+var shareBaselineLivePredicate = strings.Replace(shareSelectionLivePredicate, shareBaselineEpisodeExistsSQL, `e.file_id IS NOT NULL`, 1)
+
+const shareBaselineEpisodeSetSQL = `episode_set AS MATERIALIZED (
+ SELECT DISTINCT file_id,season_number,episode_number FROM t_share_media_file_episode
+)`
+
+const shareBaselineOwnedOutputsSQL = `owned_outputs AS MATERIALIZED (
+ SELECT output.owner_key,output.export_key,output.state,output.output_path,output.share_strm_id,mapping.id mapping_id,mapping.payload
+ FROM t_strm_export_state output LEFT JOIN t_share_strm mapping
+ ON mapping.id=CASE WHEN output.share_strm_id ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN output.share_strm_id::uuid END
+ AND mapping.id::text=output.share_strm_id
+ WHERE output.owner_key='share:default' AND output.state='active'
+)`
+
+var shareBaselineLiveRowsSQL = shareBaselineEpisodeSetSQL + `, candidate_keys AS MATERIALIZED (
+ SELECT DISTINCT selected_candidate_id FROM t_share_media_selection
+), live_rows AS MATERIALIZED (
+ SELECT i.candidate_id,i.work_key,i.season_number,i.episode_number,f.id source_id,live.id,f.file_name,f.file_id,f.media_id,r.url,r.password` + shareSelectionLiveJoin + `
+ JOIN candidate_keys selected ON selected.selected_candidate_id=i.candidate_id
+ LEFT JOIN episode_set e ON e.file_id=f.id AND e.season_number=i.season_number AND e.episode_number=i.episode_number
+ WHERE ` + shareBaselineLivePredicate + `
+)`
+
+var shareBaselineCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineMediaIDMatchSQL + shareBaselineCountsSuffixSQL
+var shareBaselineBenignCountsSQL = shareBaselineCountsPrefixSQL + shareBaselineCountsSuffixSQL
+
+const shareBaselineMediaIDMatchSQL = ` AND mapping.payload_media_id=live.id`
+
+var shareBaselineCountsPrefixSQL = `WITH ` + shareBaselineLiveRowsSQL + `, ` + shareBaselineOwnedOutputsSQL + `, selection_items AS MATERIALIZED (
+ SELECT DISTINCT work_key,season_number,episode_number FROM t_share_media_selection
+), eligible_sources AS MATERIALIZED (
+ SELECT f.id,m.work_key,m.media_type FROM t_share_media_file f
+ JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record r ON r.id=f.share_id
+ WHERE f.available AND NOT r.share_cancelled AND f.status='identified'
+), episode_files AS MATERIALIZED (
+ SELECT DISTINCT file_id FROM episode_set
+), uncovered_episode_files AS MATERIALIZED (
+ SELECT DISTINCT e.file_id FROM eligible_sources m JOIN episode_set e ON e.file_id=m.id
+ LEFT JOIN selection_items s ON s.work_key=m.work_key AND s.season_number=e.season_number AND s.episode_number=e.episode_number
+ WHERE s.work_key IS NULL
+), selection_outputs AS (
+ SELECT s.selected_candidate_id,s.work_key,s.season_number,s.episode_number,output.mapping_id,output.payload,
+ (s.stable_relative_path='' OR s.stable_relative_path LIKE '/%' OR s.stable_relative_path ~ '(^|/)\.\.(/|$)'
+ OR output.export_key IS NULL OR output.output_path<>rtrim($1,'/')||'/'||s.stable_relative_path
+ OR COALESCE(output.payload->>'file_name','')='' OR COALESCE(output.payload->>'media_id','')='' OR COALESCE(output.payload->>'share_code','')=''
+ OR (COALESCE(output.payload->>'file_id','')='' AND COALESCE(output.payload->>'file_path','')='')) invalid_basic
+ FROM t_share_media_selection s
+ LEFT JOIN owned_outputs output ON output.owner_key='share:default' AND output.export_key=s.media_item_key AND output.state='active'
+), checked_outputs AS MATERIALIZED (
+ SELECT selected_candidate_id,work_key,season_number,episode_number,mapping_id,invalid_basic,
+ CASE WHEN invalid_basic IS TRUE THEN NULL ELSE (payload->>'media_id')::integer END payload_media_id
+ FROM selection_outputs
+), live_matches AS MATERIALIZED (
+ SELECT DISTINCT mapping.selected_candidate_id,mapping.work_key,mapping.season_number,mapping.episode_number,mapping.mapping_id
+ FROM checked_outputs mapping
+ JOIN live_rows live ON live.candidate_id=mapping.selected_candidate_id AND live.work_key=mapping.work_key
+ AND live.season_number=mapping.season_number AND live.episode_number=mapping.episode_number
+ WHERE true`
+
+const shareBaselineCountsSuffixSQL = `)
+SELECT
  (SELECT count(*) FROM t_share_media_selection),
  (SELECT count(*) FROM t_strm_export_state WHERE owner_key='share:default' AND state='active'),
  (SELECT count(*) FROM t_share_export_dirty_work WHERE revision>acked_revision),
  (SELECT COALESCE(sum(revision),0) FROM t_share_export_dirty_work),
  (SELECT COALESCE(sum(selection_revision),0) FROM t_share_media_selection),
- (SELECT count(*) FROM t_share_media_selection s LEFT JOIN t_strm_export_state output
- ON output.owner_key='share:default' AND output.export_key=s.media_item_key AND output.state='active'
- LEFT JOIN t_share_strm mapping ON mapping.id::text=output.share_strm_id
- WHERE s.stable_relative_path='' OR s.stable_relative_path LIKE '/%' OR s.stable_relative_path ~ '(^|/)\.\.(/|$)'
- OR output.export_key IS NULL OR output.output_path<>rtrim($1,'/')||'/'||s.stable_relative_path
- OR COALESCE(mapping.payload->>'file_name','')='' OR COALESCE(mapping.payload->>'media_id','')='' OR COALESCE(mapping.payload->>'share_code','')=''
- OR (COALESCE(mapping.payload->>'file_id','')='' AND COALESCE(mapping.payload->>'file_path','')='')
- OR NOT EXISTS(SELECT 1 FROM t_share_media WHERE id=(mapping.payload->>'media_id')::integer)
- OR NOT EXISTS(SELECT 1` + shareSelectionLiveJoin + ` WHERE i.candidate_id=s.selected_candidate_id
- AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
-`
-const shareBaselineCountsSuffixSQL = ` AND ` + shareSelectionLivePredicate + `))
+ (SELECT count(*) FROM checked_outputs s
+ LEFT JOIN t_share_media referenced ON referenced.id=s.payload_media_id
+ LEFT JOIN live_matches matched ON matched.selected_candidate_id=s.selected_candidate_id AND matched.work_key=s.work_key
+ AND matched.season_number=s.season_number AND matched.episode_number=s.episode_number AND matched.mapping_id=s.mapping_id
+ WHERE s.invalid_basic OR referenced.id IS NULL OR matched.mapping_id IS NULL)
  + (SELECT count(*) FROM t_share_export_dirty_work WHERE revision<acked_revision OR work_key='' OR (revision>acked_revision AND scope<>'baseline'))
  + (SELECT count(*) FROM t_strm_export_state WHERE owner_key='share:default' AND state='active' AND (output_path='' OR COALESCE(share_strm_id,'')='' OR content_fingerprint='' OR mapping_fingerprint=''))
- + (SELECT count(*) FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record r ON r.id=f.share_id
- WHERE f.available AND NOT r.share_cancelled AND f.status='identified' AND
- (m.media_type IS NULL OR m.media_type NOT IN ('movie','tv')
- OR (m.media_type='movie' AND NOT EXISTS(SELECT 1 FROM t_share_media_selection s WHERE s.work_key=m.work_key AND s.season_number=0 AND s.episode_number=0))
- OR (m.media_type='tv' AND (NOT EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id)
- OR EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id AND NOT EXISTS(
- SELECT 1 FROM t_share_media_selection s WHERE s.work_key=m.work_key AND s.season_number=e.season_number AND s.episode_number=e.episode_number))))))`
+ + (SELECT count(*) FROM eligible_sources m
+ LEFT JOIN selection_items s ON s.work_key=m.work_key AND s.season_number=0 AND s.episode_number=0
+ LEFT JOIN episode_files episodes ON episodes.file_id=m.id
+ LEFT JOIN uncovered_episode_files uncovered ON uncovered.file_id=m.id
+ WHERE m.media_type IS NULL OR m.media_type NOT IN ('movie','tv')
+ OR (m.media_type='movie' AND s.work_key IS NULL)
+ OR (m.media_type='tv' AND (episodes.file_id IS NULL OR uncovered.file_id IS NOT NULL)))`
 
-const shareBaselineMappingsSQL = `SELECT selected.id,selected.file_name,selected.file_id,selected.media_id,selected.url,selected.password,mapping.id::text,mapping.payload
+var shareBaselineMappingsSQL = `WITH ` + shareBaselineLiveRowsSQL + `, ` + shareBaselineOwnedOutputsSQL + `
+ SELECT live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id::text,output.payload,count(*) multiplicity
  FROM t_share_media_selection s
- JOIN t_strm_export_state output ON output.owner_key='share:default' AND output.export_key=s.media_item_key AND output.state='active'
- JOIN t_share_strm mapping ON mapping.id::text=output.share_strm_id
- JOIN LATERAL (SELECT f.id,f.file_name,f.file_id,f.media_id,r.url,r.password` + shareSelectionLiveJoin + `
- WHERE i.candidate_id=s.selected_candidate_id AND i.work_key=s.work_key
- AND i.season_number=s.season_number AND i.episode_number=s.episode_number
- AND ` + shareSelectionLivePredicate + `) selected ON true`
+ JOIN owned_outputs output ON output.owner_key='share:default' AND output.export_key=s.media_item_key AND output.state='active'
+ JOIN live_rows live ON live.candidate_id=s.selected_candidate_id AND live.work_key=s.work_key
+ AND live.season_number=s.season_number AND live.episode_number=s.episode_number
+ WHERE output.mapping_id IS NOT NULL
+ GROUP BY live.source_id,live.file_name,live.file_id,live.media_id,live.url,live.password,output.mapping_id,output.payload`
 
-const shareBaselineSourcesSQL = `INSERT INTO t_share_export_source_state AS source
- (source_file_id,share_id,media_id,work_key,file_version,share_version,available,cancelled,episode_sig,export_keys,last_seen_run_id,state)
- SELECT f.id,f.share_id,f.media_id,m.work_key,f.version,r.version,f.available,r.share_cancelled,
- COALESCE((SELECT string_agg(e.season_number::text||':'||e.episode_number::text,',' ORDER BY e.season_number,e.episode_number) FROM t_share_media_file_episode e WHERE e.file_id=f.id),''),
- COALESCE(keys.export_keys,'[]'::jsonb),$1,CASE WHEN f.available AND NOT r.share_cancelled AND f.status='identified' THEN 'active' ELSE 'stale' END
+const shareBaselineSourcesSQL = `WITH ` + shareBaselineEpisodeSetSQL + `, episode_signatures AS MATERIALIZED (
+ SELECT e.file_id,string_agg(e.season_number::text||':'||e.episode_number::text,',' ORDER BY e.season_number,e.episode_number) episode_sig
+ FROM t_share_media_file_episode e GROUP BY e.file_id
+), sources AS MATERIALIZED (
+ SELECT f.id,f.share_id,f.media_id,m.work_key,m.media_type,f.version file_version,r.version share_version,f.available,r.share_cancelled,
+ f.available AND NOT r.share_cancelled AND f.status='identified' active
  FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record r ON r.id=f.share_id
- LEFT JOIN LATERAL (SELECT jsonb_agg(s.media_item_key ORDER BY s.media_item_key) export_keys
- FROM t_share_media_selection s WHERE f.available AND NOT r.share_cancelled AND f.status='identified' AND s.work_key=m.work_key
- AND ((m.media_type='movie' AND s.season_number=0 AND s.episode_number=0)
- OR (m.media_type='tv' AND EXISTS(SELECT 1 FROM t_share_media_file_episode e
- WHERE e.file_id=f.id AND e.season_number=s.season_number AND e.episode_number=s.episode_number)))) keys ON true
+), source_items AS MATERIALIZED (
+ SELECT f.id,s.media_item_key FROM sources f JOIN t_share_media_selection s ON s.work_key=f.work_key
+ AND s.season_number=0 AND s.episode_number=0 WHERE f.active AND f.media_type='movie'
+ UNION ALL
+ SELECT f.id,s.media_item_key FROM sources f JOIN episode_set e ON e.file_id=f.id
+ JOIN t_share_media_selection s ON s.work_key=f.work_key AND s.season_number=e.season_number AND s.episode_number=e.episode_number
+ WHERE f.active AND f.media_type='tv'
+), source_keys AS MATERIALIZED (
+ SELECT s.id,jsonb_agg(s.media_item_key ORDER BY s.media_item_key) export_keys FROM source_items s GROUP BY s.id
+)
+INSERT INTO t_share_export_source_state AS source
+ (source_file_id,share_id,media_id,work_key,file_version,share_version,available,cancelled,episode_sig,export_keys,last_seen_run_id,state)
+ SELECT f.id,f.share_id,f.media_id,f.work_key,f.file_version,f.share_version,f.available,f.share_cancelled,
+ COALESCE(episodes.episode_sig,''),COALESCE(keys.export_keys,'[]'::jsonb),$1,CASE WHEN f.active THEN 'active' ELSE 'stale' END
+ FROM sources f LEFT JOIN episode_signatures episodes ON episodes.file_id=f.id LEFT JOIN source_keys keys ON keys.id=f.id
  ORDER BY f.id` + shareExportSourcesConflictSQL
 const shareBaselineStaleSourcesSQL = `UPDATE t_share_export_source_state source SET state='stale',last_seen_run_id=$1,updated_at=now()
  WHERE NOT EXISTS(SELECT 1 FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record r ON r.id=f.share_id WHERE f.id=source.source_file_id)`
@@ -264,8 +327,12 @@ func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, exp
 		var source domain.ShareStrmSource
 		var mappingID string
 		var payload []byte
-		if err := rows.Scan(&source.ID, &source.FileName, &source.RemoteFileID, &source.MediaID, &source.URL, &source.Password, &mappingID, &payload); err != nil {
+		var multiplicity int64
+		if err := rows.Scan(&source.ID, &source.FileName, &source.RemoteFileID, &source.MediaID, &source.URL, &source.Password, &mappingID, &payload, &multiplicity); err != nil {
 			return err
+		}
+		if multiplicity <= 0 || multiplicity > expectedCount-count {
+			return fmt.Errorf("采纳映射覆盖数量异常：已验证=%d 本组=%d 预期=%d", count, multiplicity, expectedCount)
 		}
 		expected, err := domain.BuildShareStrmEntry(source)
 		if err != nil {
@@ -281,9 +348,9 @@ func validateShareBaselineMappings(ctx context.Context, transaction *sql.Tx, exp
 			return fmt.Errorf("采纳映射与选中来源 %d 不一致；保留现有输出，请重新独立核验", source.ID)
 		}
 		if actual.MediaID != expected.MediaID {
-			mediaIDDifferences++
+			mediaIDDifferences += multiplicity
 		}
-		count++
+		count += multiplicity
 	}
 	if err := rows.Err(); err != nil {
 		return err

@@ -34,6 +34,14 @@ func TestShareBaselineAdoptionController(test *testing.T) {
 		failure              bool
 	}{
 		{"success", valid, 42, 200, 1, false},
+		{"timeout-zero", strings.Replace(valid, `"reason":`, `"timeout_minutes":0,"reason":`, 1), 42, 200, 1, false},
+		{"timeout-override", strings.Replace(valid, `"reason":`, `"timeout_minutes":7,"reason":`, 1), 42, 200, 1, false},
+		{"timeout-max", strings.Replace(valid, `"reason":`, `"timeout_minutes":43200,"reason":`, 1), 42, 200, 1, false},
+		{"timeout-negative", strings.Replace(valid, `"reason":`, `"timeout_minutes":-1,"reason":`, 1), 42, 400, 0, false},
+		{"timeout-over-max", strings.Replace(valid, `"reason":`, `"timeout_minutes":43201,"reason":`, 1), 42, 400, 0, false},
+		{"timeout-fraction", strings.Replace(valid, `"reason":`, `"timeout_minutes":7.5,"reason":`, 1), 42, 400, 0, false},
+		{"timeout-string", strings.Replace(valid, `"reason":`, `"timeout_minutes":"7","reason":`, 1), 42, 400, 0, false},
+		{"timeout-overflow", strings.Replace(valid, `"reason":`, `"timeout_minutes":9223372036854775808,"reason":`, 1), 42, 400, 0, false},
 		{"benign", benign, 42, 200, 1, false},
 		{"benign-unauthenticated", benign, 0, 401, 0, false},
 		{"fractional-allowance", strings.Replace(benign, `"allow_known_benign_invalid":68`, `"allow_known_benign_invalid":68.5`, 1), 42, 400, 0, false},
@@ -83,6 +91,12 @@ func TestShareBaselineAdoptionController(test *testing.T) {
 				}
 				if scenario.name == "success" && (stub.request.AllowKnownBenignInvalid != 0 || stub.request.BenignAttestation != "") {
 					test.Fatalf("allowance defaults altered: %+v", stub.request)
+				}
+				if scenario.name == "success" && stub.request.TimeoutMinutes != nil {
+					test.Fatal("absent timeout was not preserved")
+				}
+				if scenario.name == "timeout-zero" && (stub.request.TimeoutMinutes == nil || *stub.request.TimeoutMinutes != 0) {
+					test.Fatal("explicit zero timeout was not preserved")
 				}
 			}
 		})

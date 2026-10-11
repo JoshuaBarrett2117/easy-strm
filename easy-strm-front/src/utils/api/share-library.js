@@ -10,4 +10,5 @@ export const getLibraryStrmSettings = () => api.get('/media/share-library/strm/s
 export const saveLibraryStrmSettings = (data) => api.put('/media/share-library/strm/settings', data)
 export const exportLibraryStrm = (params) => api.post('/media/share-library/strm/export', null, { params })
 export const reexportLibraryWorks = (request) => api.post('/media/share-library/strm/export', request, { params: { mode: 'work_reexport' } })
+/** 人工采纳；timeout_minutes 可省略以使用系统配置（缺省20分钟），0不设总时限，最大43200。 */
 export const adoptLibraryStrmBaseline = (confirmation) => api.post('/media/share-library/strm/baseline/adopt', confirmation)
