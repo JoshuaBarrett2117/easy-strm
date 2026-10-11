@@ -63,6 +63,18 @@ func (c *ShareStrmController) SaveSettings(x *gin.Context) {
 
 // Export 提交筛选范围内全部作品的异步导出任务。
 func (c *ShareStrmController) Export(x *gin.Context) {
+	if modes, present := x.Request.URL.Query()["mode"]; present {
+		if len(modes) != 1 || modes[0] != "work_reexport" || len(x.Request.URL.Query()) != 1 {
+			ErrorResp(x, 400, "作品重导仅接受 mode=work_reexport，不接受混合筛选")
+			return
+		}
+		c.workReexport(x)
+		return
+	}
+	if x.Request.ContentLength != 0 {
+		ErrorResp(x, 400, "JSON 作品重导必须明确指定 mode=work_reexport")
+		return
+	}
 	var q domain.ShareLibraryQuery
 	if x.ShouldBindQuery(&q) != nil || service.ValidateLibraryQuery(&q) != nil {
 		ErrorResp(x, 400, "筛选参数无效")
@@ -82,6 +94,38 @@ func (c *ShareStrmController) Export(x *gin.Context) {
 		return
 	}
 	SuccessResp(x, gin.H{"task_id": id})
+}
+
+func (controller *ShareStrmController) workReexport(ctx *gin.Context) {
+	var request domain.ShareWorkReexportRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 32*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil || decoder.Decode(new(interface{})) != io.EOF {
+		ErrorResp(ctx, 400, "重导参数仅接受一个严格 JSON 对象")
+		return
+	}
+	request.ActorUserID = ctx.GetInt("userID")
+	if request.ActorUserID <= 0 {
+		ErrorResp(ctx, 401, "作品重导必须由认证用户触发")
+		return
+	}
+	if err := service.ValidateShareWorkReexport(request); err != nil {
+		ErrorResp(ctx, 400, err.Error())
+		return
+	}
+	action, ok := controller.s.(interface {
+		StartWorkReexportContext(context.Context, domain.ShareWorkReexportRequest) (string, error)
+	})
+	if !ok {
+		ErrorResp(ctx, 500, "作品重导任务服务未初始化")
+		return
+	}
+	id, err := action.StartWorkReexportContext(ctx.Request.Context(), request)
+	if err != nil {
+		ErrorResp(ctx, 400, err.Error())
+		return
+	}
+	SuccessResp(ctx, gin.H{"task_id": id, "mode": "work_reexport", "status": "submitted"})
 }
 
 // AdoptBaseline 只接受认证用户的显式人工确认，返回可轮询任务，不提供自动采纳入口。

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -403,6 +404,9 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 		if source.FileVersion != fresh.FileVersion || source.ShareVersion != fresh.ShareVersion || source.WorkKey != fresh.WorkKey {
 			return strmExportResult{Err: ErrShareUnitSkipped}
 		}
+		if _, strict := ctx.Value(shareWorkReexportGuardContext{}).(func(context.Context) error); strict && !reflect.DeepEqual(source, fresh) {
+			return strmExportResult{Err: dao.ErrShareExportChanged}
+		}
 		source = fresh
 		if !hasSelection {
 			conflicts, err := s.shareStrmConflicts(ctx, domain.ShareLibraryQuery{WorkKey: source.WorkKey})
@@ -433,6 +437,11 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 	entry, err := domain.BuildShareStrmEntry(source)
 	if err != nil {
 		return strmExportResult{Err: err}
+	}
+	if guard, ok := ctx.Value(shareWorkReexportGuardContext{}).(func(context.Context) error); ok {
+		if err := guard(ctx); err != nil {
+			return strmExportResult{Err: err}
+		}
 	}
 	if err := s.store.SaveStrmEntry(ctx, entry); err != nil {
 		return strmExportResult{Err: err}

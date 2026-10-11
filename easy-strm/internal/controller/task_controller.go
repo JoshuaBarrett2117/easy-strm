@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
@@ -161,6 +162,10 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 	taskType, _ := task["task_type"].(string)
 	metadata, _ := task["metadata"].(map[string]interface{})
 	handler, _ := metadata["cron_handler"].(string)
+	if metadata["requested_mode"] == "work_reexport" || strings.HasPrefix(taskID, "share_work_reexport_") {
+		ErrorResp(ctx, http.StatusBadRequest, "显式作品重导不能通用恢复，请重新核验并提交明确作品范围与配置护栏")
+		return
+	}
 	if domain.IsShareStrmCronHandler(handler) {
 		ErrorResp(ctx, http.StatusBadRequest, "分享库调度任务请等待下次调度，或在定时任务管理中手动触发；不会重放旧全量")
 		return

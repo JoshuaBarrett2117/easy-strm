@@ -376,6 +376,7 @@ const canCancel = computed(() => {
 
 const canResume = computed(() => {
   const t = task.value
+  if (t?.metadata?.requested_mode === 'work_reexport' || t?.task_id?.startsWith('share_work_reexport_')) return false
   if (isShareStrmCronTask(t)) return false
   if (!t || !['cancelled', 'failed', 'partial_success'].includes(t.status)) return false
   if (t.task_type === 'watch_auto_organize' || t.task_type === 'share_sync' || t.task_type === 'strm_generate') return true

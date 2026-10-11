@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -257,6 +258,9 @@ func (s *TaskService) ResumeContext(ctx context.Context, taskID string) error {
 		kind, _ := task["task_type"].(string)
 		metadata, _ := task["metadata"].(map[string]interface{})
 		handler, _ := metadata["cron_handler"].(string)
+		if metadata["requested_mode"] == "work_reexport" || strings.HasPrefix(taskID, "share_work_reexport_") {
+			return fmt.Errorf("显式作品重导不能通用恢复，请重新核验并提交明确作品范围与配置护栏")
+		}
 		if domain.IsShareStrmCronHandler(handler) {
 			return fmt.Errorf("分享库调度任务请等待下次调度，或在定时任务管理中手动触发")
 		}
