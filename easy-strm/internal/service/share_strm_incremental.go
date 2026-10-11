@@ -230,6 +230,8 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 	}
 	selectionPrepared, _ := ctx.Value(shareSelectionPreparedContext{}).(bool)
 	selectionSchemaChecked := selectionPrepared
+	selectionSynced := selectionPrepared
+	explicitFull, _ := ctx.Value(shareExplicitFullContext{}).(bool)
 	for {
 		if err = s.cancelled(ctx, id); err != nil {
 			return err
@@ -258,10 +260,11 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 					}
 					selectionSchemaChecked = true
 				}
-				roundStates, err = s.prepareSelectionRound(ctx, id, selections, batch)
+				roundStates, err = s.prepareSelectionRound(ctx, id, selections, batch, !explicitFull || !selectionSynced)
 				if err != nil {
 					return err
 				}
+				selectionSynced = true
 			}
 		}
 		for _, dirty := range batch {
@@ -336,7 +339,7 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 	return nil
 }
 
-func (s *ShareStrmIncrementalService) prepareSelectionRound(ctx context.Context, id string, selections shareSelectionExportStore, batch []domain.ShareExportDirty) (map[string][]domain.ShareExportSourceState, error) {
+func (s *ShareStrmIncrementalService) prepareSelectionRound(ctx context.Context, id string, selections shareSelectionExportStore, batch []domain.ShareExportDirty, syncNeeded bool) (map[string][]domain.ShareExportSourceState, error) {
 	// 同步前观察整页来源，防止后续作品在同步期间变化后被空输出确认；只保留本轮有界观察。
 	observed := make(map[string][]domain.ShareExportSourceState, len(batch))
 	for _, dirty := range batch {
@@ -352,9 +355,11 @@ func (s *ShareStrmIncrementalService) prepareSelectionRound(ctx context.Context,
 		}
 		observed[dirty.WorkKey] = states
 	}
-	// SQL 候选同步不解析手选；每轮仅执行一次全局同步，手选校验仍按待办作品隔离。
-	if err := s.exporter.syncSelectionWork(ctx, selections, ""); err != nil {
-		return nil, err
+	// 显式对账恢复仅在本次调用首次同步，普通增量仍按页同步；来源观察与逐作品手选校验不跳过。
+	if syncNeeded {
+		if err := s.exporter.syncSelectionWork(ctx, selections, ""); err != nil {
+			return nil, err
+		}
 	}
 	return observed, nil
 }
