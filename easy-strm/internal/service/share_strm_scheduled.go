@@ -31,9 +31,9 @@ func (s *ShareStrmService) updateExportMetadata(ctx context.Context, id string, 
 		for key, value := range metadata {
 			accumulated[key] = value
 		}
-		return s.tasks.UpdateMetadataContext(ctx, id, accumulated)
+		return s.tasks.UpdateMetadataContext(ctx, id, shareStrmMetricMetadata(accumulated))
 	}
-	return s.tasks.UpdateMetadataContext(ctx, id, metadata)
+	return s.tasks.UpdateMetadataContext(ctx, id, shareStrmMetricMetadata(metadata))
 }
 
 // NewShareStrmScheduledService 复用分享导出和检查点，构造过程不连接数据库或启动任务。
@@ -192,8 +192,9 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 		if err = s.full(ctx, input, id); err != nil {
 			return err
 		}
+		ctx = context.WithValue(ctx, shareSelectionPreparedContext{}, true)
 		if tasks := s.worker.exporter.tasks; tasks != nil {
-			if err = s.worker.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"phase": "consuming", "prepared_revision": input.ConfigRevision, "recovery": "全量已准备，按作品消费；中断后只恢复未完成待办"}); err != nil {
+			if err = s.worker.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"phase": "consuming", "full_export_completed": true, "prepared_revision": input.ConfigRevision, "recovery": "全量已准备，按作品消费；中断后只恢复未完成待办"}); err != nil {
 				return err
 			}
 		}

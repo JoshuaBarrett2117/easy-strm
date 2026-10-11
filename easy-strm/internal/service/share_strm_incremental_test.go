@@ -97,7 +97,7 @@ func (store *incrementalMemory) ObserveWork(_ context.Context, key string) ([]do
 	rows := []domain.ShareExportSourceState{}
 	for _, source := range store.fixture.store.sources {
 		if source.WorkKey == key {
-			rows = append(rows, domain.ShareExportSourceState{SourceFileID: source.ID, ShareID: source.ShareID, MediaID: source.MediaID, WorkKey: key, FileVersion: source.FileVersion, ShareVersion: source.ShareVersion, Available: true, State: "active"})
+			rows = append(rows, domain.ShareExportSourceState{SourceFileID: source.ID, ShareID: source.ShareID, MediaID: source.MediaID, WorkKey: key, FileVersion: source.FileVersion, ShareVersion: source.ShareVersion, Available: true, State: "active", EpisodeSignature: shareSourceEpisodeSignature(source)})
 		}
 	}
 	return rows, nil

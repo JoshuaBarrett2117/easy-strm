@@ -68,6 +68,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 		}); err != nil {
 			return err
 		}
+		ctx = context.WithValue(ctx, shareSelectionSchemaCheckedContext{}, true)
 		if len(q.FileIDs) > 0 {
 			if err := s.preparationStage(ctx, "selection-work-discovery", func(ctx context.Context, report sharePreparationReport) error {
 				prepared := map[string]bool{}

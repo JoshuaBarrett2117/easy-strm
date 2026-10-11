@@ -185,7 +185,7 @@ func TestShareStrmScheduledActualFullDiscoversOrphanAndDiskDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if metadata := task["metadata"].(map[string]interface{}); metadata["reconciliation_unseen_outputs"] != float64(1) || metadata["phase"] != "consuming" {
+	if metadata := task["metadata"].(map[string]interface{}); metadata["reconciliation_unseen_outputs"] != float64(1) || metadata["phase"] != "completed" || metadata["written"] != float64(1) || metadata["exported_files"] != float64(1) || metadata["consumption_written"] != float64(0) || task["processed_files"] != float64(1) {
 		t.Fatal(metadata)
 	}
 	var path string

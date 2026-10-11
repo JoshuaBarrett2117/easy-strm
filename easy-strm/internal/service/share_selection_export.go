@@ -21,12 +21,15 @@ type shareSelectionExportStore interface {
 	AnchorSelectionPath(context.Context, string, string) (string, error)
 }
 type shareSelectionReceiptContext struct{}
+type shareSelectionSchemaCheckedContext struct{}
 
 func (s *ShareStrmService) prepareSelectionWork(ctx context.Context, store shareSelectionExportStore, work string) error {
-	if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
-		return store.CheckSelectionSchema(ctx)
-	}); err != nil {
-		return err
+	if checked, _ := ctx.Value(shareSelectionSchemaCheckedContext{}).(bool); !checked {
+		if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
+			return store.CheckSelectionSchema(ctx)
+		}); err != nil {
+			return err
+		}
 	}
 	if err := s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
 		return store.SyncSelections(ctx, work)
