@@ -97,11 +97,11 @@ func TestShareWorkReexportScopeDAOReadOnlyParameterizedPreflight(test *testing.T
 		test.Fatal("范围预检必须只读且不能根据旧映射 payload 拒绝修复")
 	}
 	for _, required := range []string{
-		"unnest($1::text[],$2::bigint[],$3::text[],$4::text[],$5::text[])",
-		"COUNT(DISTINCT media_id)>1", "output.state='active' AND output.share_strm_id=target.mapping_id",
+		"unnest($1::text[],$2::bigint[],$3::text[],$4::text[],$5::text[],$9::text[])",
+		"old.share_strm_id AS old_mapping_id", "output.share_strm_id=target.old_mapping_id",
 		"output.state<>'missing' AND output.output_path=target.output_path",
-		"selection.work_key IS NULL OR NOT(selection.work_key=ANY($6::text[]))",
-		"file.id=candidate.source_file_id", "file.media_id IS DISTINCT FROM target.media_id",
+		"selection.work_key IS NULL", "btrim(selection.work_key)=''", "NOT(selection.work_key=ANY($6::text[]))",
+		"LEFT JOIN t_share_media_selection", "unprocessed_export_key", "GROUP BY kind,owner_key,export_key,work_key",
 		"selection.stable_relative_path=target.relative_path", "selection.media_item_key<>target.item_key",
 		"output.export_key<>target.item_key", "history.owner_key<>'share:default'", "file.strm_config_id<>-1",
 	} {
@@ -113,10 +113,16 @@ func TestShareWorkReexportScopeDAOReadOnlyParameterizedPreflight(test *testing.T
 		return mock.ExpectQuery(regexp.QuoteMeta(shareWorkReexportPreflightSQL)).WithArgs(
 			pq.Array([]string{"shared-mapping", "shared-mapping"}), pq.Array([]int64{99, 99}),
 			pq.Array([]string{"tv:1:1", "tv:1:2"}), pq.Array([]string{"/isolated/tv/one.strm", "/isolated/tv/two.strm"}),
-			pq.Array([]string{"tv/one.strm", "tv/two.strm"}), pq.Array(works))
+			pq.Array([]string{"tv/one.strm", "tv/two.strm"}), pq.Array(works), domain.ShareWorkReexportMaxReferences, pq.Array([]string{"", ""}), pq.Array([]string{domain.ShareWorkReexportMappingID("shared-mapping", "tv:1:1"), domain.ShareWorkReexportMappingID("shared-mapping", "tv:1:2")}))
 	}
 	for _, collision := range []bool{true, false} {
-		expectQuery().WillReturnRows(sqlmock.NewRows([]string{"collision"}).AddRow(collision))
+		rows := sqlmock.NewRows([]string{"total", "rejected", "work", "item", "reason"})
+		if collision {
+			rows.AddRow(4, 1, "missing-work", "tv:9:1", "outside_work_scope")
+		} else {
+			rows.AddRow(4, 0, "", "", "")
+		}
+		expectQuery().WillReturnRows(rows)
 		err = store.WorkReexportPreflight(context.Background(), "/isolated", works, entries, selections)
 		if (collision && !errors.Is(err, ErrShareExportChanged)) || (!collision && err != nil) {
 			test.Fatalf("共享多集不能被误判为一对一，冲突必须拒绝：collision=%v err=%v", collision, err)
@@ -127,7 +133,7 @@ func TestShareWorkReexportScopeDAOReadOnlyParameterizedPreflight(test *testing.T
 	if err = store.WorkReexportPreflight(context.Background(), "/isolated", works, entries, selections); !errors.Is(err, failure) {
 		test.Fatal(err)
 	}
-	expectQuery().WillReturnRows(sqlmock.NewRows([]string{"collision"}).AddRow("not-a-bool"))
+	expectQuery().WillReturnRows(sqlmock.NewRows([]string{"total", "rejected", "work", "item", "reason"}).AddRow("invalid", 0, "", "", ""))
 	if err = store.WorkReexportPreflight(context.Background(), "/isolated", works, entries, selections); err == nil {
 		test.Fatal("非法读取结果不能放行")
 	}

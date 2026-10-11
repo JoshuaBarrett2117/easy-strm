@@ -1,12 +1,16 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
 	"errors"
 	"fmt"
+	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -223,32 +227,25 @@ func (runner *shareWorkReexportRunner) run(ctx context.Context, request domain.S
 	if err = counts.WorkReexportPreflight(ctx, output.Root, request.WorkKeys, entries, selections); err != nil {
 		return result, err
 	}
+	for index := range result.Works {
+		result.Works[index].Status = "running"
+	}
+	if err = persist(ctx); err != nil {
+		return result, err
+	}
+	if err = runner.reexportMetadata(ctx, request, id, store, fingerprint, prepared, sources, output); err != nil {
+		for index := range result.Works {
+			result.Works[index].Status, result.Works[index].Error = "failed", err.Error()
+		}
+		return result, err
+	}
 	for index, values := range prepared {
 		workResult := &result.Works[index]
-		workResult.Status = "running"
-		if err = persist(ctx); err != nil {
-			return result, err
-		}
-		seen := map[string]bool{}
-		for _, value := range values {
-			source := sources[value.Selection.ItemKey]
-			err = runner.exportSelection(ctx, request, id, store, input, fingerprint, values, value, source, seen)
-			if err != nil {
-				err = fmt.Errorf("选择 %s 重导失败：%w", value.Selection.ItemKey, err)
-				workResult.Status, workResult.Error = "failed", err.Error()
-				return result, err
-			}
-			workResult.ProcessedRows++
-			result.ProcessedRows++
-			if err = persist(ctx); err != nil {
-				return result, err
-			}
-		}
-		workResult.Status = "completed"
+		workResult.Status, workResult.ProcessedRows = "completed", len(values)
+		result.ProcessedRows += len(values)
 		result.ProcessedWorks = append(result.ProcessedWorks, workResult.WorkKey)
 		result.ProcessedWorkCount++
 	}
-	result.Written = output.Added + output.Updated
 	return result, runner.cancelled(ctx, id)
 }
 
@@ -262,7 +259,44 @@ func (runner *shareWorkReexportRunner) cancelled(ctx context.Context, id string)
 	return nil
 }
 
-func (runner *shareWorkReexportRunner) exportSelection(ctx context.Context, request domain.ShareWorkReexportRequest, id string, store shareWorkReexportStore, input domain.ShareExportInput, fingerprint string, expectedWork []domain.ShareWorkReexportSelection, value domain.ShareWorkReexportSelection, source domain.ShareStrmSource, seen map[string]bool) error {
+func (runner *shareWorkReexportRunner) reexportMetadata(ctx context.Context, request domain.ShareWorkReexportRequest, id string, store shareWorkReexportStore, fingerprint string, prepared [][]domain.ShareWorkReexportSelection, sources map[string]domain.ShareStrmSource, output *StrmOutput) error {
+	targets := []dao.WorkReexportTarget{}
+	snapshots := []workReexportFile{}
+	resources := []shareResource{}
+	shares := []int{}
+	for _, values := range prepared {
+		for _, value := range values {
+			source := sources[value.Selection.ItemKey]
+			filename, err := NormalizeStrmOutputPath(filepath.Join(output.Root, value.Selection.RelativePath))
+			if err != nil || !output.contains(filename) {
+				return errors.Join(err, dao.ErrShareExportChanged)
+			}
+			file, err := readWorkReexportFile(filename)
+			if err != nil {
+				return err
+			}
+			targets = append(targets, dao.WorkReexportTarget{Selection: value.Selection, Source: source, URLMappingID: file.mapping})
+			snapshots = append(snapshots, file)
+			entry, err := domain.BuildShareStrmEntry(source)
+			if err != nil {
+				return err
+			}
+			shares = append(shares, source.ShareID)
+			resources = append(resources, shareResource{key: shareKey(source.ShareID)}, shareResource{key: fmt.Sprintf("share-config:%d", source.ShareID)}, shareResource{key: fileKey(source.ID), exclusive: true}, shareResource{key: "mapping-code:" + entry.ShareCode}, shareResource{key: "mapping:" + entry.ID, exclusive: true}, shareResource{key: "mapping:" + file.mapping, exclusive: true}, shareResource{key: "identity:" + value.Selection.ItemKey, exclusive: true}, shareResource{key: "path:" + filename, exclusive: true})
+		}
+	}
+	release, err := runner.exporter.Coordinator().acquire(ctx, shares, resources...)
+	if err != nil {
+		return err
+	}
+	defer release()
+	for _, snapshot := range snapshots {
+		unlock, err := output.Store.LockPath(ctx, snapshot.path)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+	}
 	guard := func(ctx context.Context) error {
 		if err := runner.cancelled(ctx, id); err != nil {
 			return err
@@ -275,83 +309,97 @@ func (runner *shareWorkReexportRunner) exportSelection(ctx context.Context, requ
 		if err != nil || current != fingerprint {
 			return errors.Join(err, dao.ErrShareExportChanged)
 		}
-		values, err := store.WorkReexportSelections(ctx, value.Selection.WorkKey)
-		if err != nil {
-			return err
-		}
-		if len(values) != len(expectedWork) {
-			return dao.ErrShareExportChanged
-		}
-		for index := range values {
-			values[index].Selection.ExportedRevision = expectedWork[index].Selection.ExportedRevision
-			if !reflect.DeepEqual(values[index], expectedWork[index]) {
+		for workIndex, expectedWork := range prepared {
+			values, err := store.WorkReexportSelections(ctx, request.WorkKeys[workIndex])
+			if err != nil {
+				return err
+			}
+			if len(values) != len(expectedWork) {
 				return dao.ErrShareExportChanged
 			}
-		}
-		for _, candidate := range values {
-			if candidate.Selection.ItemKey == value.Selection.ItemKey {
-				candidate.Selection.ExportedRevision = value.Selection.ExportedRevision
-				if !reflect.DeepEqual(candidate, value) {
+			for index, value := range values {
+				value.Selection.ExportedRevision = expectedWork[index].Selection.ExportedRevision
+				if !reflect.DeepEqual(value, expectedWork[index]) {
 					return dao.ErrShareExportChanged
 				}
 				fresh, err := store.GetStrmSource(ctx, value.SourceID)
 				if err != nil {
 					return err
 				}
-				if !reflect.DeepEqual(fresh, source) {
+				if !reflect.DeepEqual(fresh, sources[value.Selection.ItemKey]) {
 					return dao.ErrShareExportChanged
 				}
-				if err := validateWorkReexportSelection(value.Selection.WorkKey, value, fresh); err != nil {
-					return err
-				}
-				entry, err := domain.BuildShareStrmEntry(fresh)
-				if err != nil {
-					return err
-				}
-				counts := runner.checkpoints
-				output := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
-				if checkpoint, ok := counts.(*dao.ShareExportCheckpointDAO); ok {
-					counts = checkpoint.ForOutputConnection(output.Store.Conn)
-				}
-				return counts.WorkReexportPreflight(ctx, output.Root, request.WorkKeys, []domain.ShareStrmEntry{entry}, []domain.ShareSelection{value.Selection})
 			}
 		}
-		return dao.ErrShareExportChanged
+		return nil
 	}
 	if err := guard(ctx); err != nil {
 		return err
 	}
-	output := ctx.Value(shareExportOutputContext{}).(*StrmOutput)
-	ctx = context.WithValue(ctx, shareWorkReexportGuardContext{}, guard)
-	ctx = context.WithValue(ctx, shareSelectedItemContext{}, shareSelectedItem{selection: value.Selection, relative: value.Selection.RelativePath})
-	ctx = context.WithValue(ctx, shareSelectionReceiptContext{}, func(ctx context.Context, state dao.ExportState) error {
+	verify := func(ctx context.Context, receipts []dao.WorkReexportReceipt) error {
 		if err := guard(ctx); err != nil {
 			return err
 		}
-		return output.Store.SaveSelectionExport(ctx, state, value.Selection, value.Selection.RelativePath)
-	})
-	part := runner.exporter.exportLocalStrmSource(ctx, input.Settings, source, input.Categories, seen)
-	if part.Err != nil {
-		return part.Err
+		for index, receipt := range receipts {
+			file, err := readWorkReexportFile(snapshots[index].path)
+			if err != nil {
+				return err
+			}
+			if !os.SameFile(file.info, snapshots[index].info) || !file.info.ModTime().Equal(snapshots[index].info.ModTime()) || file.info.Mode() != snapshots[index].info.Mode() || !bytes.Equal(file.content, snapshots[index].content) || receipt.State.Path != file.path || receipt.State.Content != fmt.Sprintf("%x", sha256.Sum256(append([]byte(file.path+"\x00"), file.content...))) {
+				return fmt.Errorf("文件与旧 state 凭证不一致 export_key=%q：%w", receipt.State.Key, dao.ErrShareExportChanged)
+			}
+			if !sameWorkReexportFile(receipt.Mapping, receipt.Entry) || !sameWorkReexportFile(receipt.URLMapping, receipt.Entry) || receipt.URLMapping.ID != file.mapping {
+				return fmt.Errorf("旧 URL / mapping 与选中候选不是同一分享文件 export_key=%q：%w", receipt.State.Key, dao.ErrShareExportChanged)
+			}
+		}
+		return nil
 	}
-	if !output.Seen[value.Selection.ItemKey] {
-		return fmt.Errorf("选中季集未登记，禁止确认成功")
-	}
-	if err := guard(ctx); err != nil {
+	if err = output.Store.WorkReexportMetadata(ctx, output.Root, request.WorkKeys, request.ExpectedConfigRevision, id, targets, verify); err != nil {
 		return err
 	}
-	expected, err := domain.BuildShareStrmEntry(source)
-	if err != nil {
-		return err
-	}
-	actual, err := runner.exporter.store.GetStrmEntry(ctx, expected.ID)
-	if err != nil {
-		return err
-	}
-	if actual.ID != expected.ID || actual.MediaID != expected.MediaID || actual.ShareCode != expected.ShareCode || actual.Password != expected.Password || actual.FilePath != expected.FilePath || actual.FileName != expected.FileName || (expected.FileID != "" && actual.FileID != expected.FileID) {
-		return fmt.Errorf("写后映射与选中候选实际来源不一致")
+	for _, target := range targets {
+		output.Seen[target.Selection.ItemKey] = true
 	}
 	return nil
+}
+
+type workReexportFile struct {
+	path, mapping string
+	content       []byte
+	info          os.FileInfo
+}
+
+func readWorkReexportFile(filename string) (workReexportFile, error) {
+	file := workReexportFile{path: filename}
+	var err error
+	file.info, err = os.Lstat(filename)
+	if err != nil || !file.info.Mode().IsRegular() {
+		return file, fmt.Errorf("重导要求既有普通 STRM 文件 %s：%w", filename, errors.Join(err, dao.ErrShareExportChanged))
+	}
+	if file.info.Size() > 8192 {
+		return file, fmt.Errorf("STRM 超过播放 URL 长度上限：%w", dao.ErrShareExportChanged)
+	}
+	file.content, err = os.ReadFile(filename)
+	if err != nil {
+		return file, errors.Join(err, dao.ErrShareExportChanged)
+	}
+	parsed, err := url.Parse(strings.TrimSuffix(string(file.content), "\n"))
+	if err != nil || parsed == nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return file, fmt.Errorf("旧 STRM 不是可验证的分享播放 URL：%w", dao.ErrShareExportChanged)
+	}
+	marker := strings.LastIndex(parsed.Path, "/share-strm/")
+	if marker < 0 {
+		return file, dao.ErrShareExportChanged
+	}
+	file.mapping = parsed.Path[marker+len("/share-strm/"):]
+	if _, err = uuid.Parse(file.mapping); err != nil {
+		return file, fmt.Errorf("旧播放 ID 无效：%w", dao.ErrShareExportChanged)
+	}
+	return file, nil
+}
+
+func sameWorkReexportFile(previous, next domain.ShareStrmEntry) bool {
+	return previous.ShareCode == next.ShareCode && previous.Password == next.Password && previous.FilePath == next.FilePath && previous.FileName == next.FileName && previous.FileID == next.FileID
 }
 
 // StartWorkReexportContext 创建显式有界的人工重导任务，复用任务取消与 owner 锁，不授权采纳或全量。

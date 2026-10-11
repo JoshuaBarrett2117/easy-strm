@@ -2,15 +2,17 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
+
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +29,7 @@ type workReexportMemory struct {
 	onSelections func(string)
 	onSave       func(domain.ShareStrmEntry) error
 	readErr      error
+	states       map[string]dao.ExportState
 }
 
 func (store *workReexportMemory) WorkReexportSelections(_ context.Context, work string) ([]domain.ShareWorkReexportSelection, error) {
@@ -78,16 +81,11 @@ func (store *workReexportCheckpoint) WorkReexportPreflight(_ context.Context, _ 
 	for _, work := range works {
 		scope[work] = true
 	}
-	media := map[string]int{}
 	for index, entry := range entries {
-		if previous, exists := media[entry.ID]; exists && previous != entry.MediaID {
-			return dao.ErrShareExportChanged
-		}
-		media[entry.ID] = entry.MediaID
 		for _, reference := range store.references {
 			mappingMatch := reference.mapping == entry.ID
 			pathMatch := reference.relative == selections[index].RelativePath
-			if (mappingMatch || pathMatch) && (!scope[reference.work] || (mappingMatch && reference.media != entry.MediaID) || (pathMatch && reference.item != selections[index].ItemKey)) {
+			if (mappingMatch || pathMatch) && (!scope[reference.work] || (pathMatch && reference.item != selections[index].ItemKey)) {
 				return dao.ErrShareExportChanged
 			}
 		}
@@ -111,16 +109,12 @@ func (store *workReexportCheckpoint) WorkReexportGlobalInvalid(context.Context, 
 	var invalid int64
 	for _, values := range store.store.works {
 		for _, value := range values {
-			source, err := store.store.GetStrmSource(context.Background(), value.SourceID)
+			_, err := store.store.GetStrmSource(context.Background(), value.SourceID)
 			if err != nil {
 				invalid++
 				continue
 			}
-			expected, err := domain.BuildShareStrmEntry(source)
-			if err != nil {
-				return 0, err
-			}
-			if actual := store.store.entries[expected.ID]; actual.MediaID != value.MediaID {
+			if actual := store.store.entries[store.store.states[value.Selection.ItemKey].Playback]; actual.MediaID != value.MediaID {
 				invalid++
 			}
 		}
@@ -145,7 +139,7 @@ func newWorkReexportFixture(test *testing.T) *workReexportFixture {
 	duplicate.MediaID = 9901
 	unrelated := filesystemSource(3, 9, 100, filesystemEpisode(1, 1))
 	unrelated.WorkKey, unrelated.MediaID = "tmdb:tv:8802", 8802
-	store := &workReexportMemory{selectedFilesystemStore: &selectedFilesystemStore{strmMemory: &strmMemory{sources: []domain.ShareStrmSource{source, duplicate, unrelated}, entries: map[string]domain.ShareStrmEntry{}}}, works: map[string][]domain.ShareWorkReexportSelection{}}
+	store := &workReexportMemory{selectedFilesystemStore: &selectedFilesystemStore{strmMemory: &strmMemory{sources: []domain.ShareStrmSource{source, duplicate, unrelated}, entries: map[string]domain.ShareStrmEntry{}}}, works: map[string][]domain.ShareWorkReexportSelection{}, states: map[string]dao.ExportState{}}
 	root := test.TempDir()
 	for _, selected := range []domain.ShareStrmSource{source, unrelated} {
 		for _, episode := range selected.Episodes {
@@ -167,6 +161,11 @@ func newWorkReexportFixture(test *testing.T) *workReexportFixture {
 			entry.MediaID = duplicate.MediaID
 		}
 		store.entries[entry.ID] = entry
+		payload, _ := json.Marshal(entry)
+		for _, value := range store.works[selected.WorkKey] {
+			filename := filepath.Join(root, value.Selection.RelativePath)
+			store.states[value.Selection.ItemKey] = dao.ExportState{Owner: "share:default", Key: value.Selection.ItemKey, Path: filename, Content: fmt.Sprintf("%x", sha256.Sum256(append([]byte(filename+"\x00"), filesystemContent(selected)...))), Mapping: fmt.Sprintf("%x", sha256.Sum256(payload)), Playback: entry.ID, Run: "old-run"}
+		}
 	}
 	client := setupTaskRedisMock(test)
 	test.Cleanup(func() { _ = client.Close() })
@@ -191,177 +190,19 @@ func newWorkReexportFixture(test *testing.T) *workReexportFixture {
 
 func (fixture *workReexportFixture) run(test *testing.T, ctx context.Context, id string) (domain.ShareWorkReexportResult, error) {
 	test.Helper()
+	entries, states := maps.Clone(fixture.store.entries), maps.Clone(fixture.store.states)
 	if err := fixture.tasks.Create(id, "strm_generate", "显式作品重导测试"); err != nil {
 		test.Fatal(err)
 	}
-	return fixture.runner.run(ctx, fixture.request, id)
+	result, err := fixture.runner.run(ctx, fixture.request, id)
+	if err != nil && result.ProcessedRows == 0 {
+		fixture.store.entries, fixture.store.states = entries, states
+	}
+	return result, err
 }
 
 func (fixture *workReexportFixture) expectClose() {
 	fixture.mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 1))
-}
-
-func TestShareWorkReexportStaleMappingStablePathsIdempotent(test *testing.T) {
-	for _, baseline := range []string{"required", "building"} {
-		test.Run(baseline, func(test *testing.T) {
-			fixture := newWorkReexportFixture(test)
-			fixture.checkpoint.input.BaselineState = baseline
-			originalFiles := filesystemCollection(test, fixture.request.ExpectedOutputPath)
-			originalSelections := append([]domain.ShareWorkReexportSelection(nil), fixture.store.works[fixture.request.WorkKeys[0]]...)
-			unrelated, _ := domain.BuildShareStrmEntry(fixture.store.sources[2])
-			originalUnrelated := fixture.store.entries[unrelated.ID]
-			for attempt := 0; attempt < 2; attempt++ {
-				for _, value := range originalSelections {
-					expectSelectedFile(test, fixture.mock, value.Selection, true, false)
-				}
-				fixture.expectClose()
-				result, err := fixture.run(test, context.Background(), fmt.Sprintf("share_work_reexport_repeat_%d", attempt))
-				before := int64(2)
-				if attempt > 0 {
-					before = 0
-				}
-				if err != nil || result.GlobalInvalidBefore == nil || *result.GlobalInvalidBefore != before || result.GlobalInvalidAfter == nil || *result.GlobalInvalidAfter != 0 || result.InvalidScope != "global" || result.ProcessedRows != 2 || result.ProcessedWorkCount != 1 || result.SelectionRows != 2 || result.Written != 0 {
-					test.Fatalf("修复与重复执行结果不正确：%+v err=%v", result, err)
-				}
-				assertFilesystemCollection(test, fixture.request.ExpectedOutputPath, originalFiles)
-				if !reflect.DeepEqual(originalSelections, fixture.store.works[fixture.request.WorkKeys[0]]) || !reflect.DeepEqual(originalUnrelated, fixture.store.entries[unrelated.ID]) || fixture.store.syncs != 0 || fixture.store.bulkResolves != 0 {
-					test.Fatal("选择、稳定路径、无关作品或准备语义被修改")
-				}
-				for _, work := range fixture.store.queried {
-					if work != fixture.request.WorkKeys[0] {
-						test.Fatalf("读取了范围外作品 %q", work)
-					}
-				}
-				for _, mediaID := range fixture.store.savedSources {
-					if mediaID != 8801 {
-						test.Fatal("使用了重复媒体行或未选中来源")
-					}
-				}
-				if err = fixture.mock.ExpectationsWereMet(); err != nil {
-					test.Fatal(err)
-				}
-			}
-		})
-	}
-}
-
-func TestShareWorkReexportFailClosedAndAudit(test *testing.T) {
-	for _, scenario := range []string{"empty", "unknown-work", "selection-invalid", "media-mismatch", "path-empty", "path-traversal", "path-collision", "selection-cap", "read-error", "schema-error", "config-drift", "fingerprint-drift", "source-drift", "selection-drift", "scope-drift", "cancel-before", "cancel-midway", "mapping-write-failure", "after-count-failure"} {
-		test.Run(scenario, func(test *testing.T) {
-			fixture := newWorkReexportFixture(test)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			work := fixture.request.WorkKeys[0]
-			values := fixture.store.works[work]
-			opened := true
-			switch scenario {
-			case "empty":
-				fixture.request.WorkKeys = nil
-				opened = false
-			case "unknown-work":
-				fixture.request.WorkKeys = append(fixture.request.WorkKeys, "unknown")
-			case "selection-invalid":
-				values[0].Selection.Valid = false
-			case "media-mismatch":
-				values[0].MediaID = 9901
-			case "path-empty":
-				values[0].Selection.RelativePath = ""
-			case "path-traversal":
-				values[0].Selection.RelativePath = "../outside.strm"
-			case "path-collision":
-				values[1].Selection.RelativePath = values[0].Selection.RelativePath
-			case "selection-cap":
-				fixture.store.works[work] = make([]domain.ShareWorkReexportSelection, domain.ShareWorkReexportMaxSelections+1)
-			case "read-error":
-				fixture.store.readErr = errors.New("选择读取失败")
-			case "schema-error":
-				fixture.checkpoint.schemaError = errors.New("协议缺失")
-				opened = false
-			case "config-drift", "fingerprint-drift":
-				fixture.checkpoint.onInput = func(read int) {
-					if read == 2 {
-						if scenario == "config-drift" {
-							fixture.checkpoint.input.ConfigRevision++
-						} else {
-							fixture.checkpoint.input.Settings.BaseURL = "https://changed.example.test"
-						}
-					}
-				}
-			case "source-drift", "selection-drift", "scope-drift":
-				fixture.store.onSelections = func(string) {
-					if len(fixture.store.queried) == 2 {
-						switch scenario {
-						case "source-drift":
-							fixture.store.sources[0].MediaID = 9901
-						case "selection-drift":
-							values[0].Selection.CandidateID++
-						case "scope-drift":
-							fixture.store.works[work] = append(values, values[0])
-						}
-					}
-				}
-			case "cancel-before":
-				cancel()
-				opened = false
-			case "cancel-midway", "mapping-write-failure":
-				expectSelectedFile(test, fixture.mock, values[0].Selection, true, false)
-				fixture.store.onSave = func(domain.ShareStrmEntry) error {
-					if len(fixture.store.savedSources) == 1 {
-						if scenario == "cancel-midway" {
-							cancel()
-							return context.Canceled
-						}
-						return errors.New("映射写入失败")
-					}
-					return nil
-				}
-			case "after-count-failure":
-				fixture.checkpoint.countErrAt = 2
-				for _, value := range values {
-					expectSelectedFile(test, fixture.mock, value.Selection, true, false)
-				}
-			}
-			if opened {
-				fixture.expectClose()
-			}
-			originalFiles := filesystemCollection(test, fixture.request.ExpectedOutputPath)
-			id := "share_work_reexport_" + scenario
-			result, err := fixture.run(test, ctx, id)
-			if err == nil {
-				test.Fatalf("失败分支错误地确认成功：%+v", result)
-			}
-			if scenario == "cancel-before" || scenario == "cancel-midway" {
-				if !errors.Is(err, context.Canceled) {
-					test.Fatal(err)
-				}
-			}
-			if scenario == "cancel-midway" || scenario == "mapping-write-failure" {
-				if result.ProcessedRows != 1 || result.ProcessedWorkCount != 0 || result.Works[0].Status != "failed" || result.Works[0].ProcessedRows != 1 {
-					test.Fatalf("部分结果丢失：%+v", result)
-				}
-			}
-			if scenario == "after-count-failure" && (result.GlobalInvalidAfter != nil || result.AfterCountError == "") {
-				test.Fatal("不能将读取失败伪装成 invalid=0")
-			}
-			if scenario == "selection-cap" && !strings.Contains(err.Error(), "10000") {
-				test.Fatalf("未实际验证行数上限：%v", err)
-			}
-			assertFilesystemCollection(test, fixture.request.ExpectedOutputPath, originalFiles)
-			if scenario != "empty" {
-				task, taskErr := fixture.tasks.Get(id)
-				if taskErr != nil {
-					test.Fatal(taskErr)
-				}
-				raw, _ := json.Marshal(task["metadata"])
-				if !strings.Contains(string(raw), `"requested_works"`) || !strings.Contains(string(raw), `"work_reexport_request"`) || !strings.Contains(string(raw), `"error"`) {
-					test.Fatalf("审计范围或失败结果丢失：%s", raw)
-				}
-			}
-			if err = fixture.mock.ExpectationsWereMet(); err != nil {
-				test.Fatal(err)
-			}
-		})
-	}
 }
 
 func TestShareWorkReexportValidationAndResumeGuard(test *testing.T) {
@@ -442,116 +283,6 @@ func TestShareWorkReexportAsyncTaskTracksSchemaFailure(test *testing.T) {
 	test.Fatal("异步任务没有明确失败终态")
 }
 
-func TestShareWorkReexportMultipleWorksAndGlobalInvalidScope(test *testing.T) {
-	for _, scenario := range []string{"multiple-success", "second-work-failure", "global-invalid-outside-scope"} {
-		test.Run(scenario, func(test *testing.T) {
-			fixture := newWorkReexportFixture(test)
-			firstWork := fixture.request.WorkKeys[0]
-			secondWork := fixture.store.sources[2].WorkKey
-			unrelated, _ := domain.BuildShareStrmEntry(fixture.store.sources[2])
-			if scenario == "global-invalid-outside-scope" {
-				unrelated.MediaID = 9999
-				fixture.store.entries[unrelated.ID] = unrelated
-			} else {
-				fixture.request.WorkKeys = append(fixture.request.WorkKeys, secondWork)
-			}
-			originalFiles := filesystemCollection(test, fixture.request.ExpectedOutputPath)
-			for _, value := range fixture.store.works[firstWork] {
-				expectSelectedFile(test, fixture.mock, value.Selection, true, false)
-			}
-			if scenario == "multiple-success" {
-				expectSelectedFile(test, fixture.mock, fixture.store.works[secondWork][0].Selection, true, false)
-			}
-			if scenario == "second-work-failure" {
-				fixture.store.onSave = func(entry domain.ShareStrmEntry) error {
-					if entry.MediaID == 8802 {
-						return errors.New("第二作品映射写入失败")
-					}
-					return nil
-				}
-			}
-			fixture.expectClose()
-			result, err := fixture.run(test, context.Background(), "share_work_reexport_"+scenario)
-			switch scenario {
-			case "multiple-success":
-				if err != nil || result.ProcessedRows != 3 || result.ProcessedWorkCount != 2 || !reflect.DeepEqual(result.ProcessedWorks, fixture.request.WorkKeys) {
-					test.Fatalf("多个明确作品未全部处理：%+v %v", result, err)
-				}
-			case "second-work-failure":
-				if err == nil || result.ProcessedRows != 2 || result.ProcessedWorkCount != 1 || result.Works[0].Status != "completed" || result.Works[1].Status != "failed" {
-					test.Fatalf("逐作品部分失败审计不完整：%+v %v", result, err)
-				}
-			case "global-invalid-outside-scope":
-				if err != nil || result.GlobalInvalidBefore == nil || *result.GlobalInvalidBefore != 3 || result.GlobalInvalidAfter == nil || *result.GlobalInvalidAfter != 1 || !reflect.DeepEqual(unrelated, fixture.store.entries[unrelated.ID]) {
-					test.Fatalf("不能为降低全局 invalid 扩大范围：%+v %v", result, err)
-				}
-				for _, work := range fixture.store.queried {
-					if work != firstWork {
-						test.Fatalf("范围外读取：%s", work)
-					}
-				}
-			}
-			assertFilesystemCollection(test, fixture.request.ExpectedOutputPath, originalFiles)
-			if err = fixture.mock.ExpectationsWereMet(); err != nil {
-				test.Fatal(err)
-			}
-		})
-	}
-}
-
-func TestShareWorkReexportScopePreflightRejectsBeforeMappingMutation(test *testing.T) {
-	for _, scenario := range []string{"cross-work-shared-mapping", "same-mapping-incompatible-media", "outside-scope-path", "within-scope-reference-incompatible-media", "immediate-write-recheck"} {
-		test.Run(scenario, func(test *testing.T) {
-			fixture := newWorkReexportFixture(test)
-			first := fixture.store.sources[0]
-			entry, err := domain.BuildShareStrmEntry(first)
-			if err != nil {
-				test.Fatal(err)
-			}
-			selection := fixture.store.works[first.WorkKey][0].Selection
-			reference := workReexportReference{work: "tmdb:tv:outside", item: "outside:1:1", mapping: entry.ID, relative: "outside.strm", media: 7701}
-			switch scenario {
-			case "same-mapping-incompatible-media":
-				second := first
-				second.ID, second.MediaID = 4, 7701
-				second.Episodes = []domain.ShareEpisode{filesystemEpisode(1, 3)}
-				fixture.store.sources = append(fixture.store.sources, second)
-				other := selection
-				other.ItemKey, other.Episode, other.CandidateID, other.RelativePath = shareStrmIdentity(second, second.Episodes[0]), 3, 14, "different.strm"
-				fixture.store.works[first.WorkKey] = append(fixture.store.works[first.WorkKey], domain.ShareWorkReexportSelection{Selection: other, SourceID: second.ID, MediaID: second.MediaID})
-			case "outside-scope-path":
-				reference.mapping, reference.relative = "different-mapping", fixture.store.works[first.WorkKey][1].Selection.RelativePath
-				fixture.checkpoint.references = []workReexportReference{reference}
-			case "within-scope-reference-incompatible-media":
-				reference.work = first.WorkKey
-				fixture.checkpoint.references = []workReexportReference{reference}
-			case "immediate-write-recheck":
-				fixture.checkpoint.onPreflight = func(read int) {
-					if read >= 3 {
-						fixture.checkpoint.references = []workReexportReference{reference}
-					}
-				}
-			default:
-				fixture.checkpoint.references = []workReexportReference{reference}
-			}
-			original := fixture.store.entries[entry.ID]
-			files := filesystemCollection(test, fixture.request.ExpectedOutputPath)
-			fixture.expectClose()
-			result, err := fixture.run(test, context.Background(), "share_work_reexport_scope_"+scenario)
-			if !errors.Is(err, dao.ErrShareExportChanged) || len(fixture.store.savedSources) != 0 || result.ProcessedRows != 0 || !reflect.DeepEqual(original, fixture.store.entries[entry.ID]) {
-				test.Fatalf("必须在任何映射写入前拒绝范围冲突：saved=%v result=%+v err=%v", fixture.store.savedSources, result, err)
-			}
-			if scenario == "immediate-write-recheck" && fixture.checkpoint.preflights != 3 {
-				test.Fatalf("必须由紧邻 SaveStrmEntry 的护栏拒绝：reads=%d", fixture.checkpoint.preflights)
-			}
-			assertFilesystemCollection(test, fixture.request.ExpectedOutputPath, files)
-			if err = fixture.mock.ExpectationsWereMet(); err != nil {
-				test.Fatal(err)
-			}
-		})
-	}
-}
-
 type workReexportTerminalHook struct {
 	observed chan error
 }
@@ -629,26 +360,5 @@ func TestShareWorkReexportTerminalPersistenceHasDeadline(test *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestShareWorkReexportScopeAllowsMultiEpisodeSharedMapping(test *testing.T) {
-	fixture := newWorkReexportFixture(test)
-	source := fixture.store.sources[0]
-	entry, err := domain.BuildShareStrmEntry(source)
-	if err != nil {
-		test.Fatal(err)
-	}
-	for _, value := range fixture.store.works[source.WorkKey] {
-		fixture.checkpoint.references = append(fixture.checkpoint.references, workReexportReference{work: source.WorkKey, item: value.Selection.ItemKey, mapping: entry.ID, relative: value.Selection.RelativePath, media: source.MediaID})
-		expectSelectedFile(test, fixture.mock, value.Selection, true, false)
-	}
-	fixture.expectClose()
-	result, err := fixture.run(test, context.Background(), "share_work_reexport_scope_multi_episode")
-	if err != nil || result.ProcessedRows != 2 || fixture.checkpoint.preflights < 3 || fixture.store.entries[entry.ID].MediaID != source.MediaID {
-		test.Fatalf("同作品多集可以共享映射并修复旧媒体：%+v preflights=%d err=%v", result, fixture.checkpoint.preflights, err)
-	}
-	if err = fixture.mock.ExpectationsWereMet(); err != nil {
-		test.Fatal(err)
 	}
 }

@@ -1,10 +1,41 @@
 package domain
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+)
+
 // ShareWorkReexportMaxWorks 限制一次人工重导的作品范围，禁止空范围与全库回退。
 const ShareWorkReexportMaxWorks = 100
 
 // ShareWorkReexportMaxSelections 限制一次任务的选择行数，超限必须拆分请求。
 const ShareWorkReexportMaxSelections = 10000
+
+// ShareWorkReexportMaxReferences 限制共享闭包引用数量，超限时即使全部作品在范围内也拒绝。
+const ShareWorkReexportMaxReferences = 20000
+
+// BuildShareWorkReexportEntry 仅供显式人工重导使用，以 item 盐生成独立 ID，保留普通导出的历史 ID 规则。
+func BuildShareWorkReexportEntry(source ShareStrmSource, item string) (ShareStrmEntry, error) {
+	if strings.TrimSpace(item) == "" {
+		return ShareStrmEntry{}, fmt.Errorf("重导 item_key 不能为空")
+	}
+	entry, err := BuildShareStrmEntry(source)
+	if err != nil {
+		return entry, err
+	}
+	entry.ID = ShareWorkReexportMappingID(entry.ID, item)
+	if len(entry.Episodes) == 0 {
+		entry.Episodes = nil
+	}
+	return entry, nil
+}
+
+// ShareWorkReexportMappingID 为已验证的历史 ID 与 item 生成重导 ID，供预检与写入共用同一规则。
+func ShareWorkReexportMappingID(legacyID, item string) string {
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("work_reexport:"+legacyID+":item:"+item)).String()
+}
 
 // ShareWorkReexportRequest 固定人工范围、输出目录与配置版本，不包含基线采纳授权。
 type ShareWorkReexportRequest struct {
