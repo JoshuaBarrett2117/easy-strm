@@ -430,24 +430,9 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 	} else if len(episodes) == 0 {
 		return strmExportResult{Err: fmt.Errorf("电视剧文件缺少季集映射：%s", source.FileName)}
 	}
-	matches := shareCodeRe.FindStringSubmatch(source.URL)
-	if len(matches) < 2 {
-		return strmExportResult{Err: fmt.Errorf("本地记录的115分享地址无效")}
-	}
-	entry := domain.ShareStrmEntry{
-		ID:         uuid.NewSHA1(uuid.NameSpaceURL, []byte(matches[1]+":path:"+filePath)).String(),
-		ShareCode:  matches[1],
-		Password:   source.Password,
-		FileID:     source.RemoteFileID,
-		FileName:   file.Name,
-		FilePath:   filePath,
-		MediaID:    source.MediaID,
-		Title:      source.Result.Title,
-		PosterPath: source.Result.PosterPath,
-		Episodes:   source.Episodes,
-	}
-	if entry.Password == "" {
-		entry.Password = extractSharePassword(source.URL)
+	entry, err := domain.BuildShareStrmEntry(source)
+	if err != nil {
+		return strmExportResult{Err: err}
 	}
 	if err := s.store.SaveStrmEntry(ctx, entry); err != nil {
 		return strmExportResult{Err: err}

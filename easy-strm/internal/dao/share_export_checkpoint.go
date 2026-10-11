@@ -242,7 +242,9 @@ func (d *ShareExportCheckpointDAO) DirtyBatch(ctx context.Context, after string)
 
 const shareExportDirtySQL = `SELECT work_key,revision,pending_export_keys FROM t_share_export_dirty_work WHERE revision > acked_revision AND work_key>$1 ORDER BY work_key LIMIT 100`
 
-const shareExportAckSQL = `UPDATE t_share_export_dirty_work SET acked_revision=revision,last_seen_run_id=$3,pending_export_keys='[]'::jsonb,updated_at=now() WHERE work_key=$1 AND revision=$2 AND acked_revision<>revision`
+const shareExportAckSetSQL = `UPDATE t_share_export_dirty_work SET acked_revision=revision,last_seen_run_id=`
+const shareExportAckTailSQL = `,pending_export_keys='[]'::jsonb,updated_at=now()`
+const shareExportAckSQL = shareExportAckSetSQL + `$3` + shareExportAckTailSQL + ` WHERE work_key=$1 AND revision=$2 AND acked_revision<>revision`
 
 const shareExportPlannedSQL = `UPDATE t_share_export_dirty_work SET pending_export_keys=(
  SELECT COALESCE(jsonb_agg(key ORDER BY key),'[]'::jsonb) FROM (
@@ -444,7 +446,21 @@ func (d *ShareExportCheckpointDAO) FinishBaseline(ctx context.Context, revision 
 	if current != revision {
 		return false, ErrShareExportChanged
 	}
-	result, err := transaction.ExecContext(ctx, `UPDATE t_share_export_consumer SET completed_revision=config_revision,baseline_state='ready',updated_at=now() WHERE consumer='share:default' AND config_revision=$1 AND prepared_revision=config_revision AND legacy_outputs_reconciled AND NOT EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision > acked_revision)`, revision)
+	finished, err := finishShareBaseline(ctx, transaction, revision)
+	if err != nil || !finished {
+		return finished, err
+	}
+	if err = transaction.Commit(); err != nil {
+		return false, err
+	}
+	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "同事务刷新成功水位镜像", logger.Fields{"config_revision": revision, "same_revision_refresh": true}, nil)
+	return true, nil
+}
+
+const shareExportFinishBaselineSQL = `UPDATE t_share_export_consumer SET completed_revision=config_revision,baseline_state='ready',updated_at=now() WHERE consumer='share:default' AND config_revision=$1 AND prepared_revision=config_revision AND legacy_outputs_reconciled AND NOT EXISTS(SELECT 1 FROM t_share_export_dirty_work WHERE revision > acked_revision)`
+
+func finishShareBaseline(ctx context.Context, transaction *sql.Tx, revision int64) (bool, error) {
+	result, err := transaction.ExecContext(ctx, shareExportFinishBaselineSQL, revision)
 	if err != nil {
 		return false, err
 	}
@@ -466,10 +482,6 @@ func (d *ShareExportCheckpointDAO) FinishBaseline(ctx context.Context, revision 
 	if err = ctx.Err(); err != nil {
 		return false, err
 	}
-	if err = transaction.Commit(); err != nil {
-		return false, err
-	}
-	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "同事务刷新成功水位镜像", logger.Fields{"config_revision": revision, "same_revision_refresh": true}, nil)
 	return true, nil
 }
 

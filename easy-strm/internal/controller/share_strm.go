@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/service"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -80,6 +82,43 @@ func (c *ShareStrmController) Export(x *gin.Context) {
 		return
 	}
 	SuccessResp(x, gin.H{"task_id": id})
+}
+
+// AdoptBaseline 只接受认证用户的显式人工确认，返回可轮询任务，不提供自动采纳入口。
+func (controller *ShareStrmController) AdoptBaseline(ctx *gin.Context) {
+	var request domain.ShareBaselineAdoptionRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 16*1024))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		ErrorResp(ctx, 400, "采纳参数格式无效")
+		return
+	}
+	if decoder.Decode(new(interface{})) != io.EOF {
+		ErrorResp(ctx, 400, "采纳参数仅接受一个 JSON 对象")
+		return
+	}
+	request.ActorUserID = ctx.GetInt("userID")
+	if request.ActorUserID <= 0 {
+		ErrorResp(ctx, 401, "采纳必须由已认证用户确认")
+		return
+	}
+	if err := service.ValidateShareBaselineAdoption(request); err != nil {
+		ErrorResp(ctx, 400, err.Error())
+		return
+	}
+	action, ok := controller.s.(interface {
+		StartBaselineAdoptionContext(context.Context, domain.ShareBaselineAdoptionRequest) (string, error)
+	})
+	if !ok {
+		ErrorResp(ctx, 500, "采纳任务服务未初始化")
+		return
+	}
+	id, err := action.StartBaselineAdoptionContext(ctx.Request.Context(), request)
+	if err != nil {
+		ErrorResp(ctx, 400, err.Error())
+		return
+	}
+	SuccessResp(ctx, gin.H{"task_id": id, "manual_confirmation": "人工确认采纳", "status": "submitted"})
 }
 
 // Playback 保持播放器UA并返回302；错误不生成重定向。

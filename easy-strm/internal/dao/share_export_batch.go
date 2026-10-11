@@ -10,8 +10,9 @@ import (
 const shareExportSourcesBatchSQL = `INSERT INTO t_share_export_source_state AS source(source_file_id,share_id,media_id,work_key,file_version,share_version,available,cancelled,episode_sig,export_keys,last_seen_run_id,state)
  SELECT x."SourceFileID",x."ShareID",NULLIF(x."MediaID",0),x."WorkKey",x."FileVersion",x."ShareVersion",x."Available",x."Cancelled",x."EpisodeSignature",x."ExportKeys",$2,x."State"
  FROM jsonb_to_recordset($1::jsonb) AS x("SourceFileID" integer,"ShareID" integer,"MediaID" integer,"WorkKey" text,"FileVersion" integer,"ShareVersion" integer,"Available" boolean,"Cancelled" boolean,"EpisodeSignature" text,"ExportKeys" jsonb,"State" text)
- ORDER BY x."SourceFileID"
- ON CONFLICT(source_file_id) DO UPDATE SET share_id=EXCLUDED.share_id,media_id=EXCLUDED.media_id,work_key=EXCLUDED.work_key,file_version=EXCLUDED.file_version,share_version=EXCLUDED.share_version,available=EXCLUDED.available,cancelled=EXCLUDED.cancelled,episode_sig=EXCLUDED.episode_sig,
+ ORDER BY x."SourceFileID"` + shareExportSourcesConflictSQL
+
+const shareExportSourcesConflictSQL = ` ON CONFLICT(source_file_id) DO UPDATE SET share_id=EXCLUDED.share_id,media_id=EXCLUDED.media_id,work_key=EXCLUDED.work_key,file_version=EXCLUDED.file_version,share_version=EXCLUDED.share_version,available=EXCLUDED.available,cancelled=EXCLUDED.cancelled,episode_sig=EXCLUDED.episode_sig,
  export_keys=CASE WHEN EXCLUDED.state='stale' THEN source.export_keys ELSE EXCLUDED.export_keys END,last_seen_run_id=EXCLUDED.last_seen_run_id,state=EXCLUDED.state,updated_at=now()`
 
 const shareExportStaleBatchSQL = `WITH targets AS MATERIALIZED (

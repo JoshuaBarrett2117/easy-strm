@@ -217,6 +217,9 @@ func (s *TaskService) Cancel(taskID string) error {
 		return err
 	} else if task != nil {
 		kind, _ := task["task_type"].(string)
+		if kind == "share_baseline_adopt" && task["status"] != "pending" && task["status"] != "running" {
+			return fmt.Errorf("人工基线采纳任务已结束，不能取消；已提交采纳不会撤销")
+		}
 		if domain.IsShareOperationType(kind) {
 			return fmt.Errorf("分享清理操作已结束或正在恢复，不能取消")
 		}
@@ -256,6 +259,9 @@ func (s *TaskService) ResumeContext(ctx context.Context, taskID string) error {
 		handler, _ := metadata["cron_handler"].(string)
 		if domain.IsShareStrmCronHandler(handler) {
 			return fmt.Errorf("分享库调度任务请等待下次调度，或在定时任务管理中手动触发")
+		}
+		if kind == "share_baseline_adopt" {
+			return fmt.Errorf("人工基线采纳不能自动恢复，请重新独立核验并显式提交确认与快照护栏")
 		}
 		if domain.IsShareOperationType(kind) {
 			return fmt.Errorf("清理操作需重新确认并提交，请返回分享管理重试")

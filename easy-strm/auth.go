@@ -1029,6 +1029,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		auth.POST("/media/share-library/strm/selections/refresh", selectionController.Refresh)
 		auth.PUT("/media/share-library/strm/settings", shareStrmController.SaveSettings)
 		auth.POST("/media/share-library/strm/export", shareStrmController.Export)
+		auth.POST("/media/share-library/strm/baseline/adopt", shareStrmController.AdoptBaseline)
 		auth.POST("/media/share-records", shareRecordController.Create)
 		auth.POST("/media/share-records/parse", shareRecordController.ParseImport)
 		auth.DELETE("/media/share-records/media", shareRecordController.ClearAllMedia)
