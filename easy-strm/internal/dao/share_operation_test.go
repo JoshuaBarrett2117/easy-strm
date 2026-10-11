@@ -83,6 +83,7 @@ func TestShareClearJournalCommitsWithDeletionOrRollsBack(t *testing.T) {
 			db, m, _ := sqlmock.New()
 			defer db.Close()
 			m.ExpectBegin()
+			m.ExpectExec("UPDATE t_share_record SET version=version\\+1").WithArgs(pq.Array([]int{1, 2})).WillReturnResult(sqlmock.NewResult(0, 2))
 			m.ExpectExec("DELETE FROM t_share_media_file WHERE share_id = ANY").WithArgs(pq.Array([]int{1, 2})).WillReturnResult(sqlmock.NewResult(0, 3))
 			m.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
 			journal := m.ExpectExec("UPDATE t_share_operation_queue SET status='completed'").WithArgs("original-task", int64(3))
@@ -107,9 +108,9 @@ func TestShareClearJournalCommitsWithDeletionOrRollsBack(t *testing.T) {
 func TestShareSyncRejectsChangedShareVersionBeforeWriting(t *testing.T) {
 	db, m, _ := sqlmock.New()
 	defer db.Close()
-	m.ExpectBegin()
-	m.ExpectQuery("SELECT id FROM t_share_record WHERE id=\\$1 AND version=\\$2 FOR UPDATE").WithArgs(7, 2).WillReturnError(sql.ErrNoRows)
-	m.ExpectRollback()
+	m.ExpectQuery(`SELECT pg_try_advisory_lock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	m.ExpectQuery("SELECT version FROM t_share_record WHERE id=\\$1 AND version=\\$2").WithArgs(7, 2).WillReturnError(sql.ErrNoRows)
+	m.ExpectQuery(`SELECT pg_advisory_unlock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"unlocked"}).AddRow(true))
 	if _, err := NewShareRecordDAO(db).SyncFiles(context.Background(), 7, "old-scan", []domain.ShareMedia{{FileName: "old.mkv"}}, 2); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal(err)
 	}

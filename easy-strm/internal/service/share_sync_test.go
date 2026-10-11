@@ -2,12 +2,12 @@ package service
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/lib/pq"
 )
 
 type shareSyncParser struct {
@@ -28,13 +28,19 @@ func TestSyncShareFilesStoresOnlyRealVideos(t *testing.T) {
 	defer db.Close()
 	expectSyncRecord(mock)
 	mock.ExpectQuery("SELECT id FROM t_share_media_file WHERE share_id").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery(`SELECT pg_try_advisory_lock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	mock.ExpectQuery("SELECT version FROM t_share_record WHERE id=\\$1 AND version=\\$2").WithArgs(7, 1).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(1))
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id FROM t_share_record").WithArgs(7, 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
-	mock.ExpectQuery("SELECT id,sha1 FROM t_share_media_file").WithArgs(7, "remote-1", "目录/剧集.S01E01E02.mkv").WillReturnError(sql.ErrNoRows)
-	mock.ExpectQuery("INSERT INTO t_share_media_file").WithArgs(7, "remote-1", "目录/剧集.S01E01E02.mkv", int64(10), "sha", "pick", "auto", sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
-	mock.ExpectExec("UPDATE t_share_media_file SET available=FALSE").WithArgs(7, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("WITH input AS").WithArgs(7, sqlmock.AnyArg(), pq.Array([]string{"remote-1"}), pq.Array([]string{"目录/剧集.S01E01E02.mkv"}),
+		pq.Array([]int64{10}), pq.Array([]string{"sha"}), pq.Array([]string{"pick"}), pq.Array([]string{"目录/剧集.S01E01E02.mkv"}),
+		pq.Array([]string{"sha"}), pq.Array([]bool{false}), pq.Array([]int64{0}), "auto").WillReturnRows(sqlmock.NewRows([]string{"written", "orphans"}).AddRow(1, "{}"))
 	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id FROM t_share_record").WithArgs(7, 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectExec("UPDATE t_share_media_file SET available=FALSE").WithArgs(7, sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+	mock.ExpectQuery(`SELECT pg_advisory_unlock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"unlocked"}).AddRow(true))
 	parser := shareSyncParser{response: &domain.ParseShareResponse{Files: []domain.ShareFileInfo{
 		{Name: "目录", Path: "目录", IsDir: true, Type: "folder"},
 		{Name: "剧集.S01E01E02.mkv", Path: "目录/剧集.S01E01E02.mkv", Fid: "remote-1", Size: 10, Sha1: "sha", PickCode: "pick", Type: "video"},

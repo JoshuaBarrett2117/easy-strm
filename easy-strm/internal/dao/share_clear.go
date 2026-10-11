@@ -17,6 +17,9 @@ func (d *ShareRecordDAO) ClearMedia(ctx context.Context, id int) (int64, error) 
 	if err = tx.QueryRowContext(ctx, "SELECT id FROM t_share_record WHERE id=$1 FOR UPDATE", id).Scan(&found); err != nil {
 		return 0, err
 	}
+	if _, err = tx.ExecContext(ctx, "UPDATE t_share_record SET version=version+1,updated_at=now() WHERE id=$1", id); err != nil {
+		return 0, err
+	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM t_share_media_file WHERE share_id=$1", id)
 	if err != nil {
 		return 0, err
@@ -44,6 +47,9 @@ func (d *ShareRecordDAO) ClearAllMedia(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "UPDATE t_share_record SET version=version+1,updated_at=now()"); err != nil {
+		return 0, err
+	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM t_share_media_file")
 	if err != nil {
 		return 0, err
@@ -74,6 +80,9 @@ func (d *ShareRecordDAO) ClearSelectedMedia(ctx context.Context, ids []int) (int
 		return 0, err
 	}
 	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "UPDATE t_share_record SET version=version+1,updated_at=now() WHERE id=ANY($1)", pq.Array(ids)); err != nil {
+		return 0, err
+	}
 	result, err := tx.ExecContext(ctx, "DELETE FROM t_share_media_file WHERE share_id = ANY($1)", pq.Array(ids))
 	if err != nil {
 		return 0, err

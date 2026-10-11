@@ -239,6 +239,9 @@ func (d *ShareRecordDAO) DeleteMedia(ctx context.Context, id int) error {
 		return err
 	}
 	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, "UPDATE t_share_record SET version=version+1,updated_at=now() WHERE id=(SELECT share_id FROM t_share_media_file WHERE id=$1)", id); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media_file WHERE id=$1", id); err != nil {
 		return err
 	}
@@ -390,61 +393,6 @@ func insertShareMedia(ctx context.Context, tx *sql.Tx, m *domain.ShareMedia) err
 	m.Status = "pending"
 	m.MetadataSource = source
 	return nil
-}
-
-// SyncFiles 原子同步一次完整分享扫描；只有调用本方法才会将未见历史文件标记失效。
-func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken string, files []domain.ShareMedia, versions ...int) (int, error) {
-	tx, err := d.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	var locked int
-	query := "SELECT id FROM t_share_record WHERE id=$1"
-	args := []interface{}{shareID}
-	if len(versions) > 0 {
-		query += " AND version=$2"
-		args = append(args, versions[0])
-	}
-	if err = tx.QueryRowContext(ctx, query+" FOR UPDATE", args...).Scan(&locked); err != nil {
-		return 0, err
-	}
-	for i := range files {
-		if err = ctx.Err(); err != nil {
-			return 0, err
-		}
-		file := &files[i]
-		var id int
-		var oldSHA string
-		err = tx.QueryRowContext(ctx, `SELECT id,sha1 FROM t_share_media_file WHERE share_id=$1 AND
-		 ((file_id<>'' AND file_id=$2) OR ($2='' AND file_id='' AND file_name=$3)) ORDER BY id LIMIT 1 FOR UPDATE`, shareID, file.RemoteFileID, file.FileName).Scan(&id, &oldSHA)
-		if err == sql.ErrNoRows {
-			err = tx.QueryRowContext(ctx, `INSERT INTO t_share_media_file(share_id,file_id,file_name,file_size,sha1,pick_code,metadata_source,status,available,last_seen_at,last_seen_scan_token)
-			 VALUES($1,$2,$3,$4,$5,$6,$7,'pending',TRUE,now(),$8) RETURNING id`, shareID, file.RemoteFileID, file.FileName, file.FileSize, file.SHA1, file.PickCode, domain.MetadataSourceAuto, scanToken).Scan(&id)
-		} else if err == nil {
-			changed := oldSHA != "" && file.SHA1 != "" && oldSHA != file.SHA1
-			// 仅内容或识别输入路径变化时使旧识别版本失效；普通重复扫描保留在途识别及季集关联。
-			_, err = tx.ExecContext(ctx, `UPDATE t_share_media_file SET file_name=$1,file_size=$2,sha1=$3,pick_code=$4,available=TRUE,last_seen_at=now(),last_seen_scan_token=$5,
-			 status=CASE WHEN $6 THEN 'pending' ELSE status END,media_id=CASE WHEN $6 THEN NULL ELSE media_id END,
-			 result=CASE WHEN $6 THEN NULL ELSE result END,error=CASE WHEN $6 THEN '' ELSE error END,version=version+CASE WHEN $6 OR file_name IS DISTINCT FROM $1 THEN 1 ELSE 0 END,updated_at=now() WHERE id=$7`, file.FileName, file.FileSize, file.SHA1, file.PickCode, scanToken, changed, id)
-			if err == nil && changed {
-				_, err = tx.ExecContext(ctx, "DELETE FROM t_share_media_file_episode WHERE file_id=$1", id)
-			}
-		}
-		if err != nil {
-			return 0, err
-		}
-	}
-	if _, err = tx.ExecContext(ctx, "UPDATE t_share_media_file SET available=FALSE,updated_at=now() WHERE share_id=$1 AND available AND last_seen_scan_token IS DISTINCT FROM $2", shareID, scanToken); err != nil {
-		return 0, err
-	}
-	if _, err = tx.ExecContext(ctx, "DELETE FROM t_share_media m WHERE NOT EXISTS (SELECT 1 FROM t_share_media_file f WHERE f.media_id=m.id)"); err != nil {
-		return 0, err
-	}
-	if err = tx.Commit(); err != nil {
-		return 0, err
-	}
-	return len(files), nil
 }
 
 // insertShareEpisodes 将季集映射分块批量写入调用方事务，任何分块失败均由调用方整体回滚。

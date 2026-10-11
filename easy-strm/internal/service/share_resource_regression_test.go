@@ -22,6 +22,7 @@ func TestClearUnrelatedShareDuringIdentification(t *testing.T) {
 	defer release()
 	mock.ExpectBegin()
 	mock.ExpectQuery("SELECT id FROM t_share_record").WithArgs(2).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(2))
+	mock.ExpectExec("UPDATE t_share_record SET version=version\\+1").WithArgs(2).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media_file").WithArgs(2).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()

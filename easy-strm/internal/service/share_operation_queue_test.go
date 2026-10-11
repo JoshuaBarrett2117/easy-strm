@@ -52,6 +52,7 @@ func TestQueuedFileDeleteDuringScanPreventsOldSyncRecreation(t *testing.T) {
 	expectOperationTarget(m, 7)
 	m.ExpectQuery("SELECT share_id,file_name,file_id FROM t_share_media_file").WithArgs(11).WillReturnRows(sqlmock.NewRows([]string{"share_id", "file_name", "file_id"}).AddRow(7, "removed.mkv", "remote"))
 	m.ExpectBegin()
+	m.ExpectExec("UPDATE t_share_record SET version=version\\+1").WithArgs(11).WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectExec("DELETE FROM t_share_media_file WHERE id").WithArgs(11).WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
 	m.ExpectExec("UPDATE t_share_operation_queue SET status='completed'").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -61,15 +62,21 @@ func TestQueuedFileDeleteDuringScanPreventsOldSyncRecreation(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitOperationStatus(t, s, deleteID, "completed")
-	// 删除无需等待当前扫描；旧扫描落库时过滤候选，不再次INSERT。
+	// 删除无需等待当前扫描；旧扫描因分享版本过期被跳过，不再写入或失效未见文件。
 	m.ExpectQuery("SELECT id FROM t_share_media_file WHERE share_id").WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"id"}))
-	m.ExpectBegin()
-	m.ExpectQuery("SELECT id FROM t_share_record").WithArgs(7, 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
-	m.ExpectExec("UPDATE t_share_media_file SET available=FALSE").WillReturnResult(sqlmock.NewResult(0, 0))
-	m.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
-	m.ExpectCommit()
+	m.ExpectQuery(`SELECT pg_try_advisory_lock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"locked"}).AddRow(true))
+	m.ExpectQuery("SELECT version FROM t_share_record WHERE id=\\$1 AND version=\\$2").WithArgs(7, 1).WillReturnError(sql.ErrNoRows)
+	m.ExpectQuery(`SELECT pg_advisory_unlock\(34984,\$1\)`).WithArgs(7).WillReturnRows(sqlmock.NewRows([]string{"unlocked"}).AddRow(true))
 	close(p.resume)
 	waitOperationStatus(t, s, syncID, "completed")
+	task, err := s.tasks.Get(syncID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := task["metadata"].(map[string]interface{})
+	if fmt.Sprint(metadata["skipped"]) != "1" || fmt.Sprint(metadata["synced_shares"]) != "0" || fmt.Sprint(metadata["file_count"]) != "0" {
+		t.Fatal("旧扫描未被跳过：", metadata)
+	}
 	if err := m.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -342,6 +349,7 @@ func expectOperationTarget(mock sqlmock.Sqlmock, id int) {
 }
 func expectOperationClear(mock sqlmock.Sqlmock, count int64) {
 	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE t_share_record SET version=version\\+1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media_file WHERE share_id = ANY").WillReturnResult(sqlmock.NewResult(0, count))
 	mock.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE t_share_operation_queue SET status='completed'").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -428,6 +436,7 @@ func TestShareOperationQueueExecutingCannotCancel(t *testing.T) {
 	s, mock, _ := operationFixture(t)
 	expectOperationTarget(mock, 1)
 	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE t_share_record SET version=version\\+1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media_file").WillDelayFor(150 * time.Millisecond).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media m").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE t_share_operation_queue SET status='completed'").WillReturnResult(sqlmock.NewResult(0, 1))
@@ -450,6 +459,7 @@ func TestShareOperationQueueFailureReleasesReservation(t *testing.T) {
 	s, mock, _ := operationFixture(t)
 	expectOperationTarget(mock, 1)
 	mock.ExpectBegin()
+	mock.ExpectExec("UPDATE t_share_record SET version=version\\+1").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("DELETE FROM t_share_media_file").WillReturnError(errors.New("database unavailable"))
 	mock.ExpectRollback()
 	id, e := s.StartClearMedia(context.Background(), []int{1})
