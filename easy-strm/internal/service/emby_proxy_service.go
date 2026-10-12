@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -20,12 +21,15 @@ import (
 
 // EmbyProxyService 管理实例独立反代端口，保存前绑定端口，保存失败不改变现有代理。
 type EmbyProxyService struct {
-	servers   *dao.EmbyServerDAO
-	client    *http.Client
-	reserved  map[int]bool
-	mu        sync.Mutex
-	listeners map[int]*embyProxyListener
-	closed    bool
+	servers      *dao.EmbyServerDAO
+	client       *http.Client
+	relayClient  *http.Client
+	relayContext context.Context
+	cancelRelay  context.CancelFunc
+	reserved     map[int]bool
+	mu           sync.Mutex
+	listeners    map[int]*embyProxyListener
+	closed       bool
 }
 
 type embyProxyHandler struct{ http.Handler }
@@ -83,7 +87,11 @@ func NewEmbyProxyService(servers *dao.EmbyServerDAO, client *http.Client, reserv
 	for _, port := range reservedPorts {
 		reserved[port] = true
 	}
-	return &EmbyProxyService{servers: servers, client: &copyClient, reserved: reserved, listeners: make(map[int]*embyProxyListener)}
+	relayContext, cancelRelay := context.WithCancel(context.Background())
+	return &EmbyProxyService{
+		servers: servers, client: &copyClient, reserved: reserved, listeners: make(map[int]*embyProxyListener),
+		relayClient: newEmbyProxyRelayClient(), relayContext: relayContext, cancelRelay: cancelRelay,
+	}
 }
 
 // Start 加载已启用实例；逐项报告启动失败，其他可用实例仍启动。
@@ -110,6 +118,8 @@ func (s *EmbyProxyService) Close() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.closed = true
+	s.cancelRelay()
+	s.relayClient.CloseIdleConnections()
 	for id, listener := range s.listeners {
 		listener.close()
 		delete(s.listeners, id)
@@ -231,9 +241,19 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodOptions {
+			applyProxyCORS(w.Header(), r)
+			if r.Header.Get("Origin") != "" {
+				w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+				w.Header().Set("Access-Control-Allow-Headers", "Range, If-Range, Accept, Content-Type, Authorization, X-Emby-Token, X-MediaBrowser-Token, X-Emby-Authorization, Origin")
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		playback, matched := embyPlaybackRequest(r)
 		contextual, err := beginEmbyProxyRequest(r, w, playback)
 		if err != nil {
+			applyProxyCORS(w.Header(), r)
 			http.Error(w, "请求标识随机源不可用", http.StatusServiceUnavailable)
 			return
 		}
@@ -251,6 +271,11 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 			proxy.ServeHTTP(w, r)
 			return
 		}
+		if r.Header.Get("Origin") != "" {
+			s.relayMedia(&config, w, r, location)
+			return
+		}
+		applyProxyCORS(w.Header(), r)
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Location", location)
 		w.WriteHeader(http.StatusFound)

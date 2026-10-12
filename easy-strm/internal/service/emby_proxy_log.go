@@ -51,6 +51,7 @@ func beginEmbyProxyRequest(r *http.Request, w http.ResponseWriter, playback emby
 
 func writeEmbyProxyFailure(server *domain.EmbyServer, w http.ResponseWriter, r *http.Request, failure *embyProxyFailure) {
 	logEmbyProxyFailure(server, r, failure)
+	applyProxyCORS(w.Header(), r)
 	w.Header().Set("Cache-Control", "no-store")
 	if r.Method == http.MethodHead {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
