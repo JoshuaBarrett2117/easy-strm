@@ -1,0 +1,10 @@
+emby_proxy:
+  cache_enabled: true
+  cache_ttl_seconds: 600
+  cache_capacity: 1024
+  cache_isolate_ua: true
+  cache_isolate_ip: true
+  resolve_final_url: false
+  probe_head: false
+  browser_redirect: false
+  proxy_error_strategy: reject

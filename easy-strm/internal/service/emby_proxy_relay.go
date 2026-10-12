@@ -112,6 +112,7 @@ func (s *EmbyProxyService) fetchRelayMedia(ctx context.Context, incoming *http.R
 			}
 			current = next
 		default:
+			response.Request = request
 			return response, nil
 		}
 	}

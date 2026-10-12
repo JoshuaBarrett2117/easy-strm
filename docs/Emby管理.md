@@ -25,13 +25,60 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 
 反代识别 GET/HEAD 的 `/Videos/{item_id}/stream` 及各扩展名、`original` 及各扩展名、HLS 清单和分片，以及 `/Items/{item_id}/Download` 原始文件下载，也支持 `/emby/` 前缀。识别播放接口后，沿用客户端认证与查询参数读取上游 `PlaybackInfo`，没有客户端身份时才使用实例 API Key。按 `MediaSourceId` 选中媒体源，其 HTTP(S) 路径、HTTP 协议、STRM 容器或 `.strm` 路径均视为 STRM；媒体源呈现为本地文件时，再通过 Emby `/Items` 的 `Path`、`IsShortcut` 和媒体源信息确认原项目类型，避免将 STRM 缓存路径误当成本地视频。
 
-STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不请求视频，也不向 Location 添加实例 API Key；原生客户端直接请求原 STRM 地址以及后续直链。有非空 `Origin` 的浏览器请求改为在实例端口流式中继媒体，保留 GET/HEAD、Range 和上游 200/206/416 等状态及媒体头，避免浏览器在 302 之后受直链服务的 CORS 限制。中继不向媒体服务发送 Cookie、Authorization、Emby Token、Origin、Referer 或客户端查询凭据，允许逐跳校验的公网、RFC1918、回环、CGNAT 和 IPv6 ULA HTTP(S) 地址，固定已验证 IP 拨号、TLS 验证原域名、禁用环境代理并最多跟随五次重定向。允许内网/回环地址是刻意设计——内网分域 DNS 会把本服务的公网域名解析到局域网地址，用于节省 CDN 流量，中继必须照走；不使用 own-host 白名单。全部 DNS 答案均须通过校验，公网与私网混合答案允许；无效 IP、zone、0/8、未指定、255.255.255.255、组播和链路本地地址拒绝，包括 IPv4 映射形式，不作视频回源。STRM 转码/HLS 请求、无效地址、解析失败、缺失媒体源或媒体类型无法确认时仍返回 502；Emby 返回的 401/403 保留给客户端。每次请求重新判断，后续有效的直接播放请求仍可恢复。
+默认配置下，STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不请求视频，也不向 Location 添加实例 API Key；原生客户端直接请求原 STRM 地址以及后续直链。有非空 `Origin` 的浏览器请求在实例端口流式中继媒体，保留 GET/HEAD、Range 和上游 200/206/416 等状态及媒体头，避免浏览器在 302 之后受直链服务的 CORS 限制。中继不向媒体服务发送 Cookie、Authorization、Emby Token、Origin、Referer 或客户端查询凭据，允许逐跳校验的公网、RFC1918、回环、CGNAT 和 IPv6 ULA HTTP(S) 地址，固定已验证 IP 拨号、TLS 验证原域名、禁用环境代理并最多跟随五次重定向。允许内网/回环地址是刻意设计——内网分域 DNS 会把本服务的公网域名解析到局域网地址，用于节省 CDN 流量，中继必须照走；不使用 own-host 白名单。全部 DNS 答案均须通过校验，公网与私网混合答案允许；无效 IP、zone、0/8、未指定、255.255.255.255、组播和链路本地地址拒绝，包括 IPv4 映射形式，不作视频回源。默认仍拒绝 STRM 转码/HLS、无效地址、解析失败、缺失媒体源或无法确认媒体类型，返回 502；Emby 返回的 401/403 保留给客户端。成功直链按以下策略缓存，失败不缓存，后续请求可重新解析。
 
 有 Origin 的中继和失败响应回显 Origin、允许凭据并暴露 Content-Range、Content-Length、Accept-Ranges、Content-Type，保留原有 Vary 并追加 Origin；无 Origin 不新增 CORS 头。OPTIONS 在访问 Emby 前本地返回 204，有 Origin 时声明 GET/HEAD/OPTIONS 及 Range、If-Range、认证等允许头。中继不设置整段视频的请求超时，仅对 DNS、建连、TLS 和响应头等待设置时限；客户端取消或服务关闭会中断流，服务关闭同时释放专用传输闲置连接。
 
 流式失败边界（2026-10-12，维护者：Codex）：响应头发送前的上游失败仍返回可读错误；发送后发生读写失败只记录脱敏日志并返回，不 panic、不追加错误正文，也不改写已发送的状态码或响应头。已知 Content-Length 时，客户端可以识别字节不足的截断；未知长度的流在正常返回后可能显示为正常完成，不中止传输层就无法无歧义地通知客户端失败。本实现不主动中止传输层或劫持连接。
 
-仅明确为非 STRM 的本地或其他协议媒体允许视频回源，其直接播放、转码和 HLS 保持正常。浏览、登录、图片、字幕及 WebSocket 仍透明反代。禁止回源规则作用于配置的实例反代端口，无 Origin 的客户端需要支持并跟随 302。
+默认仅明确为非 STRM 的本地或其他协议媒体允许视频回源，其直接播放、转码和 HLS 保持正常；下面的显式降级开关是例外。浏览、登录、图片、字幕及 WebSocket 仍透明反代。播放策略作用于配置的实例反代端口，无 Origin 的客户端需要支持并跟随 302。
+
+### P0 播放增强配置（2026-10-12，维护者：Codex）
+
+在现有后端 `config.yaml` 增加 `emby_proxy` 段，示例见 `easy-strm/config.example.yaml`。这些是进程级配置，加载时归一化并校验，启动时注入 Service；修改后需重启，不新增数据库字段、迁移或前端设置接口。不要用这个仅包含增强段的示例覆盖已有数据库等配置。
+
+| 配置 | 默认 | 说明 |
+| --- | --- | --- |
+| `cache_enabled` | `true` | 成功、已确认 STRM 的 HTTP(S) 直链缓存；关闭后仍合并同时到达的同键解析 |
+| `cache_ttl_seconds` | `600` | 10 分钟，允许 1–86400；0 补默认，负数拒绝 |
+| `cache_capacity` | `1024` | LRU 最大条目数及同键解析任务容量，允许 1–100000；0 补默认 |
+| `cache_isolate_ua` | `true` | 按客户端 User-Agent 隔离 |
+| `cache_isolate_ip` | `true` | 按连接对端 IP 隔离，忽略端口，不信任转发头 |
+| `resolve_final_url` | `false` | 用无凭据 HEAD 逐跳预解析最终直链；普通失败保留原 URL |
+| `probe_head` | `false` | 独立探测可用性，不依赖预解析开关；非 2xx 或 JSON 类型响应拒绝 |
+| `browser_redirect` | `false` | 有 Origin 的直接播放可改为 302；默认继续使用中继 |
+| `proxy_error_strategy` | `reject` | 仅接受 `reject` / `fallback_origin`；忽略首尾空白和大小写 |
+
+默认关闭探测和预解析，避免改变不支持 HEAD、依赖签名或网络较慢的媒体服务行为；浏览器默认中继，避免依赖 CDN 的 CORS。缓存键对实例 ID、地址、实例 API Key、代理端口、处理器配置代次、itemID、MediaSourceId、客户端身份与其余查询参数整体 SHA-256 哈希；身份包含认证头、Emby Token、Cookie 和查询凭据，缺失身份不能复用有身份结果。只忽略 `StartTimeTicks`、`PlaySessionId`、`X-Playback-Session-Id`，未知参数保留。命中跳过 PlaybackInfo 和 Items；转码/HLS 必须重新识别，不读取或写入直播放缓存。实例保存重建处理器后不会命中旧代次；旧条目由 TTL/LRU 有界淘汰。
+
+同键解析只执行一次完整流程，等待者可单独取消，不影响其他等待者；最后一名等待者离开会取消上游解析。任务最长 30 秒，服务关闭取消任务并释放缓存。失败结果是独立副本，不缓存错误、未确认类型、本地媒体或失败探测。授权缓存并不实时感知 Emby 的撤权；敏感部署应缩短 TTL 或关闭缓存，签名寿命短于 TTL 的媒体同样需要缩短或关闭缓存。
+
+预解析与探测各最多 3 次尝试，重试间隔约 2 秒，单次最长 3 秒，两阶段共享最长 15 秒总期限，支持取消。HEAD 响应体始终关闭；`application/json` 大小写、charset 参数均不影响拒绝判断。媒体请求仅携带 UA（中继另保留 Range/缓存校验头），不携带客户端 Cookie、Authorization、Emby Token、Origin、Referer 或查询凭据；STRM/CDN URL 自带的媒体签名保持不变。每个跳转复用中继 DNS 全答案验证、固定 IP 拨号、禁用环境代理和五跳上限；不安全跳转即使预解析失败也不允许回退。默认无探测的原生 302 不进行 DNS 请求，但拒绝非法 URL、userinfo 和明确禁止的 IP 字面量。
+
+| 场景 | `reject`（默认） | `fallback_origin` |
+| --- | --- | --- |
+| 原生客户端、可用直链 | 302；预解析开关可替换为最终 URL | 相同 |
+| 浏览器、可用直链 | 默认中继；`browser_redirect=true` 时 302 | 相同 |
+| 浏览器 302 响应头 | 回显 Origin、允许凭据、`Accept-Ranges: bytes`、`Cache-Control: no-cache`、`Referrer-Policy: no-referrer` | 相同 |
+| 预解析普通失败、探测关闭 | 保留原 URL，继续原流程 | 相同 |
+| HEAD 探测失败、浏览器 | 用原 STRM URL 安全中继，不缓存失败 | 相同 |
+| HEAD 探测失败、原生客户端 | 502 | 按原始入口路径/查询反代可信 Emby |
+| 缺失直链/媒体源、浏览器直接播放 | 仅 `browser_redirect=true` 时反代可信 Emby，否则 502 | 反代可信 Emby |
+| STRM 转码/HLS | 502，包括浏览器开启 302 时 | 按原始入口路径/查询反代可信 Emby，不调用媒体端点 |
+| Emby 401/403、显式 ErrorCode、解析错误、歧义/未知类型、不安全 URL/跳转 | 始终拒绝；401/403 保持原状态 | 始终拒绝，不降级 |
+
+302 头只控制本反代响应，不能保证 CDN 返回允许 Origin/凭据的 CORS；开启浏览器 302 前需自行确认直链服务兼容。`fallback_origin` 明确允许原 Emby 执行 STRM 转码/读取，可能增加源站流量和算力；它不是绕过授权或 SSRF 的开关。探测失败浏览器中继若也失败，沿用中继错误终态，不再递归回源。
+
+#### 本地参考来源与范围
+
+参考根目录：`/volume1/docker_project_data/hermes-agent/cache/scratch/refs/`，仅阅读本地文件，不复制其凭据透传、原始 URL 日志或宽松 IP 判断。
+
+- `go-emby2openlist`（本地 HEAD `9b049b8`）：`internal/service/emby/redirect.go`、`media.go` 及 `internal/web/cache/cache.go`，对比 10 分钟直链缓存、易变参数、STRM 和媒体源选择；其异步 PlaybackInfo 行为不在本次实现。
+- `MediaRelay`（本地 HEAD `fce33e1`）：`apps/server/main.ts`、`packages/emby/client.ts`、`packages/shared/rule-matcher.ts`，对比 LRU、302 头、缺失链接回源及 UA/IP 规则；本实现使用回显 Origin + 凭据，不使用通配符 CORS，也不增加规则引擎。
+- `embyExternalUrl`（本地 HEAD `91798cc`）：`emby2Alist/nginx/conf.d/emby.js`、`modules/ngx-ext.js`，对比最终链接预解析、HEAD 和 JSON 伪成功；本实现逐跳固定 IP、关闭响应体、有界重试，并禁止向媒体发送认证。
+- `xstrm-suite`（本地 HEAD `b6eb2b0`）：`nginx/conf.d/emby.js`、`modules/emby-v-media.js`，另阅读 `emby2alist/emby2Alist/conf.d/modules/emby-playback-info.js`，对比原项目 STRM 判定、虚拟媒体与字幕适配；字幕继续透明反代。
+
+保留待办、不在 P0 实现：P1 的 PlaybackInfo 12 小时缓存、异步 Emby STRM 解析、同源重定向、UA/IP/host/path 规则；P2 的转码直链和字幕 DeliveryUrl 改写。验证文件及命令见 `docs/开发与测试.md` 的 P0 增强小节。
 
 ### 失败日志
 
@@ -39,7 +86,7 @@ STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/H
 
 响应头 `X-Request-ID` 与日志中的 `request_id` 对应，可用于定位单次失败。日志不记录完整查询串、认证头、Cookie、API Key、签名直链或上游响应体，网络错误也不会输出含敏感查询参数的 URL。
 
-无 Origin 的请求不在 302 前探测直链。客户端收到 302 后访问直链失败，且未再次请求反代时，反代无法获知该结果；客户端后续改用反代端口请求转码/HLS 时会被拦截并记录失败日志。浏览器中继在响应头前失败时返回统一可读错误；响应头已发送后的传输错误记录脱敏日志并中断流，不将错误文本混入视频正文。失败日志的 detail 保留底层 Error() 原因，例如 connection refused、DNS failed，并复用公共日志规则脱敏完整 URL（含 userinfo、query、fragment）及认证、Cookie、Token 等凭据；不再只记录错误类型。
+默认无 Origin 的请求不在 302 前探测直链，可通过上述开关启用。客户端收到 302 后访问直链失败，且未再次请求反代时，反代无法获知该结果；客户端后续改用反代端口请求转码/HLS 时默认拦截，显式 `fallback_origin` 则记录降级并转发可信 Emby。浏览器中继在响应头前失败时返回统一可读错误；响应头已发送后的传输错误记录脱敏日志并中断流，不将错误文本混入视频正文。失败日志的 detail 保留底层 Error() 原因，例如 connection refused、DNS failed，并复用公共日志规则脱敏完整 URL（含 userinfo、query、fragment）及认证、Cookie、Token 等凭据；不再只记录错误类型。
 
 当前 STRM 文件及 `SERVER_URL` 保持不变，但其中的地址必须能被播放器访问。反代端口使用 HTTP；需要 HTTPS 时，可由已有入口网关转发至该端口。
 

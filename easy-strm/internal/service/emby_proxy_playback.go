@@ -99,6 +99,11 @@ func (s *EmbyProxyService) playbackLocation(server *domain.EmbyServer, base *url
 	if !strm {
 		return "", nil
 	}
+	if strings.Contains(source.Path, "://") {
+		if err := validateEmbyProxyMediaLocation(source.Path); err != nil {
+			return "", newEmbyProxyFailure("redirect", "unsafe_location", "媒体播放地址不可安全访问，已禁止回源", 200, err)
+		}
+	}
 	if playback.transcoding {
 		return "", newEmbyProxyFailure("playback_policy", "strm_fallback_blocked", "STRM 禁止转码或 HLS 回退，已禁止回源", 200, nil)
 	}
@@ -117,7 +122,10 @@ func (s *EmbyProxyService) playbackSource(server *domain.EmbyServer, base *url.U
 	if failure := s.proxyMetadata(server, base, incoming, path, incoming.URL.Query(), "playback_info", &info); failure != nil {
 		return embyProxyMediaSource{}, failure
 	}
-	if info.ErrorCode != "" || len(info.MediaSources) == 0 {
+	if info.ErrorCode != "" {
+		return embyProxyMediaSource{}, newEmbyProxyFailure("media_source", "media_source_error", "Emby 拒绝提供播放媒体源，已禁止回源", 200, nil)
+	}
+	if len(info.MediaSources) == 0 {
 		return embyProxyMediaSource{}, newEmbyProxyFailure("media_source", "media_source_missing", "Emby 未提供可用媒体源，已禁止回源", 200, nil)
 	}
 	if id := embyQuery(incoming.URL.Query(), "MediaSourceId"); id != "" {

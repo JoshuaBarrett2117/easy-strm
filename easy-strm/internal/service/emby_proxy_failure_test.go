@@ -185,7 +185,7 @@ func TestEmbyProxyFailsClosedForUnknownOrInvalidMedia(t *testing.T) {
 		name, playbackBody, itemBody, stage, reason        string
 		playbackStatus, itemStatus, status, upstreamStatus int
 	}{
-		{"直链无效", `{"MediaSources":[{"Id":"s1","Path":"https:///invalid"}]}`, "", "redirect", "invalid_strm_location", 200, 200, 502, 200},
+		{"直链无效", `{"MediaSources":[{"Id":"s1","Path":"https:///invalid"}]}`, "", "redirect", "unsafe_location", 200, 200, 502, 200},
 		{"STRM容器无直链", `{"MediaSources":[{"Id":"s1","Path":"/media/video.mkv","Container":"strm"}]}`, "", "redirect", "invalid_strm_location", 200, 200, 502, 200},
 		{"STRM路径无直链", `{"MediaSources":[{"Id":"s1","Path":"C:\\media\\video.STRM"}]}`, "", "redirect", "invalid_strm_location", 200, 200, 502, 200},
 		{"解析失败", `{"MediaSources":[private-secret]}`, "", "playback_info", "invalid_json", 200, 200, 502, 200},

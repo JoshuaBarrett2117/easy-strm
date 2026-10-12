@@ -86,7 +86,10 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	watchService := service.NewWatchService(mediaSourceService, organizeService, cloud115DAO, client, taskService)
 	embyService := service.NewEmbyService(systemConfigDAO, NewProxyAwareHTTPClient(15*time.Second))
 	embyServerDAO := dao.NewEmbyServerDAO(dao.DB)
-	embyProxyService := service.NewEmbyProxyService(embyServerDAO, NewProxyAwareHTTPClient(30*time.Second), 80, 8082)
+	embyProxyService, proxyConfigErr := service.NewEmbyProxyServiceWithConfig(embyServerDAO, NewProxyAwareHTTPClient(30*time.Second), config.EmbyProxy, 80, 8082)
+	if proxyConfigErr != nil {
+		panic(proxyConfigErr.Error())
+	}
 	if err := embyProxyService.Start(); err != nil {
 		Error("Emby 反代启动异常: %v", err)
 	}

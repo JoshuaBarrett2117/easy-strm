@@ -3,16 +3,19 @@ package main
 import (
 	"os"
 
+	"easy-strm/internal/domain"
+
 	"gopkg.in/yaml.v2"
 )
 
 type Config struct {
-	AppID       string `yaml:"app_id"`
-	AppSecret   string `yaml:"app_secret"`
-	RedirectURI string `yaml:"redirect_uri"`
-	BaseURL     string `yaml:"base_url"`
-	ServerURL   string `yaml:"server_url"` // 本服务的访问地址，用于生成STRM文件中的直链URL
-	JWTSecret   string `yaml:"jwt_secret"`
+	EmbyProxy   domain.EmbyProxyConfig `yaml:"emby_proxy"`
+	AppID       string                 `yaml:"app_id"`
+	AppSecret   string                 `yaml:"app_secret"`
+	RedirectURI string                 `yaml:"redirect_uri"`
+	BaseURL     string                 `yaml:"base_url"`
+	ServerURL   string                 `yaml:"server_url"` // 本服务的访问地址，用于生成STRM文件中的直链URL
+	JWTSecret   string                 `yaml:"jwt_secret"`
 	PostgreSQL  struct {
 		Host     string `yaml:"host"`
 		Port     int    `yaml:"port"`
@@ -38,6 +41,7 @@ var globalConfig *Config
 func LoadConfig() *Config {
 	// 默认配置
 	config := &Config{
+		EmbyProxy: domain.DefaultEmbyProxyConfig(),
 		BaseURL:   "https://proapi.115.com",
 		ServerURL: "http://localhost:8082", // 默认本服务地址
 		JWTSecret: "default_jwt_secret",
@@ -123,6 +127,11 @@ func LoadConfig() *Config {
 		config.Log.LogLevel = logLevel
 	}
 
+	var err error
+	config.EmbyProxy, err = config.EmbyProxy.Normalize()
+	if err != nil {
+		panic(err.Error())
+	}
 	globalConfig = config
 	return config
 }

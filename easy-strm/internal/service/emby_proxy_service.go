@@ -32,6 +32,9 @@ type EmbyProxyService struct {
 	mu           sync.Mutex
 	listeners    map[int]*embyProxyListener
 	closed       bool
+	options      domain.EmbyProxyConfig
+	cache        *embyProxyCache
+	generation   atomic.Uint64
 }
 
 type embyProxyHandler struct{ http.Handler }
@@ -80,6 +83,19 @@ func (l *embyProxyListener) close() {
 
 // NewEmbyProxyService 创建反代服务；reservedPorts 为应用及 Nginx 等必须保留的端口。
 func NewEmbyProxyService(servers *dao.EmbyServerDAO, client *http.Client, reservedPorts ...int) *EmbyProxyService {
+	service, err := NewEmbyProxyServiceWithConfig(servers, client, domain.DefaultEmbyProxyConfig(), reservedPorts...)
+	if err != nil {
+		panic(err.Error())
+	}
+	return service
+}
+
+// NewEmbyProxyServiceWithConfig 校验并注入进程级播放策略；非法配置不启动服务，实例仍通过原 DAO 管理。
+func NewEmbyProxyServiceWithConfig(servers *dao.EmbyServerDAO, client *http.Client, options domain.EmbyProxyConfig, reservedPorts ...int) (*EmbyProxyService, error) {
+	options, err := options.Normalize()
+	if err != nil {
+		return nil, err
+	}
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -91,10 +107,10 @@ func NewEmbyProxyService(servers *dao.EmbyServerDAO, client *http.Client, reserv
 	}
 	relayContext, cancelRelay := context.WithCancel(context.Background())
 	return &EmbyProxyService{
-		servers: servers, client: &copyClient, reserved: reserved, listeners: make(map[int]*embyProxyListener),
+		servers: servers, client: &copyClient, reserved: reserved, listeners: make(map[int]*embyProxyListener), options: options, cache: newEmbyProxyCache(options),
 		relayClient: newEmbyProxyRelayClient(), relayContext: relayContext, cancelRelay: cancelRelay,
 		relayLookup: net.DefaultResolver.LookupNetIP,
-	}
+	}, nil
 }
 
 // Start 加载已启用实例；逐项报告启动失败，其他可用实例仍启动。
@@ -122,6 +138,7 @@ func (s *EmbyProxyService) Close() {
 	defer s.mu.Unlock()
 	s.closed = true
 	s.cancelRelay()
+	s.cache.clear()
 	s.relayClient.CloseIdleConnections()
 	for id, listener := range s.listeners {
 		listener.close()
@@ -217,6 +234,7 @@ func (s *EmbyProxyService) delete(id int, persist func() error) error {
 func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler {
 	// 捕获配置副本，后续同端口更新不会影响进行中的请求。
 	config := *server
+	generation := s.generation.Add(1)
 	target, _ := url.Parse(config.BaseURL)
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
@@ -265,8 +283,12 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 			proxy.ServeHTTP(w, r)
 			return
 		}
-		location, failure := s.playbackLocation(&config, target, r, playback)
+		result := s.resolvePlaybackLocation(&config, target, r, playback, generation)
+		location, failure := result.location, result.failure
 		if failure != nil {
+			if s.handlePlaybackFallback(&config, proxy, w, r, result) {
+				return
+			}
 			writeEmbyProxyFailure(&config, w, r, failure)
 			return
 		}
@@ -274,15 +296,48 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 			proxy.ServeHTTP(w, r)
 			return
 		}
-		if r.Header.Get("Origin") != "" {
+		if r.Header.Get("Origin") != "" && !s.options.BrowserRedirect {
 			s.relayMedia(&config, w, r, location)
 			return
 		}
 		applyProxyCORS(w.Header(), r)
 		w.Header().Set("Cache-Control", "no-store")
+		if r.Header.Get("Origin") != "" {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+		}
 		w.Header().Set("Location", location)
 		w.WriteHeader(http.StatusFound)
 	})
+}
+
+// handlePlaybackFallback 按请求和解析失败选择浏览器原地址中继或可信 Emby 原始入口回源，已处理响应时返回 true。
+// 授权、不安全地址、取消和未知类型不降级；浏览器开关不豁免转码，转码回源必须显式选择 fallback_origin。
+func (s *EmbyProxyService) handlePlaybackFallback(server *domain.EmbyServer, proxy http.Handler, writer http.ResponseWriter, incoming *http.Request, result embyProxyLocationResult) bool {
+	failure := result.failure
+	if incoming.Context().Err() != nil || s.relayContext.Err() != nil || failure.reason == "authorization_failed" || failure.reason == "unsafe_location" {
+		return false
+	}
+	browser := incoming.Header.Get("Origin") != ""
+	probeFailed := result.original != "" && (failure.stage == "probe" || failure.stage == "relay")
+	if browser && probeFailed {
+		failure.blocked = false
+		logEmbyProxyFailure(server, incoming, failure)
+		s.relayMedia(server, writer, incoming, result.original)
+		return true
+	}
+	missing := failure.reason == "invalid_strm_location" || failure.reason == "media_source_missing"
+	playback, _ := embyPlaybackRequest(incoming)
+	eligible := failure.reason == "strm_fallback_blocked" || missing || probeFailed
+	if eligible && (s.options.ProxyErrorStrategy == "fallback_origin" || (browser && s.options.BrowserRedirect && missing && !playback.transcoding)) {
+		failure.blocked = false
+		logEmbyProxyFailure(server, incoming, failure)
+		applyProxyCORS(writer.Header(), incoming)
+		proxy.ServeHTTP(writer, incoming)
+		return true
+	}
+	return false
 }
 
 // base_url 已包含 /emby 时去掉重复前缀，其他子路径沿用标准库的路径拼接。
