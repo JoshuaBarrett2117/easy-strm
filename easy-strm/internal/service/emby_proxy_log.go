@@ -80,11 +80,14 @@ func logEmbyProxyFailure(server *domain.EmbyServer, r *http.Request, failure *em
 	}, nil)
 }
 
-// 仅输出可控的诊断信息；url.Error 的完整文本包含查询 Token，任意上游错误文本也可能包含直链。
 func embyProxyErrorDetail(err error) string {
 	if err == nil {
 		return ""
 	}
+	return logger.SanitizeText(embyProxyErrorCategory(err) + ": " + err.Error())
+}
+
+func embyProxyErrorCategory(err error) string {
 	var urlError *url.Error
 	if errors.As(err, &urlError) {
 		err = urlError.Err

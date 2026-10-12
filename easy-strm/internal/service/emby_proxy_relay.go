@@ -16,7 +16,7 @@ import (
 
 const embyProxyRelayMaxRedirects = 5
 
-var errEmbyProxyRelayUnsafe = errors.New("媒体地址不是可访问的公网 HTTP(S) 地址")
+var errEmbyProxyRelayUnsafe = errors.New("媒体地址不是允许访问的 HTTP(S) 地址")
 
 type embyProxyRelayTargetKey struct{}
 
@@ -82,7 +82,7 @@ func (s *EmbyProxyService) fetchRelayMedia(ctx context.Context, incoming *http.R
 		return nil, newEmbyProxyFailure("relay", "unsafe_location", "媒体播放地址无效，已禁止回源", 0, err)
 	}
 	for redirects := 0; ; redirects++ {
-		target, err := resolveEmbyProxyRelayTarget(ctx, current, net.DefaultResolver.LookupNetIP)
+		target, err := resolveEmbyProxyRelayTarget(ctx, current, s.relayLookup)
 		if err != nil {
 			return nil, newEmbyProxyFailure("relay", "unsafe_location", "媒体播放地址不可安全访问，已禁止回源", 0, err)
 		}
@@ -133,7 +133,7 @@ func resolveEmbyProxyRelayTarget(ctx context.Context, location *url.URL, lookup 
 	if address, err := netip.ParseAddr(host); err == nil {
 		ips = []netip.Addr{address}
 	} else {
-		// DNS 有界且每跳校验全部结果；混合公网/内网答案也拒绝，避免重绑定。
+		// DNS 有界且每跳校验全部结果；混合公网/内网答案允许，但任一禁用地址都会拒绝整跳。
 		resolveCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		var err error
@@ -146,38 +146,25 @@ func resolveEmbyProxyRelayTarget(ctx context.Context, location *url.URL, lookup 
 		return embyProxyRelayTarget{}, errEmbyProxyRelayUnsafe
 	}
 	for _, address := range ips {
-		if !isEmbyProxyRelayPublicIP(address) {
+		if !isEmbyProxyRelayAllowedIP(address) {
 			return embyProxyRelayTarget{}, errEmbyProxyRelayUnsafe
 		}
 	}
 	return embyProxyRelayTarget{address: net.JoinHostPort(host, port), port: port, ips: ips}, nil
 }
 
-var embyProxyRelayBlockedPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("0.0.0.0/8"),
-	netip.MustParsePrefix("100.64.0.0/10"),
-	netip.MustParsePrefix("192.0.0.0/24"),
-	netip.MustParsePrefix("192.0.2.0/24"),
-	netip.MustParsePrefix("198.18.0.0/15"),
-	netip.MustParsePrefix("198.51.100.0/24"),
-	netip.MustParsePrefix("203.0.113.0/24"),
-	netip.MustParsePrefix("240.0.0.0/4"),
-	netip.MustParsePrefix("2001::/23"),
-	netip.MustParsePrefix("2001:db8::/32"),
-	netip.MustParsePrefix("2002::/16"),
-}
-
-func isEmbyProxyRelayPublicIP(address netip.Addr) bool {
+// 允许内网/回环地址是刻意设计——内网分域 DNS 会把本服务的公网域名解析到局域网地址，用于节省 CDN 流量，中继必须照走。
+func isEmbyProxyRelayAllowedIP(address netip.Addr) bool {
+	if !address.IsValid() || address.Zone() != "" {
+		return false
+	}
 	address = address.Unmap()
-	if address.Zone() != "" || !address.IsGlobalUnicast() || address.IsPrivate() || address.IsLoopback() || address.IsLinkLocalUnicast() {
+	if address.IsUnspecified() || address.IsMulticast() || address.IsLinkLocalUnicast() {
 		return false
 	}
-	// IPv6 只接受公网单播分配段，不允许 NAT64 等转换地址绕过 IPv4 检查。
-	if address.Is6() && !netip.MustParsePrefix("2000::/3").Contains(address) {
-		return false
-	}
-	for _, prefix := range embyProxyRelayBlockedPrefixes {
-		if prefix.Contains(address) {
+	if address.Is4() {
+		ipv4 := address.As4()
+		if ipv4[0] == 0 || ipv4 == [4]byte{255, 255, 255, 255} {
 			return false
 		}
 	}
@@ -198,7 +185,7 @@ func (target embyProxyRelayTarget) dial(ctx context.Context, network string, dia
 	defer cancel()
 	var failures []error
 	for _, address := range target.ips {
-		if !isEmbyProxyRelayPublicIP(address) {
+		if !isEmbyProxyRelayAllowedIP(address) {
 			return nil, errEmbyProxyRelayUnsafe
 		}
 		connection, err := dial(dialCtx, network, net.JoinHostPort(address.Unmap().String(), target.port))

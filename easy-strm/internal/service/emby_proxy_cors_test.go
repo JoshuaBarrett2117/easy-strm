@@ -49,34 +49,45 @@ func embyProxyHeaderContains(header http.Header, key, value string) bool {
 	return false
 }
 
-func TestEmbyProxyBrowserRejectsPrivateRelayNativeRedirect(t *testing.T) {
+func TestEmbyProxyBrowserAllowsLocalRelayNativeRedirect(t *testing.T) {
 	for _, tc := range []struct {
 		name, method, origin string
-		status               int
+		status, calls        int
 	}{
-		{"浏览器GET安全拒绝", "GET", embyProxyTestOrigin, 502},
-		{"浏览器HEAD安全拒绝", "HEAD", embyProxyTestOrigin, 502},
-		{"原生GET仍302", "GET", "", 302},
-		{"原生HEAD仍302", "HEAD", "", 302},
+		{"浏览器GET本地中继", "GET", embyProxyTestOrigin, 200, 1},
+		{"浏览器HEAD本地中继", "HEAD", embyProxyTestOrigin, 200, 1},
+		{"原生GET仍302", "GET", "", 302, 0},
+		{"原生HEAD仍302", "HEAD", "", 302, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mediaCalls atomic.Int32
 			media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				mediaCalls.Add(1)
+				assertEmbyProxyRelayRequest(t, r, tc.method)
+				w.Header().Set("Content-Type", "video/mp4")
+				if r.Method != http.MethodHead {
+					_, _ = io.WriteString(w, "local-video")
+				}
 			}))
 			defer media.Close()
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.WriteString(w, `{"MediaSources":[{"Path":"`+media.URL+`/video?signature=test"}]}`)
+				_, _ = io.WriteString(w, `{"MediaSources":[{"Id":"s1","Path":"`+media.URL+`/video?signature=test"}]}`)
 			}))
 			defer remote.Close()
 			service := NewEmbyProxyService(nil, remote.Client())
 			defer service.Close()
-			request := httptest.NewRequest(tc.method, "/Videos/42/stream", nil)
-			request.Header.Set("Origin", tc.origin)
+			request := embyProxyRelayTestRequest(tc.method, tc.origin)
 			response := httptest.NewRecorder()
 			service.buildHandler(&domain.EmbyServer{BaseURL: remote.URL}).ServeHTTP(response, request)
-			if response.Code != tc.status || mediaCalls.Load() != 0 {
-				t.Errorf("status=%d 媒体访问=%d，期望 %d 且零访问", response.Code, mediaCalls.Load(), tc.status)
+			if response.Code != tc.status || mediaCalls.Load() != int32(tc.calls) {
+				t.Errorf("status=%d 媒体访问=%d，期望 %d 且访问 %d 次", response.Code, mediaCalls.Load(), tc.status, tc.calls)
+			}
+			wantBody := ""
+			if tc.origin != "" && tc.method == http.MethodGet {
+				wantBody = "local-video"
+			}
+			if response.Body.String() != wantBody {
+				t.Errorf("中继正文=%q，期望 %q", response.Body.String(), wantBody)
 			}
 			if tc.origin == "" && response.Header().Get("Location") != media.URL+"/video?signature=test" {
 				t.Error("原生播放器重定向地址改变")

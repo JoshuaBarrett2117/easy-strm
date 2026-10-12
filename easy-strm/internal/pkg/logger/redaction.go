@@ -19,6 +19,11 @@ var identityPattern = regexp.MustCompile(`(?i)\b(?:user|username|account|passwor
 var payloadPattern = regexp.MustCompile(`(?is)\b(?:body|raw|payload)\s*[:=]\s*.*`)
 var credentialPattern = regexp.MustCompile(`(?i)["']?\b(?:[a-z0-9_.-]*(?:api[-_. ]?key|token|password|passwd|secret|user[-_. ]?name|account|credential|signature|authorization|cookie)[a-z0-9_.-]*|pwd|user|auth|sign|receive[-_. ]?code)["']?\s*[:=]\s*(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;&}\]]+)`)
 
+// SanitizeText 对诊断文本复用日志脱敏规则，移除完整 URL、查询及带标识的凭据，返回可安全记录的文本。
+func SanitizeText(text string) string {
+	return sanitizeText(text)
+}
+
 func sanitizeText(text string) string {
 	text = urlPattern.ReplaceAllString(text, "[REDACTED_URL]")
 	text = queryPattern.ReplaceAllString(text, "?[REDACTED_QUERY]")

@@ -353,7 +353,7 @@ func (transport embyProxyErrorTransport) RoundTrip(*http.Request) (*http.Respons
 
 func TestEmbyProxyTransportErrorDoesNotLeakURL(t *testing.T) {
 	output := captureEmbyProxyLog(t)
-	client := &http.Client{Transport: embyProxyErrorTransport{err: &url.Error{Op: "Get", URL: "https://cdn.example/video?signature=private-signature", Err: errors.New("private-upstream-error")}}}
+	client := &http.Client{Transport: embyProxyErrorTransport{err: &url.Error{Op: "Get", URL: "https://cdn.example/video?signature=private-signature", Err: errors.New("connection refused")}}}
 	h := NewEmbyProxyService(nil, client).buildHandler(&domain.EmbyServer{ID: 7, BaseURL: "http://emby.example", APIKey: "private-key"})
 	for _, path := range []string{"/Videos/42/stream?api_key=private-token", "/System/Info?api_key=private-token"} {
 		response := httptest.NewRecorder()
@@ -366,7 +366,10 @@ func TestEmbyProxyTransportErrorDoesNotLeakURL(t *testing.T) {
 	if strings.Count(logs, `"level":"ERROR"`) != 2 {
 		t.Fatalf("每个失败请求应只记录一次: %s", logs)
 	}
-	for _, secret := range []string{"private-token", "private-signature", "private-key", "private-upstream-error"} {
+	if strings.Count(logs, "connection refused") != 2 {
+		t.Fatalf("错误日志缺少底层原因: %s", logs)
+	}
+	for _, secret := range []string{"private-token", "private-signature", "private-key"} {
 		if strings.Contains(logs, secret) {
 			t.Fatalf("错误日志泄露 %s: %s", secret, logs)
 		}

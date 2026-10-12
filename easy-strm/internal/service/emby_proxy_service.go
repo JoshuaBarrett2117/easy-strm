@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httputil"
+	"net/netip"
 	"net/url"
 	"strconv"
 	"strings"
@@ -24,6 +25,7 @@ type EmbyProxyService struct {
 	servers      *dao.EmbyServerDAO
 	client       *http.Client
 	relayClient  *http.Client
+	relayLookup  func(context.Context, string, string) ([]netip.Addr, error)
 	relayContext context.Context
 	cancelRelay  context.CancelFunc
 	reserved     map[int]bool
@@ -91,6 +93,7 @@ func NewEmbyProxyService(servers *dao.EmbyServerDAO, client *http.Client, reserv
 	return &EmbyProxyService{
 		servers: servers, client: &copyClient, reserved: reserved, listeners: make(map[int]*embyProxyListener),
 		relayClient: newEmbyProxyRelayClient(), relayContext: relayContext, cancelRelay: cancelRelay,
+		relayLookup: net.DefaultResolver.LookupNetIP,
 	}
 }
 

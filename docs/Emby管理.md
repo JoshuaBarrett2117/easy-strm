@@ -25,7 +25,7 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 
 反代识别 GET/HEAD 的 `/Videos/{item_id}/stream` 及各扩展名、`original` 及各扩展名、HLS 清单和分片，以及 `/Items/{item_id}/Download` 原始文件下载，也支持 `/emby/` 前缀。识别播放接口后，沿用客户端认证与查询参数读取上游 `PlaybackInfo`，没有客户端身份时才使用实例 API Key。按 `MediaSourceId` 选中媒体源，其 HTTP(S) 路径、HTTP 协议、STRM 容器或 `.strm` 路径均视为 STRM；媒体源呈现为本地文件时，再通过 Emby `/Items` 的 `Path`、`IsShortcut` 和媒体源信息确认原项目类型，避免将 STRM 缓存路径误当成本地视频。
 
-STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不请求视频，也不向 Location 添加实例 API Key；原生客户端直接请求原 STRM 地址以及后续直链。有非空 `Origin` 的浏览器请求改为在实例端口流式中继媒体，保留 GET/HEAD、Range 和上游 200/206/416 等状态及媒体头，避免浏览器在 302 之后受直链服务的 CORS 限制。中继不向媒体服务发送 Cookie、Authorization、Emby Token 或客户端查询凭据，仅允许逐跳校验的公网 HTTP(S) 地址，固定已验证 IP 拨号、禁用环境代理并最多跟随五次重定向；私网、回环或其他不安全目标返回可读错误，不作视频回源。STRM 转码/HLS 请求、无效地址、解析失败、缺失媒体源或媒体类型无法确认时仍返回 502；Emby 返回的 401/403 保留给客户端。每次请求重新判断，后续有效的直接播放请求仍可恢复。
+STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/HEAD 返回 `302 Location` 和 `Cache-Control: no-store`，不请求视频，也不向 Location 添加实例 API Key；原生客户端直接请求原 STRM 地址以及后续直链。有非空 `Origin` 的浏览器请求改为在实例端口流式中继媒体，保留 GET/HEAD、Range 和上游 200/206/416 等状态及媒体头，避免浏览器在 302 之后受直链服务的 CORS 限制。中继不向媒体服务发送 Cookie、Authorization、Emby Token、Origin、Referer 或客户端查询凭据，允许逐跳校验的公网、RFC1918、回环、CGNAT 和 IPv6 ULA HTTP(S) 地址，固定已验证 IP 拨号、TLS 验证原域名、禁用环境代理并最多跟随五次重定向。允许内网/回环地址是刻意设计——内网分域 DNS 会把本服务的公网域名解析到局域网地址，用于节省 CDN 流量，中继必须照走；不使用 own-host 白名单。全部 DNS 答案均须通过校验，公网与私网混合答案允许；无效 IP、zone、0/8、未指定、255.255.255.255、组播和链路本地地址拒绝，包括 IPv4 映射形式，不作视频回源。STRM 转码/HLS 请求、无效地址、解析失败、缺失媒体源或媒体类型无法确认时仍返回 502；Emby 返回的 401/403 保留给客户端。每次请求重新判断，后续有效的直接播放请求仍可恢复。
 
 有 Origin 的中继和失败响应回显 Origin、允许凭据并暴露 Content-Range、Content-Length、Accept-Ranges、Content-Type，保留原有 Vary 并追加 Origin；无 Origin 不新增 CORS 头。OPTIONS 在访问 Emby 前本地返回 204，有 Origin 时声明 GET/HEAD/OPTIONS 及 Range、If-Range、认证等允许头。中继不设置整段视频的请求超时，仅对 DNS、建连、TLS 和响应头等待设置时限；客户端取消或服务关闭会中断流，服务关闭同时释放专用传输闲置连接。
 
@@ -39,7 +39,7 @@ STRM 直接播放的 `Path` 为有效 HTTP(S) 地址时，无 `Origin` 的 GET/H
 
 响应头 `X-Request-ID` 与日志中的 `request_id` 对应，可用于定位单次失败。日志不记录完整查询串、认证头、Cookie、API Key、签名直链或上游响应体，网络错误也不会输出含敏感查询参数的 URL。
 
-无 Origin 的请求不在 302 前探测直链。客户端收到 302 后访问直链失败，且未再次请求反代时，反代无法获知该结果；客户端后续改用反代端口请求转码/HLS 时会被拦截并记录失败日志。浏览器中继在响应头前失败时返回统一可读错误；响应头已发送后的传输错误记录脱敏日志并中断流，不将错误文本混入视频正文。
+无 Origin 的请求不在 302 前探测直链。客户端收到 302 后访问直链失败，且未再次请求反代时，反代无法获知该结果；客户端后续改用反代端口请求转码/HLS 时会被拦截并记录失败日志。浏览器中继在响应头前失败时返回统一可读错误；响应头已发送后的传输错误记录脱敏日志并中断流，不将错误文本混入视频正文。失败日志的 detail 保留底层 Error() 原因，例如 connection refused、DNS failed，并复用公共日志规则脱敏完整 URL（含 userinfo、query、fragment）及认证、Cookie、Token 等凭据；不再只记录错误类型。
 
 当前 STRM 文件及 `SERVER_URL` 保持不变，但其中的地址必须能被播放器访问。反代端口使用 HTTP；需要 HTTPS 时，可由已有入口网关转发至该端口。
 

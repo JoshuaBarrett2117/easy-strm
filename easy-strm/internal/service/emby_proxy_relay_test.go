@@ -196,10 +196,10 @@ func TestProxyRelayRedirectLimitAndUnsafeTargets(t *testing.T) {
 		{"五跳成功", "/next", 5, 200, 6},
 		{"六跳拒绝", "/next", 6, 502, 6},
 		{"循环拒绝", embyProxyTestMediaURL, 100, 502, 6},
-		{"本地地址", "http://127.0.0.1/video?signature=private", 1, 502, 1},
-		{"私网地址", "https://10.0.0.1/video", 1, 502, 1},
+		{"本地地址", "http://127.0.0.1/video?signature=private", 1, 200, 2},
+		{"私网地址", "https://10.0.0.1/video", 1, 200, 2},
 		{"链路本地", "http://169.254.169.254/latest/meta-data", 1, 502, 1},
-		{"IPv4映射", "http://[::ffff:127.0.0.1]/video", 1, 502, 1},
+		{"IPv4映射", "http://[::ffff:127.0.0.1]/video", 1, 200, 2},
 		{"非HTTP", "file:///etc/passwd", 1, 502, 1},
 		{"凭据地址", "https://user:secret@8.8.8.8/video", 1, 502, 1},
 		{"无地址", "", 1, 502, 1},
@@ -387,26 +387,28 @@ func TestProxyRelayStreamingCancellationAndClose(t *testing.T) {
 	}
 }
 
-func TestProxyRelayPublicIPPolicy(t *testing.T) {
+func TestProxyRelayAllowedIPPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		address string
-		public  bool
+		allowed bool
 	}{
 		{"8.8.8.8", true}, {"1.1.1.1", true}, {"2606:4700:4700::1111", true}, {"::ffff:8.8.8.8", true},
-		{"127.0.0.1", false}, {"127.255.255.255", false}, {"10.0.0.1", false}, {"172.16.0.1", false}, {"192.168.1.1", false},
+		{"127.0.0.1", true}, {"127.255.255.255", true}, {"10.0.0.1", true}, {"172.16.0.1", true}, {"192.168.31.12", true},
 		{"169.254.169.254", false}, {"0.0.0.0", false}, {"0.1.2.3", false}, {"224.0.0.1", false}, {"255.255.255.255", false},
-		{"100.64.0.1", false}, {"198.18.0.1", false}, {"192.0.2.1", false}, {"198.51.100.1", false}, {"203.0.113.1", false},
-		{"::", false}, {"::1", false}, {"fc00::1", false}, {"fd00::1", false}, {"fe80::1", false}, {"ff02::1", false},
-		{"::ffff:127.0.0.1", false}, {"::ffff:10.0.0.1", false}, {"::ffff:169.254.169.254", false}, {"::ffff:0.0.0.0", false}, {"::ffff:224.0.0.1", false},
-		{"2001:db8::1", false}, {"2002:7f00:1::", false}, {"64:ff9b::7f00:1", false}, {"2606:4700:4700::1111%eth0", false},
+		{"100.64.0.1", true}, {"100.127.255.255", true}, {"198.18.0.1", true}, {"192.0.2.1", true}, {"198.51.100.1", true}, {"203.0.113.1", true},
+		{"::", false}, {"::1", true}, {"fc00::1", true}, {"fd00::1", true}, {"fe80::1", false}, {"ff02::1", false},
+		{"::ffff:127.0.0.1", true}, {"::ffff:10.0.0.1", true}, {"::ffff:192.168.31.12", true}, {"::ffff:100.64.0.1", true},
+		{"::ffff:169.254.169.254", false}, {"::ffff:0.0.0.0", false}, {"::ffff:0.1.2.3", false}, {"::ffff:224.0.0.1", false}, {"::ffff:255.255.255.255", false},
+		{"2001:db8::1", true}, {"2002:7f00:1::", true}, {"64:ff9b::7f00:1", true}, {"2606:4700:4700::1111%eth0", false},
+		{"::ffff:127.0.0.1%eth0", false}, {"::ffff:8.8.8.8%eth0", false}, {"::1%eth0", false}, {"fe80::1%eth0", false}, {"febf:ffff::1", false},
 	} {
 		t.Run(tc.address, func(t *testing.T) {
-			if actual := isEmbyProxyRelayPublicIP(netip.MustParseAddr(tc.address)); actual != tc.public {
-				t.Errorf("公网策略=%v，期望 %v", actual, tc.public)
+			if actual := isEmbyProxyRelayAllowedIP(netip.MustParseAddr(tc.address)); actual != tc.allowed {
+				t.Errorf("地址允许策略=%v，期望 %v", actual, tc.allowed)
 			}
 		})
 	}
-	if isEmbyProxyRelayPublicIP(netip.Addr{}) {
+	if isEmbyProxyRelayAllowedIP(netip.Addr{}) {
 		t.Error("不应接受无效IP")
 	}
 }
@@ -419,9 +421,13 @@ func TestProxyRelayDNSPolicyAndPinnedDial(t *testing.T) {
 		allowed     bool
 	}{
 		{"公网", []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil, true},
-		{"混合答案", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("127.0.0.1")}, nil, false},
+		{"公网及私网", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("192.168.31.12")}, nil, true},
+		{"公网及回环", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("127.0.0.1")}, nil, true},
+		{"公网及链路本地", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("169.254.169.254")}, nil, false},
+		{"公网及IPv6链路本地", []netip.Addr{netip.MustParseAddr("8.8.8.8"), netip.MustParseAddr("fe80::1")}, nil, false},
+		{"公网及无效地址", []netip.Addr{netip.MustParseAddr("8.8.8.8"), {}}, nil, false},
 		{"空答案", nil, nil, false},
-		{"内网", []netip.Addr{netip.MustParseAddr("10.0.0.1")}, nil, false},
+		{"内网", []netip.Addr{netip.MustParseAddr("192.168.31.12")}, nil, true},
 		{"解析失败", nil, errors.New("lookup failed"), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -436,7 +442,7 @@ func TestProxyRelayDNSPolicyAndPinnedDial(t *testing.T) {
 					t.Error("DNS 解析没有时限")
 				}
 				if lookups > 1 {
-					return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+					return []netip.Addr{netip.MustParseAddr("169.254.169.254")}, nil
 				}
 				return tc.answers, tc.lookupError
 			}
@@ -448,7 +454,7 @@ func TestProxyRelayDNSPolicyAndPinnedDial(t *testing.T) {
 				return
 			}
 			connection, err := target.dial(context.Background(), "tcp", func(ctx context.Context, network, address string) (net.Conn, error) {
-				if address != "8.8.8.8:443" || lookups != 1 {
+				if address != net.JoinHostPort(tc.answers[0].Unmap().String(), "443") || lookups != 1 {
 					t.Errorf("拨号必须固定已验证IP，不可二次解析: address=%s lookups=%d", address, lookups)
 				}
 				if _, ok := ctx.Deadline(); !ok {
@@ -483,11 +489,11 @@ func TestProxyRelayProductionTransportSafety(t *testing.T) {
 	}{
 		{"未校验", context.Background(), "127.0.0.1:80"},
 		{"目标不符", context.WithValue(context.Background(), embyProxyRelayTargetKey{}, embyProxyRelayTarget{address: "cdn.example:443", port: "443", ips: []netip.Addr{netip.MustParseAddr("8.8.8.8")}}), "other.example:443"},
-		{"内网IP", context.WithValue(context.Background(), embyProxyRelayTargetKey{}, embyProxyRelayTarget{address: "cdn.example:443", port: "443", ips: []netip.Addr{netip.MustParseAddr("127.0.0.1")}}), "cdn.example:443"},
+		{"链路本地IP", context.WithValue(context.Background(), embyProxyRelayTargetKey{}, embyProxyRelayTarget{address: "cdn.example:443", port: "443", ips: []netip.Addr{netip.MustParseAddr("169.254.169.254")}}), "cdn.example:443"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if connection, err := transport.DialContext(tc.ctx, "tcp", tc.address); err == nil || connection != nil {
-				t.Fatal("未经安全校验的拨号应拒绝")
+			if connection, err := transport.DialContext(tc.ctx, "tcp", tc.address); !errors.Is(err, errEmbyProxyRelayUnsafe) || connection != nil {
+				t.Fatalf("未经安全校验的拨号应被安全策略拒绝，connection=%v, err=%v", connection, err)
 			}
 		})
 	}
