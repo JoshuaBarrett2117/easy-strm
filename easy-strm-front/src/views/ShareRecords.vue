@@ -13,6 +13,7 @@
         <n-button type="primary" secondary @click="processSelected">一键处理全部</n-button>
         <n-button type="warning" @click="taskSettingsShow=true">识别任务设置</n-button>
         <n-button type="error" :loading="clearingAll" :disabled="clearingAll || !selectedShareIDs.length || selectedShareIDs.some(shareBusy)" @click="clearSelectedMedia">批量清空识别内容</n-button>
+        <n-button type="error" :loading="deletingSelected" :disabled="deletingSelected || !selectedShareIDs.length || selectedShareIDs.some(shareBusy)" @click="deleteSelectedShares">批量删除分享</n-button>
       </n-space>
       <n-alert v-for="taskState in taskStates" :key="taskState.task_id" class="mb-4" :type="taskState.status === 'failed' ? 'error' : taskState.status === 'completed' ? 'success' : 'info'" :title="`分享任务：${taskState.metadata?.phase || taskState.status || '准备中'}`">
         <n-progress type="line" :percentage="taskState.progress || 0" indicator-placement="inside" />
@@ -48,7 +49,7 @@ import ShareImportDialog from '../components/ShareImportDialog.vue'
 import ShareTaskSettingsDialog from '../components/ShareTaskSettingsDialog.vue'
 import ShareMediaGallery from '../components/ShareMediaGallery.vue'
 import { NAlert, NButton, NCard, NDataTable, NForm, NFormItem, NImage, NInput, NModal, NSpace, NProgress, NSelect, NTag, NUpload, useMessage } from 'naive-ui'
-import { getShareRecords,getUnsyncedShareRecordIDs, clearShareMedia, clearSelectedShareMedia, createShareRecord, updateShareRecord, deleteShareRecord, identifyShareMedia, identifyShareRecord, syncShareRecord, deleteShareMedia, batchIdentifyShareRecords, batchSyncShareRecords, getShareIdentifyTask } from '../utils/api/media'
+import { getShareRecords,getUnsyncedShareRecordIDs, clearShareMedia, clearSelectedShareMedia, createShareRecord, updateShareRecord, deleteShareRecord, batchDeleteShareRecords, identifyShareMedia, identifyShareRecord, syncShareRecord, deleteShareMedia, batchIdentifyShareRecords, batchSyncShareRecords, getShareIdentifyTask } from '../utils/api/media'
 import { createShareTaskWatcher } from '../utils/ui/shareTaskWatcher'
 import { cancelTask, getUnifiedTaskList } from '../utils/api/task'
 const route=useRoute(), router=useRouter()
@@ -58,7 +59,10 @@ const load=async()=>{loading.value=true;try{const r=await getShareRecords({page:
 const changePageSize=size=>{pagination.value={...pagination.value,pageSize:size};page.value=1;load()}
 const operationTypes = ['share_delete', 'share_clear', 'share_media_delete']
 const activeOperations = computed(() => Object.values(taskStates.value).filter(task => operationTypes.includes(task.task_type) && ['pending', 'running'].includes(task.status)))
-const busyShareIDs = computed(() => new Set(activeOperations.value.filter(task => task.task_type !== 'share_media_delete').flatMap(task => task.metadata?.record_ids || []).map(Number)))
+const busyShareIDs = computed(() => new Set(Object.values(taskStates.value)
+  .filter(task => [...operationTypes.filter(kind => kind !== 'share_media_delete'), 'share_sync', 'share_identify'].includes(task.task_type) && ['pending', 'running'].includes(task.status))
+  .flatMap(task => [...(task.metadata?.record_ids || []), task.metadata?.current_share_id, task.metadata?.share_id])
+  .map(Number).filter(id => id > 0)))
 const fileSubmittingIDs = ref(new Set())
 const busyFileIDs = computed(() => [...fileSubmittingIDs.value, ...activeOperations.value.filter(task => task.task_type === 'share_media_delete').map(task => Number(task.metadata?.file_id))])
 const shareBusy = id => busyShareIDs.value.has(Number(id))
@@ -76,6 +80,26 @@ const submitOperation = (response, kind, ids, fileID = 0) => {
   return id
 }
 const deletingIDs = ref(new Set())
+const deletingSelected = ref(false)
+const deleteSelectedShares = () => {
+  const ids = [...selectedShareIDs.value]
+  if (deletingSelected.value || !ids.length || ids.some(shareBusy)) return
+  dialog.warning({
+    title: '批量删除分享',
+    content: `确定删除选中的 ${ids.length} 个分享吗？将同时删除已同步的分享文件记录、关联的 STRM 数据库记录和已生成的 STRM 文件，此操作不可恢复。网盘原文件不受影响。若目标正在处理，将等待当前操作结束后自动删除；服务重启后会继续执行。`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      if (deletingSelected.value || ids.some(shareBusy)) return false
+      deletingSelected.value = true
+      try {
+        const response = await batchDeleteShareRecords(ids)
+        submitOperation(response, 'share_delete', ids)
+      } catch { return false }
+      finally { deletingSelected.value = false }
+    }
+  })
+}
 const remove = row => {
   if (deletingIDs.value.has(row.id) || shareBusy(row.id)) return
   dialog.warning({
@@ -148,7 +172,16 @@ const taskWatcher = createShareTaskWatcher(
   task => { taskStates.value = { ...taskStates.value, [task.task_id]: task } },
   task => {
     if (operationTypes.includes(task.task_type)) {
-      if (task.status === 'completed') {
+      if (task.task_type === 'share_delete' && ['completed', 'failed'].includes(task.status)) {
+        const result = task.metadata?.result || {}
+        const recordIDs = task.metadata?.record_ids || []
+        const removedIDs = new Set([...(result.deleted_ids || []), ...(result.skipped_ids || [])].map(Number))
+        if (!Array.isArray(result.deleted_ids) && task.status === 'completed' && recordIDs.length === 1) removedIDs.add(Number(recordIDs[0]))
+        selectedShareIDs.value = selectedShareIDs.value.filter(id => !removedIDs.has(Number(id)))
+        const deleted = Number(result.deleted ?? (task.status === 'completed' && recordIDs.length === 1 ? 1 : 0))
+        if (task.status === 'completed') msg.success(`已删除 ${deleted} 个分享`)
+        else msg.warning(`已删除 ${deleted} 个分享，失败 ${result.failed_ids?.length ?? recordIDs.length - removedIDs.size} 个分享：${task.error_message || '请在任务中心查看详情'}`)
+      } else if (task.status === 'completed') {
         msg.success(task.task_type === 'share_clear' ? `已清空 ${task.metadata?.result?.deleted || 0} 条文件记录` : '删除已完成')
         selectedShareIDs.value = selectedShareIDs.value.filter(id => !(task.metadata?.record_ids || []).includes(id))
       } else if (task.status === 'failed') msg.error(task.error_message || '清理失败，请在任务中心查看详情')

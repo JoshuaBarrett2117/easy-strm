@@ -757,7 +757,7 @@ func (s *ShareRecordService) startIdentifyTask(ctx context.Context, ids []int, r
 		return id, nil
 	}
 	batchCtx := context.WithValue(s.Coordinator().batchContext(logger.WithTaskID(context.WithoutCancel(ctx), taskID), taskID), shareTaskSettingsContext{}, settings)
-	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"record_ids": recordIDs, "phase": "准备媒体列表", "current_file": "", "retry_failed": retry, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "running"}, {"name": "识别媒体", "status": "pending"}, {"name": "汇总结果", "status": "pending"}}})
 	go func() {
 		defer s.Coordinator().finishRequest(key, taskID)
 		s.runBatchIdentify(batchCtx, taskID, ids, retry, recordIDs, pendingOnly...)
@@ -801,6 +801,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	for _, record := range records {
 		contextIDs = append(contextIDs, record.ID)
 	}
+	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"record_ids": contextIDs})
 	evidence, err := s.dao.ListIdentifyContext(ctx, contextIDs)
 	if err != nil {
 		_ = s.tasks.SetErrorContext(ctx, taskID, err.Error())

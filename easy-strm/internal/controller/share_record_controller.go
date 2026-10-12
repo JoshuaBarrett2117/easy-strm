@@ -182,6 +182,34 @@ func (c *ShareRecordController) Delete(x *gin.Context) {
 	}
 	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
 }
+
+// BatchDelete 校验所选分享ID并提交持久化删除任务，提交时不存在的分享返回404。
+func (c *ShareRecordController) BatchDelete(x *gin.Context) {
+	var request struct {
+		ShareIDs []int `json:"share_ids"`
+	}
+	if x.ShouldBindJSON(&request) != nil || len(request.ShareIDs) == 0 {
+		ErrorResp(x, 400, "请至少选择一个分享")
+		return
+	}
+	for _, id := range request.ShareIDs {
+		if id <= 0 {
+			ErrorResp(x, 400, "请至少选择一个分享")
+			return
+		}
+	}
+	taskID, err := c.s.StartBatchDelete(x, request.ShareIDs)
+	if errors.Is(err, sql.ErrNoRows) {
+		ErrorResp(x, 404, "分享不存在")
+		return
+	}
+	if err != nil {
+		ErrorResp(x, 500, err.Error())
+		return
+	}
+	SuccessResp(x, domain.ShareOperationAccepted{TaskID: taskID})
+}
+
 func (c *ShareRecordController) AddMedia(x *gin.Context) {
 	var m domain.ShareMedia
 	_ = x.ShouldBindJSON(&m)

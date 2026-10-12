@@ -110,11 +110,43 @@ func (d *ShareOperationDAO) Published(ctx context.Context, id string) error {
 
 type shareOperationTaskContext struct{}
 
+type shareBatchDeleteContext struct {
+	taskID  string
+	shareID int
+}
+
+// WithShareBatchDelete 仅在批量任务的单次分享删除范围内附加检查点身份。
+// 删除事务只追加该分享的成功ID，不推进整个任务终态；检查点写入失败必须回滚删除。
+func WithShareBatchDelete(ctx context.Context, taskID string, shareID int) context.Context {
+	return context.WithValue(ctx, shareBatchDeleteContext{}, shareBatchDeleteContext{taskID: taskID, shareID: shareID})
+}
+
 // WithShareOperationTask 让清理DAO将完成日志与数据变更原子提交。
 func WithShareOperationTask(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, shareOperationTaskContext{}, id)
 }
+
+// 批量上下文优先于单条完成上下文，确保每次删除只登记检查点而不提前结束整个任务。
 func completeShareOperationTx(ctx context.Context, tx *sql.Tx, count int64) error {
+	if batch, ok := ctx.Value(shareBatchDeleteContext{}).(shareBatchDeleteContext); ok {
+		result, err := tx.ExecContext(ctx, `UPDATE t_share_operation_queue SET result=jsonb_set(
+ COALESCE(NULLIF(result,'null'::jsonb),'{}'::jsonb),'{deleted_ids}',
+ CASE WHEN COALESCE(NULLIF(result->'deleted_ids','null'::jsonb),'[]'::jsonb) @> to_jsonb($2::int)
+ THEN COALESCE(NULLIF(result->'deleted_ids','null'::jsonb),'[]'::jsonb)
+ ELSE COALESCE(NULLIF(result->'deleted_ids','null'::jsonb),'[]'::jsonb) || to_jsonb($2::int) END),
+ published=FALSE,updated_at=now() WHERE task_id=$1 AND status='running'`, batch.taskID, batch.shareID)
+		if err != nil {
+			return err
+		}
+		rows, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if rows != 1 {
+			return fmt.Errorf("批量删除检查点写入失败，任务 %s 分享 %d：更新 %d 行", batch.taskID, batch.shareID, rows)
+		}
+		return nil
+	}
 	id, _ := ctx.Value(shareOperationTaskContext{}).(string)
 	if id == "" {
 		return nil

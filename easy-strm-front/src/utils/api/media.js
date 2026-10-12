@@ -102,6 +102,7 @@ export const createShareRecord = (data) => api.post('/media/share-records', data
 export const parseShareImport = (text) => api.post('/media/share-records/parse', { text })
 export const updateShareRecord = (id, data) => api.put(`/media/share-records/${id}`, data)
 export const deleteShareRecord = (id) => api.delete(`/media/share-records/${id}`)
+export const batchDeleteShareRecords = (shareIds) => api.post('/media/share-records/batch-delete', { share_ids: shareIds })
 // 清空媒体候选及识别内容，保留分享链接配置。
 // 清空／删除返回已持久化的 task_id；完成数量通过任务结果读取。
 export const clearShareMedia = (id) => api.delete(`/media/share-records/${id}/media`)

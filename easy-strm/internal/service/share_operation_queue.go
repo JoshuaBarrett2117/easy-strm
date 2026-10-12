@@ -70,6 +70,15 @@ func (s *ShareRecordService) StartDelete(ctx context.Context, id int) (string, e
 	return s.enqueueOperation(ctx, "share_delete", []int{id}, 0)
 }
 
+// StartBatchDelete 固定所选分享集合，复用删除队列的排序、去重、逐项校验和资源锁。
+// 空集合不创建任务；已接受的任务逐项清理，失败不阻止后续分享执行。
+func (s *ShareRecordService) StartBatchDelete(ctx context.Context, ids []int) (string, error) {
+	if len(ids) == 0 {
+		return "", fmt.Errorf("请至少选择一个分享")
+	}
+	return s.enqueueOperation(ctx, "share_delete", ids, 0)
+}
+
 // StartDeleteMedia 校验文件属于该分享后，将单文件删除持久化并排队。
 func (s *ShareRecordService) StartDeleteMedia(ctx context.Context, shareID, id int) (string, error) {
 	if id <= 0 || shareID <= 0 {
@@ -306,7 +315,11 @@ func (q *shareOperationQueue) run(parent context.Context, v domain.ShareOperatio
 				coord.removedFile(*deletedFile)
 			}
 		} else {
-			coord.invalidate(v.ShareIDs)
+			if v.Kind == "share_delete" && len(v.ShareIDs) > 1 {
+				coord.invalidate(shareDeletedIDs(v.Result))
+			} else {
+				coord.invalidate(v.ShareIDs)
+			}
 		}
 	}
 	execCtx := dao.WithShareOperationTask(context.WithValue(persistenceCtx, shareOwnerContext{}, v.TaskID), v.TaskID)
@@ -318,8 +331,7 @@ func (q *shareOperationQueue) run(parent context.Context, v domain.ShareOperatio
 	var count int64
 	switch v.Kind {
 	case "share_delete":
-		err = q.s.deleteShare(execCtx, v.ShareIDs[0])
-		count = 1
+		err = q.runDelete(execCtx, &v)
 	case "share_media_delete":
 		var file domain.ShareMedia
 		file, err = q.s.dao.FileIdentity(execCtx, v.FileID)
@@ -341,7 +353,11 @@ func (q *shareOperationQueue) run(parent context.Context, v domain.ShareOperatio
 		q.fail(persistenceCtx, v, err, release, completedEffect)
 		return
 	}
-	stored := q.finish(persistenceCtx, v, "completed", "", map[string]interface{}{"deleted": count})
+	result := map[string]interface{}{"deleted": count}
+	if v.Kind == "share_delete" {
+		result = v.Result
+	}
+	stored := q.finish(persistenceCtx, v, "completed", "", result)
 	if stored.Status == "completed" {
 		completedEffect()
 	}
@@ -396,8 +412,13 @@ func (q *shareOperationQueue) publishCancelled(ctx context.Context, v domain.Sha
 }
 func (q *shareOperationQueue) fail(ctx context.Context, v domain.ShareOperation, err error, release func(), completedEffect func()) {
 	logger.WithContext(ctx, "share_operation").Log(logger.ERROR, "清理失败", nil, err)
-	stored := q.finish(ctx, v, "failed", err.Error(), nil)
-	if stored.Status == "completed" {
+	var result map[string]interface{}
+	batchDelete := v.Kind == "share_delete" && len(v.ShareIDs) > 1
+	if v.Kind == "share_delete" {
+		result = v.Result
+	}
+	stored := q.finish(ctx, v, "failed", err.Error(), result)
+	if stored.Status == "completed" || batchDelete {
 		completedEffect()
 	}
 	release()

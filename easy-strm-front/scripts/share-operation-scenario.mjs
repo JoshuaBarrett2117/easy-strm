@@ -14,7 +14,7 @@ export async function runShareOperationScenario(kind) {
     const task = () => ({
       task_id: taskID, task_type: taskType, task_name: kind === 'delete' ? '删除分享' : '清空分享文件记录',
       status, progress: status === 'completed' ? 100 : 0,
-      metadata: { record_ids: [9], phase: status === 'pending' ? '等待目标资源' : '执行清理', cancellable: status === 'pending', blocking_task_ids: ['identify-A'], result: { deleted: 3 } }
+      metadata: { record_ids: [9], phase: status === 'pending' ? '等待目标资源' : '执行清理', cancellable: status === 'pending', blocking_task_ids: ['identify-A'], result: { deleted: kind === 'delete' ? 1 : 3 } }
     })
     await page.addInitScript(() => localStorage.setItem('token', 'test'))
     await page.route('**/api/**', async route => {
@@ -78,7 +78,7 @@ export async function runShareOperationScenario(kind) {
     await page.getByText('正在执行清理', { exact: true }).waitFor()
     await page.getByRole('button', { name: '取消等待', exact: true }).waitFor({ state: 'detached' })
     status = 'completed'
-    await page.getByText(kind === 'delete' ? '删除已完成' : '已清空 3 条文件记录', { exact: true }).waitFor()
+    await page.getByText(kind === 'delete' ? '已删除 1 个分享' : '已清空 3 条文件记录', { exact: true }).waitFor()
     if (kind === 'delete') await row('排队分享A').waitFor({ state: 'detached' })
     else await row('排队分享A').getByText('文件 0 · 媒体 0', { exact: true }).waitFor()
     assert.equal(submits, 3)
