@@ -15,6 +15,7 @@ type EmbyProxyConfig struct {
 	ResolveFinalURL    bool   `yaml:"resolve_final_url"`
 	ProbeHEAD          bool   `yaml:"probe_head"`
 	BrowserRedirect    bool   `yaml:"browser_redirect"`
+	ForceDirectPlay    bool   `yaml:"force_direct_play"`
 	ProxyErrorStrategy string `yaml:"proxy_error_strategy"`
 }
 

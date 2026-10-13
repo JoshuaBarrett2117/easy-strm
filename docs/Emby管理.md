@@ -33,7 +33,7 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 
 默认仅明确为非 STRM 的本地或其他协议媒体允许视频回源，其直接播放、转码和 HLS 保持正常；下面的显式降级开关是例外。浏览、登录、图片、字幕及 WebSocket 仍透明反代。播放策略作用于配置的实例反代端口，无 Origin 的客户端需要支持并跟随 302。
 
-### P0 播放增强配置（2026-10-12，维护者：Codex）
+### P0 播放增强配置（2026-10-13，维护者：Codex）
 
 在现有后端 `config.yaml` 增加 `emby_proxy` 段，示例见 `easy-strm/config.example.yaml`。这些是进程级配置，加载时归一化并校验，启动时注入 Service；修改后需重启，不新增数据库字段、迁移或前端设置接口。不要用这个仅包含增强段的示例覆盖已有数据库等配置。
 
@@ -47,9 +47,14 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 | `resolve_final_url` | `false` | 用无凭据 HEAD 逐跳预解析最终直链；普通失败保留原 URL |
 | `probe_head` | `false` | 独立探测可用性，不依赖预解析开关；非 2xx 或 JSON 类型响应拒绝 |
 | `browser_redirect` | `false` | 有 Origin 的直接播放可改为 302；默认继续使用中继 |
+| `force_direct_play` | `false` | 改写 POST PlaybackInfo 的客户端能力以禁用转码，启用直接播放与直接串流；不兼容的编码可能播放失败 |
 | `proxy_error_strategy` | `reject` | 仅接受 `reject` / `fallback_origin`；忽略首尾空白和大小写 |
 
 默认关闭探测和预解析，避免改变不支持 HEAD、依赖签名或网络较慢的媒体服务行为；浏览器默认中继，避免依赖 CDN 的 CORS。缓存键对实例 ID、地址、实例 API Key、代理端口、处理器配置代次、itemID、MediaSourceId、客户端身份与其余查询参数整体 SHA-256 哈希；身份包含认证头、Emby Token、Cookie 和查询凭据，缺失身份不能复用有身份结果。只忽略 `StartTimeTicks`、`PlaySessionId`、`X-Playback-Session-Id`，未知参数保留。命中跳过 PlaybackInfo 和 Items；转码/HLS 必须重新识别，不读取或写入直播放缓存。实例保存重建处理器后不会命中旧代次；旧条目由 TTL/LRU 有界淘汰。
+
+`force_direct_play=true` 仅处理路径以 `/Items/{非空ID}/PlaybackInfo` 结尾的 POST 请求，路径大小写不敏感，支持 `/emby` 和其他前缀。有效 JSON 对象的 `DeviceProfile` 将设置 `EnableTranscoding=false`、`TranscodingProfiles=[]`、`EnableDirectPlay=true`、`EnableDirectStream=true`；`MaxStreamingBitrate` 缺失或低于 200000000 时提升至该值，更大值和无关字段保持原值及数字精度。该开关不会改善客户端解码能力：不支持的编码可能直接播放失败，不能依靠转码兼容；默认关闭。
+
+改写最多读取 8 MiB 加一个超限检测字节。空体、无效 JSON、缺失或类型错误的 `DeviceProfile`/目标字段、读取失败、超限和编码请求体均保留原始请求转发；已读取的前缀会与剩余流拼接，不截断超限正文，也不改变原始长度或分块 framing。成功改写同步正文长度并移除旧分块编码。日志仅记录 item ID、失败原因或改动字段，不记录请求体和凭据。现有播放回退流程及 `strm_fallback_blocked` 防护不变。
 
 同键解析只执行一次完整流程，等待者可单独取消，不影响其他等待者；最后一名等待者离开会取消上游解析。任务最长 30 秒，服务关闭取消任务并释放缓存。失败结果是独立副本，不缓存错误、未确认类型、本地媒体或失败探测。授权缓存并不实时感知 Emby 的撤权；敏感部署应缩短 TTL 或关闭缓存，签名寿命短于 TTL 的媒体同样需要缩短或关闭缓存。
 

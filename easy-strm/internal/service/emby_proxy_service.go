@@ -280,6 +280,9 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		}
 		r = contextual
 		if !matched {
+			if s.options.ForceDirectPlay {
+				forceEmbyDirectPlay(r)
+			}
 			proxy.ServeHTTP(w, r)
 			return
 		}

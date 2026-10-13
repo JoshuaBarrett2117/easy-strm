@@ -7,4 +7,7 @@ emby_proxy:
   resolve_final_url: false
   probe_head: false
   browser_redirect: false
+  # 强制直接播放：改写 POST PlaybackInfo 的客户端能力，禁用转码并启用直接播放/直接串流。
+  # 默认关闭；启用后客户端不支持的音视频编码可能直接播放失败，无法依靠转码兼容。
+  force_direct_play: false
   proxy_error_strategy: reject
