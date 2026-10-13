@@ -19,7 +19,7 @@ func TestDeleteWithStrmAtomicCleanup(t *testing.T) {
 			mock.ExpectExec("DELETE FROM t_strm_file WHERE strm_config_id=-1").WithArgs(pq.Array(paths)).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec("DELETE FROM t_strm_export_history WHERE owner_key='share:default'").WithArgs(pq.Array(paths)).WillReturnResult(sqlmock.NewResult(0, 1))
 			mock.ExpectExec("DELETE FROM t_strm_export_state WHERE owner_key='share:default'").WithArgs(pq.Array(paths)).WillReturnResult(sqlmock.NewResult(0, 1))
-			q := mock.ExpectExec("DELETE FROM t_share_strm WHERE id=ANY").WithArgs(pq.Array(entries))
+			q := mock.ExpectExec("DELETE FROM t_share_strm WHERE id::text=ANY").WithArgs(pq.Array(entries))
 			if fail {
 				q.WillReturnError(fmt.Errorf("db failure"))
 				mock.ExpectRollback()

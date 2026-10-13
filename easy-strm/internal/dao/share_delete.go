@@ -23,7 +23,7 @@ func (d *ShareRecordDAO) ShareDeleteURL(ctx context.Context, id int) (string, er
 func (d *ShareRecordDAO) ShareDeleteEntries(ctx context.Context, code string) ([]string, error) {
 	rows, err := d.db.QueryContext(ctx, `SELECT id FROM t_share_strm WHERE payload->>'share_code'=$1
  AND NOT EXISTS(SELECT 1 FROM t_strm_export_state e JOIN t_share_media_selection s ON s.media_item_key=e.export_key
- WHERE e.owner_key='share:default' AND e.share_strm_id=t_share_strm.id)`, code)
+ WHERE e.owner_key='share:default' AND e.share_strm_id=t_share_strm.id::text)`, code)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func deleteShareStrmRecords(ctx context.Context, tx *sql.Tx, entries, paths []st
 		}
 	}
 	if len(entries) > 0 {
-		_, err := tx.ExecContext(ctx, "DELETE FROM t_share_strm WHERE id=ANY($1::text[])", pq.Array(entries))
+		_, err := tx.ExecContext(ctx, "DELETE FROM t_share_strm WHERE id::text=ANY($1::text[])", pq.Array(entries))
 		return err
 	}
 	return nil
