@@ -244,6 +244,9 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		},
 		Transport: s.client.Transport,
 		ModifyResponse: func(response *http.Response) error {
+			if s.options.ForceDirectPlay {
+				forceEmbyDirectPlayResponse(response)
+			}
 			// 请求入口已设置标识，移除上游同名头，避免 ReverseProxy 追加重复值。
 			response.Header.Del("X-Request-ID")
 			if response.Request != nil {
