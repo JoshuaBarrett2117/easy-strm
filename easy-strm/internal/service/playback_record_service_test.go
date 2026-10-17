@@ -19,6 +19,17 @@ type playbackStoreStub struct {
 	location string
 }
 
+func (s *playbackStoreStub) UpdateCaller(_ context.Context, id, ip string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.records {
+		if s.records[index].ID == id {
+			s.records[index].IP = ip
+		}
+	}
+	return nil
+}
+
 func (s *playbackStoreStub) UpdatePoster(_ context.Context, id, poster string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -169,13 +180,21 @@ func TestPlaybackRecordMergesRepeatedResolutionsIntoSession(t *testing.T) {
 		t.Fatalf("同一播放会话记录数 = %d，期望 1", len(store.records))
 	}
 
-	// 不同文件、不同来源仍是独立播放；静默超过五分钟后重播也会新增记录。
+	// Emby 容器回源与真实播放器解析同一 STRM 属于同一会话，来源地址应更新为真实客户端。
+	s.Record("/动画/龙珠.mkv", "pick-dragon-ball", 3, "https://cdn.test/device", "192.168.31.117", "GET")
+	if len(store.records) != 1 {
+		t.Fatalf("跨来源重复解析记录数 = %d，期望 1", len(store.records))
+	}
+	if store.records[0].IP != "192.168.31.117" {
+		t.Fatalf("来源地址 = %s，期望真实客户端 192.168.31.117", store.records[0].IP)
+	}
+
+	// 不同文件仍是独立播放；静默超过五分钟后重播也会新增记录。
 	s.Record("/动画/龙珠2.mkv", "pick-dragon-ball-2", 3, "https://cdn.test/other", "172.17.0.3", "GET")
-	s.Record("/动画/龙珠.mkv", "pick-dragon-ball", 3, "https://cdn.test/device", "172.17.0.4", "GET")
 	now = now.Add(playbackSessionIdleTimeout + time.Second)
 	s.Record("/动画/龙珠.mkv", "pick-dragon-ball", 3, "https://cdn.test/replay", "172.17.0.3", "GET")
-	if len(store.records) != 4 {
-		t.Fatalf("独立播放记录数 = %d，期望 4", len(store.records))
+	if len(store.records) != 3 {
+		t.Fatalf("独立播放记录数 = %d，期望 3", len(store.records))
 	}
 }
 

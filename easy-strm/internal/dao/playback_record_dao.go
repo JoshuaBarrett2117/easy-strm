@@ -27,6 +27,15 @@ func (d *PlaybackRecordDAO) Save(ctx context.Context, record domain.PlaybackReco
 	return err
 }
 
+// UpdateCaller 合并同一播放会话时刷新来源地址（Emby 回源地址不覆盖真实客户端）。
+func (d *PlaybackRecordDAO) UpdateCaller(ctx context.Context, recordID, ip string) error {
+	if DB == nil {
+		return fmt.Errorf("数据库未初始化")
+	}
+	_, err := DB.ExecContext(ctx, `UPDATE t_strm_playback_record SET caller_ip=$2 WHERE record_id=$1`, recordID, ip)
+	return err
+}
+
 // List 返回按调用时间倒序排列的最近记录。
 func (d *PlaybackRecordDAO) List(ctx context.Context) ([]domain.PlaybackRecord, error) {
 	if DB == nil {

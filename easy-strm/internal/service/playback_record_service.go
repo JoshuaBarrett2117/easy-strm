@@ -26,6 +26,16 @@ type PlaybackRecordStore interface {
 	GetLocation(context.Context, string) string
 	SetLocation(context.Context, string, string) error
 	UpdatePoster(context.Context, string, string) error
+	UpdateCaller(context.Context, string, string) error
+}
+
+// playbackSession 记录一次播放会话：最近调用时间、首条记录 ID 与当前来源地址。
+// 会话按「账号 + 文件」聚合，不按 IP 聚合：Emby 容器与真实播放器会分别解析同一 STRM，
+// 若把 IP 纳入 key，两边永远无法合并，每次播放都会落两条记录。
+type playbackSession struct {
+	lastCall time.Time
+	recordID string
+	ip       string
 }
 
 // PlaybackRecordService 编排播放会话记录、重复解析合并及按需归属地补全。
@@ -34,7 +44,7 @@ type PlaybackRecordService struct {
 	client         *http.Client
 	now            func() time.Time
 	sessionMu      sync.Mutex
-	sessions       map[string]time.Time
+	sessions       map[string]playbackSession
 	posterResolver func(context.Context, string) (string, error)
 	posterSlots    chan struct{}
 	posterRetry    map[string]time.Time
@@ -46,7 +56,7 @@ func NewPlaybackRecordService(store PlaybackRecordStore) *PlaybackRecordService 
 		store:       store,
 		client:      &http.Client{Timeout: 2 * time.Second},
 		now:         time.Now,
-		sessions:    make(map[string]time.Time),
+		sessions:    make(map[string]playbackSession),
 		posterSlots: make(chan struct{}, 2),
 		posterRetry: make(map[string]time.Time),
 	}
@@ -58,8 +68,9 @@ func (s *PlaybackRecordService) Record(filePath, pickcode string, account int, d
 	if identity == "" {
 		identity = strings.ToLower(strings.ReplaceAll(filePath, "\\", "/"))
 	}
-	sessionKey := fmt.Sprintf("direct:%d:%s:%s", account, identity, ip)
-	if !s.beginSessionCall(sessionKey) {
+	sessionKey := fmt.Sprintf("direct:%d:%s", account, identity)
+	if session, merged := s.beginSessionCall(sessionKey); merged {
+		s.refreshSessionCaller(sessionKey, session, ip)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -73,15 +84,19 @@ func (s *PlaybackRecordService) Record(filePath, pickcode string, account int, d
 		logger.Warnf("播放记录媒体信息读取失败: %v", err)
 		metadata.Title = name
 	}
-	if !s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
+	recordID, saved := s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method)
+	if !saved {
 		s.releaseSessionCall(sessionKey)
+		return
 	}
+	s.bindSessionRecord(sessionKey, recordID, ip)
 }
 
 // RecordShare 记录分享资源库 STRM 播放会话，元数据按导出映射读取。
 func (s *PlaybackRecordService) RecordShare(entryID, directURL, ip, method string) {
-	sessionKey := "share:" + entryID + ":" + ip
-	if !s.beginSessionCall(sessionKey) {
+	sessionKey := "share:" + entryID
+	if session, merged := s.beginSessionCall(sessionKey); merged {
+		s.refreshSessionCaller(sessionKey, session, ip)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -93,9 +108,12 @@ func (s *PlaybackRecordService) RecordShare(entryID, directURL, ip, method strin
 			metadata.Title = entryID
 		}
 	}
-	if !s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method) {
+	recordID, saved := s.save(playbackDisplayName(metadata), metadata.Poster, directURL, ip, method)
+	if !saved {
 		s.releaseSessionCall(sessionKey)
+		return
 	}
+	s.bindSessionRecord(sessionKey, recordID, ip)
 }
 
 // playbackDisplayName 使用确定的文件级映射展示季集，未知季集不猜测。
@@ -112,7 +130,7 @@ func playbackDisplayName(metadata domain.PlaybackMetadata) string {
 	return strings.Join(parts, " · ")
 }
 
-func (s *PlaybackRecordService) save(name, poster, directURL, ip, method string) bool {
+func (s *PlaybackRecordService) save(name, poster, directURL, ip, method string) (string, bool) {
 	// 元数据只用于补全展示，超时后保存仍需独立预算，不能复用已失效的查询上下文。
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -122,34 +140,82 @@ func (s *PlaybackRecordService) save(name, poster, directURL, ip, method string)
 	}
 	if err := s.store.Save(ctx, record); err != nil {
 		logger.Warnf("保存播放记录失败: %v", err)
-		return false
+		return "", false
 	}
-	return true
+	return record.ID, true
 }
 
 // beginSessionCall 将同一来源对同一文件的连续解析合并为一次播放会话。
 // 每次重复解析都会延长会话，只有静默超过五分钟后再次解析才新增记录。
-func (s *PlaybackRecordService) beginSessionCall(key string) bool {
+// 返回既有会话时表示应合并，不再新增记录。
+func (s *PlaybackRecordService) beginSessionCall(key string) (playbackSession, bool) {
 	now := s.now()
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-	for existingKey, lastCall := range s.sessions {
-		if now.Sub(lastCall) > playbackSessionIdleTimeout {
+	for existingKey, session := range s.sessions {
+		if now.Sub(session.lastCall) > playbackSessionIdleTimeout {
 			delete(s.sessions, existingKey)
 		}
 	}
-	if lastCall, ok := s.sessions[key]; ok && now.Sub(lastCall) <= playbackSessionIdleTimeout {
-		s.sessions[key] = now
-		return false
+	if session, ok := s.sessions[key]; ok && now.Sub(session.lastCall) <= playbackSessionIdleTimeout {
+		session.lastCall = now
+		s.sessions[key] = session
+		return session, true
 	}
-	s.sessions[key] = now
-	return true
+	return playbackSession{lastCall: now}, false
+}
+
+// bindSessionRecord 把新建的记录挂到会话上，后续重复解析据此合并。
+func (s *PlaybackRecordService) bindSessionRecord(key, recordID, ip string) {
+	s.sessionMu.Lock()
+	defer s.sessionMu.Unlock()
+	s.sessions[key] = playbackSession{lastCall: s.now(), recordID: recordID, ip: ip}
+}
+
+// refreshSessionCaller 合并时用更可信的来源地址更新首条记录：
+// Emby 容器会先回源一次，真实播放器随后才到，展示应以真实客户端为准。
+func (s *PlaybackRecordService) refreshSessionCaller(key string, session playbackSession, ip string) {
+	if !preferCallerIP(ip, session.ip) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.store.UpdateCaller(ctx, session.recordID, ip); err != nil {
+		logger.Warnf("更新播放记录来源失败: %v", err)
+		return
+	}
+	s.sessionMu.Lock()
+	if current, ok := s.sessions[key]; ok {
+		current.ip = ip
+		s.sessions[key] = current
+	}
+	s.sessionMu.Unlock()
 }
 
 func (s *PlaybackRecordService) releaseSessionCall(key string) {
 	s.sessionMu.Lock()
 	delete(s.sessions, key)
 	s.sessionMu.Unlock()
+}
+
+// preferCallerIP 优先保留真实客户端地址；Docker 网桥地址（Emby 容器回源）不覆盖真实地址。
+func preferCallerIP(next, current string) bool {
+	if next == "" || next == current {
+		return false
+	}
+	if current == "" {
+		return true
+	}
+	return isDockerBridgeIP(current) && !isDockerBridgeIP(next)
+}
+
+func isDockerBridgeIP(value string) bool {
+	ip := net.ParseIP(value)
+	if ip == nil {
+		return false
+	}
+	_, block, err := net.ParseCIDR("172.16.0.0/12")
+	return err == nil && block.Contains(ip)
 }
 
 // List 分页返回记录；归属地查询共享三秒预算，不阻塞 STRM 播放。
