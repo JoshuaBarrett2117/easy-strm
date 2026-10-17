@@ -15,6 +15,7 @@ type shareSelectionActions interface {
 	List(context.Context, domain.ShareSelectionQuery) ([]domain.ShareSelection, int, error)
 	Detail(context.Context, string) (domain.ShareSelectionDetail, error)
 	Change(context.Context, domain.ShareSelectionChange) (string, error)
+	Apply(context.Context, string) (string, error)
 	Refresh(context.Context) error
 }
 
@@ -65,6 +66,23 @@ func (c *ShareSelectionController) Change(ctx *gin.Context) {
 	}
 	// 改选已在后台立即重建该作品，不再提示“下次导出生效”。
 	SuccessResp(ctx, gin.H{"next_export": false, "immediate": taskID != "", "task_id": taskID})
+}
+
+// Apply 对历史待应用改选立即触发单作品重建。
+func (c *ShareSelectionController) Apply(ctx *gin.Context) {
+	var body struct {
+		MediaItemKey string `json:"media_item_key"`
+	}
+	if ctx.ShouldBindJSON(&body) != nil {
+		ErrorResp(ctx, 400, "媒体键无效")
+		return
+	}
+	taskID, err := c.service.Apply(ctx.Request.Context(), body.MediaItemKey)
+	if err != nil {
+		selectionError(ctx, err)
+		return
+	}
+	SuccessResp(ctx, gin.H{"task_id": taskID, "immediate": taskID != ""})
 }
 
 // Refresh 显式刷新候选，列表读取没有写副作用。

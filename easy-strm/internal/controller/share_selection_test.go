@@ -26,6 +26,7 @@ func (fake *selectionControllerFake) Change(context.Context, domain.ShareSelecti
 	fake.called = true
 	return "", fake.err
 }
+func (fake *selectionControllerFake) Apply(context.Context, string) (string, error) { return "", fake.err }
 func (fake *selectionControllerFake) Refresh(context.Context) error { return fake.err }
 
 func TestSelectionControllerCASResponses(t *testing.T) {

@@ -83,6 +83,26 @@ func (s *ShareSelectionService) Change(ctx context.Context, change domain.ShareS
 	return taskID, nil
 }
 
+// Apply 对已保存但尚未导出的改选立即重建该作品，供历史待应用条目手动触发。
+func (s *ShareSelectionService) Apply(ctx context.Context, itemKey string) (string, error) {
+	if strings.TrimSpace(itemKey) == "" || len(itemKey) > 2000 {
+		return "", fmt.Errorf("媒体键无效")
+	}
+	if s.applyNow == nil {
+		return "", fmt.Errorf("立即重建未启用")
+	}
+	detail, err := s.store.SelectionDetail(ctx, itemKey)
+	if err != nil {
+		return "", err
+	}
+	if detail.Selection.WorkKey == "" {
+		return "", fmt.Errorf("作品键缺失")
+	}
+	taskID, err := s.applyNow(ctx, detail.Selection.WorkKey)
+	logger.WithContext(ctx, "share_selection").Log(logger.INFO, "来源改选手动应用", logger.Fields{"media_item_key": itemKey, "work_key": detail.Selection.WorkKey, "task_id": taskID}, err)
+	return taskID, err
+}
+
 // Refresh 显式从应用库刷新发现，不访问分享网络或文件系统。
 func (s *ShareSelectionService) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)

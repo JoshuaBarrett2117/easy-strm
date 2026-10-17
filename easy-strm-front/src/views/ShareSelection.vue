@@ -14,7 +14,10 @@
           <p>当前来源 #{{ detail.selection.selected_candidate_id }} · {{ detail.selection.selection_mode === 'manual' ? '手动粘性选择' : '自动持久选择' }} · 版本 {{ detail.selection.selection_revision }}</p>
           <p>输出相对路径：{{ detail.selection.stable_relative_path || '首次成功导出后固定' }}</p>
           <n-alert v-if="!detail.selection.valid" type="warning">选定来源失效，原 STRM 文件保持不变。请明确选择有效候选。</n-alert>
-          <n-alert v-if="detail.selection.selection_revision > detail.selection.exported_revision" type="info">正在重建 STRM（已导出版本 {{ detail.selection.exported_revision }}），完成后自动刷新</n-alert>
+          <n-alert v-if="detail.selection.selection_revision > detail.selection.exported_revision" type="warning">
+            来源已改选，尚未应用（已导出版本 {{ detail.selection.exported_revision }}）
+            <n-button size="tiny" style="margin-left: 8px" :loading="applying" @click="applySelection">立即应用</n-button>
+          </n-alert>
           <n-data-table :columns="candidateColumns" :data="detail.candidates" :row-key="row => row.candidate_id" :scroll-x="800" />
         </template>
       </n-spin>
@@ -25,7 +28,7 @@
 <script setup>
 import { computed, h, onMounted, onBeforeUnmount, ref } from 'vue'
 import { NAlert, NButton, NCard, NDataTable, NInput, NModal, NPagination, NSpace, NSpin, useDialog, useMessage } from 'naive-ui'
-import { listShareSelections, getShareSelectionDetail, changeShareSelection, refreshShareSelections } from '../utils/api/share-selection'
+import { listShareSelections, getShareSelectionDetail, changeShareSelection, refreshShareSelections, applyShareSelection } from '../utils/api/share-selection'
 import { createActionTrace } from '../utils/ui/action-trace'
 
 const message = useMessage(), dialog = useDialog()
@@ -39,7 +42,7 @@ const columns = [
   { title: '作品', key: 'title', minWidth: 200 },
   { title: '季集', key: 'episode_number', render: episodeLabel },
   { title: '选定来源', key: 'selected_candidate_id', render: row => `#${row.selected_candidate_id} · ${row.selection_mode === 'manual' ? '手动' : '自动'}` },
-  { title: '状态', key: 'valid', render: row => !row.valid ? '来源失效 · 保留旧文件' : row.selection_revision > row.exported_revision ? '待导出' : '已应用' },
+  { title: '状态', key: 'valid', render: row => !row.valid ? '来源失效 · 保留旧文件' : row.selection_revision > row.exported_revision ? '待应用' : '已应用' },
   { title: '操作', key: 'actions', fixed: 'right', width: 120, render: row => h(NButton, { onClick: () => open(row.media_item_key) }, { default: () => '查看候选' }) }
 ]
 const candidateColumns = computed(() => {
@@ -87,6 +90,21 @@ function confirmChange(row) {
     finally { changingID.value = null }
   } })
 }
+// 历史改选或自动重建未启动时，可手动触发单作品重建。
+const applying = ref(false)
+async function applySelection() {
+  if (!detail.value?.selection?.media_item_key) return
+  const traceId = createActionTrace()
+  applying.value = true
+  try {
+    const res = await applyShareSelection({ media_item_key: detail.value.selection.media_item_key }, traceId)
+    const taskId = res?.data?.data?.task_id
+    message.success(taskId ? '已开始重建该作品的 STRM' : '未启动重建，请稍后重试')
+    if (taskId) scheduleSelectionRefresh(detail.value.selection.media_item_key, traceId)
+  } catch (error) { message.error(errorText(error)) }
+  finally { applying.value = false }
+}
+
 // 改选后后台会立即重建该作品的 STRM，这里轮询已导出版本，完成后自动收起提示。
 const selectionRefreshTimers = new Set()
 function scheduleSelectionRefresh(key, traceId, attempt = 0) {
