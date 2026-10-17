@@ -506,20 +506,22 @@ func (fixture *phaseFixture) round(name string, query domain.ShareLibraryQuery, 
 		}
 	}
 	fixture.mock.ExpectQuery("SELECT pg_try_advisory_lock\\(hashtextextended\\('share:default',34982\\)\\)").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
-	fixture.mock.ExpectQuery("SELECT strm_config_id,local_strm_path").WillReturnRows(sqlmock.NewRows([]string{"id", "path"}))
-	fixture.mock.ExpectQuery("SELECT output_path FROM").WillReturnRows(sqlmock.NewRows([]string{"path"}))
 	fixture.states["sentinel"] = dao.ExportState{Owner: "share:default", Key: "sentinel", Run: "previous"}
-	rows := sqlmock.NewRows([]string{"key", "run"})
-	keys := make([]string, 0, len(fixture.states))
-	for key := range fixture.states {
-		keys = append(keys, key)
+	if isFullShareStrmQuery(query) {
+		fixture.mock.ExpectQuery("SELECT strm_config_id,local_strm_path").WillReturnRows(sqlmock.NewRows([]string{"id", "path"}))
+		fixture.mock.ExpectQuery("SELECT output_path FROM").WillReturnRows(sqlmock.NewRows([]string{"path"}))
+		rows := sqlmock.NewRows([]string{"key", "run"})
+		keys := make([]string, 0, len(fixture.states))
+		for key := range fixture.states {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			state := fixture.states[key]
+			rows.AddRow(key, state.Run)
+		}
+		fixture.mock.ExpectQuery("SELECT export_key,last_seen_run_id").WillReturnRows(rows)
 	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		state := fixture.states[key]
-		rows.AddRow(key, state.Run)
-	}
-	fixture.mock.ExpectQuery("SELECT export_key,last_seen_run_id").WillReturnRows(rows)
 	fixture.mock.ExpectExec("SELECT pg_advisory_unlock_all").WillReturnResult(sqlmock.NewResult(0, 0))
 	if finish && len(fixture.store.sources) == 0 {
 		fixture.expectFinish()

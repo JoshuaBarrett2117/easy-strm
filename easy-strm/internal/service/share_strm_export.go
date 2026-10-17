@@ -141,7 +141,7 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	if s.exportDB != nil && output == nil {
 		if err := s.preparationStage(ctx, "output-lock", func(ctx context.Context, _ sharePreparationReport) error {
 			var lockErr error
-			output, lockErr = WaitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, nil)
+			output, lockErr = waitStrmOutput(ctx, s.exportDB, cfg.OutputPath, "share:default", id, nil, isFullShareStrmQuery(q))
 			return lockErr
 		}); err != nil {
 			if output != nil && output.Store != nil {

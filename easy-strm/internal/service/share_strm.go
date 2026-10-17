@@ -166,9 +166,10 @@ func (s *ShareStrmService) StartExportContext(parent context.Context, q domain.S
 	q.FileIDs = sortedShareIDs(q.FileIDs)
 	raw, _ := json.Marshal(struct {
 		Query  domain.ShareLibraryQuery
+		Work   string
 		Files  []int
 		Config domain.ShareStrmSettings
-	}{q, q.FileIDs, cfg})
+	}{q, q.WorkKey, q.FileIDs, cfg})
 	key := "export:" + string(raw)
 	generated, err := uuid.NewV7()
 	if err != nil {
@@ -210,6 +211,15 @@ func (s *ShareStrmService) StartExportContext(parent context.Context, q domain.S
 		_ = s.tasks.UpdateStatusContext(ctx, id, "completed")
 	}()
 	return id, nil
+}
+
+// StartWorkExportContext 来源改选后立即重建单个作品的 STRM，
+// 与全量导出共用任务/输出锁，避免并发写同一输出目录。
+func (s *ShareStrmService) StartWorkExportContext(parent context.Context, work string) (string, error) {
+	if strings.TrimSpace(work) == "" {
+		return "", fmt.Errorf("作品键无效")
+	}
+	return s.StartExportContext(parent, domain.ShareLibraryQuery{WorkKey: work})
 }
 
 // StartAutoExport 已配置分享库输出目录时，为刚识别完成的文件创建独立增量导出任务。

@@ -14,7 +14,7 @@ import (
 type shareSelectionActions interface {
 	List(context.Context, domain.ShareSelectionQuery) ([]domain.ShareSelection, int, error)
 	Detail(context.Context, string) (domain.ShareSelectionDetail, error)
-	Change(context.Context, domain.ShareSelectionChange) error
+	Change(context.Context, domain.ShareSelectionChange) (string, error)
 	Refresh(context.Context) error
 }
 
@@ -58,11 +58,13 @@ func (c *ShareSelectionController) Change(ctx *gin.Context) {
 		ErrorResp(ctx, 400, "候选或版本参数无效")
 		return
 	}
-	if err := c.service.Change(ctx.Request.Context(), change); err != nil {
+	taskID, err := c.service.Change(ctx.Request.Context(), change)
+	if err != nil {
 		selectionError(ctx, err)
 		return
 	}
-	SuccessResp(ctx, gin.H{"next_export": true})
+	// 改选已在后台立即重建该作品，不再提示“下次导出生效”。
+	SuccessResp(ctx, gin.H{"next_export": false, "immediate": taskID != "", "task_id": taskID})
 }
 
 // Refresh 显式刷新候选，列表读取没有写副作用。

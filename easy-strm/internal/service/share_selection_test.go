@@ -17,9 +17,9 @@ func (fake *selectionServiceFake) SelectionDetail(context.Context, string) (doma
 	fake.reads++
 	return domain.ShareSelectionDetail{}, nil
 }
-func (fake *selectionServiceFake) ChangeSelection(context.Context, domain.ShareSelectionChange) error {
+func (fake *selectionServiceFake) ChangeSelection(context.Context, domain.ShareSelectionChange) (string, error) {
 	fake.changes++
-	return nil
+	return "", nil
 }
 func (fake *selectionServiceFake) SyncSelections(context.Context, string) error {
 	fake.refreshes++
@@ -41,7 +41,7 @@ func TestSelectionServiceValidationAndExplicitRefresh(t *testing.T) {
 	if fake.refreshes != 0 {
 		t.Fatal("list discovered sources")
 	}
-	if err := service.Change(ctx, domain.ShareSelectionChange{ItemKey: "w", CandidateID: 1}); err == nil {
+	if _, err := service.Change(ctx, domain.ShareSelectionChange{ItemKey: "w", CandidateID: 1}); err == nil {
 		t.Fatal("missing CAS accepted")
 	}
 	if err := service.Refresh(ctx); err != nil {

@@ -48,7 +48,7 @@ func TestSelectionCASMembershipAndAtomicDirty(t *testing.T) {
 			} else {
 				mock.ExpectRollback()
 			}
-			err = store.ChangeSelection(context.Background(), domain.ShareSelectionChange{ItemKey: "work:1:2", CandidateID: 22, ExpectedRevision: 3})
+			_, err = store.ChangeSelection(context.Background(), domain.ShareSelectionChange{ItemKey: "work:1:2", CandidateID: 22, ExpectedRevision: 3})
 			if (err == nil) != (test.revision == 3 && test.valid && !test.dirtyFail) {
 				t.Fatalf("err=%v", err)
 			}
@@ -116,7 +116,7 @@ func TestSelectionMissingDoesNotModify(t *testing.T) {
 	mock.ExpectExec(regexp.QuoteMeta(shareSelectionLockSQL)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery("SELECT selection_revision").WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
-	err := NewShareRecordDAO(database).ChangeSelection(context.Background(), domain.ShareSelectionChange{ItemKey: "missing", CandidateID: 1, ExpectedRevision: 1})
+	_, err := NewShareRecordDAO(database).ChangeSelection(context.Background(), domain.ShareSelectionChange{ItemKey: "missing", CandidateID: 1, ExpectedRevision: 1})
 	if !errors.Is(err, sql.ErrNoRows) {
 		t.Fatal(err)
 	}

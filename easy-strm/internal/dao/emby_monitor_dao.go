@@ -139,7 +139,9 @@ func (d *EmbyMonitorDAO) UpsertItems(serverID int, items []domain.EmbyMonitorIte
 			SELECT $2,item.item_id,item.item_type,item.name,COALESCE(item.series_name,''),COALESCE(item.year,0),COALESCE(item.image_tag,''),item.date_created,$3,$4
 			FROM jsonb_to_recordset($1::jsonb) AS item(item_id text,item_type text,name text,series_name text,year integer,image_tag text,date_created timestamptz)
 			ON CONFLICT(server_id,item_id) DO UPDATE SET item_type=EXCLUDED.item_type,name=EXCLUDED.name,
-			series_name=EXCLUDED.series_name,production_year=EXCLUDED.production_year,image_tag=EXCLUDED.image_tag,date_created=EXCLUDED.date_created`,
+			series_name=EXCLUDED.series_name,production_year=EXCLUDED.production_year,image_tag=EXCLUDED.image_tag,date_created=EXCLUDED.date_created
+			WHERE (t_emby_monitor_item.item_type,t_emby_monitor_item.name,t_emby_monitor_item.series_name,t_emby_monitor_item.production_year,t_emby_monitor_item.image_tag,t_emby_monitor_item.date_created)
+			IS DISTINCT FROM (EXCLUDED.item_type,EXCLUDED.name,EXCLUDED.series_name,EXCLUDED.production_year,EXCLUDED.image_tag,EXCLUDED.date_created)`,
 			string(payload), serverID, now, baseline)
 		if err != nil {
 			return err

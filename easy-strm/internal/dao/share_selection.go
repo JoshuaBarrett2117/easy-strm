@@ -127,23 +127,23 @@ func (d *ShareRecordDAO) SelectionDetail(ctx context.Context, key string) (domai
 }
 
 // ChangeSelection 原子验证成员、CAS 改选并入队，绝不在事务内写文件。
-func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.ShareSelectionChange) error {
+func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.ShareSelectionChange) (string, error) {
 	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer transaction.Rollback()
 	if _, err = transaction.ExecContext(ctx, shareSelectionLockSQL); err != nil {
-		return err
+		return "", err
 	}
 	var revision int64
 	var work string
 	err = transaction.QueryRowContext(ctx, `SELECT selection_revision,work_key FROM t_share_media_selection WHERE media_item_key=$1 FOR UPDATE`, change.ItemKey).Scan(&revision, &work)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if revision != change.ExpectedRevision {
-		return ErrShareSelectionConflict
+		return "", ErrShareSelectionConflict
 	}
 	var valid bool
 	err = transaction.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM t_share_media_selection s JOIN t_share_export_candidate_item i ON i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
@@ -151,26 +151,26 @@ func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.Shar
  WHERE s.media_item_key=$1 AND c.candidate_id=$2 AND NOT i.revoked AND c.available AND c.state='active' AND f.available AND NOT r.share_cancelled AND f.status='identified' AND m.work_key=s.work_key
  AND ((m.media_type='movie' AND s.season_number=0 AND s.episode_number=0) OR EXISTS(SELECT 1 FROM t_share_media_file_episode e WHERE e.file_id=f.id AND e.season_number=s.season_number AND e.episode_number=s.episode_number)))`, change.ItemKey, change.CandidateID).Scan(&valid)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !valid {
-		return ErrShareSelectionConflict
+		return "", ErrShareSelectionConflict
 	}
 	result, err := transaction.ExecContext(ctx, `UPDATE t_share_media_selection SET selected_candidate_id=$2,selection_mode='manual',selection_revision=selection_revision+1,updated_at=now() WHERE media_item_key=$1 AND selection_revision=$3`, change.ItemKey, change.CandidateID, change.ExpectedRevision)
 	if err != nil {
-		return err
+		return "", err
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
-		return err
+		return "", err
 	}
 	if count != 1 {
-		return ErrShareSelectionConflict
+		return "", ErrShareSelectionConflict
 	}
 	if _, err = transaction.ExecContext(ctx, `SELECT share_export_enqueue(ARRAY[$1]::text[],'selection')`, work); err != nil {
-		return err
+		return "", err
 	}
-	return transaction.Commit()
+	return work, transaction.Commit()
 }
 
 // SyncSelections 显式从应用库刷新候选，work 非空时仅同步该作品及其旧候选的新归属。

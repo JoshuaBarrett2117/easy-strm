@@ -30,17 +30,17 @@ func (store *selectionRound2Store) SelectionDetail(context.Context, string) (dom
 	return domain.ShareSelectionDetail{Selection: domain.ShareSelection{ItemKey: "fixture:0:0", RelativePath: "fixed.strm"}, Candidates: []domain.ShareCandidate{}}, store.err
 }
 func (store *selectionRound2Store) SyncSelections(context.Context, string) error { return store.err }
-func (store *selectionRound2Store) ChangeSelection(_ context.Context, change domain.ShareSelectionChange) error {
+func (store *selectionRound2Store) ChangeSelection(_ context.Context, change domain.ShareSelectionChange) (string, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	if store.err != nil {
-		return store.err
+		return "", store.err
 	}
 	if change.ExpectedRevision != store.revision {
-		return dao.ErrShareSelectionConflict
+		return "", dao.ErrShareSelectionConflict
 	}
 	store.revision++
-	return nil
+	return "work:fixture", nil
 }
 
 func selectionRound2Router(store *selectionRound2Store) *gin.Engine {

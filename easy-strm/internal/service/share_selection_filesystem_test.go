@@ -32,8 +32,8 @@ func (store *selectedFilesystemStore) ListSelections(context.Context, domain.Sha
 func (store *selectedFilesystemStore) SelectionDetail(context.Context, string) (domain.ShareSelectionDetail, error) {
 	return domain.ShareSelectionDetail{Selection: store.selection}, nil
 }
-func (store *selectedFilesystemStore) ChangeSelection(context.Context, domain.ShareSelectionChange) error {
-	return nil
+func (store *selectedFilesystemStore) ChangeSelection(context.Context, domain.ShareSelectionChange) (string, error) {
+	return "", nil
 }
 func (store *selectedFilesystemStore) SyncSelections(context.Context, string) error {
 	store.syncs++

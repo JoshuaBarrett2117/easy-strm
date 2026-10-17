@@ -173,7 +173,7 @@ func TestSelectionWriteIsolationAndFirstStatement(t *testing.T) {
 			case "sync":
 				err = store.SyncSelections(ctx, "work")
 			case "change":
-				err = store.ChangeSelection(ctx, domain.ShareSelectionChange{})
+				_, err = store.ChangeSelection(ctx, domain.ShareSelectionChange{})
 			case "resolve":
 				_, _, err = store.ResolveSelection(ctx, "work:0:0")
 			case "batch":

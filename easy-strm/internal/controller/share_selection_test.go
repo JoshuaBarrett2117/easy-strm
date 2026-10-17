@@ -22,9 +22,9 @@ func (fake *selectionControllerFake) List(context.Context, domain.ShareSelection
 func (fake *selectionControllerFake) Detail(context.Context, string) (domain.ShareSelectionDetail, error) {
 	return domain.ShareSelectionDetail{}, fake.err
 }
-func (fake *selectionControllerFake) Change(context.Context, domain.ShareSelectionChange) error {
+func (fake *selectionControllerFake) Change(context.Context, domain.ShareSelectionChange) (string, error) {
 	fake.called = true
-	return fake.err
+	return "", fake.err
 }
 func (fake *selectionControllerFake) Refresh(context.Context) error { return fake.err }
 

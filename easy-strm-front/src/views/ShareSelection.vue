@@ -14,7 +14,7 @@
           <p>当前来源 #{{ detail.selection.selected_candidate_id }} · {{ detail.selection.selection_mode === 'manual' ? '手动粘性选择' : '自动持久选择' }} · 版本 {{ detail.selection.selection_revision }}</p>
           <p>输出相对路径：{{ detail.selection.stable_relative_path || '首次成功导出后固定' }}</p>
           <n-alert v-if="!detail.selection.valid" type="warning">选定来源失效，原 STRM 文件保持不变。请明确选择有效候选。</n-alert>
-          <n-alert v-if="detail.selection.selection_revision > detail.selection.exported_revision" type="info">待下次导出应用（已导出版本 {{ detail.selection.exported_revision }}）</n-alert>
+          <n-alert v-if="detail.selection.selection_revision > detail.selection.exported_revision" type="info">正在重建 STRM（已导出版本 {{ detail.selection.exported_revision }}），完成后自动刷新</n-alert>
           <n-data-table :columns="candidateColumns" :data="detail.candidates" :row-key="row => row.candidate_id" :scroll-x="800" />
         </template>
       </n-spin>
@@ -79,16 +79,34 @@ async function open(key, traceId = createActionTrace()) {
 function close() { detailRevision++; activeKey.value = ''; detail.value = null; detailLoading.value = false; detailError.value = '' }
 function confirmChange(row) {
   const selection = detail.value.selection
-  dialog.warning({ title: '确认改选来源', content: `将 ${selection.title} ${episodeLabel(selection)} 改为 ${row.share_name} 的 ${row.file_name}。只在下一次导出替换内容，路径保持不变。`, positiveText: '确认改选', negativeText: '取消', onPositiveClick: async () => {
+  dialog.warning({ title: '确认改选来源', content: `将 ${selection.title} ${episodeLabel(selection)} 改为 ${row.share_name} 的 ${row.file_name}。将立即重建该作品的 STRM，路径保持不变。`, positiveText: '确认改选', negativeText: '取消', onPositiveClick: async () => {
     const traceId = createActionTrace()
     changingID.value = row.candidate_id
-    try { await changeShareSelection({ media_item_key: selection.media_item_key, candidate_id: row.candidate_id, expected_revision: selection.selection_revision }, traceId); message.success('改选已保存，待下一次导出生效'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId) }
+    try { const res = await changeShareSelection({ media_item_key: selection.media_item_key, candidate_id: row.candidate_id, expected_revision: selection.selection_revision }, traceId); const taskId = res?.data?.data?.task_id; message.success(taskId ? '改选已保存，正在立即重建该作品的 STRM' : '改选已保存，等待后台导出应用'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId); if (taskId) scheduleSelectionRefresh(selection.media_item_key, traceId) }
     catch (error) { message.error(errorText(error)); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId) }
     finally { changingID.value = null }
   } })
 }
+// 改选后后台会立即重建该作品的 STRM，这里轮询已导出版本，完成后自动收起提示。
+const selectionRefreshTimers = new Set()
+function scheduleSelectionRefresh(key, traceId, attempt = 0) {
+  const timer = setTimeout(async () => {
+    selectionRefreshTimers.delete(timer)
+    try {
+      const response = await getShareSelectionDetail(key, traceId)
+      const selection = response.data.data?.selection
+      if (selection && selection.exported_revision >= selection.selection_revision) {
+        if (activeKey.value === key) detail.value = response.data.data
+        await load(traceId)
+        return
+      }
+    } catch (error) { /* 重建期间详情可能短暂不可读，继续重试 */ }
+    if (attempt < 20) scheduleSelectionRefresh(key, traceId, attempt + 1)
+  }, 3000)
+  selectionRefreshTimers.add(timer)
+}
 onMounted(() => load())
-onBeforeUnmount(() => { listRevision++; close() })
+onBeforeUnmount(() => { listRevision++; selectionRefreshTimers.forEach(clearTimeout); selectionRefreshTimers.clear(); close() })
 </script>
 
 <style scoped>
