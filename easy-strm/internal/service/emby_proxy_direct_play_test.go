@@ -27,6 +27,13 @@ func newEmbyDirectPlayTestProxy(t *testing.T, enabled bool) (*httptest.Server, <
 	t.Helper()
 	captured := make(chan embyDirectPlayCapture, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// 强制直接播放会先回查媒体类型；这里把测试 item 一律标为远程（STRM），沿用既有改写断言。
+		if request.Method == http.MethodGet && request.URL.Query().Get("Ids") != "" {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(writer, `{"Items":[{"Id":"`+request.URL.Query().Get("Ids")+`","Path":"/media/video.strm","MediaSources":[{"Id":"s1","Path":"/media/video.strm"}]}]}`)
+			return
+		}
 		body, err := io.ReadAll(request.Body)
 		if err != nil {
 			t.Errorf("读取上游请求失败：%v", err)

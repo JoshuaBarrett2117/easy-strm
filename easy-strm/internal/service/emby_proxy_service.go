@@ -35,6 +35,9 @@ type EmbyProxyService struct {
 	options      domain.EmbyProxyConfig
 	cache        *embyProxyCache
 	generation   atomic.Uint64
+	// directPlayCache 缓存 item 是否为远程（STRM）媒体源，避免每次 PlaybackInfo 都回查 Emby。
+	directPlayMu    sync.Mutex
+	directPlayCache map[string]embyDirectPlayVerdict
 }
 
 type embyProxyHandler struct{ http.Handler }
@@ -244,7 +247,7 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		},
 		Transport: s.client.Transport,
 		ModifyResponse: func(response *http.Response) error {
-			if s.options.ForceDirectPlay {
+			if s.options.ForceDirectPlay && embyDirectPlayForced(response.Request) {
 				forceEmbyDirectPlayResponse(response)
 			}
 			// 请求入口已设置标识，移除上游同名头，避免 ReverseProxy 追加重复值。
@@ -283,8 +286,9 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 		}
 		r = contextual
 		if !matched {
-			if s.options.ForceDirectPlay {
+			if s.options.ForceDirectPlay && s.directPlayApplies(&config, target, r) {
 				forceEmbyDirectPlay(r)
+				r = withEmbyDirectPlayScope(r, true)
 			}
 			proxy.ServeHTTP(w, r)
 			return

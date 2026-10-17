@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -27,8 +28,62 @@ type Logger struct {
 	outputType string
 	logDir     string
 	keepDays   atomic.Int64
-	infoFile   *os.File
-	debugFile  *os.File
+	infoFile   io.Closer
+	debugFile  io.Closer
+}
+
+// rollingFile 按日期滚动写入 {prefix}_YYYY-MM-DD.log。
+// 旧实现只在启动时计算一次文件名，长期运行的容器会把所有日志写进同一天的文件，
+// 也导致系统日志页面看不到当天的 debug 文件。
+type rollingFile struct {
+	mu     sync.Mutex
+	dir    string
+	prefix string
+	date   string
+	file   *os.File
+}
+
+func newRollingFile(dir, prefix string) (*rollingFile, error) {
+	writer := &rollingFile{dir: dir, prefix: prefix}
+	if err := writer.rotate(time.Now().Format("2006-01-02")); err != nil {
+		return nil, err
+	}
+	return writer, nil
+}
+
+func (writer *rollingFile) rotate(date string) error {
+	file, err := os.OpenFile(filepath.Join(writer.dir, fmt.Sprintf("%s_%s.log", writer.prefix, date)), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	if writer.file != nil {
+		_ = writer.file.Close()
+	}
+	writer.file = file
+	writer.date = date
+	return nil
+}
+
+func (writer *rollingFile) Write(p []byte) (int, error) {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if date := time.Now().Format("2006-01-02"); date != writer.date {
+		if err := writer.rotate(date); err != nil {
+			return 0, err
+		}
+	}
+	return writer.file.Write(p)
+}
+
+func (writer *rollingFile) Close() error {
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if writer.file == nil {
+		return nil
+	}
+	err := writer.file.Close()
+	writer.file = nil
+	return err
 }
 
 var logger *Logger
@@ -70,33 +125,22 @@ func InitLogger(config *Config) {
 		pkglogger.WithContext(nil, "startup").Log(pkglogger.ERROR, "日志文件初始化失败，使用控制台输出", nil, err)
 	}
 
-	// 根据配置决定是否同时输出到控制台
-	if config.Log.OutputType == "console" {
-		// 只输出到控制台，但同时也写入文件（用于日志查看功能）
-		if infoFileOutput != nil && debugFileOutput != nil {
+	// 文件写入始终开启（系统日志页面依赖这些文件）；DEBUG 是否落到标准输出由输出模式决定。
+	if infoFileOutput != nil && debugFileOutput != nil {
+		infoOutput = io.MultiWriter(os.Stdout, infoFileOutput)
+		warnOutput = io.MultiWriter(os.Stdout, infoFileOutput)
+		errorOutput = io.MultiWriter(os.Stderr, infoFileOutput)
+		if config.Log.OutputType == "console" {
 			debugOutput = io.MultiWriter(os.Stdout, debugFileOutput)
-			infoOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-			warnOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-			errorOutput = io.MultiWriter(os.Stderr, infoFileOutput)
 		} else {
-			debugOutput = os.Stdout
-			infoOutput = os.Stdout
-			warnOutput = os.Stdout
-			errorOutput = os.Stderr
+			// 文件模式：DEBUG 只落 debug 文件，避免把容器标准输出刷爆。
+			debugOutput = debugFileOutput
 		}
 	} else {
-		// 输出到文件，同时也输出到控制台
-		if infoFileOutput != nil && debugFileOutput != nil {
-			debugOutput = io.MultiWriter(os.Stdout, debugFileOutput)
-			infoOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-			warnOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-			errorOutput = io.MultiWriter(os.Stderr, infoFileOutput)
-		} else {
-			debugOutput = os.Stdout
-			infoOutput = os.Stdout
-			warnOutput = os.Stdout
-			errorOutput = os.Stderr
-		}
+		debugOutput = os.Stdout
+		infoOutput = os.Stdout
+		warnOutput = os.Stdout
+		errorOutput = os.Stderr
 	}
 
 	// 创建日志记录器
@@ -126,27 +170,23 @@ func InitLogger(config *Config) {
 	// 周期清理由统一调度管理。
 }
 
-// setupFileOutput 设置日志文件输出（拆分为INFO和DEBUG两个文件）
-func setupFileOutput(logDir string) (io.Writer, *os.File, io.Writer, *os.File, error) {
+// setupFileOutput 设置日志文件输出（拆分为INFO和DEBUG两个文件，按日期滚动）
+func setupFileOutput(logDir string) (io.Writer, io.Closer, io.Writer, io.Closer, error) {
 	// 创建日志目录
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
-	dateStr := time.Now().Format("2006-01-02")
-
 	// INFO日志文件（包含INFO、WARN、ERROR级别）
-	infoLogFileName := fmt.Sprintf("%s/info_%s.log", logDir, dateStr)
-	infoFile, err := os.OpenFile(infoLogFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	infoFile, err := newRollingFile(logDir, "info")
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 
 	// DEBUG日志文件（仅包含DEBUG级别）
-	debugLogFileName := fmt.Sprintf("%s/debug_%s.log", logDir, dateStr)
-	debugFile, err := os.OpenFile(debugLogFileName, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	debugFile, err := newRollingFile(logDir, "debug")
 	if err != nil {
-		infoFile.Close()
+		_ = infoFile.Close()
 		return nil, nil, nil, nil, err
 	}
 

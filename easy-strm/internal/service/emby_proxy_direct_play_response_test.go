@@ -17,6 +17,12 @@ import (
 
 func TestEmbyProxyForceDirectPlayResponseRegression(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// 强制直接播放会先回查媒体类型；这里把测试 item 一律标为远程（STRM）。
+		if request.Method == http.MethodGet && request.URL.Query().Get("Ids") != "" {
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(writer, `{"Items":[{"Id":"42","Path":"/media/video.strm","MediaSources":[{"Id":"s1","Path":"/media/video.strm"}]}]}`)
+			return
+		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(writer, `{"PlaySessionId":"session","MediaSources":[{"IsRemote":true,"SupportsDirectPlay":false,"SupportsDirectStream":true,"SupportsTranscoding":true,"DirectStreamUrl":"/original.mp4","TranscodingUrl":"/master.m3u8"}]}`)
 	}))

@@ -19,6 +19,13 @@ func newEmbyDirectPlayResponseTestProxy(t *testing.T, enabled bool, body string,
 	t.Helper()
 	captured := make(chan embyDirectPlayCapture, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		// 强制直接播放会先回查媒体类型；这里把测试 item 一律标为远程（STRM），沿用既有改写断言。
+		if request.Method == http.MethodGet && request.URL.Query().Get("Ids") != "" {
+			writer.Header().Set("Content-Type", "application/json")
+			writer.WriteHeader(http.StatusOK)
+			_, _ = io.WriteString(writer, `{"Items":[{"Id":"`+request.URL.Query().Get("Ids")+`","Path":"/media/video.strm","MediaSources":[{"Id":"s1","Path":"/media/video.strm"}]}]}`)
+			return
+		}
 		input, err := io.ReadAll(request.Body)
 		if err != nil {
 			t.Errorf("读取上游请求失败：%v", err)
@@ -286,6 +293,11 @@ func TestEmbyProxyForceDirectPlayResponseLifecycleIntegration(t *testing.T) {
 				logs := captureEmbyProxyLog(t)
 				body := &embyDirectPlayTestBody{reader: strings.NewReader(test.input), readError: test.readError, closeErr: errors.New("private-close-token")}
 				transport := embyProxyRelayTestTransport(func(request *http.Request) (*http.Response, error) {
+					// 强制直接播放会先回查媒体类型；该回查使用独立响应体，避免干扰生命周期计数。
+					if request.Method == http.MethodGet && request.URL.Query().Get("Ids") != "" {
+						payload := `{"Items":[{"Id":"42","Path":"/media/video.strm","MediaSources":[{"Id":"s1","Path":"/media/video.strm"}]}]}`
+						return &http.Response{StatusCode: http.StatusOK, Request: request, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(payload)), ContentLength: int64(len(payload))}, nil
+					}
 					response := &http.Response{StatusCode: http.StatusOK, Request: request, Header: http.Header{"Content-Type": {"application/json"}, "Access-Control-Allow-Origin": {"https://web.example"}}, Body: body, ContentLength: int64(len(test.input))}
 					if chunked {
 						response.ContentLength = -1
