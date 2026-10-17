@@ -6,7 +6,7 @@
     <div class="gallery-grid">
       <article v-for="item in visibleMedia" :key="item.media_id || item.id" class="media-card">
         <div class="poster">
-          <img v-if="poster(item) && !failedImages[poster(item)]" :src="poster(item)" :alt="title(item)" loading="lazy" @error="failedImages[poster(item)] = true" />
+          <img v-if="poster(item) && !failedImages[poster(item)]" :src="posterSrc(poster(item))" :alt="title(item)" loading="lazy" @error="markImageError(poster(item))" />
           <div v-else class="poster-empty">暂无海报</div>
           <span class="media-type">{{ item.result?.media_type === 'tv' ? '电视剧' : '电影' }}</span>
         </div>
@@ -64,6 +64,7 @@ import { useRouter } from 'vue-router'
 import { h, reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { NPagination, NButton, NModal, NInput, NInputNumber, NSelect, NSpace, NDataTable, NTag, useMessage } from 'naive-ui'
 import { getShareMedia, getShareFiles, searchTmdb, manualIdentifyShareMedia } from '../utils/api/media'
+import { createImageRetry } from '../utils/image-retry'
 
 const router = useRouter()
 const props = defineProps({ shareId: { type: Number, required: true }, revision: Number, blocked: Boolean, busyFileIDs: { type: Array, default: () => [] } })
@@ -182,7 +183,8 @@ const fileColumns = [
   {title:'识别说明', key:'error', render:row => row.error || row.result?.message || '—', ellipsis:{tooltip:true}},
   {title:'操作', render:row => h(NSpace, {}, {default:() => [h(NButton,{size:'tiny',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>emit('identify',row)},{default:()=>'自动识别'}),h(NButton,{size:'tiny',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>openManual(row)},{default:()=>'手动识别'}),h(NButton,{size:'tiny',type:'error',disabled:props.blocked||props.busyFileIDs.includes(row.id),onClick:()=>emit('remove',row)},{default:()=>'删除候选'})]})}
 ]
-const failedImages = reactive({})
+const { failed: failedImages, bump: markImageError, src: posterSrc, reset: resetPosterRetry } = createImageRetry()
+watch(visibleMedia, resetPosterRetry)
 const title = item => item.result?.title || item.result?.original_title || item.file_name
 const poster = item => item.result?.poster_path || item.result?.candidates?.[0]?.poster_path
 const source = item => {

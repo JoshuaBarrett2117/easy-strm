@@ -65,10 +65,10 @@
           <div class="poster-image">
             <img
               v-if="poster(item) && !failed[poster(item)]"
-              :src="poster(item)"
+              :src="imageRetry.src(poster(item))"
               :alt="item.title"
               loading="lazy"
-              @error="failed[poster(item)] = true"
+              @error="imageRetry.bump(poster(item))"
             /><span v-else>暂无海报</span>
           </div>
           <div class="poster-info">
@@ -200,10 +200,10 @@
                           <div class="episode-visual">
                             <img
                               v-if="episodeImage(episode) && !failed[episodeImage(episode)]"
-                              :src="episodeImage(episode)"
+                              :src="imageRetry.src(episodeImage(episode))"
                               :alt="episode.name || `第 ${episode.episode_number} 集`"
                               loading="lazy"
-                              @error="failed[episodeImage(episode)] = true"
+                              @error="imageRetry.bump(episodeImage(episode))"
                             />
                             <span v-else>暂无剧照</span>
                             <b>E{{ padEpisode(episode.episode_number) }}</b>
@@ -341,6 +341,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ShareStrmDialog from '../components/ShareStrmDialog.vue'
+import { createImageRetry } from '../utils/image-retry'
 import {
   NAlert,
   NButton,
@@ -426,6 +427,7 @@ const defaults = () => ({
   sort: 'created',
   direction: 'desc',
 })
+const imageRetry = createImageRetry()
 const form = reactive(defaults()),
   items = ref([]),
   total = ref(0),
@@ -433,8 +435,9 @@ const form = reactive(defaults()),
   pageSize = ref(24),
   loading = ref(false),
   error = ref(''),
-  failed = reactive({}),
+  failed = imageRetry.failed,
   enriching = ref(false)
+watch(items, imageRetry.reset)
 const options = ref({ genres: [], countries: [] }),
   mediaTypes = [
     { label: '电影', value: 'movie' },
