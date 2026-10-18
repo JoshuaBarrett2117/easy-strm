@@ -293,15 +293,15 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		}
 		return convertStrmConfigToDetail(cfg), nil
 	})
-	strmController.SetCreateStrmConfig(func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*controller.StrmConfigDetail, error) {
-		cfg, err := CreateStrmConfig(cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
+	strmController.SetCreateStrmConfig(func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*controller.StrmConfigDetail, error) {
+		cfg, err := CreateStrmConfig(cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, behaviorSyncEnabled, behaviorSyncInterval)
 		if err != nil {
 			return nil, err
 		}
 		return convertStrmConfigToDetail(cfg), nil
 	})
-	strmController.SetUpdateStrmConfig(func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*controller.StrmConfigDetail, error) {
-		cfg, err := UpdateStrmConfig(id, cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency)
+	strmController.SetUpdateStrmConfig(func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*controller.StrmConfigDetail, error) {
+		cfg, err := UpdateStrmConfig(id, cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, behaviorSyncEnabled, behaviorSyncInterval)
 		if err != nil {
 			return nil, err
 		}

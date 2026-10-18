@@ -59,24 +59,34 @@ const (
 
 // StrmConfig 领域模型：STRM文件配置
 type StrmConfig struct {
-	ClearBeforeGenerate bool      `json:"clear_before_generate"`
-	ID                  int       `json:"id"`
-	Cloud115Id          int       `json:"cloud115_id"`
-	NetDiskPath         string    `json:"net_disk_path"`
-	LocalPath           string    `json:"local_path"`
-	Cron                string    `json:"cron"`
-	Extension           string    `json:"extension"`
-	DirTreeFile         string    `json:"dir_tree_file"`
-	SyncMode            string    `json:"sync_mode"`
-	SourceAccount       int       `json:"source_account"`
-	TargetAccount       int       `json:"target_account"`
-	TargetDirectory     string    `json:"target_directory"`
-	AutoCleanup         bool      `json:"auto_cleanup"`
-	CleanupThreshold    int       `json:"cleanup_threshold"`
-	CleanupPolicy       string    `json:"cleanup_policy"`
-	MaxConcurrency      int       `json:"max_concurrency"`
-	CreateTime          time.Time `json:"create_time"`
-	UpdateTime          time.Time `json:"update_time"`
+	ClearBeforeGenerate  bool      `json:"clear_before_generate"`
+	ID                   int       `json:"id"`
+	Cloud115Id           int       `json:"cloud115_id"`
+	NetDiskPath          string    `json:"net_disk_path"`
+	LocalPath            string    `json:"local_path"`
+	Cron                 string    `json:"cron"`
+	Extension            string    `json:"extension"`
+	DirTreeFile          string    `json:"dir_tree_file"`
+	SyncMode             string    `json:"sync_mode"`
+	SourceAccount        int       `json:"source_account"`
+	TargetAccount        int       `json:"target_account"`
+	TargetDirectory      string    `json:"target_directory"`
+	AutoCleanup          bool      `json:"auto_cleanup"`
+	CleanupThreshold     int       `json:"cleanup_threshold"`
+	CleanupPolicy        string    `json:"cleanup_policy"`
+	MaxConcurrency       int       `json:"max_concurrency"`
+	BehaviorSyncEnabled  bool      `json:"behavior_sync_enabled"`
+	BehaviorSyncInterval int       `json:"behavior_sync_interval"`
+	CreateTime           time.Time `json:"create_time"`
+	UpdateTime           time.Time `json:"update_time"`
+}
+
+// BehaviorSyncSchedule 增量同步调度维度：配置ID、账号、周期与最近一次运行时间。
+type BehaviorSyncSchedule struct {
+	ID         int        `json:"id"`
+	Cloud115ID int        `json:"cloud115_id"`
+	Interval   int        `json:"behavior_sync_interval"`
+	LastRunAt  *time.Time `json:"last_run_at"`
 }
 
 // SystemConfig 领域模型：系统配置

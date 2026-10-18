@@ -15,23 +15,25 @@ import (
 
 // StrmConfigDetail STRM配置详情（用于回调注入时传递配置数据）
 type StrmConfigDetail struct {
-	ClearBeforeGenerate bool
-	ID                  int
-	Cloud115Id          int
-	NetDiskPath         string
-	LocalPath           string
-	Cron                string
-	Extension           string
-	SyncMode            string
-	SourceAccount       int
-	TargetAccount       int
-	TargetDirectory     string
-	AutoCleanup         bool
-	CleanupThreshold    int
-	CleanupPolicy       string
-	MaxConcurrency      int
-	CreateTime          time.Time
-	UpdateTime          time.Time
+	ClearBeforeGenerate  bool
+	ID                   int
+	Cloud115Id           int
+	NetDiskPath          string
+	LocalPath            string
+	Cron                 string
+	Extension            string
+	SyncMode             string
+	SourceAccount        int
+	TargetAccount        int
+	TargetDirectory      string
+	AutoCleanup          bool
+	CleanupThreshold     int
+	CleanupPolicy        string
+	MaxConcurrency       int
+	BehaviorSyncEnabled  bool
+	BehaviorSyncInterval int
+	CreateTime           time.Time
+	UpdateTime           time.Time
 }
 
 // Cloud115AccountBrief 115账号简要信息（用于回调注入时传递账号数据）
@@ -67,9 +69,9 @@ type StrmController struct {
 	// getStrmConfigByID: 根据 ID 获取 STRM 配置（main.GetStrmConfigByID）
 	getStrmConfigByID func(id int) (*StrmConfigDetail, error)
 	// createStrmConfig: 创建 STRM 配置（main.CreateStrmConfig）
-	createStrmConfig func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfigDetail, error)
+	createStrmConfig func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfigDetail, error)
 	// updateStrmConfig: 更新 STRM 配置（main.UpdateStrmConfig）
-	updateStrmConfig func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfigDetail, error)
+	updateStrmConfig func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfigDetail, error)
 	// deleteStrmConfig: 删除 STRM 配置（main.DeleteStrmConfig）
 	deleteStrmConfig func(id int) error
 	// getCloud115ByID: 根据 ID 获取 115 账号（main.GetCloud115ByID）
@@ -109,11 +111,11 @@ func (c *StrmController) SetGetStrmConfigByID(fn func(id int) (*StrmConfigDetail
 	c.getStrmConfigByID = fn
 }
 
-func (c *StrmController) SetCreateStrmConfig(fn func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfigDetail, error)) {
+func (c *StrmController) SetCreateStrmConfig(fn func(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfigDetail, error)) {
 	c.createStrmConfig = fn
 }
 
-func (c *StrmController) SetUpdateStrmConfig(fn func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*StrmConfigDetail, error)) {
+func (c *StrmController) SetUpdateStrmConfig(fn func(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfigDetail, error)) {
 	c.updateStrmConfig = fn
 }
 
@@ -156,14 +158,15 @@ func (c *StrmController) SetServerURL(url string) {
 // 保持与原 auth.go 内联处理器一致的响应字段
 func formatStrmConfig(cfg *StrmConfigDetail, full bool) map[string]interface{} {
 	result := map[string]interface{}{
-		"id":            cfg.ID,
-		"cloud115_id":   cfg.Cloud115Id,
-		"net_disk_path": cfg.NetDiskPath,
-		"local_path":    cfg.LocalPath,
-		"cron":          cfg.Cron,
-		"extension":     cfg.Extension,
-		"create_time":   cfg.CreateTime.Format("2006-01-02 15:04:05"),
-		"update_time":   cfg.UpdateTime.Format("2006-01-02 15:04:05"),
+		"id":                    cfg.ID,
+		"cloud115_id":           cfg.Cloud115Id,
+		"net_disk_path":         cfg.NetDiskPath,
+		"local_path":            cfg.LocalPath,
+		"cron":                  cfg.Cron,
+		"extension":             cfg.Extension,
+		"behavior_sync_enabled": cfg.BehaviorSyncEnabled,
+		"create_time":           cfg.CreateTime.Format("2006-01-02 15:04:05"),
+		"update_time":           cfg.UpdateTime.Format("2006-01-02 15:04:05"),
 	}
 	// full=true 时返回所有字段（用于详情/创建/更新响应）
 	if full {
@@ -175,6 +178,7 @@ func formatStrmConfig(cfg *StrmConfigDetail, full bool) map[string]interface{} {
 		result["cleanup_threshold"] = cfg.CleanupThreshold
 		result["cleanup_policy"] = cfg.CleanupPolicy
 		result["max_concurrency"] = cfg.MaxConcurrency
+		result["behavior_sync_interval"] = cfg.BehaviorSyncInterval
 	}
 	return result
 }
@@ -243,19 +247,21 @@ func (c *StrmController) CreateConfig(ctx *gin.Context) {
 	logger.Debug("StrmController[CreateConfig] 创建STRM配置")
 
 	var cfgData struct {
-		Cloud115Id       int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath      string `json:"net_disk_path" binding:"required"`
-		LocalPath        string `json:"local_path" binding:"required"`
-		Cron             string `json:"cron"`
-		Extension        string `json:"extension"`
-		SyncMode         string `json:"sync_mode"`
-		SourceAccount    int    `json:"source_account"`
-		TargetAccount    int    `json:"target_account"`
-		TargetDirectory  string `json:"target_directory"`
-		AutoCleanup      bool   `json:"auto_cleanup"`
-		CleanupThreshold int    `json:"cleanup_threshold"`
-		CleanupPolicy    string `json:"cleanup_policy"`
-		MaxConcurrency   int    `json:"max_concurrency"`
+		Cloud115Id          int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath         string `json:"net_disk_path" binding:"required"`
+		LocalPath           string `json:"local_path" binding:"required"`
+		Cron                string `json:"cron"`
+		Extension           string `json:"extension"`
+		SyncMode            string `json:"sync_mode"`
+		SourceAccount       int    `json:"source_account"`
+		TargetAccount       int    `json:"target_account"`
+		TargetDirectory     string `json:"target_directory"`
+		AutoCleanup         bool   `json:"auto_cleanup"`
+		CleanupThreshold    int    `json:"cleanup_threshold"`
+		CleanupPolicy       string `json:"cleanup_policy"`
+		MaxConcurrency      int    `json:"max_concurrency"`
+		BehaviorSyncEnabled bool   `json:"behavior_sync_enabled"`
+		BehaviorSyncInterval int   `json:"behavior_sync_interval"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {
@@ -275,7 +281,7 @@ func (c *StrmController) CreateConfig(ctx *gin.Context) {
 		cfgData.Cron, cfgData.Extension, cfgData.SyncMode,
 		cfgData.SourceAccount, cfgData.TargetAccount, cfgData.TargetDirectory,
 		cfgData.AutoCleanup, cfgData.CleanupThreshold, cfgData.CleanupPolicy,
-		cfgData.MaxConcurrency,
+		cfgData.MaxConcurrency, cfgData.BehaviorSyncEnabled, cfgData.BehaviorSyncInterval,
 	)
 	if err != nil {
 		logger.Errorf("StrmController[CreateConfig] 创建配置失败: %v", err)
@@ -298,19 +304,21 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 	logger.Debugf("StrmController[UpdateConfig] 更新STRM配置, ID: %d", id)
 
 	var cfgData struct {
-		Cloud115Id       int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath      string `json:"net_disk_path" binding:"required"`
-		LocalPath        string `json:"local_path" binding:"required"`
-		Cron             string `json:"cron"`
-		Extension        string `json:"extension"`
-		SyncMode         string `json:"sync_mode"`
-		SourceAccount    int    `json:"source_account"`
-		TargetAccount    int    `json:"target_account"`
-		TargetDirectory  string `json:"target_directory"`
-		AutoCleanup      bool   `json:"auto_cleanup"`
-		CleanupThreshold int    `json:"cleanup_threshold"`
-		CleanupPolicy    string `json:"cleanup_policy"`
-		MaxConcurrency   int    `json:"max_concurrency"`
+		Cloud115Id          int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath         string `json:"net_disk_path" binding:"required"`
+		LocalPath           string `json:"local_path" binding:"required"`
+		Cron                string `json:"cron"`
+		Extension           string `json:"extension"`
+		SyncMode            string `json:"sync_mode"`
+		SourceAccount       int    `json:"source_account"`
+		TargetAccount       int    `json:"target_account"`
+		TargetDirectory     string `json:"target_directory"`
+		AutoCleanup         bool   `json:"auto_cleanup"`
+		CleanupThreshold    int    `json:"cleanup_threshold"`
+		CleanupPolicy       string `json:"cleanup_policy"`
+		MaxConcurrency      int    `json:"max_concurrency"`
+		BehaviorSyncEnabled bool   `json:"behavior_sync_enabled"`
+		BehaviorSyncInterval int   `json:"behavior_sync_interval"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {
@@ -330,7 +338,7 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 		cfgData.Cron, cfgData.Extension, cfgData.SyncMode,
 		cfgData.SourceAccount, cfgData.TargetAccount, cfgData.TargetDirectory,
 		cfgData.AutoCleanup, cfgData.CleanupThreshold, cfgData.CleanupPolicy,
-		cfgData.MaxConcurrency,
+		cfgData.MaxConcurrency, cfgData.BehaviorSyncEnabled, cfgData.BehaviorSyncInterval,
 	)
 	if err != nil {
 		logger.Errorf("StrmController[UpdateConfig] 更新配置失败: %v", err)

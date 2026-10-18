@@ -216,6 +216,15 @@ func (run *behaviorRun) write(ctx context.Context, node BehaviorNode, root behav
 	return nil
 }
 
+func (run *behaviorRun) inScope(target string) bool {
+	for _, root := range run.roots {
+		if behaviorWithin(root.LocalPath, target) {
+			return true
+		}
+	}
+	return false
+}
+
 func (run *behaviorRun) recoverPending(ctx context.Context) error {
 	items, err := run.store.Pending(ctx)
 	if err != nil {
@@ -224,6 +233,10 @@ func (run *behaviorRun) recoverPending(ctx context.Context) error {
 	for _, item := range items {
 		if err = run.budget(ctx); err != nil {
 			return err
+		}
+		// 索引按账号共享，只恢复属于当前配置子树的待完成移动，避免误动其他配置的进度。
+		if !run.inScope(item.Path) && !run.inScope(item.PendingPath) {
+			continue
 		}
 		if err = run.finishMove(ctx, item); err != nil {
 			return err

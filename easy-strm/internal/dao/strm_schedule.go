@@ -13,10 +13,10 @@ func (d *StrmConfigDAO) SaveWithSchedule(c *domain.StrmConfig) ([]int, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	args := []interface{}{c.Cloud115Id, c.NetDiskPath, c.LocalPath, c.Cron, c.Extension, c.SyncMode, c.SourceAccount, c.TargetAccount, c.TargetDirectory, c.AutoCleanup, c.CleanupThreshold, c.CleanupPolicy, c.MaxConcurrency}
-	query := `INSERT INTO t_strm_config(cloud115_id,net_disk_path,local_path,cron,extension,sync_mode,source_account,target_account,target_directory,auto_cleanup,cleanup_threshold,cleanup_policy,max_concurrency) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`
+	args := []interface{}{c.Cloud115Id, c.NetDiskPath, c.LocalPath, c.Cron, c.Extension, c.SyncMode, c.SourceAccount, c.TargetAccount, c.TargetDirectory, c.AutoCleanup, c.CleanupThreshold, c.CleanupPolicy, c.MaxConcurrency, c.BehaviorSyncEnabled, c.BehaviorSyncInterval}
+	query := `INSERT INTO t_strm_config(cloud115_id,net_disk_path,local_path,cron,extension,sync_mode,source_account,target_account,target_directory,auto_cleanup,cleanup_threshold,cleanup_policy,max_concurrency,behavior_sync_enabled,behavior_sync_interval) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`
 	if c.ID > 0 {
-		query = `UPDATE t_strm_config SET cloud115_id=$1,net_disk_path=$2,local_path=$3,cron=$4,extension=$5,sync_mode=$6,source_account=$7,target_account=$8,target_directory=$9,auto_cleanup=$10,cleanup_threshold=$11,cleanup_policy=$12,max_concurrency=$13 WHERE id=$14`
+		query = `UPDATE t_strm_config SET cloud115_id=$1,net_disk_path=$2,local_path=$3,cron=$4,extension=$5,sync_mode=$6,source_account=$7,target_account=$8,target_directory=$9,auto_cleanup=$10,cleanup_threshold=$11,cleanup_policy=$12,max_concurrency=$13,behavior_sync_enabled=$14,behavior_sync_interval=$15 WHERE id=$16`
 		args = append(args, c.ID)
 	}
 	err = tx.QueryRow(query+` RETURNING id,COALESCE(dir_tree_file,''),create_time,update_time`, args...).Scan(&c.ID, &c.DirTreeFile, &c.CreateTime, &c.UpdateTime)

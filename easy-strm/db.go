@@ -298,6 +298,13 @@ DO $$ BEGIN
 		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'max_concurrency') THEN
 			ALTER TABLE t_strm_config ADD COLUMN max_concurrency INT DEFAULT 1;
 		END IF;
+		-- 增量同步按配置维度启用开关与周期
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'behavior_sync_enabled') THEN
+			ALTER TABLE t_strm_config ADD COLUMN behavior_sync_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+		END IF;
+		IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'behavior_sync_interval') THEN
+			ALTER TABLE t_strm_config ADD COLUMN behavior_sync_interval INT NOT NULL DEFAULT 600;
+		END IF;
 		-- 删除不需要的字段
 		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 't_strm_config' AND column_name = 'name') THEN
 			ALTER TABLE t_strm_config DROP COLUMN name;

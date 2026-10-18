@@ -43,6 +43,7 @@ func (f *fakeBehaviorRemote) List(_ context.Context, _, cid string, _ int) (Beha
 type fakeBehaviorSession struct {
 	cursor  int64
 	cookie  string
+	cloudID int
 	roots   []domain.BehaviorRoot
 	index   map[string]*domain.BehaviorIndex
 	pending []domain.BehaviorIndex
@@ -56,8 +57,8 @@ func (s *fakeBehaviorSession) Advance(_ context.Context, cursor int64) error {
 	s.cursor = cursor
 	return nil
 }
-func (s *fakeBehaviorSession) Configuration(_ context.Context) (string, []domain.BehaviorRoot, error) {
-	return s.cookie, s.roots, nil
+func (s *fakeBehaviorSession) Configuration(_ context.Context) (string, int, []domain.BehaviorRoot, error) {
+	return s.cookie, s.cloudID, s.roots, nil
 }
 func (s *fakeBehaviorSession) Get(_ context.Context, id string) (*domain.BehaviorIndex, error) {
 	return s.index[id], nil
@@ -273,9 +274,10 @@ func TestBehaviorWriteIdempotent(t *testing.T) {
 func TestBehaviorSyncRunAdvancesCheckpointAndIsIdempotent(t *testing.T) {
 	rootPath := t.TempDir()
 	session := &fakeBehaviorSession{
-		cookie: "testcookie",
-		roots:  []domain.BehaviorRoot{{ID: 1, CloudPath: "/media", LocalPath: rootPath}},
-		index:  map[string]*domain.BehaviorIndex{},
+		cookie:  "testcookie",
+		cloudID: 1,
+		roots:   []domain.BehaviorRoot{{ID: 1, CloudPath: "/media", LocalPath: rootPath}},
+		index:   map[string]*domain.BehaviorIndex{},
 	}
 	repo := &fakeBehaviorRepository{session: session}
 	remote := &fakeBehaviorRemote{

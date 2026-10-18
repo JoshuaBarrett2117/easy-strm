@@ -110,7 +110,7 @@
           :columns="columns"
           :data="strmConfigList"
           :row-key="(row) => row.id"
-          :scroll-x="1460"
+          :scroll-x="1560"
           size="small"
           @update:sorter="handleSorterChange"
         >
@@ -157,6 +157,21 @@
 
         <n-form-item label="后缀名" path="extension">
           <n-input v-model:value="form.extension" placeholder="请输入文件后缀名，多个用逗号分隔，如：.mp4,.mkv,.avi" />
+        </n-form-item>
+
+        <n-form-item label="启用增量同步" path="behavior_sync_enabled">
+          <n-switch v-model:value="form.behavior_sync_enabled" />
+        </n-form-item>
+
+        <n-form-item label="同步周期(秒)" path="behavior_sync_interval">
+          <n-input-number
+            v-model:value="form.behavior_sync_interval"
+            :min="1"
+            :step="1"
+            :disabled="!form.behavior_sync_enabled"
+            placeholder="请输入同步周期"
+            class="w-full"
+          />
         </n-form-item>
       </n-form>
 
@@ -208,11 +223,13 @@ import {
   NFormItem,
   NIcon,
   NInput,
+  NInputNumber,
   NModal,
   NProgress,
   NRadio,
   NRadioGroup,
   NSelect,
+  NSwitch,
   NTag,
   NTimePicker,
   useMessage
@@ -238,7 +255,7 @@ import EmptyState from '../components/common/EmptyState.vue'
 import TargetFolderPicker from '../components/resource/TargetFolderPicker.vue'
 import { getCloud115List } from '../utils/api/cloud115'
 import { getCronTasks, runCronTask, updateCronTask } from '../utils/api/cron'
-import { createStrmConfig, deleteStrmConfig, generateFullStrmConfig, getStrmConfigList, getStrmTaskStatus, updateStrmConfig } from '../utils/api/strm'
+import { createStrmConfig, deleteStrmConfig, generateFullStrmConfig, getStrmConfigById, getStrmConfigList, getStrmTaskStatus, updateStrmConfig } from '../utils/api/strm'
 import { showAlertDialog, showConfirmDialog } from '../utils/ui/messageBox'
 
 const DEFAULT_EXTENSION = '.mp4,.avi,.mkv,.mov,.wmv,.flv,.webm,.m4v,.mpeg,.mpg,.3gp,.rmvb,.rm,.vob,.ts,.m2ts,.divx,.asf'
@@ -448,6 +465,15 @@ const columns = computed(() => [
     }
   },
   {
+    title: '增量同步',
+    key: 'behavior_sync_enabled',
+    width: 90,
+    align: 'center',
+    render: (row) => row.behavior_sync_enabled
+      ? h(NTag, { type: 'success', size: 'small' }, { default: () => '开' })
+      : h(NTag, { type: 'default', size: 'small' }, { default: () => '关' })
+  },
+  {
     title: '后缀名',
     key: 'extension',
     minWidth: 200,
@@ -569,7 +595,9 @@ const form = ref({
   net_disk_path: '',
   local_path: '',
   cron: '',
-  extension: '.strm'
+  extension: '.strm',
+  behavior_sync_enabled: false,
+  behavior_sync_interval: 600
 })
 
 // Cron 生成器表单
@@ -669,21 +697,36 @@ const handleAdd = () => {
     net_disk_path: '',
     local_path: '',
     cron: '',
-    extension: DEFAULT_EXTENSION
+    extension: DEFAULT_EXTENSION,
+    behavior_sync_enabled: false,
+    behavior_sync_interval: 600
   }
   dialogVisible.value = true
 }
 
 // 编辑配置
-const handleEdit = (row) => {
+const handleEdit = async (row) => {
   dialogTitle.value = '编辑配置'
+  // 列表响应不含 behavior_sync_interval，需拉取详情补齐，避免保存时用默认值覆盖已有周期
+  let syncInterval = 600
+  try {
+    const resp = await getStrmConfigById(row.id)
+    const detail = resp.data?.data
+    if (detail && typeof detail.behavior_sync_interval === 'number') {
+      syncInterval = detail.behavior_sync_interval
+    }
+  } catch (e) {
+    // 详情拉取失败时回退默认周期，不阻塞编辑
+  }
   form.value = {
     id: row.id,
     cloud115_id: parseInt(row.cloud115_id),
     net_disk_path: row.net_disk_path,
     local_path: row.local_path,
     cron: row.cron,
-    extension: row.extension || '.strm'
+    extension: row.extension || '.strm',
+    behavior_sync_enabled: !!row.behavior_sync_enabled,
+    behavior_sync_interval: syncInterval
   }
   dialogVisible.value = true
 }
@@ -704,7 +747,9 @@ const submitConfig = async () => {
     net_disk_path: form.value.net_disk_path,
     local_path: form.value.local_path,
     cron: form.value.cron,
-    extension: form.value.extension
+    extension: form.value.extension,
+    behavior_sync_enabled: form.value.behavior_sync_enabled,
+    behavior_sync_interval: form.value.behavior_sync_interval
   }
 
   try {

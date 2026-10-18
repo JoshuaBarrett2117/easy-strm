@@ -134,7 +134,8 @@ type behaviorRun struct {
 }
 
 // Run 在账号锁内按时间顺序处理整个选定批次；任何失败均不推进检查点。
-func (service *BehaviorSyncService) Run(ctx context.Context, account, limit int) (stats BehaviorStats, runErr error) {
+// 入参为 STRM 配置 ID，事件过滤仅作用于该配置的目录子树，检查点独立于账号下其他配置。
+func (service *BehaviorSyncService) Run(ctx context.Context, strmConfigID, limit int) (stats BehaviorStats, runErr error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Hour)
 	defer cancel()
 	defer func() {
@@ -142,10 +143,10 @@ func (service *BehaviorSyncService) Run(ctx context.Context, account, limit int)
 			stats.Failed++
 		}
 	}()
-	if account <= 0 || limit <= 0 || limit > 20000 {
-		return stats, fmt.Errorf("账号或max_events无效（1至20000）")
+	if strmConfigID <= 0 || limit <= 0 || limit > 20000 {
+		return stats, fmt.Errorf("配置ID或max_events无效（配置ID>0且max_events在1至20000）")
 	}
-	store, err := service.store.Lock(ctx, account)
+	store, err := service.store.Lock(ctx, strmConfigID)
 	if err != nil {
 		return stats, err
 	}
@@ -155,7 +156,7 @@ func (service *BehaviorSyncService) Run(ctx context.Context, account, limit int)
 	if err != nil {
 		return stats, err
 	}
-	cookie, configured, err := store.Configuration(ctx)
+	cookie, account, configured, err := store.Configuration(ctx)
 	if err != nil {
 		return stats, err
 	}
