@@ -74,6 +74,15 @@ func (d *CronTaskDAO) ValidateStrm(config, cloud int) error {
 	return nil
 }
 
+// ValidateCloud115 检查行为同步任务关联的115账号存在。
+func (d *CronTaskDAO) ValidateCloud115(cloud int) error {
+	var found int
+	if err := db.QueryRow(`SELECT id FROM t_cloud_115 WHERE id=$1`, cloud).Scan(&found); err != nil {
+		return fmt.Errorf("115账号不存在: %w", err)
+	}
+	return nil
+}
+
 // StartRun 保存每次触发，包括因并发而跳过的记录。
 func (d *CronTaskDAO) StartRun(id int, taskID, trigger, status string) error {
 	_, err := db.Exec(`INSERT INTO t_cron_task_run(cron_task_id,task_id,trigger_type,status) VALUES($1,$2,$3,$4)`, id, taskID, trigger, status)

@@ -167,6 +167,12 @@ func (s *CronService) ValidateDefinition(t *domain.CronTask) error {
 			return err
 		}
 	}
+	if t.Handler == "behavior_sync" {
+		t.Cloud115ID = CronInt(t.Params, "cloud115_id")
+		if err := s.cronTaskDAO.ValidateCloud115(t.Cloud115ID); err != nil {
+			return err
+		}
+	}
 	t.TaskType = t.Handler
 	return nil
 }
@@ -381,7 +387,7 @@ func cronTaskKind(handler string) string {
 	if handler == "full_generate" || cronShareMode(handler) != "" {
 		return "strm_generate"
 	}
-	if handler == "incremental_sync" {
+	if handler == "incremental_sync" || handler == "behavior_sync" {
 		return "incremental_sync"
 	}
 	return "cleanup"

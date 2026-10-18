@@ -74,7 +74,7 @@ func TestCronBuiltinHandlersRegistered(t *testing.T) {
 	for _, h := range scheduler.Handlers() {
 		handlers[h.Key] = h.Execute != nil
 	}
-	for _, key := range []string{"full_generate", "incremental_sync", "log_cleanup", "identify_cache_cleanup", "cooling_recovery", "share_strm_incremental_export", "share_strm_full_reconciliation"} {
+	for _, key := range []string{"full_generate", "incremental_sync", "log_cleanup", "identify_cache_cleanup", "cooling_recovery", "share_strm_incremental_export", "share_strm_full_reconciliation", "behavior_sync"} {
 		if !handlers[key] {
 			t.Errorf("处理器 %s 未注册", key)
 		}

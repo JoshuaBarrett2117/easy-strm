@@ -90,6 +90,35 @@ func InitCronScheduler() error {
 		n, e := dao.NewIdentifyCacheDAO().DeleteOlderThan(service.CronInt(t.Params, "keep_days"))
 		return fmt.Sprintf("已清理%d条缓存", n), e
 	}})
+	scheduler.Register(service.CronHandler{
+		Key:         "behavior_sync",
+		Name:        "115操作事件增量同步",
+		DefaultCron: "0 */10 * * * *",
+		Parameters: []service.CronParameter{
+			{Key: "cloud115_id", Label: "115账号ID"},
+			{Key: "max_events", Label: "单次最多处理事件数", Default: 500},
+		},
+		Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+			account := service.CronInt(t.Params, "cloud115_id")
+			if account <= 0 {
+				return "", fmt.Errorf("115账号ID无效")
+			}
+			limit := service.CronInt(t.Params, "max_events")
+			if limit <= 0 {
+				limit = 500
+			}
+			store := dao.NewBehaviorDAO(getDBInstance())
+			remote := service.NewBehaviorHTTPClient(NewProxyAwareHTTPClient(30 * time.Second))
+			emby := service.NewEmbyService(dao.NewSystemConfigDAO(), NewProxyAwareHTTPClient(15*time.Second))
+			refresher := service.NewEmbyBehaviorRefresher(emby)
+			syncService := service.NewBehaviorSyncService(store, remote, refresher, func() string { return GetConfig().ServerURL })
+			stats, runErr := syncService.Run(ctx, account, limit)
+			if runErr != nil {
+				return "", runErr
+			}
+			return fmt.Sprintf("拉取%d条，命中%d，生成%d，跳过%d，失败%d，checkpoint %d→%d", stats.Fetched, stats.Matched, stats.Generated, stats.Skipped, stats.Failed, stats.Before, stats.After), nil
+		},
+	})
 	return nil
 }
 
