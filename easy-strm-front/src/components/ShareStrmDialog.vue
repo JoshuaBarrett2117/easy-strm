@@ -9,7 +9,7 @@
         <n-form-item label="服务器导出目录"><n-input v-model:value="form.output_path" placeholder="例如 /media/share-library（Docker 内路径）" /></n-form-item>
         <n-form-item label="播放访问地址"><n-input v-model:value="form.base_url" placeholder="例如 http://192.168.1.10:8080" /></n-form-item>
         <n-form-item label="播放转存到115账号"><n-select v-model:value="form.cloud115_id" :options="accounts" placeholder="请先在115账号管理中配置账号" /></n-form-item>
-        <n-form-item label="115转存目录"><n-input v-model:value="form.transfer_path" placeholder="例如 /STRM播放" /></n-form-item>
+        <n-form-item label="115转存目录"><n-input v-model:value="form.transfer_path" placeholder="留空使用账号目录或系统默认目录（/EmbyCache）" /></n-form-item>
         <n-form-item label="单条目固定输出"><span class="switch-note">每部电影或季集仅一个 STRM。首次发现默认，手选粘性，改选仅替换内容；旧去重开关不能恢复多来源输出。</span></n-form-item>
       </n-form>
       <p class="export-note">可在“STRM 来源选择”逐集改选。手选失效保留原文件并报错；首次输出相对路径固定。增量不会自动全量对账，缺少基线时请在定时任务显式运行全量对账。播放地址须可被媒体服务器访问。</p>
@@ -56,7 +56,7 @@ async function cancelExport() {
   try { await cancelTask(taskID.value); await refreshProgress() }
   catch (e) { message.error(errorText(e)) }
 }
-const form = reactive({ output_path: '', base_url: '', cloud115_id: null, transfer_path: '/STRM播放', strm_dedupe_export: true })
+const form = reactive({ output_path: '', base_url: '', cloud115_id: null, transfer_path: '', strm_dedupe_export: true })
 const accounts = ref([]), loading = ref(false), saving = ref(false), exporting = ref(false), loadError = ref(''), taskID = ref('')
 let revision = 0
 const errorText = (e) => e.response?.data?.error || e.response?.data?.message || e.message
@@ -69,7 +69,7 @@ async function load() {
     const [settings, list] = await Promise.all([getLibraryStrmSettings(), getCloud115List()])
     if (current !== revision) return
     const value = settings.data.data
-    Object.assign(form, { ...value, cloud115_id: value.cloud115_id || null, transfer_path: value.transfer_path || '/STRM播放', strm_dedupe_export: value.strm_dedupe_export !== false })
+    Object.assign(form, { ...value, cloud115_id: value.cloud115_id || null, transfer_path: value.transfer_path || '', strm_dedupe_export: value.strm_dedupe_export !== false })
     const accountData = list.data.data
     accounts.value = (Array.isArray(accountData) ? accountData : accountData?.data || []).map((account) => ({ label: account.name, value: account.id }))
   } catch (e) {

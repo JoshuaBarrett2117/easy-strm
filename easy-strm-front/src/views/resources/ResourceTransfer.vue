@@ -84,7 +84,7 @@
       <h3 class="section-title">转存确认</h3>
       <div class="confirm-info">
         <span>目标账号：<strong>{{ accountName }}</strong></span>
-        <span>保存路径：<strong>{{ targetDirectory || '（账号默认根目录）' }}</strong></span>
+        <span>保存路径：<strong>{{ targetDirectory || '（使用账号目录或系统分享转存默认目录）' }}</strong></span>
         <span>文件数：<strong>{{ selectedFiles.length }}</strong> 个，共 {{ formatSize(selectedSize) }}</span>
       </div>
 
@@ -223,7 +223,7 @@ const canSubmit = computed(() => {
     targetCloud115Id.value > 0 &&
     selectedFiles.value.length > 0 &&
     !submitting.value
-    // targetDirectory 允许为空（表示使用账号根目录）
+    // 保留空值，由后端在执行时解析账号目录或系统默认目录。
   )
 })
 

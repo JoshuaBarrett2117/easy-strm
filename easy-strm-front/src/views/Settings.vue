@@ -13,6 +13,12 @@
               <n-form-item label="识别 worker 数"><n-input-number v-model:value="form.share_identify_workers" :min="1" :max="16" :step="1" /></n-form-item>
             </div>
 
+            <n-form-item label="分享转存默认目录">
+              <div class="w-full">
+                <n-input v-model:value="form.share_transfer_dir" placeholder="/EmbyCache" />
+                <p class="mt-2 text-sm text-gray-500">未指定转存目录时使用此目录；已配置的 STRM 转存目录或账号目录优先。留空恢复 /EmbyCache，请填写以 / 开头且不含 .. 的路径。</p>
+              </div>
+            </n-form-item>
             <n-form-item label="日志保留天数">
               <div class="w-full">
                 <n-input-number
@@ -713,6 +719,7 @@ const initialForm = ref({})
 
 const form = ref({
   log_save_day_limit: 1,
+  share_transfer_dir: '/EmbyCache',
   proxy_url: '',
   proxy_domains: '',
   scrape_enabled_on_organize: true,
@@ -881,6 +888,7 @@ const fetchSettings = async () => {
     const data = response.data.data || {}
     form.value = {
       log_save_day_limit: parseInt(data.log_save_day_limit, 10) || 1,
+      share_transfer_dir: data.share_transfer_dir || '/EmbyCache',
       share_sync_workers: parseInt(data.share_sync_workers, 10) || 3,
       share_identify_workers: parseInt(data.share_identify_workers, 10) || 3,
       proxy_url: data.proxy_url || '',
@@ -916,6 +924,7 @@ const fetchSettings = async () => {
     if (error.response?.status === 404) {
       form.value = {
         log_save_day_limit: 1,
+        share_transfer_dir: '/EmbyCache',
         share_sync_workers: 3,
         share_identify_workers: 3,
         proxy_url: '',
@@ -954,6 +963,7 @@ const handleSubmit = async () => {
   try {
     const settings = {
       log_save_day_limit: String(form.value.log_save_day_limit),
+      share_transfer_dir: form.value.share_transfer_dir,
       share_sync_workers: String(form.value.share_sync_workers),
       share_identify_workers: String(form.value.share_identify_workers),
       proxy_url: form.value.proxy_url,
@@ -973,7 +983,7 @@ const handleSubmit = async () => {
     initialForm.value = { ...form.value }
   } catch (error) {
     console.error('保存配置失败:', error)
-    message.error('保存配置失败')
+    message.error(error.response?.data?.error || '保存配置失败')
   } finally {
     loading.value = false
   }

@@ -15,7 +15,13 @@ func (d *CronTaskDAO) Hydrate(t *domain.CronTask) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(raw, &t.Params)
+	if err := json.Unmarshal(raw, &t.Params); err != nil {
+		return err
+	}
+	if t.Handler == "cleanup_directories" {
+		t.CleanupTargets, err = d.CleanupTargets(t.ID)
+	}
+	return err
 }
 
 // SaveDefinition 保存通用配置，并保持STRM页面的关联配置一致。
@@ -29,6 +35,11 @@ func (d *CronTaskDAO) SaveDefinition(t *domain.CronTask) error {
 		return err
 	}
 	defer tx.Rollback()
+	if t.Handler == "cleanup_directories" {
+		if err := lockCleanupDefinition(tx, t.ID); err != nil {
+			return err
+		}
+	}
 	var config, cloud interface{}
 	if t.StrmConfigID > 0 {
 		config = t.StrmConfigID
@@ -58,6 +69,11 @@ func (d *CronTaskDAO) SaveDefinition(t *domain.CronTask) error {
 	if t.Handler == "full_generate" {
 		_, err = tx.Exec(`UPDATE t_strm_config SET cron=$1 WHERE id=$2`, t.CronExpr, t.StrmConfigID)
 		if err != nil {
+			return err
+		}
+	}
+	if t.Handler == "cleanup_directories" {
+		if err := saveCleanupTargets(tx, t); err != nil {
 			return err
 		}
 	}

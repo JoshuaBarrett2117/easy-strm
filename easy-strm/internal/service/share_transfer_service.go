@@ -49,6 +49,7 @@ const (
 // ShareTransferService 115分享链接转存服务
 // 提供分享链接解析、文件浏览和批量转存的核心业务逻辑
 type ShareTransferService struct {
+	settings           ShareTaskSettingsStore
 	client             Cloud115Client           // 115客户端接口
 	taskDAO            TaskDAO                  // 任务状态DAO（接口，便于测试注入内存实现）
 	logDAO             *dao.ShareTransferLogDAO // 转存日志PG DAO
@@ -107,6 +108,7 @@ func NewShareTransferService(
 ) *ShareTransferService {
 	redisCli := dao.GetGlobalRedisClient()
 	return &ShareTransferService{
+		settings:           dao.NewSystemConfigDAO(),
 		client:             client,
 		taskDAO:            taskDAO,
 		logDAO:             logDAO,
@@ -502,9 +504,14 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 		return nil, fmt.Errorf("目标115账号未登录或Cookie已失效")
 	}
 
+	// 只在本次执行中解析默认值，任务元数据仍保留未设置状态供恢复时重新读取。
+	directory, err := ResolveShareTransferDirectory(s.settings, req.TargetDirectory, targetAccount.TransferDirectory)
+	if err != nil {
+		return nil, err
+	}
 	// 2. 确保目标目录存在
-	if req.TargetDirectory != "" {
-		_, err := s.client.MkdirAll115(req.TargetDirectory, req.TargetCloud115Id, targetAccount.Cookie)
+	if directory != "" {
+		_, err := s.client.MkdirAll115(directory, req.TargetCloud115Id, targetAccount.Cookie)
 		if err != nil {
 			logger.Warnf("[INFO] ShareTransfer | shareCode=%s*** | action=submit | mkdirErr=%v",
 				truncateShareCode(req.ShareCode), err)
@@ -626,6 +633,19 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 
 	// 更新状态为 transferring
 	s.taskDAO.UpdateStatus(taskId, transferStatusTransferring)
+
+	directory, directoryErr := ResolveShareTransferDirectory(s.settings, req.TargetDirectory, targetAccount.TransferDirectory)
+	if directoryErr != nil {
+		s.taskDAO.SetError(taskId, directoryErr.Error())
+		return
+	}
+	if strings.TrimSpace(req.TargetDirectory) == "" {
+		if _, err := s.client.MkdirAll115(directory, req.TargetCloud115Id, targetAccount.Cookie); err != nil {
+			s.taskDAO.SetError(taskId, fmt.Sprintf("创建默认转存目录失败: %v", err))
+			return
+		}
+	}
+	req.TargetDirectory = directory
 
 	// 获取目标目录CID
 	targetDirCID := "0"

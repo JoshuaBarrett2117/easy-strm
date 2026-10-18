@@ -107,7 +107,6 @@ func validateShareStrmSettings(v *domain.ShareStrmSettings) error {
 	v.DedupeExport = true
 	v.OutputPath = strings.TrimSpace(v.OutputPath)
 	v.BaseURL = strings.TrimRight(strings.TrimSpace(v.BaseURL), "/")
-	v.TransferPath = strings.TrimSpace(v.TransferPath)
 	u, err := url.Parse(v.BaseURL)
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return fmt.Errorf("播放地址须为HTTP(S)服务地址，不包含查询参数或账号密码")
@@ -118,8 +117,16 @@ func validateShareStrmSettings(v *domain.ShareStrmSettings) error {
 	if v.Cloud115ID <= 0 {
 		return fmt.Errorf("请选择115转存账号")
 	}
-	if !strings.HasPrefix(v.TransferPath, "/") || strings.Contains(v.TransferPath, "\\") {
-		return fmt.Errorf("115转存目录须为以 / 开头的路径")
+	if v.TransferPath != "" {
+		value, err := NormalizeShareTransferDirectory(v.TransferPath)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(v.TransferPath) == "" {
+			v.TransferPath = ""
+		} else {
+			v.TransferPath = value
+		}
 	}
 	return nil
 }
@@ -401,6 +408,10 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 	}
 	if account == nil {
 		return "", fmt.Errorf("115转存账号不存在")
+	}
+	cfg.TransferPath, err = ResolveShareTransferDirectory(s.settings, cfg.TransferPath, account.TransferDirectory)
+	if err != nil {
+		return "", err
 	}
 	unlock, err := s.store.LockStrmPlayback(ctx, fmt.Sprintf("share-strm:%d:%s:%s", cfg.Cloud115ID, cfg.TransferPath, id))
 	if err != nil {

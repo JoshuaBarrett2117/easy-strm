@@ -39,19 +39,20 @@
           ><n-select
             v-model:value="form.handler"
             :options="handlerOptions"
-            :disabled="form.builtin"
+            :disabled="form.builtin || (form.id && form.handler === 'cleanup_directories')"
             @update:value="resetParams"
         /></n-form-item>
         <n-form-item v-for="parameter in currentHandler?.parameters || []" :key="parameter.key" :label="parameter.label"
           ><n-checkbox v-if="parameter.type === 'boolean'" v-model:checked="form.params[parameter.key]">清空目标目录全部内容</n-checkbox><n-input-number v-else v-model:value="form.params[parameter.key]" :min="1" :precision="0"
         /></n-form-item>
+        <CronCleanupTargets v-if="form.handler === 'cleanup_directories'" v-model="form.cleanup_targets" />
         <n-form-item label="Cron表达式（五段或六段）"
           ><n-input v-model:value="form.cron_expr" placeholder="0 0 3 * * *"
         /></n-form-item>
         <n-form-item label="时区"
           ><n-input v-model:value="form.timezone" placeholder="Local 或 Asia/Shanghai"
         /></n-form-item>
-        <n-alert v-if="currentHandler?.default_cron" type="info" style="margin-bottom: 16px">
+        <n-alert v-if="currentHandler?.default_cron && form.handler !== 'cleanup_directories'" type="info" style="margin-bottom: 16px">
           分享库增量建议每日每 6 小时运行，全量对账建议每周日 03:00 运行。两类任务互斥，冲突会跳过并记录占用任务。
           检查点不可信时增量会升级为全量对账；中断后等待下次调度续跑，不自动补跑。仅标记失效，不删除文件。
         </n-alert>
@@ -78,6 +79,7 @@
 </template>
 <script setup>
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import CronCleanupTargets from '../components/CronCleanupTargets.vue'
 import {
   NAlert,
   NButton,
@@ -152,6 +154,7 @@ const showEdit = ref(false),
   form = ref({ params: {} })
 const currentHandler = computed(() => handlers.value.find((h) => h.key === form.value.handler))
 const resetParams = () => {
+  form.value.cleanup_targets = []
   form.value.params = Object.fromEntries(
     (currentHandler.value?.parameters || []).map((p) => [p.key, p.type==='boolean' ? false : p.default || null])
   )
@@ -202,11 +205,20 @@ const action = async (row, fn) => {
     busy.value = n
   }
 }
-const run = (row) =>
+const executeRun = (row) =>
   action(row, async () => {
     const r = await runCronTask(row.id)
     message.success('触发记录：' + r.data.data.task_id + '，请查看执行记录或任务中心')
   })
+const run = row => {
+  if (row.handler !== 'cleanup_directories') return executeRun(row)
+  const targets = (row.cleanup_targets || []).filter(target => target.enabled)
+  dialog.warning({
+    title: '立即清空目录内容',
+    content: `将清空 ${targets.length} 个目标：${targets.map(target => `账号 ${target.cloud115_id} · ${target.dir_path}`).join('；')}。保留目标目录，删除其全部内容。`,
+    positiveText: '确认清空', negativeText: '取消', onPositiveClick: () => executeRun(row)
+  })
+}
 const toggle = (row) =>
   action(row, () => updateCronTask(row.id, { status: row.status === 'enabled' ? 'disabled' : 'enabled' }))
 const remove = (row) =>
