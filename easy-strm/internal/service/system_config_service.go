@@ -88,10 +88,17 @@ func (s *SystemConfigService) GetAll() ([]*domain.SystemConfig, error) {
 		return nil, err
 	}
 	filtered := make([]*domain.SystemConfig, 0, len(configs))
+	foundDirectory := false
 	for _, config := range configs {
+		if config != nil && config.ConfigKey == ShareTransferDirectoryKey {
+			foundDirectory = true
+		}
 		if config != nil && !isRemovedSystemConfigKey(config.ConfigKey) && config.ConfigKey != "metatube_token" {
 			filtered = append(filtered, config)
 		}
+	}
+	if !foundDirectory {
+		filtered = append(filtered, &domain.SystemConfig{ConfigKey: ShareTransferDirectoryKey, ConfigVal: "/EmbyCache"})
 	}
 	return filtered, nil
 }
@@ -101,11 +108,20 @@ func (s *SystemConfigService) GetByKey(key string) (*domain.SystemConfig, error)
 	if isRemovedSystemConfigKey(key) || key == "metatube_token" {
 		return nil, nil
 	}
-	return s.systemConfigDAO.GetByKey(key)
+	row, err := s.systemConfigDAO.GetByKey(key)
+	if err == nil && row == nil && key == ShareTransferDirectoryKey {
+		row = &domain.SystemConfig{ConfigKey: key, ConfigVal: "/EmbyCache"}
+	}
+	return row, err
 }
 
 // Upsert 更新或创建单个系统配置。
 func (s *SystemConfigService) Upsert(key, value string) error {
+	values := map[string]string{key: value}
+	if err := NormalizeShareTransferSettings(values); err != nil {
+		return err
+	}
+	value = values[key]
 	if isRemovedSystemConfigKey(key) {
 		return fmt.Errorf("系统配置 %s 已停用", key)
 	}
@@ -118,6 +134,9 @@ func (s *SystemConfigService) Upsert(key, value string) error {
 // BatchUpsert 批量更新系统配置，返回成功写入的配置。
 func (s *SystemConfigService) BatchUpsert(configs map[string]string) map[string]string {
 	updated := make(map[string]string)
+	if err := NormalizeShareTransferSettings(configs); err != nil {
+		return updated
+	}
 	if err := ValidateShareWorkerSettings(configs); err != nil {
 		return updated
 	}

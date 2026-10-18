@@ -168,6 +168,13 @@ func (s *CronService) ValidateDefinition(t *domain.CronTask) error {
 		}
 	}
 	t.TaskType = t.Handler
+	if t.Handler == "cleanup_directories" {
+		if err := validateCleanupTargets(t.CleanupTargets, s.cronTaskDAO.ValidateCleanupAccount); err != nil {
+			return err
+		}
+	} else if len(t.CleanupTargets) > 0 {
+		return fmt.Errorf("仅定时清空目录支持清空目标")
+	}
 	return nil
 }
 
@@ -188,7 +195,7 @@ func (s *CronService) Save(t *domain.CronTask) (*domain.CronTask, error) {
 		t.LastRunTime = old.LastRunTime
 		t.LastRunStatus = old.LastRunStatus
 		t.LastRunMessage = old.LastRunMessage
-		if old.Builtin && old.Handler != t.Handler {
+		if (old.Builtin || old.Handler == "cleanup_directories") && old.Handler != t.Handler {
 			return nil, fmt.Errorf("内置任务不能更换处理器")
 		}
 	}
@@ -428,6 +435,9 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 	}
 	taskID := fmt.Sprintf("cron_%d_%s", id, generated.String())
 	keys := []string{fmt.Sprintf("task:%d", id)}
+	if t.Handler == "cleanup_directories" {
+		keys = append(keys, "cleanup_directories")
+	}
 	if t.StrmConfigID > 0 {
 		keys = append(keys, fmt.Sprintf("strm:%d", t.StrmConfigID))
 	}
@@ -505,14 +515,18 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 		defer release()
 		now := time.Now()
 		status, message := "success", ""
+		handlerMessage := ""
 		defer func() {
 			if v := recover(); v != nil {
 				status = "failed"
 				message = fmt.Sprint(v)
+				handlerMessage = ""
 			}
 			if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {
 				status = "cancelled"
-				message = "任务已取消"
+				if handlerMessage == "" {
+					message = "任务已取消"
+				}
 			}
 			if status == "failed" {
 				_ = s.tasks.SetErrorContext(context.WithoutCancel(ctx), taskID, message)
@@ -549,12 +563,15 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 		}
 		var runErr error
 		message, runErr = h.Execute(ctx, t, taskID)
+		handlerMessage = message
 		if runErr != nil {
 			status = "failed"
 			if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
 				status = "cancelled"
 			}
-			message = runErr.Error()
+			if message == "" {
+				message = runErr.Error()
+			}
 		}
 	}()
 	return taskID, nil

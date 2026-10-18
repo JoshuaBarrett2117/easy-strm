@@ -112,6 +112,12 @@ func (sc *SettingsController) UpdateByKey(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
+	values := map[string]string{key: reqData.Value}
+	if err := service.NormalizeShareTransferSettings(values); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
+		return
+	}
+	reqData.Value = values[key]
 	if key == "metatube_enabled" || key == "metatube_url" || key == "metatube_token" {
 		adultEnabled := false
 		if current, err := sc.systemConfigService.GetByKey("adult_content_enabled"); err == nil && current != nil {
@@ -163,6 +169,10 @@ func (sc *SettingsController) BatchUpdate(ctx *gin.Context) {
 	if err := ctx.ShouldBindJSON(&reqData); err != nil {
 		logger.Warnf("SettingsController[BatchUpdate] 请求体无效: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	if err := service.NormalizeShareTransferSettings(reqData); err != nil {
+		ErrorResp(ctx, http.StatusBadRequest, err.Error())
 		return
 	}
 	adultEnabled := false

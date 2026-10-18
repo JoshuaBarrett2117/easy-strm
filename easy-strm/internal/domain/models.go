@@ -104,6 +104,7 @@ type StrmFile struct {
 
 // CronTask 领域模型：定时任务配置
 type CronTask struct {
+	CleanupTargets []CronCleanupTarget    `json:"cleanup_targets"`
 	TaskKey        string                 `json:"task_key"`
 	Handler        string                 `json:"handler"`
 	Params         map[string]interface{} `json:"params"`

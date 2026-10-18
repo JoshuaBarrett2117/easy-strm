@@ -28,8 +28,9 @@ func TestSystemConfigServiceHidesRemovedAlistSettings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("读取系统配置失败: %v", err)
 	}
-	if len(configs) != 1 || configs[0].ConfigKey != "proxy_url" {
-		t.Fatalf("已停用的 Alist 配置不应返回: %#v", configs)
+	if len(configs) != 2 || configs[0].ConfigKey != "proxy_url" ||
+		configs[1].ConfigKey != "share_transfer_dir" || configs[1].ConfigVal != "/EmbyCache" {
+		t.Fatalf("已停用的 Alist 配置不应返回，且需补回默认分享转存目录: %#v", configs)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

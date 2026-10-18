@@ -26,6 +26,8 @@ func InitCronScheduler() error {
 	scheduler = service.NewCronService(dao.NewCronTaskDAO())
 	scheduler.SetTaskService(service.NewTaskService(dao.NewTaskRedisDAOWithGlobal()))
 	cloud115Service := service.NewCloud115Service(dao.NewCloud115DAO())
+	cleanup := service.NewDirectoryCleanupService(cleanup115Client{}, dao.NewCloud115DAO().GetByID)
+	scheduler.Register(service.CronHandler{Key: "cleanup_directories", Name: "定时清空目录", DefaultCron: "0 0 3 * * *", Parameters: []service.CronParameter{}, Execute: cleanup.Execute})
 	scheduler.Register(service.CronHandler{Key: "cooling_recovery", Name: "账号冷却恢复", Parameters: []service.CronParameter{}, Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
 		return "账号冷却检查完成", cloud115Service.CheckAndRecoverCoolingAccounts()
 	}})

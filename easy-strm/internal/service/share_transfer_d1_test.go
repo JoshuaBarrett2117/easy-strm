@@ -42,7 +42,8 @@ type d1TransferClient struct {
 }
 
 func (client *d1TransferClient) MkdirAll115(path string, account int, cookie string) (string, error) {
-	if path != "/测试目标" || account != 7 {
+	// 显式目录 /测试目标 与空目录经系统设置解析出的默认目录 /EmbyCache 都允许。
+	if account != 7 || (path != "/测试目标" && path != "/EmbyCache") {
 		return "", errors.New("unexpected target")
 	}
 	return "target-cid", nil
