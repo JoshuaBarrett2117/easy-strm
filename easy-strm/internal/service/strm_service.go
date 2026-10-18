@@ -43,7 +43,7 @@ func buildFullGenerateCronTaskName(strmConfigID int) string {
 
 // CreateConfig 创建基础配置并同步定时任务。
 func (s *StrmService) CreateConfig(cloud int, netPath, localPath, expr, extension string) (*domain.StrmConfig, error) {
-	return s.CreateConfigExt(cloud, netPath, localPath, expr, extension, "manual", 0, 0, "", false, 0, "", 1)
+	return s.CreateConfigExt(cloud, netPath, localPath, expr, extension, "manual", 0, 0, "", false, 0, "", 1, false, 600)
 }
 
 // UpdateConfig 更新基础字段，保留其他配置。
@@ -64,13 +64,13 @@ func (s *StrmService) UpdateConfig(id, cloud int, netPath, localPath, expr, exte
 }
 
 // CreateConfigExt 原子创建配置及调度定义。
-func (s *StrmService) CreateConfigExt(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*domain.StrmConfig, error) {
-	return s.saveScheduledConfig(&domain.StrmConfig{Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency})
+func (s *StrmService) CreateConfigExt(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
+	return s.saveScheduledConfig(&domain.StrmConfig{Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency, BehaviorSyncEnabled: behaviorSyncEnabled, BehaviorSyncInterval: behaviorSyncInterval})
 }
 
 // UpdateConfigExt 原子更新配置及调度定义。
-func (s *StrmService) UpdateConfigExt(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*domain.StrmConfig, error) {
-	return s.saveScheduledConfig(&domain.StrmConfig{ID: id, Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency})
+func (s *StrmService) UpdateConfigExt(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
+	return s.saveScheduledConfig(&domain.StrmConfig{ID: id, Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency, BehaviorSyncEnabled: behaviorSyncEnabled, BehaviorSyncInterval: behaviorSyncInterval})
 }
 func (s *StrmService) saveScheduledConfig(c *domain.StrmConfig) (*domain.StrmConfig, error) {
 	var err error
@@ -92,6 +92,9 @@ func (s *StrmService) saveScheduledConfig(c *domain.StrmConfig) (*domain.StrmCon
 	}
 	if c.MaxConcurrency == 0 {
 		c.MaxConcurrency = 1
+	}
+	if c.BehaviorSyncInterval <= 0 {
+		c.BehaviorSyncInterval = 600
 	}
 	if s.scheduler == nil {
 		return nil, fmt.Errorf("统一调度服务未初始化")
@@ -225,6 +228,7 @@ func (s *StrmService) UpdateNetDiskPath(configID int, netDiskPath string) error 
 		cfg.Cron, cfg.Extension, cfg.SyncMode, cfg.SourceAccount,
 		cfg.TargetAccount, cfg.TargetDirectory, cfg.AutoCleanup,
 		cfg.CleanupThreshold, cfg.CleanupPolicy, cfg.MaxConcurrency,
+		cfg.BehaviorSyncEnabled, cfg.BehaviorSyncInterval,
 	)
 	if err != nil {
 		return fmt.Errorf("更新STRM配置网盘路径失败: %v", err)

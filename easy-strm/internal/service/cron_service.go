@@ -388,7 +388,7 @@ func cronTaskKind(handler string) string {
 	if handler == "full_generate" || cronShareMode(handler) != "" {
 		return "strm_generate"
 	}
-	if handler == "incremental_sync" {
+	if handler == "incremental_sync" || handler == "behavior_sync" {
 		return "incremental_sync"
 	}
 	return "cleanup"

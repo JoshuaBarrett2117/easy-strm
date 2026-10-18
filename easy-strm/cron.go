@@ -92,6 +92,57 @@ func InitCronScheduler() error {
 		n, e := dao.NewIdentifyCacheDAO().DeleteOlderThan(service.CronInt(t.Params, "keep_days"))
 		return fmt.Sprintf("已清理%d条缓存", n), e
 	}})
+	scheduler.Register(service.CronHandler{
+		Key:         "behavior_sync",
+		Name:        "115操作事件增量同步",
+		DefaultCron: "0 */10 * * * *",
+		Parameters: []service.CronParameter{
+			{Key: "max_events", Label: "单配置单次最多处理事件数", Default: 500},
+		},
+		Execute: func(ctx context.Context, t *domain.CronTask, id string) (string, error) {
+			limit := service.CronInt(t.Params, "max_events")
+			if limit <= 0 {
+				limit = 500
+			}
+			schedules, err := dao.NewStrmConfigDAO().ListBehaviorSyncSchedules()
+			if err != nil {
+				return "", err
+			}
+			if len(schedules) == 0 {
+				return "无启用的增量同步配置", nil
+			}
+			store := dao.NewBehaviorDAO(getDBInstance())
+			remote := service.NewBehaviorHTTPClient(NewProxyAwareHTTPClient(30 * time.Second))
+			emby := service.NewEmbyService(dao.NewSystemConfigDAO(), NewProxyAwareHTTPClient(15*time.Second))
+			refresher := service.NewEmbyBehaviorRefresher(emby)
+			syncService := service.NewBehaviorSyncService(store, remote, refresher, func() string { return GetConfig().ServerURL })
+			parts := make([]string, 0, len(schedules))
+			failed := make([]string, 0)
+			ran := 0
+			for _, schedule := range schedules {
+				if err = ctx.Err(); err != nil {
+					break
+				}
+				// 按配置各自周期节流：未到周期跳过，避免一个全局任务把每个配置都打满。
+				if schedule.Interval > 0 && schedule.LastRunAt != nil && time.Since(*schedule.LastRunAt) < time.Duration(schedule.Interval)*time.Second {
+					parts = append(parts, fmt.Sprintf("配置%d未到周期", schedule.ID))
+					continue
+				}
+				stats, runErr := syncService.Run(ctx, schedule.ID, limit)
+				if runErr != nil {
+					failed = append(failed, fmt.Sprintf("配置%d: %v", schedule.ID, runErr))
+					continue
+				}
+				ran++
+				parts = append(parts, fmt.Sprintf("配置%d: 拉取%d 命中%d 生成%d 跳过%d", schedule.ID, stats.Fetched, stats.Matched, stats.Generated, stats.Skipped))
+			}
+			summary := fmt.Sprintf("处理%d个配置；%s", ran, strings.Join(parts, "；"))
+			if len(failed) > 0 {
+				return summary, fmt.Errorf("%s；失败：%s", summary, strings.Join(failed, "；"))
+			}
+			return summary, nil
+		},
+	})
 	return nil
 }
 

@@ -24,13 +24,15 @@ func (s *StrmConfigDAO) GetByID(id int) (*domain.StrmConfig, error) {
 		`SELECT id, cloud115_id, net_disk_path, local_path, cron, extension,
 		COALESCE(dir_tree_file, ''), sync_mode, COALESCE(source_account, 0), COALESCE(target_account, 0),
 		COALESCE(target_directory, ''), auto_cleanup, COALESCE(cleanup_threshold, 0),
-		COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 0), create_time, update_time
+		COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 0), behavior_sync_enabled,
+		COALESCE(behavior_sync_interval, 600), create_time, update_time
 		FROM t_strm_config WHERE id = $1`,
 		id,
 	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath,
 		&cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount,
 		&cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold,
-		&cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.CreateTime, &cfg.UpdateTime)
+		&cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.BehaviorSyncEnabled,
+		&cfg.BehaviorSyncInterval, &cfg.CreateTime, &cfg.UpdateTime)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
@@ -54,7 +56,8 @@ func (s *StrmConfigDAO) GetAll(sortField, sortOrder string) ([]*domain.StrmConfi
 		`SELECT id, cloud115_id, net_disk_path, local_path, cron, extension,
 		COALESCE(dir_tree_file, ''), sync_mode, COALESCE(source_account, 0), COALESCE(target_account, 0),
 		COALESCE(target_directory, ''), auto_cleanup, COALESCE(cleanup_threshold, 0),
-		COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 0), create_time, update_time
+		COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 0), behavior_sync_enabled,
+		COALESCE(behavior_sync_interval, 600), create_time, update_time
 		FROM t_strm_config ORDER BY %s`, orderClause)
 
 	rows, err := DB.Query(query)
@@ -69,13 +72,37 @@ func (s *StrmConfigDAO) GetAll(sortField, sortOrder string) ([]*domain.StrmConfi
 		err := rows.Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath,
 			&cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount,
 			&cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold,
-			&cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.CreateTime, &cfg.UpdateTime)
+			&cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.BehaviorSyncEnabled,
+			&cfg.BehaviorSyncInterval, &cfg.CreateTime, &cfg.UpdateTime)
 		if err != nil {
 			return nil, fmt.Errorf("StrmConfigDAO[GetAll] 扫描失败: %v", err)
 		}
 		list = append(list, cfg)
 	}
 	return list, nil
+}
+
+// ListBehaviorSyncSchedules 返回所有启用增量同步的配置及其运行节奏（最近运行时间取自 checkpoint）。
+func (s *StrmConfigDAO) ListBehaviorSyncSchedules() ([]domain.BehaviorSyncSchedule, error) {
+	rows, err := DB.Query(
+		`SELECT sc.id, sc.cloud115_id, sc.behavior_sync_interval, cp.last_run_at
+		FROM t_strm_config sc
+		LEFT JOIN t_behavior_checkpoint cp ON cp.strm_config_id = sc.id AND cp.cloud115_id = sc.cloud115_id
+		WHERE sc.behavior_sync_enabled
+		ORDER BY sc.id`)
+	if err != nil {
+		return nil, fmt.Errorf("StrmConfigDAO[ListBehaviorSyncSchedules] 查询失败: %v", err)
+	}
+	defer rows.Close()
+	var list []domain.BehaviorSyncSchedule
+	for rows.Next() {
+		var item domain.BehaviorSyncSchedule
+		if err = rows.Scan(&item.ID, &item.Cloud115ID, &item.Interval, &item.LastRunAt); err != nil {
+			return nil, fmt.Errorf("StrmConfigDAO[ListBehaviorSyncSchedules] 扫描失败: %v", err)
+		}
+		list = append(list, item)
+	}
+	return list, rows.Err()
 }
 
 // Create 创建STRM配置
@@ -111,14 +138,14 @@ func (s *StrmConfigDAO) Update(id, cloud115Id int, netDiskPath, localPath, cron,
 }
 
 // CreateExt 创建STRM配置（扩展版，包含秒传同步字段）
-func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
+func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
 	err := DB.QueryRow(
-		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency,
-	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath, &cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount, &cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold, &cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.CreateTime, &cfg.UpdateTime)
+		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, behavior_sync_enabled, behavior_sync_interval)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, behavior_sync_enabled, behavior_sync_interval, create_time, update_time`,
+		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, behaviorSyncEnabled, behaviorSyncInterval,
+	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath, &cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount, &cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold, &cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.BehaviorSyncEnabled, &cfg.BehaviorSyncInterval, &cfg.CreateTime, &cfg.UpdateTime)
 	if err != nil {
 		return nil, fmt.Errorf("StrmConfigDAO[CreateExt] 创建失败: %v", err)
 	}
@@ -126,14 +153,14 @@ func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, 
 }
 
 // UpdateExt 更新STRM配置（扩展版，包含秒传同步字段）
-func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int) (*domain.StrmConfig, error) {
+func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
 	err := DB.QueryRow(
-		`UPDATE t_strm_config SET cloud115_id=$1, net_disk_path=$2, local_path=$3, cron=$4, extension=$5, sync_mode=$6, source_account=$7, target_account=$8, target_directory=$9, auto_cleanup=$10, cleanup_threshold=$11, cleanup_policy=$12, max_concurrency=$13
-		WHERE id=$14
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, id,
-	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath, &cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount, &cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold, &cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.CreateTime, &cfg.UpdateTime)
+		`UPDATE t_strm_config SET cloud115_id=$1, net_disk_path=$2, local_path=$3, cron=$4, extension=$5, sync_mode=$6, source_account=$7, target_account=$8, target_directory=$9, auto_cleanup=$10, cleanup_threshold=$11, cleanup_policy=$12, max_concurrency=$13, behavior_sync_enabled=$14, behavior_sync_interval=$15
+		WHERE id=$16
+		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, behavior_sync_enabled, behavior_sync_interval, create_time, update_time`,
+		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, behaviorSyncEnabled, behaviorSyncInterval, id,
+	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath, &cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount, &cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold, &cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.BehaviorSyncEnabled, &cfg.BehaviorSyncInterval, &cfg.CreateTime, &cfg.UpdateTime)
 	if err != nil {
 		return nil, fmt.Errorf("StrmConfigDAO[UpdateExt] 更新失败: %v", err)
 	}

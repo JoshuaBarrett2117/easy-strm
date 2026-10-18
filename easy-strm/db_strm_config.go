@@ -17,12 +17,14 @@ func GetStrmConfigByID(id int) (*StrmConfig, error) {
 		COALESCE(dir_tree_file, ''), COALESCE(sync_mode, 'manual'), COALESCE(source_account, 0),
 		COALESCE(target_account, 0), COALESCE(target_directory, ''), auto_cleanup,
 		COALESCE(cleanup_threshold, 0), COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 1),
+		behavior_sync_enabled, COALESCE(behavior_sync_interval, 600),
 		create_time, update_time FROM t_strm_config WHERE id = $1`, id).Scan(
 		&strmConfig.ID, &strmConfig.Cloud115Id, &strmConfig.NetDiskPath, &strmConfig.LocalPath,
 		&strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode,
 		&strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory,
 		&strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy,
-		&strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+		&strmConfig.MaxConcurrency, &strmConfig.BehaviorSyncEnabled, &strmConfig.BehaviorSyncInterval,
+		&strmConfig.CreateTime, &strmConfig.UpdateTime)
 	if err != nil {
 		Error("Failed to get strm config by ID %d: %v", id, err)
 		return nil, err
@@ -47,6 +49,7 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 		COALESCE(dir_tree_file, ''), COALESCE(sync_mode, 'manual'), COALESCE(source_account, 0),
 		COALESCE(target_account, 0), COALESCE(target_directory, ''), auto_cleanup,
 		COALESCE(cleanup_threshold, 0), COALESCE(cleanup_policy, ''), COALESCE(max_concurrency, 1),
+		behavior_sync_enabled, COALESCE(behavior_sync_interval, 600),
 		create_time, update_time FROM t_strm_config ORDER BY %s %s`, sortField, sortOrder)
 	rows, err := db.Query(query)
 	if err != nil {
@@ -62,7 +65,8 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 			&strmConfig.Cron, &strmConfig.Extension, &strmConfig.DirTreeFile, &strmConfig.SyncMode,
 			&strmConfig.SourceAccount, &strmConfig.TargetAccount, &strmConfig.TargetDirectory,
 			&strmConfig.AutoCleanup, &strmConfig.CleanupThreshold, &strmConfig.CleanupPolicy,
-			&strmConfig.MaxConcurrency, &strmConfig.CreateTime, &strmConfig.UpdateTime)
+			&strmConfig.MaxConcurrency, &strmConfig.BehaviorSyncEnabled, &strmConfig.BehaviorSyncInterval,
+			&strmConfig.CreateTime, &strmConfig.UpdateTime)
 		if err != nil {
 			Error("Failed to scan strm config row: %v", err)
 			return nil, err
@@ -80,13 +84,13 @@ func GetAllStrmConfig(sortField, sortOrder string) ([]*StrmConfig, error) {
 }
 
 // CreateStrmConfig 将旧入口转发给统一Service，避免配置与任务分开提交。
-func CreateStrmConfig(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*StrmConfig, error) {
-	return strmWriteService().CreateConfigExt(cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency)
+func CreateStrmConfig(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfig, error) {
+	return strmWriteService().CreateConfigExt(cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency, behaviorSyncEnabled, behaviorSyncInterval)
 }
 
 // UpdateStrmConfig 将旧入口转发给统一Service。
-func UpdateStrmConfig(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int) (*StrmConfig, error) {
-	return strmWriteService().UpdateConfigExt(id, cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency)
+func UpdateStrmConfig(id, cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*StrmConfig, error) {
+	return strmWriteService().UpdateConfigExt(id, cloud, netPath, localPath, expr, extension, mode, source, target, targetDir, cleanup, threshold, policy, concurrency, behaviorSyncEnabled, behaviorSyncInterval)
 }
 
 // DeleteStrmConfig 删除配置及全部关联调度。
