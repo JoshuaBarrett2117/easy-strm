@@ -2,9 +2,12 @@ package main
 
 import (
 	"crypto/sha256"
+	"easy-strm/internal/domain"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"sync"
@@ -254,22 +257,58 @@ func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string,
 		SetDoNotParseResponse(true).
 		Post("https://webapi.115.com/share/receive")
 	if err != nil {
-		return fmt.Errorf("share receive request failed: %v", err)
+		return fmt.Errorf("share receive request failed: %w", err)
+	}
+	if resp == nil {
+		return fmt.Errorf("share receive response is missing")
 	}
 	data := resp.RawBody()
-	bodyBytes, _ := io.ReadAll(data)
-	data.Close()
+	if data == nil {
+		return fmt.Errorf("share receive response body is missing")
+	}
+	if status := resp.StatusCode(); status < http.StatusOK || status >= http.StatusMultipleChoices {
+		// 非成功响应可能含代理错误页或敏感信息，只返回状态码并释放响应体。
+		if closeErr := data.Close(); closeErr != nil {
+			return fmt.Errorf("share receive response HTTP %d: close error_type=%T", status, closeErr)
+		}
+		return fmt.Errorf("share receive response HTTP %d", status)
+	}
+	const maxReceiveShareResponseBytes = 1 << 20
+	bodyBytes, readErr := io.ReadAll(io.LimitReader(data, maxReceiveShareResponseBytes+1))
+	closeErr := data.Close()
+	if readErr != nil {
+		var timeout net.Error
+		if errors.As(readErr, &timeout) && timeout.Timeout() {
+			return fmt.Errorf("read share receive response timeout: error_type=%T", readErr)
+		}
+		return fmt.Errorf("read share receive response failed: error_type=%T", readErr)
+	}
+	if len(bodyBytes) > maxReceiveShareResponseBytes {
+		return fmt.Errorf("share receive response exceeds %d bytes", maxReceiveShareResponseBytes)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close share receive response failed: error_type=%T", closeErr)
+	}
 
 	var result struct {
-		State  bool   `json:"state"`
-		Errno  int    `json:"errno"`
-		Errmsg string `json:"errmsg"`
+		State   bool   `json:"state"`
+		Errno   int    `json:"errno"`
+		Errmsg  string `json:"errmsg"`
+		Error   string `json:"error"`
+		Message string `json:"message"`
 	}
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return fmt.Errorf("parse share receive response failed: error_type=%T", err)
 	}
 	if !result.State {
-		return fmt.Errorf("share receive failed (errno=%d)", result.Errno)
+		message := result.Errmsg
+		if message == "" {
+			message = result.Error
+		}
+		if message == "" {
+			message = result.Message
+		}
+		return &domain.ShareReceiveError{Errno: result.Errno, Message: message}
 	}
 	Info("[ReceiveShare] success | target_id=%d", targetCloud115ID)
 	return nil

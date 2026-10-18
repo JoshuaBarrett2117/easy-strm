@@ -170,16 +170,16 @@ func (c *ShareStrmController) Playback(x *gin.Context) {
 	defer beginDirectLinkRequest(x, "share_strm_playback")()
 	id, err := uuid.Parse(x.Param("id"))
 	if err != nil {
-		ErrorResp(x, 400, "播放标识无效")
+		writeSharePlaybackError(x, 400, errors.New("播放标识无效"))
 		return
 	}
 	link, err := c.s.Playback(x.Request.Context(), id.String(), x.Request.UserAgent())
 	if errors.Is(err, sql.ErrNoRows) {
-		ErrorResp(x, 404, "播放映射不存在，请重新导出")
+		writeSharePlaybackError(x, 404, errors.New("播放映射不存在，请重新导出"))
 		return
 	}
 	if err != nil {
-		ErrorResp(x, 502, err.Error())
+		writeSharePlaybackError(x, 502, err)
 		return
 	}
 	x.Header("Cache-Control", "no-store")

@@ -12,10 +12,9 @@ import (
 	"easy-strm/internal/pkg/logger"
 )
 
-// force_direct_play 只应作用于 STRM（远程直链）媒体源。
-// 本地视频需要 Emby 转码兜底，一旦被强制 DirectPlay 就会出现「只能播 STRM、本地视频播不了」。
-// 因此改写前先按 item 判定媒体类型：远程强制，本地放行；判定失败时保持放行（fail-open），
-// 避免把本地视频重新锁死为不可转码。
+// force_direct_play 只作用于 STRM；直播和本地视频保留 Emby 的协商和转码能力。
+// 改写前查询项目类型及生命周期字段，直播不写入判定缓存；类型未知时仅跳过协商改写，
+// 实际流请求仍执行 playbackLocation 的授权和类型校验。
 
 const (
 	embyDirectPlayVerdictTTL      = 10 * time.Minute
@@ -61,7 +60,7 @@ func (s *EmbyProxyService) directPlayApplies(server *domain.EmbyServer, base *ur
 	if verdict, ok := s.loadDirectPlayVerdict(key); ok {
 		return verdict
 	}
-	remote, failure := s.lookupDirectPlayVerdict(server, base, request, itemID)
+	remote, live, failure := s.lookupDirectPlayVerdict(server, base, request, itemID)
 	if failure != nil {
 		logger.WithContext(request.Context(), "emby_proxy").Log(logger.WARN, "强制直接播放未改写，媒体类型未知", logger.Fields{
 			"item_id": itemID,
@@ -69,7 +68,9 @@ func (s *EmbyProxyService) directPlayApplies(server *domain.EmbyServer, base *ur
 		}, nil)
 		return false
 	}
-	s.storeDirectPlayVerdict(key, remote)
+	if !live {
+		s.storeDirectPlayVerdict(key, remote)
+	}
 	return remote
 }
 
@@ -92,7 +93,7 @@ func (s *EmbyProxyService) storeDirectPlayVerdict(key string, remote bool) {
 	s.directPlayCache[key] = embyDirectPlayVerdict{remote: remote, expires: time.Now().Add(embyDirectPlayVerdictTTL)}
 }
 
-func (s *EmbyProxyService) lookupDirectPlayVerdict(server *domain.EmbyServer, base *url.URL, incoming *http.Request, itemID string) (bool, *embyProxyFailure) {
+func (s *EmbyProxyService) lookupDirectPlayVerdict(server *domain.EmbyServer, base *url.URL, incoming *http.Request, itemID string) (remote, live bool, failure *embyProxyFailure) {
 	// 必须沿用客户端原始查询参数（UserId、api_key 等）：Emby 的 /Items 在用户身份下
 	// 缺少 UserId 会返回空集合，导致 STRM 被判为「类型未知」而丢失强制直连。
 	query := incoming.URL.Query()
@@ -112,10 +113,14 @@ func (s *EmbyProxyService) lookupDirectPlayVerdict(server *domain.EmbyServer, ba
 	}
 	prefix := embyDirectPlayPathPrefix(incoming.URL.Path)
 	if failure := s.proxyMetadata(server, base, incoming, prefix+"/Items", query, "direct_play_kind", &info); failure != nil {
-		return false, failure
+		return false, false, failure
 	}
 	if len(info.Items) != 1 || info.Items[0].ID != itemID {
-		return false, newEmbyProxyFailure("direct_play_kind", "media_kind_unknown", "Emby 未提供对应项目的媒体类型", 200, nil)
+		return false, false, newEmbyProxyFailure("direct_play_kind", "media_kind_unknown", "Emby 未提供对应项目的媒体类型", 200, nil)
 	}
-	return classifyEmbyProxyItem(info.Items[0], embyProxyMediaSource{})
+	if embyProxyItemIsLive(info.Items[0], embyProxyMediaSource{}) {
+		return false, true, nil
+	}
+	remote, failure = classifyEmbyProxyItem(info.Items[0], embyProxyMediaSource{})
+	return remote, false, failure
 }

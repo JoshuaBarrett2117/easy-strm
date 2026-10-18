@@ -18,6 +18,9 @@ import (
 func TestEmbyProxyEnhanceCacheSkipsMetadata(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveEmbyProxySTRMItemFixture(writer, request) {
+			return
+		}
 		calls.Add(1)
 		io.WriteString(writer, `{"MediaSources":[{"Id":"s1","Path":"https://8.8.8.8/movie"}]}`)
 	}))
@@ -47,6 +50,9 @@ func TestEmbyProxyEnhanceTranscodeBypassesCacheAndAuthorization(t *testing.T) {
 	var calls, streamCalls atomic.Int32
 	var denied atomic.Bool
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveEmbyProxySTRMItemFixture(writer, request) {
+			return
+		}
 		if !strings.HasSuffix(request.URL.Path, "/PlaybackInfo") {
 			streamCalls.Add(1)
 			return
@@ -124,6 +130,9 @@ func TestEmbyProxyEnhanceSingleflightIncludesItems(t *testing.T) {
 func TestEmbyProxyEnhanceHandlerGeneration(t *testing.T) {
 	var calls atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if serveEmbyProxySTRMItemFixture(writer, request) {
+			return
+		}
 		calls.Add(1)
 		io.WriteString(writer, `{"MediaSources":[{"Id":"s1","Path":"https://8.8.8.8/movie"}]}`)
 	}))

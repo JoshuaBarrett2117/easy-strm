@@ -2,6 +2,7 @@ package service
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,15 @@ import (
 	"easy-strm/internal/domain"
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+// VOD 测试同时提供项目元数据，不能再以 HTTP URL 本身充当 STRM 类型证据。
+func serveEmbyProxySTRMItemFixture(w http.ResponseWriter, r *http.Request) bool {
+	if !strings.HasSuffix(r.URL.Path, "/Items") || r.URL.Query().Get("Ids") == "" {
+		return false
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"Items": []map[string]string{{"Id": r.URL.Query().Get("Ids"), "Type": "Movie", "Path": "/media/movie.strm"}}})
+	return true
+}
 
 func TestEmbyProxyPlayback(t *testing.T) {
 	for _, tc := range []struct {
@@ -62,7 +72,7 @@ func TestEmbyProxyPlayback(t *testing.T) {
 					_, _ = io.WriteString(w, tc.body)
 					return
 				}
-				if r.URL.Path == "/Items" {
+				if strings.HasSuffix(r.URL.Path, "/Items") {
 					if r.URL.Query().Get("Ids") != "42" || r.URL.Query().Get("Fields") != "Path,MediaSources" {
 						t.Errorf("未查询原项目类型: %s", r.URL.Path)
 					}
@@ -141,6 +151,10 @@ func TestEmbyProxyUnavailableUpstream(t *testing.T) {
 func TestEmbyProxyPreservesEscapedBaseAndClientPaths(t *testing.T) {
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.EscapedPath() {
+		case "/gateway%2Froute/emby/Items":
+			if r.URL.Query().Get("Ids") != "item?1" || !serveEmbyProxySTRMItemFixture(w, r) {
+				t.Error("项目查询转义标识丢失")
+			}
 		case "/gateway%2Froute/emby/Items/a%2Fb":
 			if r.URL.RawQuery != "filter=a%2Fb" {
 				t.Errorf("查询被改写: %s", r.URL.RawQuery)
@@ -184,7 +198,7 @@ func TestEmbyProxyPlaybackIdentityAndBasePath(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/gateway/emby/Items/42/PlaybackInfo" {
+				if r.URL.Path != "/gateway/emby/Items/42/PlaybackInfo" && r.URL.Path != "/gateway/emby/Items" {
 					t.Errorf("路径=%s", r.URL.Path)
 				}
 				if tc.key != "" && r.Header.Get(tc.key) != tc.value {
@@ -195,6 +209,9 @@ func TestEmbyProxyPlaybackIdentityAndBasePath(t *testing.T) {
 				}
 				if (r.Header.Get("X-Emby-Token") == "admin-secret") != tc.fallback {
 					t.Error("错误地覆盖客户端身份")
+				}
+				if serveEmbyProxySTRMItemFixture(w, r) {
+					return
 				}
 				_, _ = io.WriteString(w, `{"MediaSources":[{"Path":"https://cdn.example/video"}]}`)
 			}))

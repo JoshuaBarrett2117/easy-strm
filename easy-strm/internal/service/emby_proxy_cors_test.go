@@ -71,6 +71,9 @@ func TestEmbyProxyBrowserAllowsLocalRelayNativeRedirect(t *testing.T) {
 			}))
 			defer media.Close()
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveEmbyProxySTRMItemFixture(w, r) {
+					return
+				}
 				_, _ = io.WriteString(w, `{"MediaSources":[{"Id":"s1","Path":"`+media.URL+`/video?signature=test"}]}`)
 			}))
 			defer remote.Close()
@@ -167,6 +170,9 @@ func TestEmbyProxyPlaybackFailuresKeepPolicyAndCORS(t *testing.T) {
 				output := captureEmbyProxyLog(t)
 				calls := 0
 				transport := embyProxyRelayTestTransport(func(request *http.Request) (*http.Response, error) {
+					if strings.HasSuffix(request.URL.Path, "/Items") {
+						return &http.Response{StatusCode: 200, Header: make(http.Header), Request: request, Body: io.NopCloser(strings.NewReader(`{"Items":[{"Id":"42","Type":"Movie","Path":"/media/movie.strm"}]}`))}, nil
+					}
 					calls++
 					if !strings.HasSuffix(request.URL.Path, "/PlaybackInfo") {
 						t.Error("失败后不可视频回源")

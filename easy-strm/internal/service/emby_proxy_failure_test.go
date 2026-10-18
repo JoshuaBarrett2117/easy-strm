@@ -63,6 +63,9 @@ func TestEmbyProxySTRMDoesNotFallbackAfterRedirect(t *testing.T) {
 			output := captureEmbyProxyLog(t)
 			var videoCalls atomic.Int32
 			remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if serveEmbyProxySTRMItemFixture(w, r) {
+					return
+				}
 				if strings.HasSuffix(r.URL.Path, "/PlaybackInfo") {
 					_, _ = io.WriteString(w, `{"MediaSources":[{"Id":"s1","Path":"https://cdn.example/video?signature=private-signature"}]}`)
 					return
@@ -214,6 +217,9 @@ func TestEmbyProxyFailsClosedForUnknownOrInvalidMedia(t *testing.T) {
 					w.WriteHeader(tc.playbackStatus)
 					_, _ = io.WriteString(w, tc.playbackBody)
 				case r.URL.Path == "/Items":
+					if tc.itemBody == "" && serveEmbyProxySTRMItemFixture(w, r) {
+						return
+					}
 					w.WriteHeader(tc.itemStatus)
 					_, _ = io.WriteString(w, tc.itemBody)
 				default:
@@ -304,6 +310,9 @@ func TestEmbyProxyDirectSTRMPlaybackDoesNotProbeTarget(t *testing.T) {
 	defer target.Close()
 	location := target.URL + "/video?signature=private-signature"
 	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if serveEmbyProxySTRMItemFixture(w, r) {
+			return
+		}
 		if !strings.HasSuffix(r.URL.Path, "/PlaybackInfo") {
 			t.Error("不应读取其他上游接口")
 		}

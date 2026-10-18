@@ -96,6 +96,14 @@ func rewriteEmbyDirectPlayResponseJSON(body []byte) ([]byte, []string, []int, st
 	if len(sources) == 0 {
 		return nil, nil, nil, "empty_media_sources"
 	}
+	// 即使前置判定与响应之间媒体状态发生变化，也不能删除直播的转码或生命周期信息。
+	var item embyProxyItem
+	if err := json.Unmarshal(body, &item); err != nil {
+		return nil, nil, nil, "invalid_media_source"
+	}
+	if embyProxyItemIsLive(item, embyProxyMediaSource{}) {
+		return nil, nil, nil, "live_media_source"
+	}
 	changed := make([]string, 0)
 	var localSources []int
 	for index, rawSource := range sources {

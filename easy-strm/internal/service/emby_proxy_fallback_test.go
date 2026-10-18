@@ -51,6 +51,9 @@ func TestEmbyProxyFallbackPolicyOriginalPathAndQuery(t *testing.T) {
 			}
 			forwarded := make(chan string, 2)
 			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if serveEmbyProxySTRMItemFixture(writer, request) {
+					return
+				}
 				if strings.HasSuffix(request.URL.Path, "/PlaybackInfo") {
 					if testCase.metadataStatus != 0 {
 						writer.WriteHeader(testCase.metadataStatus)
@@ -112,6 +115,9 @@ func TestEmbyProxyProbeNativeRejectVersusOrigin(t *testing.T) {
 		t.Run(strategy, func(t *testing.T) {
 			forwarded := make(chan string, 1)
 			upstream := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if serveEmbyProxySTRMItemFixture(writer, request) {
+					return
+				}
 				if strings.HasSuffix(request.URL.Path, "/PlaybackInfo") {
 					io.WriteString(writer, `{"MediaSources":[{"Path":"https://8.8.8.8/video"}]}`)
 					return

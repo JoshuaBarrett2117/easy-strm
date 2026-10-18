@@ -387,5 +387,5 @@ func embyClientIdentity(r *http.Request) bool {
 			return true
 		}
 	}
-	return embyQuery(r.URL.Query(), "api_key") != "" || embyQuery(r.URL.Query(), "AccessToken") != "" || embyQuery(r.URL.Query(), "X-Emby-Token") != ""
+	return embyQuery(r.URL.Query(), "api_key") != "" || embyQuery(r.URL.Query(), "ApiKey") != "" || embyQuery(r.URL.Query(), "Token") != "" || embyQuery(r.URL.Query(), "AccessToken") != "" || embyQuery(r.URL.Query(), "X-Emby-Token") != ""
 }

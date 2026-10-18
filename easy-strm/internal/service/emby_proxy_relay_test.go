@@ -39,6 +39,9 @@ func (body *embyProxyRelayTestBody) Close() error {
 func newEmbyProxyRelayTestService(t *testing.T, transport embyProxyRelayTestTransport) *EmbyProxyService {
 	t.Helper()
 	metadata := embyProxyRelayTestTransport(func(request *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(request.URL.Path, "/Items") {
+			return &http.Response{StatusCode: 200, Header: make(http.Header), Request: request, Body: io.NopCloser(strings.NewReader(`{"Items":[{"Id":"42","Type":"Movie","Path":"/media/movie.strm"}]}`))}, nil
+		}
 		if !strings.HasSuffix(request.URL.Path, "/PlaybackInfo") {
 			t.Errorf("中继不可回退视频回源: %s", request.URL.Path)
 		}

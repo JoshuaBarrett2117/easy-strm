@@ -42,6 +42,8 @@ func embyPlaybackRequest(r *http.Request) (embyProxyPlaybackRequest, bool) {
 		return playback, false
 	case strings.HasSuffix(action, ".m3u8") || strings.HasSuffix(action, ".mpd"):
 		playback.transcoding = true
+	case action == "live":
+		playback.transcoding = true
 	case action == "stream" || strings.HasPrefix(action, "stream.") || action == "original" || strings.HasPrefix(action, "original."):
 	default:
 		return playback, false
@@ -65,15 +67,20 @@ func embyTranscodingQuery(query url.Values) bool {
 }
 
 type embyProxyMediaSource struct {
-	ID        string `json:"Id"`
-	Path      string `json:"Path"`
-	Protocol  string `json:"Protocol"`
-	Container string `json:"Container"`
-	IsRemote  bool   `json:"IsRemote"`
+	ID               string `json:"Id"`
+	Path             string `json:"Path"`
+	Protocol         string `json:"Protocol"`
+	Container        string `json:"Container"`
+	IsRemote         bool   `json:"IsRemote"`
+	IsInfiniteStream bool   `json:"IsInfiniteStream"`
+	RequiresOpening  bool   `json:"RequiresOpening"`
+	RequiresClosing  bool   `json:"RequiresClosing"`
+	LiveStreamID     string `json:"LiveStreamId"`
 }
 
 type embyProxyItem struct {
 	ID           string                 `json:"Id"`
+	Type         string                 `json:"Type"`
 	Path         string                 `json:"Path"`
 	IsShortcut   bool                   `json:"IsShortcut"`
 	MediaSources []embyProxyMediaSource `json:"MediaSources"`
@@ -89,12 +96,13 @@ func (s *EmbyProxyService) playbackLocation(server *domain.EmbyServer, base *url
 			failure.mediaSourceID = source.ID
 		}
 	}()
-	strm := embyProxySourceIsSTRM(source)
-	if !strm {
-		strm, failure = s.isSTRMItem(server, base, incoming, playback, source)
-		if failure != nil {
-			return "", failure
-		}
+	if embyProxySourceIsLive(source) {
+		return "", nil
+	}
+	// HTTP 本身无法区分 STRM 与 tuner；必须回查项目类型，不能把客户端 LiveStreamId 当作证据。
+	strm, failure := s.isSTRMItem(server, base, incoming, playback, source)
+	if failure != nil {
+		return "", failure
 	}
 	if !strm {
 		return "", nil
@@ -143,11 +151,6 @@ func (s *EmbyProxyService) playbackSource(server *domain.EmbyServer, base *url.U
 }
 
 func (s *EmbyProxyService) isSTRMItem(server *domain.EmbyServer, base *url.URL, incoming *http.Request, playback embyProxyPlaybackRequest, source embyProxyMediaSource) (bool, *embyProxyFailure) {
-	path := strings.TrimSpace(source.Path)
-	parsed, err := url.Parse(path)
-	if path == "" || (source.IsRemote && (err != nil || parsed.Scheme == "")) {
-		return false, newEmbyProxyFailure("media_kind", "media_kind_unknown", "无法确认播放媒体类型，已禁止回源", 200, nil)
-	}
 	query := incoming.URL.Query()
 	for name := range query {
 		if strings.EqualFold(name, "Ids") || strings.EqualFold(name, "Fields") || strings.EqualFold(name, "Limit") {
@@ -166,10 +169,24 @@ func (s *EmbyProxyService) isSTRMItem(server *domain.EmbyServer, base *url.URL, 
 	if len(info.Items) != 1 || info.Items[0].ID != playback.itemID {
 		return false, newEmbyProxyFailure("media_kind", "media_kind_unknown", "Emby 未提供对应项目的媒体类型，已禁止回源", 200, nil)
 	}
+	if !embyProxyItemIsLive(info.Items[0], source) && !embyProxySourceIsSTRM(source) && strings.TrimSpace(source.Path) == "" {
+		return false, newEmbyProxyFailure("media_kind", "media_kind_unknown", "无法确认播放媒体类型，已禁止回源", 200, nil)
+	}
 	return classifyEmbyProxyItem(info.Items[0], source)
 }
 
 func classifyEmbyProxyItem(item embyProxyItem, selected embyProxyMediaSource) (bool, *embyProxyFailure) {
+	if embyProxyItemIsLive(item, selected) {
+		return false, nil
+	}
+	if embyProxySourceIsSTRM(selected) {
+		return true, nil
+	}
+	path := strings.TrimSpace(selected.Path)
+	parsed, err := url.Parse(path)
+	if selected.IsRemote && (err != nil || parsed.Scheme == "") {
+		return false, newEmbyProxyFailure("media_kind", "media_kind_unknown", "无法确认播放媒体类型，已禁止回源", 200, nil)
+	}
 	if item.IsShortcut || embyProxySourceIsSTRM(embyProxyMediaSource{Path: item.Path}) {
 		return true, nil
 	}
@@ -190,8 +207,28 @@ func classifyEmbyProxyItem(item embyProxyItem, selected embyProxyMediaSource) (b
 }
 
 func embyProxySourceIsSTRM(source embyProxyMediaSource) bool {
+	if embyProxySourceIsLive(source) {
+		return false
+	}
 	path := strings.ToLower(strings.TrimSpace(source.Path))
 	return strings.HasPrefix(path, "http:") || strings.HasPrefix(path, "https:") || strings.HasSuffix(path, ".strm") || strings.EqualFold(source.Protocol, "Http") || strings.EqualFold(source.Protocol, "Https") || strings.EqualFold(source.Container, "strm")
+}
+
+// 生命周期字段仅来自可信 Emby 元数据；此类地址由 Emby 管理打开、关闭和转码，不可缓存或跳转 tuner。
+func embyProxySourceIsLive(source embyProxyMediaSource) bool {
+	return source.IsInfiniteStream || source.RequiresOpening || source.RequiresClosing || strings.TrimSpace(source.LiveStreamID) != ""
+}
+
+func embyProxyItemIsLive(item embyProxyItem, selected embyProxyMediaSource) bool {
+	if strings.EqualFold(item.Type, "LiveTvChannel") || embyProxySourceIsLive(selected) {
+		return true
+	}
+	for _, source := range item.MediaSources {
+		if (selected.ID == "" || selected.ID == source.ID) && embyProxySourceIsLive(source) {
+			return true
+		}
+	}
+	return false
 }
 
 func embyProxySTRMLocation(path string) (string, bool) {
@@ -241,7 +278,7 @@ func buildEmbyProxyMetadataRequest(server *domain.EmbyServer, base *url.URL, inc
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range []string{"Authorization", "X-Emby-Authorization", "X-Emby-Token", "X-MediaBrowser-Token", "Cookie", "User-Agent"} {
+	for _, key := range []string{"Authorization", "X-Emby-Authorization", "X-Emby-Token", "X-MediaBrowser-Token", "X-Emby-Device-Id", "X-Emby-Client", "X-Emby-Device-Name", "X-Emby-Client-Version", "Cookie", "User-Agent"} {
 		for _, value := range incoming.Header.Values(key) {
 			request.Header.Add(key, value)
 		}
