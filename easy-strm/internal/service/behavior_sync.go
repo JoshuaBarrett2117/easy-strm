@@ -70,10 +70,11 @@ func behaviorLog(ctx context.Context, reason string, event domain.BehaviorEvent)
 // selectBehaviorBatch 扫描到检查点或末页，环形缓冲区只保留最老N条。
 // 不在降序前N条处截断；因此积压大于N也不会丢失或饿死旧事件。
 func selectBehaviorBatch(ctx context.Context, remote BehaviorRemote, cookie string, cursor int64, limit int, stats *BehaviorStats) ([]domain.BehaviorEvent, error) {
-	buffer := make([]domain.BehaviorEvent, limit)
-	used, next, offset := 0, 0, 0
-	var lowest int64
-	for {
+	// 115 的事件 ID 并非严格随页降序（实测 2000 条中有 25 处回升），
+	// 因此不能按「ID 必须严格递减」判定数据损坏，也不能用「低于历史最低值就丢弃」
+	// 的环形缓冲，否则会漏掉 ID 回升的真实事件。这里按 ID 去重收集，最后统一排序取最旧的一批。
+	collected := make(map[int64]domain.BehaviorEvent, limit*2)
+	for offset := 0; ; {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -85,36 +86,47 @@ func selectBehaviorBatch(ctx context.Context, remote BehaviorRemote, cookie stri
 			return nil, fmt.Errorf("115行为响应state=false")
 		}
 		stats.Fetched += len(page.List)
-		stop := false
-		for position, event := range page.List {
+		hasNew := false
+		for _, event := range page.List {
 			id := int64(event.ID)
-			if id <= 0 || (position > 0 && event.ID >= page.List[position-1].ID) {
-				return nil, fmt.Errorf("行为ID无效或不是严格降序")
+			if id <= 0 {
+				return nil, fmt.Errorf("行为ID无效")
 			}
 			if id <= cursor {
-				stop = true
-				break
-			}
-			if lowest != 0 && id >= lowest {
 				continue
 			}
-			lowest = id
-			buffer[next] = event
-			next = (next + 1) % limit
-			if used < limit {
-				used++
+			hasNew = true
+			if _, exists := collected[id]; exists {
+				continue
 			}
+			collected[id] = event
 		}
-		if stop || !page.NextPage {
+		if !page.NextPage {
 			break
 		}
 		if len(page.List) == 0 {
 			return nil, fmt.Errorf("行为分页为空但仍声明next_page，保留检查点")
 		}
+		if !hasNew {
+			break
+		}
 		offset += len(page.List)
+		if offset > limit*200 {
+			break
+		}
 	}
-	selected := append([]domain.BehaviorEvent(nil), buffer[:used]...)
-	sort.Slice(selected, func(first, second int) bool { return selected[first].ID < selected[second].ID })
+	ids := make([]int64, 0, len(collected))
+	for id := range collected {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(first, second int) bool { return ids[first] < ids[second] })
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	selected := make([]domain.BehaviorEvent, 0, len(ids))
+	for _, id := range ids {
+		selected = append(selected, collected[id])
+	}
 	return selected, nil
 }
 

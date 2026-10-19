@@ -142,12 +142,21 @@ func TestBehaviorHTTPSelectBehaviorBatch(t *testing.T) {
 			offsets: []int{0, 2, 5}, want: []domain.BehaviorID{40, 50, 60}, fetched: 6,
 		},
 		{
-			name: "checkpoint_stops_before_next_page", cursor: 55, limit: 2,
+			name: "checkpoint_filters_processed_events", cursor: 55, limit: 2,
 			pages: []string{
 				`{"count":9886,"next_page":true,"list":[{"id":90},{"id":80}]}`,
-				`{"count":9886,"next_page":true,"list":[{"id":70},{"id":60},{"id":55},{"id":40}]}`,
+				`{"count":9886,"next_page":false,"list":[{"id":70},{"id":60},{"id":55},{"id":40}]}`,
 			},
 			offsets: []int{0, 2}, want: []domain.BehaviorID{60, 70}, fetched: 6,
+		},
+		{
+			// 整页都已处理过（ID 全部 <= checkpoint）即停止翻页，避免无谓请求。
+			name: "checkpoint_stops_when_page_has_no_new", cursor: 55, limit: 2,
+			pages: []string{
+				`{"count":9886,"next_page":true,"list":[{"id":90},{"id":80}]}`,
+				`{"count":9886,"next_page":true,"list":[{"id":50},{"id":40}]}`,
+			},
+			offsets: []int{0, 2}, want: []domain.BehaviorID{80, 90}, fetched: 4,
 		},
 		{
 			name: "empty_page_with_next_page_rejected", limit: 3,

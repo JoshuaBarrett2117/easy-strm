@@ -107,7 +107,7 @@ func TestSelectBehaviorBatchCursorTermination(t *testing.T) {
 				{ID: 80, Type: 2, Name: "c.mp4"},
 			}}, nil
 		}
-		return domain.BehaviorPage{State: true, NextPage: true, List: []domain.BehaviorEvent{
+		return domain.BehaviorPage{State: true, NextPage: false, List: []domain.BehaviorEvent{
 			{ID: 70, Type: 2, Name: "d.mp4"},
 			{ID: 60, Type: 2, Name: "e.mp4"},
 			{ID: 55, Type: 2, Name: "f.mp4"},
@@ -331,5 +331,48 @@ func TestBehaviorSyncRunAdvancesCheckpointAndIsIdempotent(t *testing.T) {
 	}
 	if len(entries) != 1 {
 		t.Fatalf("重复运行产生额外文件，目录条目数 = %d，期望 1", len(entries))
+	}
+}
+
+// TestSelectBehaviorBatchToleratesNonMonotonicIDs 覆盖线上真实情况：
+// 115 的事件 ID 并非严格降序，不能据此判定数据损坏。
+func TestSelectBehaviorBatchToleratesNonMonotonicIDs(t *testing.T) {
+	remote := &fakeBehaviorRemote{events: func(offset int) (domain.BehaviorPage, error) {
+		return domain.BehaviorPage{State: true, NextPage: false, List: []domain.BehaviorEvent{
+			{ID: 100, Type: 2, Name: "a.mp4"},
+			{ID: 95, Type: 2, Name: "b.mp4"},
+			{ID: 97, Type: 2, Name: "c.mp4"},
+		}}, nil
+	}}
+	var stats BehaviorStats
+	got, err := selectBehaviorBatch(context.Background(), remote, "cookie", 0, 10, &stats)
+	if err != nil {
+		t.Fatalf("ID 非严格降序不应报错: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("选中事件数 = %d，期望 3", len(got))
+	}
+}
+
+// TestSelectBehaviorBatchStopsWhenPageHasNoNewEvents 覆盖整页都 <= checkpoint 时停止翻页。
+func TestSelectBehaviorBatchStopsWhenPageHasNoNewEvents(t *testing.T) {
+	fetched := 0
+	remote := &fakeBehaviorRemote{events: func(offset int) (domain.BehaviorPage, error) {
+		fetched++
+		return domain.BehaviorPage{State: true, NextPage: true, List: []domain.BehaviorEvent{
+			{ID: 40, Type: 2, Name: "old1.mp4"},
+			{ID: 30, Type: 2, Name: "old2.mp4"},
+		}}, nil
+	}}
+	var stats BehaviorStats
+	got, err := selectBehaviorBatch(context.Background(), remote, "cookie", 50, 10, &stats)
+	if err != nil {
+		t.Fatalf("不应报错: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("不应选中事件，实际 %d", len(got))
+	}
+	if fetched != 1 {
+		t.Fatalf("应只拉取一页即停止，实际 %d 页", fetched)
 	}
 }
