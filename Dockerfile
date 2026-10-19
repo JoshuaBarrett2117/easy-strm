@@ -15,7 +15,8 @@ RUN --mount=type=cache,target=/root/.npm \
     npm config set fetch-retry-factor 2 && \
     npm config set fetch-retry-mintimeout 10000 && \
     npm config set fetch-retry-maxtimeout 120000 && \
-    npm ci --prefer-offline --no-audit --no-fund --registry="${NPM_REGISTRY}"
+    npm ci --ignore-scripts --prefer-offline --no-audit --no-fund --registry="${NPM_REGISTRY}" && \
+    (npm rebuild esbuild --foreground-scripts || (sleep 3 && npm rebuild esbuild --foreground-scripts))
 
 COPY easy-strm-front/ ./
 RUN npm run build
