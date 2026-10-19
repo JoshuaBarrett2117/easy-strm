@@ -226,6 +226,12 @@ func (service *BehaviorSyncService) Run(ctx context.Context, strmConfigID, limit
 				return stats, err
 			}
 			if err = run.handle(ctx, event); err != nil {
+				// 多个 115 账号映射到同一个本地输出树时，同一路径只能有一个归属；
+				// 这不是数据损坏，跳过该事件即可，不能让整轮同步失败。
+				if errors.Is(err, dao.ErrBehaviorPathConflict) {
+					run.skip(ctx, event, "STRM路径已被其他115账号占用")
+					continue
+				}
 				return stats, fmt.Errorf("事件%d: %w", event.ID, err)
 			}
 		}

@@ -175,7 +175,26 @@ func (store *behaviorSession) Pending(ctx context.Context) ([]domain.BehaviorInd
 	return store.query(ctx, `SELECT `+behaviorColumns+` FROM t_strm_file_index WHERE cloud115_id=$1 AND pending_path<>'' LIMIT 20001`, store.cloudID)
 }
 
+// ErrBehaviorPathConflict 表示该 STRM 路径已被另一个 115 账号占用。
+// t_strm_file_index.strm_path 是全局唯一索引，而多个账号可以映射到同一个本地输出树，
+// 此时不能让整轮同步失败，应由调用方按「跳过」处理。
+var ErrBehaviorPathConflict = errors.New("STRM路径已被其他115账号占用")
+
 func (store *behaviorSession) Put(ctx context.Context, item domain.BehaviorIndex) error {
+	if item.Path != "" {
+		var owner int
+		err := store.conn.QueryRowContext(ctx, `SELECT cloud115_id FROM t_strm_file_index WHERE strm_path=$1 LIMIT 1`, item.Path).Scan(&owner)
+		switch {
+		case err == nil && owner != store.cloudID:
+			return ErrBehaviorPathConflict
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		// 同账号下该路径已被别的 file_id 占用（重命名/移动遗留），先清掉旧行再落新行。
+		if _, err := store.conn.ExecContext(ctx, `DELETE FROM t_strm_file_index WHERE cloud115_id=$1 AND strm_path=$2 AND file_id<>$3`, store.cloudID, item.Path, item.FileID); err != nil {
+			return err
+		}
+	}
 	_, err := store.conn.ExecContext(ctx, `INSERT INTO t_strm_file_index(`+behaviorColumns+`) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) ON CONFLICT(cloud115_id,file_id) DO UPDATE SET parent_id=EXCLUDED.parent_id,strm_path=EXCLUDED.strm_path,is_dir=EXCLUDED.is_dir,size=EXCLUDED.size,sha1=EXCLUDED.sha1,owned=EXCLUDED.owned,content_hash=EXCLUDED.content_hash,pending_path=EXCLUDED.pending_path,pending_content=EXCLUDED.pending_content,updated_at=CURRENT_TIMESTAMP`, store.cloudID, item.FileID, item.ParentID, item.Path, item.IsDir, item.Size, item.SHA1, item.Owned, item.ContentHash, item.PendingPath, item.PendingContent)
 	return err
 }
