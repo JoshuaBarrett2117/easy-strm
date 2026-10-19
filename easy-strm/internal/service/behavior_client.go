@@ -122,9 +122,42 @@ func (client *BehaviorHTTPClient) get(ctx context.Context, cookie, endpoint stri
 
 // Events 固定每页1000条，从offset=0开始消费降序事件。
 func (client *BehaviorHTTPClient) Events(ctx context.Context, cookie string, offset int) (domain.BehaviorPage, error) {
+	var response struct {
+		State    bool            `json:"state"`
+		Count    int             `json:"count"`
+		NextPage bool            `json:"next_page"`
+		Data     json.RawMessage `json:"data"`
+	}
+	if err := client.get(ctx, cookie, "/user/behavior/detail", url.Values{"limit": {"1000"}, "offset": {strconv.Itoa(offset)}}, &response); err != nil {
+		return domain.BehaviorPage{}, err
+	}
+	if len(response.Data) == 0 {
+		return domain.BehaviorPage{}, fmt.Errorf("115行为响应缺少data")
+	}
 	var page domain.BehaviorPage
-	err := client.get(ctx, cookie, "/user/behavior/detail", url.Values{"limit": {"1000"}, "offset": {strconv.Itoa(offset)}}, &page)
-	return page, err
+	var err error
+	switch response.Data[0] {
+	case '{':
+		err = json.Unmarshal(response.Data, &page)
+	case '[':
+		page.Count, page.NextPage = response.Count, response.NextPage
+		err = json.Unmarshal(response.Data, &page.List)
+	default:
+		return domain.BehaviorPage{}, fmt.Errorf("115行为响应data必须是分页对象或事件数组")
+	}
+	if err != nil {
+		return domain.BehaviorPage{}, fmt.Errorf("115行为分页响应格式无效: %w", err)
+	}
+	if page.List == nil {
+		return domain.BehaviorPage{}, fmt.Errorf("115行为响应缺少有效list数组")
+	}
+	for _, event := range page.List {
+		if event.ID <= 0 {
+			return domain.BehaviorPage{}, fmt.Errorf("115行为响应事件ID无效")
+		}
+	}
+	page.State = response.State
+	return page, nil
 }
 
 // Resolve 只解析明确配置的网盘路径；非根路径返回0时视为失败。
