@@ -27,6 +27,7 @@ type NotificationEventMonitor struct {
 	accountDAO    notificationAccountStore
 	redis         *redis.Client
 	interval      time.Duration
+	taskScope     *NotificationTaskScopeService
 
 	mu     sync.Mutex
 	cancel context.CancelFunc
@@ -55,6 +56,7 @@ func NewNotificationEventMonitor(
 	taskDAO notificationTaskStore,
 	accountDAO notificationAccountStore,
 	redisClient *redis.Client,
+	taskScope *NotificationTaskScopeService,
 ) *NotificationEventMonitor {
 	return &NotificationEventMonitor{
 		configService: configService,
@@ -63,6 +65,7 @@ func NewNotificationEventMonitor(
 		accountDAO:    accountDAO,
 		redis:         redisClient,
 		interval:      5 * time.Second,
+		taskScope:     taskScope,
 	}
 }
 
@@ -141,10 +144,22 @@ func (m *NotificationEventMonitor) runOnce(ctx context.Context) error {
 }
 
 func (m *NotificationEventMonitor) initializeBaseline(ctx context.Context, channel string, tasks []map[string]interface{}, accounts []*domain.Cloud115) error {
+	scope := notificationTaskScopeSnapshot{}
+	if m.taskScope != nil {
+		var err error
+		scope, err = m.taskScope.snapshot(ctx)
+		if err != nil {
+			logger.Warnf("[NotificationEventMonitor] 初始化任务范围失败，保留未绑定的排队事件: %v", err)
+		}
+	}
 	pipe := m.redis.TxPipeline()
 	for _, task := range tasks {
-		taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+		taskID, _ := task["task_id"].(string)
+		taskID = strings.TrimSpace(taskID)
 		if taskID == "" {
+			continue
+		}
+		if !scope.all && strings.EqualFold(fmt.Sprint(task["status"]), "pending") && scope.taskKey(task) == "" {
 			continue
 		}
 		pipe.Set(ctx, taskEventKeyForChannel(channel, taskID, "started"), "1", notificationEventTTL)
@@ -167,10 +182,30 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, channel Not
 	if err := m.redis.Expire(ctx, notificationBaselineKey(channel.Channel), notificationEventTTL).Err(); err != nil {
 		return err
 	}
+	if m.taskScope == nil {
+		return fmt.Errorf("任务通知范围服务未初始化")
+	}
+	scope, err := m.taskScope.snapshot(ctx)
+	if err != nil {
+		return err
+	}
 	for _, task := range tasks {
-		taskID := strings.TrimSpace(fmt.Sprint(task["task_id"]))
+		taskID, _ := task["task_id"].(string)
+		taskID = strings.TrimSpace(taskID)
 		if taskID == "" {
 			continue
+		}
+		if !scope.all {
+			key := scope.taskKey(task)
+			if key == "" && strings.EqualFold(fmt.Sprint(task["status"]), "pending") {
+				continue
+			}
+			if key == "" || !scope.selected[key] {
+				if err := m.suppressTaskEvents(ctx, channel.Channel, taskID, task); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		if err := m.processTaskEvent(ctx, channel, task, "started"); err != nil {
 			return err
@@ -179,6 +214,19 @@ func (m *NotificationEventMonitor) processTasks(ctx context.Context, channel Not
 			if err := m.processTaskEvent(ctx, channel, task, status); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+func (m *NotificationEventMonitor) suppressTaskEvents(ctx context.Context, channel, taskID string, task map[string]interface{}) error {
+	events := []string{"started"}
+	if status := normalizeTerminalStatus(fmt.Sprint(task["status"])); status != "" {
+		events = append(events, status)
+	}
+	for _, event := range events {
+		if err := m.redis.SetNX(ctx, taskEventKeyForChannel(channel, taskID, event), "scope_disabled", notificationEventTTL).Err(); err != nil {
+			return err
 		}
 	}
 	return nil

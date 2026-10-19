@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"easy-strm/internal/domain"
 )
@@ -80,18 +81,25 @@ func (d *SystemConfigDAO) Upsert(key, val string) error {
 
 // BatchUpsert 批量更新或插入配置
 func (d *SystemConfigDAO) BatchUpsert(configs map[string]string) error {
+	return d.BatchUpsertContext(context.Background(), configs)
+}
+
+// BatchUpsertContext 在两秒预算内原子写入关联配置，取消或失败时回滚并失效配置快照。
+func (d *SystemConfigDAO) BatchUpsertContext(ctx context.Context, configs map[string]string) error {
 	if _, present := configs["share_strm_incremental_watermark"]; present {
 		return fmt.Errorf("内部水位不可通过配置接口修改")
 	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
 	defer InvalidateSystemConfigCache(DB)
-	tx, err := DB.Begin()
+	tx, err := DB.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
 	for k, v := range configs {
-		_, err := tx.Exec(
+		_, err := tx.ExecContext(ctx,
 			`INSERT INTO t_system_config (config_key, config_val, update_time)
 			 VALUES ($1, $2, CURRENT_TIMESTAMP)
 			 ON CONFLICT (config_key) DO UPDATE SET config_val = $2, update_time = CURRENT_TIMESTAMP`,

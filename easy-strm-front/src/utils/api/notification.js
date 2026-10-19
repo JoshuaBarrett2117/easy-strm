@@ -1,5 +1,19 @@
 import { request } from './request'
 
+export const getNotificationTaskScope = (options = {}) => {
+  return request('/notify/task-scope', {
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}
+
+export const updateNotificationTaskScope = (data, options = {}) => {
+  return request('/notify/task-scope', {
+    method: 'PUT',
+    data,
+    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
+  })
+}
+
 export const getTelegramConfig = (options = {}) => {
   return request('/notify/telegram/config', {
     skipGlobalErrorMessage: options.skipGlobalErrorMessage || false

@@ -65,3 +65,22 @@ func TestSystemConfigServiceRejectsUnknownRuleSettings(t *testing.T) {
 		t.Fatal("expected unknown rule setting group to be rejected")
 	}
 }
+
+func TestNotificationTaskScopeGenericSettingsCannotWrite(t *testing.T) {
+	for _, key := range []string{notifyTaskKeysKey, notifyTaskScopeConfiguredKey} {
+		t.Run(key, func(t *testing.T) {
+			store := &mockSystemConfigDAO{configs: map[string]string{}}
+			settings := NewSystemConfigService(store)
+			if err := settings.Upsert(key, "[]"); err == nil {
+				t.Error("通用单键接口不得修改任务通知范围")
+			}
+			updated := settings.BatchUpsert(map[string]string{key: "true", "proxy_url": "http://localhost:1234"})
+			if len(updated) != 1 || updated["proxy_url"] != "http://localhost:1234" {
+				t.Errorf("批量接口只能更新非保留配置: %v", updated)
+			}
+			if _, written := store.configs[key]; written {
+				t.Fatalf("保留配置不应进入 DAO 写入: %v", store.configs)
+			}
+		})
+	}
+}

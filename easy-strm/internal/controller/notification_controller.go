@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +20,67 @@ type NotificationController struct {
 	notifications *service.NotificationService
 	telegramBot   *service.TelegramBotService
 	weComCallback weComCallbackHandler
+	taskScope     *service.NotificationTaskScopeService
+}
+
+// SetTaskScopeService 注入任务通知范围服务，复用监控器的选择规则。
+func (c *NotificationController) SetTaskScopeService(scope *service.NotificationTaskScopeService) {
+	c.taskScope = scope
+}
+
+// GetTaskScope 返回当前所有调度任务及有效选择。
+func (c *NotificationController) GetTaskScope(ctx *gin.Context) {
+	if c.taskScope == nil {
+		ErrorResp(ctx, http.StatusInternalServerError, "任务通知范围服务未初始化")
+		return
+	}
+	view, err := c.taskScope.Get(ctx.Request.Context())
+	if err != nil {
+		ErrorResp(ctx, http.StatusInternalServerError, err.Error())
+		return
+	}
+	SuccessResp(ctx, view)
+}
+
+// UpdateTaskScope 校验有界 JSON 请求，明确区分空数组与缺失、null 或错误元素。
+func (c *NotificationController) UpdateTaskScope(ctx *gin.Context) {
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, 1<<20)
+	var request struct {
+		Selected []json.RawMessage `json:"selected"`
+	}
+	decoder := json.NewDecoder(ctx.Request.Body)
+	if err := decoder.Decode(&request); err != nil || request.Selected == nil {
+		ErrorResp(ctx, http.StatusBadRequest, "selected 必须是任务键字符串数组")
+		return
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		ErrorResp(ctx, http.StatusBadRequest, "无效的请求体")
+		return
+	}
+	selected := make([]string, 0, len(request.Selected))
+	for _, element := range request.Selected {
+		var key string
+		if string(element) == "null" || json.Unmarshal(element, &key) != nil {
+			ErrorResp(ctx, http.StatusBadRequest, "selected 的元素必须是任务键字符串")
+			return
+		}
+		selected = append(selected, key)
+	}
+	if c.taskScope == nil {
+		ErrorResp(ctx, http.StatusInternalServerError, "任务通知范围服务未初始化")
+		return
+	}
+	updated, err := c.taskScope.Update(ctx.Request.Context(), selected)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, service.ErrInvalidNotificationTaskSelection) {
+			status = http.StatusBadRequest
+		}
+		ErrorResp(ctx, status, err.Error())
+		return
+	}
+	SuccessResp(ctx, gin.H{"selected": updated})
 }
 
 type weComCallbackHandler interface {

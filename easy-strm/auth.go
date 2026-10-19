@@ -105,7 +105,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	globalAPIService := service.NewGlobalAPIService(systemConfigDAO)
 	tmdbService.SetFilenameRecognitionRuleStore(systemConfigDAO)
 	telegramBotService := service.NewTelegramBotService(notificationConfigService, dashboardService, taskService, cronService, embyService, notificationHTTPClient)
-	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient())
+	notificationTaskScopeService := service.NewNotificationTaskScopeService(systemConfigDAO, cronTaskDAO)
+	notificationEventMonitor := service.NewNotificationEventMonitor(notificationConfigService, notificationService, dao.NewTaskRedisDAOWithGlobal(), cloud115DAO, dao.GetGlobalRedisClient(), notificationTaskScopeService)
 
 	// --- 分享转存服务初始化 ---
 	shareTransferTaskDAO := dao.NewTaskRedisDAOWithGlobal()
@@ -243,6 +244,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	dashboardController := controller.NewDashboardController(dashboardService)
 	cacheAdminController := controller.NewCacheAdminController(cacheAdminService)
 	notificationController := controller.NewNotificationController(notificationConfigService, notificationService, telegramBotService)
+	notificationController.SetTaskScopeService(notificationTaskScopeService)
 	weComCallbackService := service.NewWeComCallbackService(
 		notificationConfigService,
 		notificationService,
@@ -786,6 +788,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 
 		// ========== 通知配置 ==========
 		auth.GET("/notify/config", notificationController.GetAll)
+		auth.GET("/notify/task-scope", notificationController.GetTaskScope)
+		auth.PUT("/notify/task-scope", notificationController.UpdateTaskScope)
 		auth.PUT("/notify/config", notificationController.Update)
 		auth.DELETE("/notify/config/:channel", notificationController.Delete)
 		auth.POST("/notify/test", notificationController.Test)

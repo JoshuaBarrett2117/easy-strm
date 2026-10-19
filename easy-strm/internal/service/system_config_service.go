@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"strings"
 
-	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 )
 
 // SystemConfigService 系统配置服务。
 // 负责配置读取、批量更新与日志保留天数配置解析。
 type SystemConfigService struct {
-	systemConfigDAO *dao.SystemConfigDAO
+	systemConfigDAO systemConfigStore
+}
+
+type systemConfigStore interface {
+	SystemConfigReader
+	GetAll() ([]*domain.SystemConfig, error)
+	Upsert(string, string) error
 }
 
 var mcpRuleSettingDefaults = map[string]map[string]bool{
@@ -77,7 +82,7 @@ func parseBoolConfig(value string, defaultValue bool) bool {
 }
 
 // NewSystemConfigService 创建系统配置服务实例。
-func NewSystemConfigService(systemConfigDAO *dao.SystemConfigDAO) *SystemConfigService {
+func NewSystemConfigService(systemConfigDAO systemConfigStore) *SystemConfigService {
 	return &SystemConfigService{systemConfigDAO: systemConfigDAO}
 }
 
@@ -153,7 +158,7 @@ func (s *SystemConfigService) BatchUpsert(configs map[string]string) map[string]
 
 func isRemovedSystemConfigKey(key string) bool {
 	// 全局 API 密钥只能通过专用接口访问，避免通用设置接口泄露明文。
-	return key == "share_strm_incremental_watermark" || key == AIRecognitionConfigKey || key == "alist_url" || key == "alist_token" || key == GlobalAPIKeyKey || key == GlobalAPIEnabledKey || key == GlobalAPIBaseURLKey
+	return key == "share_strm_incremental_watermark" || key == AIRecognitionConfigKey || key == "alist_url" || key == "alist_token" || key == GlobalAPIKeyKey || key == GlobalAPIEnabledKey || key == GlobalAPIBaseURLKey || key == notifyTaskKeysKey || key == notifyTaskScopeConfiguredKey
 }
 
 // GetLogSaveDayLimit 获取日志保留天数，配置不存在时返回默认值 1。

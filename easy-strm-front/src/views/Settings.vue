@@ -289,6 +289,7 @@
 
         <!-- 通知渠道 -->
         <n-tab-pane name="notification" tab="通知">
+          <NotificationTaskScope />
           <h2 class="mb-4 text-base font-bold text-slate-800 dark:text-white">Telegram 机器人</h2>
           <n-form :model="telegramForm" label-placement="top" class="max-w-2xl">
             <div class="mb-5 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-white/5 dark:bg-white/5">
@@ -668,6 +669,7 @@
 </template>
 
 <script setup>
+import NotificationTaskScope from '../components/settings/NotificationTaskScope.vue'
 import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { ref, computed, onMounted } from 'vue'
 import {

@@ -14,6 +14,7 @@
     "e2e:share-file-delete": "node scripts/e2e-share-file-delete.mjs",
     "e2e:share-review": "node scripts/e2e-share-review.mjs",
     "e2e:emby-monitor": "node scripts/e2e-emby-monitor.mjs",
+    "e2e:notification-task-scope": "node scripts/e2e-notification-task-scope.mjs",
     "test:share-strm-summary": "node --test scripts/test-share-strm-task-summary.mjs",
     "test:share-batch-delete": "node --test scripts/share-batch-delete.test.mjs",
 	"test:share-record-cursor": "node --test scripts/test-share-record-cursor.mjs",

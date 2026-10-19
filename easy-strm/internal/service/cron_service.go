@@ -482,7 +482,7 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 		if err = s.tasks.CreateContext(parent, taskID, cronTaskKind(t.Handler), t.TaskName+"（跳过）"); err != nil {
 			return "", err
 		}
-		if err = s.tasks.UpdateMetadataContext(parent, taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": "skipped", "outcome": "skipped", "skip_reason": reason, "blocked_by_task_id": blockedBy, "message": reason}); err != nil {
+		if err = s.tasks.UpdateMetadataContext(parent, taskID, map[string]interface{}{"cron_task_key": t.TaskKey, "cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": "skipped", "outcome": "skipped", "skip_reason": reason, "blocked_by_task_id": blockedBy, "message": reason}); err != nil {
 			return "", err
 		}
 		return taskID, s.tasks.UpdateStatusContext(parent, taskID, "completed")
@@ -501,7 +501,7 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 	entry := logger.WithContext(ctx, "cron")
 	entry.Log(logger.INFO, "调度任务开始", logger.Fields{"event": "cron_start", "trigger": trigger, "handler": t.Handler}, nil)
 	s.tasks.RegisterCancel(taskID, cancel)
-	if e := s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
+	if e := s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"cron_task_key": t.TaskKey, "cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
 		cancel()
 		s.tasks.RemoveCancel(taskID)
 		release()

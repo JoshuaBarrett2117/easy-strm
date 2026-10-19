@@ -147,6 +147,16 @@ func TestCronRunSerializesConfig(t *testing.T) {
 	if err != nil || task == nil {
 		t.Fatalf("跳过记录不可追踪: %v", err)
 	}
+	for _, executionID := range []string{id, skipped} {
+		execution, readErr := s.tasks.Get(executionID)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		metadata, _ := execution["metadata"].(map[string]interface{})
+		if metadata["cron_task_key"] != "test" {
+			t.Errorf("普通和跳过执行都必须保留稳定任务键: %v", metadata)
+		}
+	}
 	mock.ExpectExec(`UPDATE t_cron_task_run SET status=\$1`).WithArgs("success", "成功", id).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec(`UPDATE t_cron_task SET last_run_time`).WithArgs(sqlmock.AnyArg(), nil, "success", "成功", 1).WillReturnResult(sqlmock.NewResult(0, 1))
 	once.Do(func() { close(finish) })

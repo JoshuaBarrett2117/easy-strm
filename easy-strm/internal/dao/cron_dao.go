@@ -1,6 +1,7 @@
 package dao
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"time"
@@ -15,6 +16,29 @@ type CronTaskDAO struct{}
 // NewCronTaskDAO 创建定时任务DAO实例
 func NewCronTaskDAO() *CronTaskDAO {
 	return &CronTaskDAO{}
+}
+
+// GetNotificationTasks 一次读取通知所需的全部调度定义，不加载关联配置或清理目录。
+func (c *CronTaskDAO) GetNotificationTasks(ctx context.Context) ([]*domain.CronTask, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	rows, err := db.QueryContext(ctx, `SELECT id, COALESCE(task_key,''), task_name, COALESCE(handler,''), COALESCE(status,'') FROM t_cron_task ORDER BY id`)
+	if err != nil {
+		return nil, fmt.Errorf("读取通知任务列表失败: %w", err)
+	}
+	defer rows.Close()
+	tasks := make([]*domain.CronTask, 0)
+	for rows.Next() {
+		task := &domain.CronTask{}
+		if err := rows.Scan(&task.ID, &task.TaskKey, &task.TaskName, &task.Handler, &task.Status); err != nil {
+			return nil, fmt.Errorf("读取通知任务定义失败: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("读取通知任务列表失败: %w", err)
+	}
+	return tasks, nil
 }
 
 // GetByID 根据ID获取定时任务

@@ -56,7 +56,7 @@ func TestNotificationEventMonitorConcurrentTaskDeduplication(t *testing.T) {
 	client := newNotificationTestRedis(t)
 	config := NotificationEventChannel{Channel: "telegram", NotifyTaskCompleted: true}
 	sender := &fakeNotificationSender{delay: 50 * time.Millisecond}
-	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
+	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client, newNotificationTestScope())
 	tasks := []map[string]interface{}{{
 		"task_id": "same-task", "task_type": "strm", "task_name": "并发任务", "status": "completed",
 	}}
@@ -89,7 +89,7 @@ func TestNotificationEventMonitorConcurrentTaskDeduplication(t *testing.T) {
 func TestNotificationEventMonitorReleasesClaimAfterSendFailure(t *testing.T) {
 	client := newNotificationTestRedis(t)
 	sender := &fakeNotificationSender{sendErr: errors.New("发送失败")}
-	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client)
+	monitor := NewNotificationEventMonitor(nil, sender, nil, nil, client, newNotificationTestScope())
 	tasks := []map[string]interface{}{{"task_id": "retry-task", "status": "completed"}}
 
 	err := monitor.processTasks(context.Background(), NotificationEventChannel{Channel: "telegram", NotifyTaskCompleted: true}, tasks)
@@ -118,7 +118,7 @@ func TestNotificationEventMonitorBaselineAndDeduplication(t *testing.T) {
 	sender := &fakeNotificationSender{}
 	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "task_type": "organize", "task_name": "旧任务", "status": "completed"}}}
 	accounts := &fakeNotificationAccountStore{accounts: []*domain.Cloud115{{ID: 1, Name: "主号", Status: domain.AccountStatusActive}}}
-	monitor := NewNotificationEventMonitor(reader, sender, tasks, accounts, client)
+	monitor := NewNotificationEventMonitor(reader, sender, tasks, accounts, client, newNotificationTestScope())
 
 	if err := monitor.runOnce(context.Background()); err != nil {
 		t.Fatal(err)
@@ -162,7 +162,7 @@ func TestNotificationEventMonitorChannelsHaveIndependentBaselines(t *testing.T) 
 	sender := &fakeNotificationSender{}
 	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "status": "completed"}}}
 	accounts := &fakeNotificationAccountStore{}
-	monitor := NewNotificationEventMonitor(reader, sender, tasks, accounts, client)
+	monitor := NewNotificationEventMonitor(reader, sender, tasks, accounts, client, newNotificationTestScope())
 
 	if err := monitor.runOnce(context.Background()); err != nil {
 		t.Fatal(err)
@@ -184,7 +184,7 @@ func TestNotificationEventMonitorSendsStartedAndTerminalOnce(t *testing.T) {
 	config := NotificationEventChannel{Channel: "telegram", NotifyTaskStarted: true, NotifyTaskCompleted: true}
 	sender := &fakeNotificationSender{}
 	tasks := &fakeNotificationTaskStore{tasks: []map[string]interface{}{{"task_id": "old", "task_name": "旧任务", "status": "completed"}}}
-	monitor := NewNotificationEventMonitor(&fakeTelegramConfigReader{channels: []NotificationEventChannel{config}}, sender, tasks, &fakeNotificationAccountStore{}, client)
+	monitor := NewNotificationEventMonitor(&fakeTelegramConfigReader{channels: []NotificationEventChannel{config}}, sender, tasks, &fakeNotificationAccountStore{}, client, newNotificationTestScope())
 	if err := monitor.runOnce(context.Background()); err != nil {
 		t.Fatal(err)
 	}
