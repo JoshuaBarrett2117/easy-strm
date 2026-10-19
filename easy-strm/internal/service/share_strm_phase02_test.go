@@ -6,6 +6,7 @@ import (
 	"easy-strm/internal/domain"
 	"errors"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -73,8 +74,14 @@ func TestShareStrmIncrementalWrittenSharedKeys(t *testing.T) {
 		t.Fatalf("首次写盘失败：%+v，文件清单：%v", result, store.files)
 	}
 	var outputPath string
-	for filePath := range store.files {
-		outputPath = filePath
+	for _, file := range store.files {
+		if file.FilePath != shareCandidatePath(first.FileName) || file.FileName != filepath.Base(file.FilePath) || file.StrmConfigID != -1 {
+			t.Fatalf("分享文件清单字段不正确：%+v", file)
+		}
+		if !filepath.IsAbs(file.LocalStrmPath) {
+			t.Fatalf("本地 STRM 路径不是绝对路径：%q", file.LocalStrmPath)
+		}
+		outputPath = file.LocalStrmPath
 	}
 	before, err := os.ReadFile(outputPath)
 	if err != nil {

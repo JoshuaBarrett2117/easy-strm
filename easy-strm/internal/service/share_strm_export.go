@@ -577,7 +577,10 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 			attempt.mappedKeys[seenIdentity] = exportKey
 			attempt.keys[source.ID] = append(attempt.keys[source.ID], exportKey)
 		}
-		if err := s.store.SaveExportedStrmFile(ctx, domain.StrmFile{StrmConfigID: -1, FileName: file.Name, FilePath: localPath, LocalStrmPath: localPath}); err != nil {
+		// FilePath 保存分享内相对路径；落盘绝对路径保存在 LocalStrmPath。
+		// 所有分享共用配置 -1，唯一键 (strm_config_id,file_path) 按相对路径去重；
+		// 不同分享的相同相对路径会触发 ON CONFLICT，更新同一行的文件名、落盘路径和更新时间。
+		if err := s.store.SaveExportedStrmFile(ctx, domain.StrmFile{StrmConfigID: -1, FileName: file.Name, FilePath: filePath, LocalStrmPath: localPath}); err != nil {
 			finishPath()
 			result.Err = fmt.Errorf("STRM文件已处理，但登记文件清单失败：%w", err)
 			return result
