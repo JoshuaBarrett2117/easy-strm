@@ -138,7 +138,9 @@ func InitCronScheduler() error {
 			}
 			summary := fmt.Sprintf("处理%d个配置；%s", ran, strings.Join(parts, "；"))
 			if len(failed) > 0 {
-				return summary, fmt.Errorf("%s；失败：%s", summary, strings.Join(failed, "；"))
+				// 失败原因必须进入执行摘要，否则 last_run_message 只剩空壳，无法定位。
+				summary = fmt.Sprintf("%s；失败：%s", summary, strings.Join(failed, "；"))
+				return summary, fmt.Errorf("%s", summary)
 			}
 			return summary, nil
 		},
