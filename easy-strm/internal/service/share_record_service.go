@@ -233,6 +233,10 @@ func (s *ShareRecordService) ManualIdentifyWithCount(ctx context.Context, m doma
 	if err != nil {
 		return 0, err
 	}
+	// 手动核对表单填的季/集必须落到 result 上，否则列表与导出会显示成 0/0。
+	if m.Result.MediaType == "tv" && len(episodes) > 0 {
+		m.Result.SeasonNumber, m.Result.EpisodeNumber = episodes[0].SeasonNumber, episodes[0].EpisodeNumber
+	}
 	if !m.ApplyToSeries || m.Result.MediaType != "tv" {
 		if m.ShareID <= 0 {
 			parent, err := s.dao.FileShareID(ctx, m.ID)
@@ -337,9 +341,11 @@ func (s *ShareRecordService) buildManualSeriesBatch(target domain.ShareMedia, ep
 			}
 			input := shareEpisodeInput(context.Background(), item.FileName, "tv")
 			query := s.tmdb.analyzeShareQuery(input, "tv")
-			candidate := domain.TmdbSearchResult{Title: target.Result.Title, OriginalTitle: target.Result.OriginalTitle, Year: target.Result.Year, MediaType: "tv"}
 			parsed := s.tmdb.parseFilenameForMediaType(input, "tv")
-			if parsed.Episode <= 0 || (canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.Title) && canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.OriginalTitle)) || selectVerifiedShareCandidate(query, []domain.TmdbSearchResult{candidate}) == nil {
+			// 用户已手动确认作品身份，这里只按「同目录 + 片名一致 + 同季 + 可解析集号」判断，
+			// 不再用文件名里的年份去否决：发布组写错年份（如 1883 标成 2018）会让整批静默跳过。
+			_ = query
+			if parsed.Episode <= 0 || (canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.Title) && canonicalShareTitle(parsed.Title) != canonicalShareTitle(target.Result.OriginalTitle)) {
 				continue
 			}
 			if len(episodes) == 0 || parsed.Season != episodes[0].SeasonNumber {
