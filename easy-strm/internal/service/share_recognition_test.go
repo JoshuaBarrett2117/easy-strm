@@ -167,6 +167,10 @@ func TestShareEpisodeTitleRegression(t *testing.T) {
 // TestShareExplicitID 优先使用文件内ID，不能进入模糊搜索。
 func TestShareExplicitID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/tv/216292/season/1" {
+			fmt.Fprint(w, `{"season_number":1,"air_date":"2024-04-19"}`)
+			return
+		}
 		if r.URL.Path != "/tv/216292" {
 			t.Errorf("意外请求 %s", r.URL.Path)
 			http.NotFound(w, r)
@@ -246,7 +250,7 @@ func TestShareAIOnlyAfterRules(t *testing.T) {
 	}
 }
 
-// TestShareDirectoryYearFallback 目录年份与TMDB不一致时重查，禁止同名多项自动认领。
+// TestShareDirectoryYearFallback 目录年份冲突不能通过清除年份绕过核验。
 func TestShareDirectoryYearFallback(t *testing.T) {
 	for _, ambiguous := range []bool{false, true} {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +272,7 @@ func TestShareDirectoryYearFallback(t *testing.T) {
 			t.Fatal(q)
 		}
 		got, err := svc.IdentifyShareFile(context.Background(), raw, "auto", "auto")
-		if err != nil || got.Success == ambiguous {
+		if err != nil || got.Success {
 			t.Fatal(got, err)
 		}
 		server.Close()

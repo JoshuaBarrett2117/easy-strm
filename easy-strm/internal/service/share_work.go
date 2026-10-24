@@ -59,9 +59,16 @@ func (s *TmdbService) analyzeShareQuery(filename, forcedType string) ShareMediaQ
 	parsed := s.parseFilenameForMediaType(filename, forcedType)
 	if parsed.MediaType == "tv" && parsed.Episode > 0 && parsed.Title != "" {
 		q.MediaType = "tv"
+		evidenceYear := q.Year
 		q.Titles, q.Year = cleanShareTitles(parsed.Title)
-		if q.Year == 0 {
+		if q.rangeStart != 0 {
+			q.Year = evidenceYear
+		}
+		if q.Year == 0 && q.rangeStart == 0 {
 			q.Year = parsed.Year
+		}
+		if q.Year == 0 && q.rangeStart != 0 {
+			q.Year = q.fileYear
 		}
 	}
 	if forcedType == "tv" || forcedType == "movie" {
@@ -69,6 +76,7 @@ func (s *TmdbService) analyzeShareQuery(filename, forcedType string) ShareMediaQ
 	}
 	addShareMovieContext(&q, filename)
 	applyShareTVContext(&q, filename, parsed)
+	applyShareYearEvidence(&q, filename)
 	base := path.Base(strings.ReplaceAll(filename, "\\", "/"))
 	if q.MediaType == "tv" && shareOnlyEpisode.MatchString(strings.TrimSuffix(base, path.Ext(base))) {
 		filtered := make([]string, 0, len(q.Titles))
@@ -84,10 +92,11 @@ func (s *TmdbService) analyzeShareQuery(filename, forcedType string) ShareMediaQ
 
 func (s *TmdbService) shareWorkKey(ctx context.Context, filename, source, forcedType string) string {
 	q := s.analyzeShareQuery(filename, forcedType)
-	// 季目录年份只描述单季，不参与作品身份缓存键，避免同剧跨季重复检索。
-	keyYear := q.Year
-	if q.YearSource == "season_directory" {
-		keyYear = 0
+	// 年份证据不同必须重新选取候选，单个缓存ID复核无法发现新增歧义。
+	keySeason := 0
+	if q.MediaType == "tv" && (q.Year != 0 || q.fileYear != 0 || q.SeasonYear != 0 || q.rangeStart != 0) {
+		// 缺少播出区间时核验依赖指定季年份；无年份证据仍允许跨季复用。
+		keySeason = q.Season
 	}
 	parent := path.Dir(strings.ReplaceAll(filename, "\\", "/"))
 	// 季目录不构成作品边界，其他目录上下文仍保留，避免合集内同名作品串号。
@@ -95,7 +104,7 @@ func (s *TmdbService) shareWorkKey(ctx context.Context, filename, source, forced
 		parent = path.Dir(parent)
 	}
 	rules, _ := json.Marshal(s.GetFilenameRecognitionRules().Rules)
-	payload, _ := json.Marshal([]interface{}{"share-work-v4-episode-context", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, keyYear, q.SeasonYear, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
+	payload, _ := json.Marshal([]interface{}{"share-work-v6-complete-year-evidence", ctx.Value(shareWorkScopeKey{}), parent, q.Titles, q.Year, q.fileYear, q.SeasonYear, q.rangeStart, q.rangeEnd, keySeason, q.MediaType, q.TmdbID, normalizeMetadataSourcePolicy(source), s.baseURL, s.language, fmt.Sprintf("%x", sha256.Sum256(rules)), s.adultContentEnabled, s.metatubeDefaultEnabled, s.metatubeURL})
 	return string(payload)
 }
 
@@ -122,7 +131,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 		func() {
 			defer close(attempt.done)
 			attempt.value, attempt.err = s.resolveShareWork(ctx, filename, source, forcedType, key, round.bypassWorkCache)
-			if attempt.err != nil {
+			if attempt.err != nil || attempt.value != nil && attempt.value.Result != nil && !attempt.value.Result.Success {
 				round.mu.Lock()
 				delete(round.works, key)
 				round.mu.Unlock()
@@ -141,12 +150,26 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 	result.SeasonNumber, result.EpisodeNumber = parsed.Season, parsed.Episode
 	if result.Success && result.MediaType == "tv" && parsed.Episode > 0 {
 		q := s.analyzeShareQuery(filename, forcedType)
-		if q.TmdbID == 0 && (q.SeasonYear > 0 || shareCandidateTitleScore(q, domain.TmdbSearchResult{Title: result.Title, OriginalTitle: result.OriginalTitle}, nil) == 0) {
+		for _, title := range result.QueryAfterAI {
+			q.Titles = appendImportCandidate(q.Titles, title)
+		}
+		if q.TmdbID == result.TmdbID {
+			q.Titles = appendImportCandidate(q.Titles, result.Title)
+		}
+		candidate := domain.TmdbSearchResult{TmdbID: result.TmdbID, MediaType: "tv", MetadataSource: result.MetadataSource, Title: result.Title, OriginalTitle: result.OriginalTitle, Year: result.Year}
+		seasonKnown := false
+		for _, season := range attempt.value.Seasons {
+			seasonKnown = seasonKnown || season == parsed.Season
+		}
+		if q.Year != 0 || q.fileYear != 0 || q.SeasonYear != 0 || q.rangeStart != 0 || shareCandidateTitleScore(q, candidate, nil) == 0 {
 			detail, err := s.shareTVDetail(ctx, result.TmdbID)
 			if err != nil {
 				return nil, err
 			}
-			candidate := domain.TmdbSearchResult{Title: result.Title, OriginalTitle: result.OriginalTitle, Year: result.Year}
+			q, err = s.enrichShareYearEvidence(ctx, q, []domain.TmdbSearchResult{candidate})
+			if err != nil {
+				return nil, err
+			}
 			var aliases []string
 			if shareCandidateTitleScore(q, candidate, nil) == 0 {
 				aliases, err = s.shareAliases(ctx, "tv", result.TmdbID)
@@ -156,7 +179,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 			}
 			if mapped, ok := shareSeasonEvidence(q, candidate, detail, aliases); ok {
 				result.SeasonNumber = mapped
-			} else if q.SeasonYear > 0 {
+			} else if !shareCandidateYearMatches(q, candidate) || seasonKnown || shareCandidateTitleScore(q, candidate, aliases) == 0 {
 				result.Success = false
 				result.Message = "作品已找到，但季号和该季播出年份未通过核验，请手动核对"
 				result.FailureReason = result.Message

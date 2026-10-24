@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"path"
 	"regexp"
 	"strconv"
@@ -70,7 +71,7 @@ func shareTVDirectoryContext(filename, forcedType string) (title string, season,
 	for i := len(segments) - 2; i >= 0; i-- {
 		v := segments[i]
 		n, isSeason := shareContextSeason(v)
-		y, _ := shareTitleYear(v)
+		y, _ := shareTitleYear(shareYearRangeRE.ReplaceAllString(v, " "))
 		if isSeason && !seasonFound {
 			season = n
 			seasonYear = y
@@ -179,7 +180,10 @@ func applyShareTVContext(q *ShareMediaQuery, filename string, p *ParsedFilename)
 	}
 	if p.Season > 1 {
 		if seasonYear == 0 {
-			seasonYear = q.Year
+			seasonYear = q.fileYear
+			if seasonYear == 0 && q.rangeStart == 0 {
+				seasonYear = q.Year
+			}
 		}
 		q.SeasonYear = seasonYear
 		q.Year = workYear
@@ -197,8 +201,14 @@ func applyShareTVContext(q *ShareMediaQuery, filename string, p *ParsedFilename)
 
 // shareSeasonEvidence 使用季名与播出年份核验映射，不以人气或候选顺序选择作品。
 func shareSeasonEvidence(q ShareMediaQuery, c domain.TmdbSearchResult, detail map[string]interface{}, aliases []string) (int, bool) {
+	if _, exists := q.tvYears[shareCandidateIdentity(c)]; !exists {
+		q.tvYears = map[string]shareTVYears{shareCandidateIdentity(c): shareDetailYears(detail, c)}
+	}
 	direct := shareCandidateTitleScore(q, c, aliases) > 0
 	seasons, _ := detail["seasons"].([]interface{})
+	if direct && len(seasons) == 0 {
+		return q.Season, shareCandidateYearMatches(q, c)
+	}
 	mapped := -1
 	for _, raw := range seasons {
 		item, ok := raw.(map[string]interface{})
@@ -211,11 +221,6 @@ func shareSeasonEvidence(q ShareMediaQuery, c domain.TmdbSearchResult, detail ma
 		}
 		n := int(number)
 		name, _ := item["name"].(string)
-		date, _ := item["air_date"].(string)
-		year := 0
-		if len(date) >= 4 {
-			year, _ = strconv.Atoi(date[:4])
-		}
 		named := false
 		if n > 0 && name != "" && !shareSeasonRE.MatchString(name) {
 			for _, title := range q.Titles {
@@ -226,22 +231,121 @@ func shareSeasonEvidence(q ShareMediaQuery, c domain.TmdbSearchResult, detail ma
 				}
 			}
 		}
-		targetYear := q.SeasonYear
-		if targetYear == 0 && named {
-			targetYear = q.Year
-		}
-		if targetYear > 0 && (year == 0 || year < targetYear-1 || year > targetYear+1) {
+		if !named && (!direct || n != q.Season) {
 			continue
 		}
-		if !named && (!direct || n != q.Season || !shareCandidateYearMatches(q, c)) {
+		seasonQuery := q
+		seasonQuery.Season = n
+		if !shareCandidateYearMatches(seasonQuery, c) {
 			continue
 		}
 		if mapped >= 0 && mapped != n {
+			if q.Evidence != nil {
+				q.Evidence.ambiguous = true
+			}
 			return 0, false
 		}
 		mapped = n
 	}
 	return mapped, mapped >= 0
+}
+
+func (s *TmdbService) selectShareTVCandidate(ctx context.Context, q ShareMediaQuery, candidates []domain.TmdbSearchResult) (*domain.TmdbSearchResult, error) {
+	direct := make([]domain.TmdbSearchResult, 0, len(candidates))
+	for _, candidate := range candidates {
+		if shareCandidateTitleScore(q, candidate, nil) > 0 {
+			direct = append(direct, candidate)
+		}
+	}
+	var err error
+	q, err = s.enrichShareYearEvidence(ctx, q, direct)
+	if err != nil {
+		return nil, err
+	}
+	directMatches := map[string]bool{}
+	for _, candidate := range direct {
+		if shareCandidateYearMatches(q, candidate) {
+			directMatches[shareCandidateIdentity(candidate)] = true
+		}
+	}
+	if len(directMatches) > 1 && selectVerifiedShareCandidate(q, direct) == nil {
+		if q.Evidence != nil {
+			q.Evidence.record(q, candidates)
+			q.Evidence.ambiguous = true
+		}
+		return nil, nil
+	}
+	aliases := map[string][]string{}
+	relevant := make([]domain.TmdbSearchResult, 0, len(candidates))
+	for _, candidate := range candidates {
+		key := shareCandidateIdentity(candidate)
+		if _, exists := aliases[key]; !exists && shareCandidateTitleScore(q, candidate, nil) == 0 {
+			names, err := s.shareAliases(ctx, "tv", candidate.TmdbID)
+			if err != nil {
+				return nil, err
+			}
+			aliases[key] = names
+		}
+		matched := shareCandidateTitleScore(q, candidate, aliases[key]) > 0
+		if !matched && q.Season > 0 {
+			// 先读取指定季核验具名季，404仅表示该季不存在，其他故障不能当作无关证据。
+			_, err := s.getTVSeasonDetailContext(ctx, candidate.TmdbID, q.Season)
+			if err != nil && !errors.Is(err, errTVSeasonNotFound) {
+				return nil, err
+			}
+			// 季存在时还需详情核验其他具名季，不能仅凭指定季名称排除合法映射。
+			matched = err == nil
+		}
+		if matched {
+			relevant = append(relevant, candidate)
+		}
+	}
+	q, err = s.enrichShareYearEvidence(ctx, q, relevant)
+	if err != nil {
+		return nil, err
+	}
+	if q.Evidence != nil {
+		q.Evidence.record(q, candidates)
+	}
+	bestScore := 0
+	var best *domain.TmdbSearchResult
+	ambiguous := false
+	for index := range relevant {
+		candidate := &relevant[index]
+		key := shareCandidateIdentity(*candidate)
+		score := shareCandidateTitleScore(q, *candidate, aliases[key])
+		yearMatches := shareCandidateYearMatches(q, *candidate)
+		if q.Season > 0 {
+			detail, err := s.shareTVDetail(ctx, candidate.TmdbID)
+			if err != nil {
+				return nil, err
+			}
+			if _, ok := shareSeasonEvidence(q, *candidate, detail, aliases[key]); ok {
+				yearMatches = true
+				if score == 0 {
+					score = 1
+				}
+			}
+		}
+		if score == 0 || !yearMatches {
+			continue
+		}
+		if score > bestScore {
+			best, bestScore, ambiguous = candidate, score, false
+		} else if score == bestScore && best != nil && shareCandidateIdentity(*best) != key {
+			ambiguous = true
+		}
+	}
+	if ambiguous {
+		if q.Evidence != nil {
+			q.Evidence.ambiguous = true
+		}
+		return nil, nil
+	}
+	if q.Evidence != nil && q.Evidence.ambiguous {
+		return nil, nil
+	}
+	return best, nil
 }
 
 func (s *TmdbService) selectShareSeasonCandidate(ctx context.Context, q ShareMediaQuery, candidates []domain.TmdbSearchResult, aliases map[string][]string) (*domain.TmdbSearchResult, error) {
@@ -265,6 +369,9 @@ func (s *TmdbService) selectShareSeasonCandidate(ctx context.Context, q ShareMed
 			continue
 		}
 		if best != nil {
+			if q.Evidence != nil {
+				q.Evidence.ambiguous = true
+			}
 			return nil, nil
 		}
 		best = c

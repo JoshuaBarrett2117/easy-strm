@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 )
@@ -119,20 +120,33 @@ func (s *TmdbService) getTVDetailContext(ctx context.Context, tmdbID int) (map[s
 
 // GetTVSeasonDetail 获取剧集单季详情，响应包含该季完整集目录。
 func (s *TmdbService) GetTVSeasonDetail(tmdbID, season int) (map[string]interface{}, error) {
+	return s.getTVSeasonDetailContext(context.Background(), tmdbID, season)
+}
+
+var errTVSeasonNotFound = errors.New("TMDB 未收录该季详情")
+
+func (s *TmdbService) getTVSeasonDetailContext(ctx context.Context, tmdbID, season int) (map[string]interface{}, error) {
 	if s.apiKey == "" {
 		return nil, fmt.Errorf("TMDB API Key 未配置")
 	}
-	if detail, ok := s.loadDetailCache("tv_season", tmdbID, season, 0); ok {
+	if detail, ok := s.loadDetailCache("tv_season", tmdbID, season, 0); ok && !bypassShareRecognitionCache(ctx) {
 		return detail, nil
 	}
 
 	apiURL := fmt.Sprintf("%s/tv/%d/season/%d?api_key=%s&language=%s",
 		s.baseURL, tmdbID, season, s.apiKey, s.language)
-	resp, err := s.httpClient.Get(apiURL)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.doShareTMDBRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("TMDB API 请求失败: %v", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errTVSeasonNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("TMDB API 返回错误: %d", resp.StatusCode)
 	}

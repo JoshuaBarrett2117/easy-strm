@@ -224,8 +224,11 @@ func TestShareWorkKeySeparatesConflicts(t *testing.T) {
 			t.Fatal("冲突作品被合并:", name)
 		}
 	}
-	if key != s.shareWorkKey(ctx, "合集/Show (2020) S02E02.mkv", "tmdb", "tv") {
-		t.Fatal("季号不应拆分作品")
+	if key == s.shareWorkKey(ctx, "合集/Show (2020) S02E02.mkv", "tmdb", "tv") {
+		t.Fatal("有年份证据时须隔离指定季年份回退")
+	}
+	if s.shareWorkKey(ctx, "合集/Show S01E01.mkv", "tmdb", "tv") != s.shareWorkKey(ctx, "合集/Show S02E02.mkv", "tmdb", "tv") {
+		t.Fatal("无年份证据时季号不应拆分作品")
 	}
 }
 

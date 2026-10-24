@@ -56,7 +56,11 @@ func TestShareEpisodeMovieConfusion(t *testing.T) {
 					return
 				}
 				if r.URL.Path == "/search/tv" {
-					fmt.Fprintf(w, `{"results":[{"id":42,"name":%q,"first_air_date":"2014-01-01"}]}`, tc.title)
+					year, _ := shareTitleYear(strings.ReplaceAll(tc.file, "/", " "))
+					if year == 0 {
+						year = 2014
+					}
+					fmt.Fprintf(w, `{"results":[{"id":42,"name":%q,"first_air_date":"%d-01-01"}]}`, tc.title, year)
 					return
 				}
 				fmt.Fprint(w, `{"id":42,"results":[],"seasons":[],"translations":[]}`)

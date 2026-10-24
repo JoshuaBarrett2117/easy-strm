@@ -2,11 +2,13 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"easy-strm/internal/domain"
@@ -14,8 +16,103 @@ import (
 
 var shareStandaloneYear = regexp.MustCompile(`(?:19|20)[0-9]{2}`)
 
+var shareYearRangeRE = regexp.MustCompile(`(?:^|[^\pL\pN])((?:19|20)[0-9]{2})\s*[-~～–—]\s*((?:19|20)[0-9]{2})(?:$|[^\pL\pN])`)
+var shareSeasonRangeRE = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])S[0-9]{1,2}\s*[-~～–—]\s*S[0-9]{1,2}(?:$|[^\pL\pN])`)
+
+type shareTVYears struct {
+	first, last int
+	seasons     map[int]int
+}
+
+func shareDateYear(value interface{}) int {
+	date, _ := value.(string)
+	parsed, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return 0
+	}
+	return parsed.Year()
+}
+
+func shareDetailYears(detail map[string]interface{}, candidate domain.TmdbSearchResult) shareTVYears {
+	years := shareTVYears{first: shareDateYear(detail["first_air_date"]), last: shareDateYear(detail["last_air_date"]), seasons: map[int]int{}}
+	if years.first == 0 {
+		years.first = shareDateYear(candidate.FirstAirDate)
+	}
+	if years.first == 0 && candidate.FirstAirDate == "" {
+		years.first = candidate.Year
+	}
+	if seasons, ok := detail["seasons"].([]interface{}); ok {
+		for _, raw := range seasons {
+			if item, ok := raw.(map[string]interface{}); ok {
+				if number, ok := item["season_number"].(float64); ok {
+					years.seasons[int(number)] = shareDateYear(item["air_date"])
+				}
+			}
+		}
+	}
+	return years
+}
+
+func applyShareYearEvidence(q *ShareMediaQuery, filename string) {
+	if q.MediaType != "tv" {
+		return
+	}
+	segments := strings.Split(strings.ReplaceAll(filename, "\\", "/"), "/")
+	base := segments[len(segments)-1]
+	base = strings.TrimSuffix(base, path.Ext(base))
+	q.fileYear, _ = shareTitleYear(base)
+	// 合集区间独立于单年证据；端点不充当文件或作品年份。
+	for index := len(segments) - 1; index >= 0; index-- {
+		match := shareYearRangeRE.FindStringSubmatch(segments[index])
+		if match == nil {
+			continue
+		}
+		q.rangeStart, _ = strconv.Atoi(match[1])
+		q.rangeEnd, _ = strconv.Atoi(match[2])
+		break
+	}
+	if q.fileYear > 0 && q.Year == 0 && q.SeasonYear == 0 {
+		q.Year = q.fileYear
+		q.YearSource = "filename"
+	}
+}
+
+func (s *TmdbService) enrichShareYearEvidence(ctx context.Context, q ShareMediaQuery, candidates []domain.TmdbSearchResult) (ShareMediaQuery, error) {
+	q.tvYears = map[string]shareTVYears{}
+	if q.Year == 0 && q.fileYear == 0 && q.SeasonYear == 0 && q.rangeStart == 0 {
+		return q, nil
+	}
+	for _, candidate := range candidates {
+		if candidate.MediaType != "tv" || candidate.TmdbID <= 0 {
+			continue
+		}
+		key := shareCandidateIdentity(candidate)
+		if _, exists := q.tvYears[key]; exists {
+			continue
+		}
+		detail, err := s.shareTVDetail(ctx, candidate.TmdbID)
+		if err != nil {
+			return q, err
+		}
+		years := shareDetailYears(detail, candidate)
+		if !(years.first > 0 && years.last >= years.first) && q.Season > 0 && years.seasons[q.Season] == 0 {
+			season, err := s.getTVSeasonDetailContext(ctx, candidate.TmdbID, q.Season)
+			if err != nil && !errors.Is(err, errTVSeasonNotFound) {
+				return q, err
+			}
+			if number, ok := season["season_number"].(float64); !ok || int(number) == q.Season {
+				years.seasons[q.Season] = shareDateYear(season["air_date"])
+			}
+		}
+		q.tvYears[key] = years
+	}
+	return q, nil
+}
+
 // shareTitleYear 优先括号年份，否则取技术参数前最后一个独立年份，保留片名中的1900、1917等数字。
 func shareTitleYear(name string) (int, int) {
+	// 等长遮盖保留标题截断位置，避免把区间端点识别成独立年份。
+	name = shareYearRangeRE.ReplaceAllStringFunc(name, func(value string) string { return strings.Repeat(" ", len(value)) })
 	if m := shareParentYearRE.FindStringSubmatchIndex(name); m != nil {
 		year, _ := strconv.Atoi(name[m[2]:m[3]])
 		return year, m[2]
@@ -101,7 +198,43 @@ func shareCandidateIdentity(c domain.TmdbSearchResult) string {
 	return fmt.Sprintf("%s:%s:%s:%s:%d", c.MetadataSource, c.MetadataProvider, c.MetadataID, c.MediaType, c.TmdbID)
 }
 func shareCandidateYearMatches(q ShareMediaQuery, c domain.TmdbSearchResult) bool {
-	return q.Year == 0 || c.Year > 0 && c.Year >= q.Year-1 && c.Year <= q.Year+1
+	if c.MediaType != "tv" {
+		return q.Year == 0 || c.Year > 0 && c.Year >= q.Year-1 && c.Year <= q.Year+1
+	}
+	years, ok := q.tvYears[shareCandidateIdentity(c)]
+	if !ok {
+		years = shareTVYears{first: c.Year}
+	}
+	start, end := years.first, years.last
+	// 完整播出区间按闭区间核验；缺失时依次降级到指定季、首播年±1。
+	interval := start > 0 && end >= start
+	if !interval {
+		year := years.seasons[q.Season]
+		if year == 0 {
+			year = years.first
+		}
+		start, end = year-1, year+1
+		if year == 0 {
+			start, end = 0, 0
+		}
+	}
+	if q.rangeStart > 0 && (q.rangeEnd < q.rangeStart || start == 0 || q.rangeEnd < start || q.rangeStart > end) {
+		return false
+	}
+	year := q.fileYear
+	if year == 0 {
+		year = q.SeasonYear
+	}
+	if year == 0 {
+		year = q.Year
+	}
+	if year != 0 && (start == 0 || year < start || year > end) {
+		return false
+	}
+	if q.SeasonYear != 0 && (start == 0 || q.SeasonYear < start || q.SeasonYear > end) {
+		return false
+	}
+	return true
 }
 func shareCandidateTitleScore(q ShareMediaQuery, c domain.TmdbSearchResult, aliases []string) int {
 	names := append([]string{c.Title, c.OriginalTitle}, aliases...)

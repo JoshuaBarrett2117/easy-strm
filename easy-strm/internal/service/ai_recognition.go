@@ -5,6 +5,7 @@ import (
 	"context"
 	"easy-strm/internal/domain"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,15 @@ type AIRecognitionService struct {
 	mu     sync.Mutex
 	cached *domain.AIRecognitionConfig
 }
+
+type aiTransientError struct {
+	message string
+	cause   error
+}
+
+func (err *aiTransientError) Error() string { return err.message }
+
+func (err *aiTransientError) Unwrap() error { return err.cause }
 
 // NewAIRecognitionService 创建AI辅助服务；HTTP客户端由现有代理配置装配。
 func NewAIRecognitionService(store AIRecognitionStore, client *http.Client) *AIRecognitionService {
@@ -162,15 +172,18 @@ func (s *AIRecognitionService) request(ctx context.Context, cfg domain.AIRecogni
 		if ctx.Err() != nil {
 			return fmt.Errorf("AI请求超时或已取消: %w", ctx.Err())
 		}
-		return fmt.Errorf("AI端点连接失败，请检查地址及网络")
+		return &aiTransientError{message: "AI端点连接失败，请检查地址及网络", cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 && resp.StatusCode <= 599 {
+			return &aiTransientError{message: fmt.Sprintf("AI端点返回HTTP %d", resp.StatusCode)}
+		}
 		return fmt.Errorf("AI端点返回HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024+1))
 	if err != nil {
-		return fmt.Errorf("读取AI响应失败")
+		return &aiTransientError{message: "读取AI响应失败", cause: err}
 	}
 	if len(data) > 1024*1024 {
 		return fmt.Errorf("AI响应过大")
@@ -271,12 +284,32 @@ func (s *AIRecognitionService) Assist(ctx context.Context, filename, scene strin
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
-	if round, ok := ctx.Value(recognitionRoundKey{}).(*recognitionRound); ok {
-		return round.infer(ctx, filename, func() (*domain.AIRecognitionHint, error) {
-			return s.infer(ctx, cfg, filename, scene)
-		})
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(cfg.TimeoutSeconds)*time.Second)
+	defer cancel()
+	infer := func() (*domain.AIRecognitionHint, error) {
+		// 三次尝试与1s、2s退避共享一次调用预算，成功但内容无效不重试。
+		for attempt := 0; ; attempt++ {
+			if err := ctx.Err(); err != nil {
+				return nil, fmt.Errorf("AI请求超时或已取消: %w", err)
+			}
+			hint, err := s.infer(ctx, cfg, filename, scene)
+			var transient *aiTransientError
+			if err == nil || attempt == 2 || !errors.As(err, &transient) {
+				return hint, err
+			}
+			timer := time.NewTimer(time.Second << attempt)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, fmt.Errorf("AI请求超时或已取消: %w", ctx.Err())
+			case <-timer.C:
+			}
+		}
 	}
-	hint, err := s.infer(ctx, cfg, filename, scene)
+	if round, ok := ctx.Value(recognitionRoundKey{}).(*recognitionRound); ok {
+		return round.infer(ctx, filename, infer)
+	}
+	hint, err := infer()
 	return hint, true, err
 }
 
