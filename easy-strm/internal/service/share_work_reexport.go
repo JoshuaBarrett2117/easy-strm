@@ -203,6 +203,9 @@ func (runner *shareWorkReexportRunner) run(ctx context.Context, request domain.S
 			return result, fmt.Errorf("作品 %s 无选择行或请求超过 %d 行上限，禁止回退扫描", work, domain.ShareWorkReexportMaxSelections)
 		}
 		for _, value := range values {
+			if value.Selection.SourceKind == "strm115" {
+				return result, domain.ErrStrm115MetadataUnsupported
+			}
 			source, sourceErr := store.GetStrmSource(ctx, value.SourceID)
 			if sourceErr != nil {
 				return result, sourceErr

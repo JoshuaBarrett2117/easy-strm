@@ -17,9 +17,9 @@ var ErrShareSelectionConflict = errors.New("来源选择版本已变化或候选
 var ErrShareSelectionUnavailable = errors.New("选定来源不可用或识别已改变，保留原文件；请明确改选有效来源后重试")
 
 const shareSelectionLockSQL = `SELECT pg_advisory_xact_lock(34983,1)`
-const shareSelectionScalarColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path`
+const shareSelectionScalarColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path,s.source_kind,s.external_ref`
 const shareSelectionValidSQL = `
- EXISTS(SELECT 1` + shareSelectionLiveJoin + `
+ s.source_kind='share' AND EXISTS(SELECT 1` + shareSelectionLiveJoin + `
  WHERE i.candidate_id=s.selected_candidate_id AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
  AND ` + shareSelectionLivePredicate + `)`
 const shareSelectionColumns = shareSelectionScalarColumns + `,COALESCE(m.title,s.work_key),` + shareSelectionValidSQL
@@ -27,19 +27,21 @@ const shareSelectionFrom = ` FROM t_share_media_selection s LEFT JOIN t_share_me
 
 func scanShareSelection(row interface{ Scan(...interface{}) error }) (domain.ShareSelection, error) {
 	var value domain.ShareSelection
-	err := row.Scan(&value.ItemKey, &value.WorkKey, &value.Season, &value.Episode, &value.CandidateID, &value.Mode, &value.Revision, &value.ExportedRevision, &value.RelativePath, &value.Title, &value.Valid)
+	var candidate sql.NullInt64
+	err := row.Scan(&value.ItemKey, &value.WorkKey, &value.Season, &value.Episode, &candidate, &value.Mode, &value.Revision, &value.ExportedRevision, &value.RelativePath, &value.SourceKind, &value.ExternalRef, &value.Title, &value.Valid)
+	value.CandidateID = candidate.Int64
 	return value, err
 }
 
-// CheckSelectionSchema 在任何改选或文件副作用前要求 DBA 手工安装 v47。
+// CheckSelectionSchema 在任何改选或文件副作用前要求 DBA 手工安装兼容的 v47/v51。
 func (d *ShareRecordDAO) CheckSelectionSchema(ctx context.Context) error {
 	var ready bool
-	err := d.db.QueryRowContext(ctx, `SELECT to_regclass('t_share_export_candidate') IS NOT NULL AND to_regclass('t_share_export_candidate_item') IS NOT NULL AND to_regclass('t_share_media_selection') IS NOT NULL`).Scan(&ready)
+	err := d.db.QueryRowContext(ctx, selectionSchemaReadySQL).Scan(&ready)
 	if err != nil {
 		return err
 	}
 	if !ready {
-		return fmt.Errorf("来源选择未安装，请 DBA 手工应用 v47，再显式全量导出")
+		return fmt.Errorf("来源选择 v47/v51 未安装或结构不兼容，请 DBA 审核并手工应用迁移；本功能不自动迁移，也不要求全量导出")
 	}
 	return nil
 }
@@ -89,6 +91,26 @@ func (d *ShareRecordDAO) ListSelections(ctx context.Context, q domain.ShareSelec
 	if err != nil {
 		return nil, 0, err
 	}
+	cache := map[string][]selection115Item{}
+	for index := range values {
+		selection := &values[index]
+		if selection.SourceKind != "strm115" {
+			continue
+		}
+		matches, found := cache[selection.WorkKey]
+		if !found {
+			matches, err = selection115Work(ctx, transaction, selection.WorkKey)
+			if err != nil {
+				return nil, 0, err
+			}
+			cache[selection.WorkKey] = matches
+		}
+		for _, match := range matches {
+			if match.candidate.ExternalRef == selection.ExternalRef && match.season == selection.Season && match.episode == selection.Episode {
+				selection.Valid = match.candidate.Available
+			}
+		}
+	}
 	return values, total, transaction.Commit()
 }
 
@@ -114,6 +136,7 @@ func (d *ShareRecordDAO) SelectionDetail(ctx context.Context, key string) (domai
 	}
 	for rows.Next() {
 		var candidate domain.ShareCandidate
+		candidate.SourceKind = "share"
 		if err = rows.Scan(&candidate.ID, &candidate.SourceID, &candidate.ShareID, &candidate.ShareName, &candidate.FileName, &candidate.FileSize, &candidate.FirstSeen, &candidate.Available, &candidate.State, &candidate.Revoked); err != nil {
 			rows.Close()
 			return value, err
@@ -123,11 +146,27 @@ func (d *ShareRecordDAO) SelectionDetail(ctx context.Context, key string) (domai
 	if err = errors.Join(rows.Err(), rows.Close()); err != nil {
 		return value, err
 	}
+	matches, err := selection115Work(ctx, transaction, value.Selection.WorkKey)
+	if err != nil {
+		return value, err
+	}
+	for _, match := range matches {
+		if match.season != value.Selection.Season || match.episode != value.Selection.Episode {
+			continue
+		}
+		value.Candidates = append(value.Candidates, match.candidate)
+		if value.Selection.SourceKind == "strm115" && match.candidate.ExternalRef == value.Selection.ExternalRef {
+			value.Selection.Valid = match.candidate.Available
+		}
+	}
 	return value, transaction.Commit()
 }
 
 // ChangeSelection 原子验证成员、CAS 改选并入队，绝不在事务内写文件。
 func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.ShareSelectionChange) (string, error) {
+	if err := domain.ValidateShareSelectionChange(&change); err != nil {
+		return "", err
+	}
 	transaction, err := d.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return "", err
@@ -145,6 +184,9 @@ func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.Shar
 	if revision != change.ExpectedRevision {
 		return "", ErrShareSelectionConflict
 	}
+	if change.SourceKind == "strm115" {
+		return changeSelection115(ctx, transaction, change, work)
+	}
 	var valid bool
 	err = transaction.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM t_share_media_selection s JOIN t_share_export_candidate_item i ON i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
  JOIN t_share_export_candidate c USING(candidate_id) JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_record r ON r.id=f.share_id JOIN t_share_media m ON m.id=f.media_id
@@ -156,7 +198,7 @@ func (d *ShareRecordDAO) ChangeSelection(ctx context.Context, change domain.Shar
 	if !valid {
 		return "", ErrShareSelectionConflict
 	}
-	result, err := transaction.ExecContext(ctx, `UPDATE t_share_media_selection SET selected_candidate_id=$2,selection_mode='manual',selection_revision=selection_revision+1,updated_at=now() WHERE media_item_key=$1 AND selection_revision=$3`, change.ItemKey, change.CandidateID, change.ExpectedRevision)
+	result, err := transaction.ExecContext(ctx, `UPDATE t_share_media_selection SET selected_candidate_id=$2,source_kind='share',external_ref='',selection_mode='manual',selection_revision=selection_revision+1,updated_at=now() WHERE media_item_key=$1 AND selection_revision=$3`, change.ItemKey, change.CandidateID, change.ExpectedRevision)
 	if err != nil {
 		return "", err
 	}

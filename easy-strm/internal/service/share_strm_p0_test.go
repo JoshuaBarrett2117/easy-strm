@@ -142,7 +142,7 @@ func TestShareStrmP0RunEmptyQueueDoesNotPrepareSelections(t *testing.T) {
 	if err := runIncrementalFixture(t, fixture, runner.worker, "p0-empty"); err != nil {
 		t.Fatal(err)
 	}
-	if selections.checks != 0 || len(selections.syncWorks) != 0 || selections.resolves != 0 || store.batchCalls > 3 || store.reads != 0 {
+	if selections.checks != 1 || len(selections.syncWorks) != 0 || selections.resolves != 0 || store.batchCalls > 3 || store.reads != 0 {
 		t.Fatalf("空队列执行了来源准备或重复消费：calls=%d selection=%+v", store.batchCalls, selections)
 	}
 }

@@ -50,9 +50,13 @@ type ShareStrmService struct {
 	categoriesContext func(context.Context) ([]*domain.MediaCategory, error)
 	account           func(int) (*domain.Cloud115, error)
 	directLink        func(string, int, string, string) (string, error)
+	strm115ServerURL  func() string
 	coordOnce         sync.Once
 	coordinator       *ShareOperationCoordinator
 }
+
+// SetStrm115ServerURL 注入应用 ServerURL，目录直链不使用分享导出的 BaseURL。
+func (s *ShareStrmService) SetStrm115ServerURL(reader func() string) { s.strm115ServerURL = reader }
 
 // SetExportDatabase 注入统一输出清单数据库。
 func (s *ShareStrmService) SetExportDatabase(db *sql.DB) { s.exportDB = db }

@@ -48,7 +48,7 @@ var shareSelectionPrepareSQL = []string{
  FROM t_share_media_selection s
  LEFT JOIN selection_valid_member v ON v.work_key=s.work_key AND v.season_number=s.season_number AND v.episode_number=s.episode_number AND v.candidate_id=s.selected_candidate_id
  LEFT JOIN selection_fallback b ON b.work_key=s.work_key AND b.season_number=s.season_number AND b.episode_number=s.episode_number
- WHERE ($1='' OR s.work_key=$1) AND v.candidate_id IS NULL`,
+ WHERE s.source_kind='share' AND ($1='' OR s.work_key=$1) AND v.candidate_id IS NULL`,
 	`CREATE UNIQUE INDEX ON selection_resolution(media_item_key)`,
 	`ANALYZE selection_resolution`,
 }
@@ -57,7 +57,7 @@ const shareSelectionPrepareErrorsSQL = `SELECT media_item_key,selection_mode FRO
  WHERE selection_mode='manual' OR fallback_candidate IS NULL ORDER BY media_item_key`
 const shareSelectionPrepareUpdateSQL = `UPDATE t_share_media_selection s
  SET selected_candidate_id=r.fallback_candidate,selection_revision=s.selection_revision+1,updated_at=now()
- FROM selection_resolution r WHERE s.media_item_key=r.media_item_key AND s.selection_mode='auto' AND r.selection_mode='auto'
+ FROM selection_resolution r WHERE s.media_item_key=r.media_item_key AND s.source_kind='share' AND s.selection_mode='auto' AND r.selection_mode='auto'
 	 AND s.selected_candidate_id=r.selected_candidate_id AND r.fallback_candidate IS NOT NULL RETURNING s.work_key`
 
 func lockShareSelection(ctx context.Context, transaction *sql.Tx) error {
@@ -90,6 +90,9 @@ func (store *ShareRecordDAO) ResolveSelections(ctx context.Context, work string)
 		if _, err = transaction.ExecContext(ctx, query, args...); err != nil {
 			return 0, fmt.Errorf("集合解析来源选择：%w", err)
 		}
+	}
+	if err = preflightSelection115(ctx, transaction, work); err != nil {
+		return 0, err
 	}
 	rows, err := transaction.QueryContext(ctx, shareSelectionPrepareErrorsSQL)
 	if err != nil {

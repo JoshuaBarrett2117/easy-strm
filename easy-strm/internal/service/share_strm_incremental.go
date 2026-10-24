@@ -112,6 +112,12 @@ func (s *ShareStrmIncrementalService) Run(ctx context.Context, id string) (runEr
 	if err := s.checkpoints.CheckSchema(ctx); err != nil {
 		return err
 	}
+	if selections, ok := s.exporter.store.(shareSelectionExportStore); ok {
+		if err := selections.CheckSelectionSchema(ctx); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, shareSelectionSchemaCheckedContext{}, true)
+	}
 	if reader, ok := s.checkpoints.(interface {
 		ReadWatermark(context.Context) (*domain.ShareIncrementalWatermark, error)
 	}); ok {
@@ -229,7 +235,8 @@ func (s *ShareStrmIncrementalService) runPrepared(ctx context.Context, id string
 		return err
 	}
 	selectionPrepared, _ := ctx.Value(shareSelectionPreparedContext{}).(bool)
-	selectionSchemaChecked := selectionPrepared
+	selectionSchemaChecked, _ := ctx.Value(shareSelectionSchemaCheckedContext{}).(bool)
+	selectionSchemaChecked = selectionSchemaChecked || selectionPrepared
 	selectionSynced := selectionPrepared
 	explicitFull, _ := ctx.Value(shareExplicitFullContext{}).(bool)
 	for {
@@ -451,6 +458,12 @@ func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string
 			}
 		}
 	}
+	remaining := s.exporter.exportRemainingStrm115(ctx, input.Settings, domain.ShareLibraryQuery{WorkKey: dirty.WorkKey}, input.Categories, seen)
+	result.Written += remaining.Written
+	if remaining.Err != nil {
+		result.Err = remaining.Err
+		return processed, 0, result
+	}
 	for index := range states {
 		if states[index].State == "active" {
 			states[index].ExportKeys = attempt.keys[states[index].SourceFileID]
@@ -471,7 +484,18 @@ func (s *ShareStrmIncrementalService) consumeWork(ctx context.Context, id string
 			return processed, 0, result
 		}
 	}
-	marked, err := s.checkpoints.CompleteWork(ctx, dirty, input.ConfigRevision, id, states, snapshot)
+	var marked int
+	if checkpoints, ok := s.checkpoints.(interface {
+		CompleteSelectionWork(context.Context, domain.ShareExportDirty, int64, string, []domain.ShareExportSourceState, dao.ExportSnapshot, []string) (int, error)
+	}); ok {
+		keys := make([]string, 0, len(seen))
+		for key := range seen {
+			keys = append(keys, key)
+		}
+		marked, err = checkpoints.CompleteSelectionWork(ctx, dirty, input.ConfigRevision, id, states, snapshot, keys)
+	} else {
+		marked, err = s.checkpoints.CompleteWork(ctx, dirty, input.ConfigRevision, id, states, snapshot)
+	}
 	result.Err = err
 	return processed, marked, result
 }

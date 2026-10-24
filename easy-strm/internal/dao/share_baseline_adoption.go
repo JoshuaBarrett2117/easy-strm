@@ -176,6 +176,13 @@ func (store *ShareExportCheckpointDAO) AdoptBaseline(ctx context.Context, reques
 	if _, err = transaction.ExecContext(ctx, shareBaselineTablesLockSQL); err != nil {
 		return result, fmt.Errorf("采纳拒绝：存在并发生产者、配置或导出写入，请停写并重新核验：%w", err)
 	}
+	var unsupported bool
+	if err = transaction.QueryRowContext(ctx, selectionMetadataUnsupportedSQL).Scan(&unsupported); err != nil {
+		return result, err
+	}
+	if unsupported {
+		return result, domain.ErrStrm115MetadataUnsupported
+	}
 	ready, err := validateShareBaselineConsumer(ctx, transaction, request, fingerprint, &result)
 	if err != nil || ready {
 		if err == nil {

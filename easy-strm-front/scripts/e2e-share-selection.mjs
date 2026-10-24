@@ -9,23 +9,25 @@ import { chromium } from 'playwright'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const envDir = await mkdtemp(resolve(tmpdir(), 'estrm-selection-env-'))
-const output = process.env.E2E_OUTPUT_DIR || '/opt/data/output/estrm-round2/browser'
+const output = await mkdtemp(resolve(tmpdir(), 'estrm-selection-evidence-'))
 const selection = { media_item_key: 'fixture:tv:1:2', work_key: 'fixture:tv', title: '测试剧集', season_number: 1, episode_number: 2, selected_candidate_id: 11, selection_mode: 'auto', selection_revision: 1, exported_revision: 1, stable_relative_path: 'tv/测试剧集/Season 01/测试剧集 - S01E02.strm', valid: true }
 const candidates = [
   { candidate_id: 11, share_name: '最先发现来源', file_name: '剧集/first.mkv', file_size: 1024 ** 3, first_seen_seq: 20, available: true, revoked: false, state: 'active' },
   { candidate_id: 12, share_name: '另一个分享', file_name: '剧集/remux.mkv', file_size: 8 * 1024 ** 3, first_seen_seq: 21, available: true, revoked: false, state: 'active' },
+  { candidate_id: 0, source_kind: 'strm115', external_ref: '0:25', cloud115_id: 9, cloud_path: '/日番/测试剧集 [tmdbid=1]/Season 1/测试.S01E02.mkv', file_name: 'directory-available.mkv', file_size: 12 * 1024 ** 3, available: true },
+  { candidate_id: 0, source_kind: 'strm115', external_ref: '1:26', cloud115_id: 10, cloud_path: '/日番/测试剧集 [tmdbid=1]/Season 1/missing.S01E02.mkv', file_name: 'directory-unavailable.mkv', file_size: 10 * 1024 ** 3, available: false },
   { candidate_id: 13, share_name: '已撤销映射', file_name: 'wrong.mkv', file_size: 1024 ** 3, first_seen_seq: 22, available: false, revoked: true, state: 'stale' }
 ]
-let changes = 0, refreshes = 0
+let changes = 0, refreshes = 0, applies = 0
 let listMode = 'normal', detailMode = 'normal', conflictNext = false
 const requests = []
 let releaseInitialList
 const initialListGate = new Promise(resolve => { releaseInitialList = resolve })
 let initialList = true
-const server = await createServer({ root, envDir, configFile: false, plugins: [vue(), {
+const server = await createServer({ root, envDir, cacheDir: resolve(envDir, 'vite-cache'), configFile: false, plugins: [vue(), {
   name: 'selection-isolated-fixture',
   resolveId(id) { if (id === '/__selection-entry.js') return id },
-  load(id) { if (id === '/__selection-entry.js') return `import {createApp,h} from '/node_modules/.vite/deps/vue.js';import {NConfigProvider,NMessageProvider,NDialogProvider} from '/node_modules/.vite/deps/naive-ui.js';import Selection from '/src/views/ShareSelection.vue';createApp({render:()=>h(NConfigProvider,null,{default:()=>h(NMessageProvider,null,{default:()=>h(NDialogProvider,null,{default:()=>h(Selection)})})})}).mount('#app')` },
+  load(id) { if (id === '/__selection-entry.js') return `import {createApp,h} from 'vue';import {NConfigProvider,NMessageProvider,NDialogProvider} from 'naive-ui';import Selection from '/src/views/ShareSelection.vue';createApp({render:()=>h(NConfigProvider,null,{default:()=>h(NMessageProvider,null,{default:()=>h(NDialogProvider,null,{default:()=>h(Selection)})})})}).mount('#app')` },
   configureServer(vite) { vite.middlewares.use((request, response, next) => { if (request.url !== '/__selection') return next(); response.setHeader('Content-Type', 'text/html'); response.end('<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="app"></div><script type="module" src="/__selection-entry.js"></script></body></html>') }) }
 }], optimizeDeps: { include: ['vue', 'naive-ui'] }, server: { host: '127.0.0.1', port: 0 } })
 let browser
@@ -33,6 +35,11 @@ try {
   await mkdir(output, { recursive: true }); await server.listen()
   browser = await chromium.launch({ headless: true, executablePath: process.env.E2E_BROWSER_EXECUTABLE || undefined, args: ['--no-sandbox'] })
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url())
+    if (url.hostname !== '127.0.0.1') return route.abort('blockedbyclient')
+    return route.fallback()
+  })
   const pageErrors = []
   await page.addInitScript(() => localStorage.setItem('token', 'isolated-fixture-token'))
   page.on('pageerror', error => pageErrors.push(error.message))
@@ -53,9 +60,16 @@ try {
       const change = request.postDataJSON()
       assert.equal(change.expected_revision, selection.selection_revision)
       assert.equal(change.media_item_key, selection.media_item_key)
-      assert.equal(change.candidate_id, 12)
+      if (change.source_kind === 'strm115') {
+        assert.equal(change.external_ref, '0:25'); assert.equal(change.candidate_id, undefined)
+      } else { assert.equal(change.source_kind, 'share'); assert.equal(change.candidate_id, 12); assert.equal(change.external_ref, undefined) }
       if (conflictNext) { conflictNext = false; return fail(409, '来源版本已变化，请刷新后重试') }
-      changes++; selection.selected_candidate_id = 12; selection.selection_revision++; selection.selection_mode = 'manual'; data = { next_export: true }
+      changes++; selection.source_kind = change.source_kind; selection.external_ref = change.external_ref || ''; selection.selected_candidate_id = change.candidate_id ?? null; selection.selection_revision++; selection.selection_mode = 'manual'; data = { next_export: false, immediate: false, task_id: '' }
+    } else if (url.pathname.endsWith('/apply')) {
+      assert.equal(request.method(), 'POST')
+      assert.equal(url.pathname, '/api/media/share-library/strm/selections/apply')
+      assert.deepEqual(request.postDataJSON(), { media_item_key: selection.media_item_key })
+      applies++; data = { immediate: true, task_id: 'mock-rebuild' }
     } else if (url.pathname.endsWith('/refresh')) { refreshes++; data = null }
     else {
       if (initialList) { initialList = false; await initialListGate }
@@ -76,6 +90,9 @@ try {
   await page.getByRole('button', { name: '查看候选', exact: true }).click()
   await page.getByText('最先发现来源', { exact: true }).waitFor()
   const modal = page.locator('.n-modal').first()
+  assert.ok(await modal.getByText('分享库', { exact: true }).count())
+  assert.equal(await modal.getByText('115目录', { exact: true }).count(), 2)
+  assert.equal(await modal.locator('tr').filter({ hasText: 'directory-unavailable.mkv' }).getByRole('button').isDisabled(), true)
   assert.match(await modal.innerText(), /当前来源 #11/)
   assert.match(await modal.innerText(), /识别映射已撤销/)
   const buttons = modal.getByRole('button', { name: '选择此来源', exact: true })
@@ -98,8 +115,20 @@ try {
   assert.equal(actionRequests.length, 3)
   assert.deepEqual(actionRequests.map(request => request.method), ['PUT', 'GET', 'GET'])
   assert.equal(new Set(actionRequests.map(request => request.trace)).size, 1)
-  assert.match(await modal.innerText(), /待下次导出应用/)
+  assert.match(await modal.innerText(), /来源已改选，尚未应用/)
   assert.ok((await modal.innerText()).includes(selection.stable_relative_path))
+  const stablePath = selection.stable_relative_path
+  await modal.locator('tr').filter({ hasText: 'directory-available.mkv' }).getByRole('button').click()
+  await page.getByRole('button', { name: '确认改选', exact: true }).click()
+  await page.getByText('当前来源 115目录 0:25', { exact: false }).waitFor()
+  assert.equal(selection.stable_relative_path, stablePath)
+  await modal.locator('tr').filter({ hasText: 'directory-available.mkv' }).getByRole('button', { name: '选定 · 设为手动', exact: true }).waitFor()
+  await modal.getByRole('button', { name: '立即应用', exact: true }).click()
+  await page.getByText('已开始重建该作品的 STRM', { exact: true }).waitFor()
+  await modal.locator('tr').filter({ hasText: '剧集/remux.mkv' }).getByRole('button').click()
+  await page.getByRole('button', { name: '确认改选', exact: true }).click()
+  await page.getByText('当前来源 #12', { exact: false }).waitFor()
+  await page.locator('.n-dialog').waitFor({ state: 'hidden' })
   await page.screenshot({ path: `${output}/desktop.png`, fullPage: true })
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await modal.isVisible(), true)
@@ -135,8 +164,8 @@ try {
   assert.notEqual(refreshRequests[0].trace, actionRequests[0].trace)
   assert.ok(requests.some(request => request.page === '2'))
   assert.ok(requests.some(request => request.keyword === '测试剧集' && request.page === '1'))
-  assert.equal(changes, 1); assert.equal(refreshes, 1); assert.deepEqual(pageErrors, [])
-  const evidence = { ok: true, api: 'all mocked, synthetic fixtures; no real DB', envDir: 'isolated empty fixture', changes, refreshes, actionRequests, refreshRequests, assertions: ['auth wrapper', 'list', 'search', 'pagination', 'loading', 'detail', 'current', 'disabled revoked', 'CAS error', 'confirm', 'pending rebuild', 'stable path', 'empty', 'list error', 'detail error', 'mobile', 'one real confirmation action three requests same X-Trace-Id'], screenshots: ['loading.png', 'cas-conflict.png', 'desktop.png', 'mobile.png', 'detail-error.png', 'list-error.png', 'empty.png'] }
+  assert.equal(changes, 3); assert.equal(refreshes, 1); assert.equal(applies, 1); assert.deepEqual(pageErrors, [])
+  const evidence = { ok: true, api: 'all mocked, synthetic fixtures; no real DB', envDir: 'isolated empty fixture', output, changes, refreshes, applies, actionRequests, refreshRequests, assertions: ['auth wrapper', 'list', 'search', 'pagination', 'loading', 'detail', 'current', 'share and directory badges', 'disabled revoked and unavailable directory', 'CAS error', 'confirm', 'directory external_ref payload', 'apply POST', 'return to share candidate_id payload', 'pending rebuild', 'stable path', 'empty', 'list error', 'detail error', 'mobile', 'one real confirmation action three requests same X-Trace-Id'], screenshots: ['loading.png', 'cas-conflict.png', 'desktop.png', 'mobile.png', 'detail-error.png', 'list-error.png', 'empty.png'] }
   await writeFile(`${output}/assertions.json`, JSON.stringify(evidence, null, 2))
   console.log(JSON.stringify(evidence))
 } finally { if (browser) await browser.close(); await server.close(); await rm(envDir, { recursive: true, force: true }) }

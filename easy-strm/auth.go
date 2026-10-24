@@ -153,6 +153,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		}
 		return link.Url.Url, nil
 	})
+	shareStrmService.SetStrm115ServerURL(func() string { return GetConfig().ServerURL })
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
 	shareRecordService.SetAutoStrmExportContext(shareStrmService.StartAutoExportContext)
 	shareRecordService.SetStrmDeleteGuard(shareStrmService)

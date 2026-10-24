@@ -26,7 +26,9 @@ func (fake *selectionControllerFake) Change(context.Context, domain.ShareSelecti
 	fake.called = true
 	return "", fake.err
 }
-func (fake *selectionControllerFake) Apply(context.Context, string) (string, error) { return "", fake.err }
+func (fake *selectionControllerFake) Apply(context.Context, string) (string, error) {
+	return "", fake.err
+}
 func (fake *selectionControllerFake) Refresh(context.Context) error { return fake.err }
 
 func TestSelectionControllerCASResponses(t *testing.T) {
@@ -41,6 +43,10 @@ func TestSelectionControllerCASResponses(t *testing.T) {
 		{`{"media_item_key":"w:0:0","candidate_id":2,"expected_revision":1}`, dao.ErrShareSelectionConflict, 409, true},
 		{`{"media_item_key":"w:0:0","candidate_id":2}`, nil, 400, false},
 		{`{"media_item_key":"w:0:0","candidate_id":-1,"expected_revision":1}`, nil, 400, false},
+		{`{"media_item_key":"w:0:0","source_kind":"strm115","external_ref":"0:12","expected_revision":1}`, nil, 200, true},
+		{`{"media_item_key":"w:0:0","source_kind":"strm115","external_ref":"-1:12","expected_revision":1}`, nil, 400, false},
+		{`{"media_item_key":"w:0:0","source_kind":"strm115","candidate_id":2,"external_ref":"0:12","expected_revision":1}`, nil, 400, false},
+		{`{"media_item_key":"w:0:0","source_kind":"unknown","candidate_id":2,"expected_revision":1}`, nil, 400, false},
 	} {
 		fake := &selectionControllerFake{err: test.err}
 		router := gin.New()

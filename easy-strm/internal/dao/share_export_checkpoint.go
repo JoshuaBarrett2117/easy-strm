@@ -306,7 +306,7 @@ func (d *ShareExportCheckpointDAO) ObserveWork(ctx context.Context, key string) 
 
 // WorkKeys 获取历史来源键与半成功键，不遍历输出 owner 的全部清单。
 func (d *ShareExportCheckpointDAO) WorkKeys(ctx context.Context, key string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT jsonb_array_elements_text(export_keys) FROM t_share_export_source_state WHERE work_key=$1 UNION SELECT jsonb_array_elements_text(pending_export_keys) FROM t_share_export_dirty_work WHERE work_key=$1`, key)
+	rows, err := d.db.QueryContext(ctx, `SELECT jsonb_array_elements_text(export_keys) FROM t_share_export_source_state WHERE work_key=$1 UNION SELECT jsonb_array_elements_text(pending_export_keys) FROM t_share_export_dirty_work WHERE work_key=$1 UNION SELECT media_item_key FROM t_share_media_selection WHERE work_key=$1 AND source_kind='strm115'`, key)
 	if err != nil {
 		return nil, err
 	}
@@ -342,6 +342,15 @@ func (d *ShareExportCheckpointDAO) TargetSnapshot(ctx context.Context, keys []st
 
 // CompleteWork 在同一短事务中 CAS 检查配置/作品，写检查点、差集失效及 ack。
 func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domain.ShareExportDirty, configRevision int64, run string, states []domain.ShareExportSourceState, snapshot ExportSnapshot) (int, error) {
+	return d.completeSelectionWork(ctx, dirty, configRevision, run, states, snapshot, nil)
+}
+
+// CompleteSelectionWork 保留本轮实际发布的目录选择键，避免没有分享来源时被差集标记失效。
+func (d *ShareExportCheckpointDAO) CompleteSelectionWork(ctx context.Context, dirty domain.ShareExportDirty, configRevision int64, run string, states []domain.ShareExportSourceState, snapshot ExportSnapshot, keys []string) (int, error) {
+	return d.completeSelectionWork(ctx, dirty, configRevision, run, states, snapshot, keys)
+}
+
+func (d *ShareExportCheckpointDAO) completeSelectionWork(ctx context.Context, dirty domain.ShareExportDirty, configRevision int64, run string, states []domain.ShareExportSourceState, snapshot ExportSnapshot, publishedKeys []string) (int, error) {
 	transaction, err := d.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -362,6 +371,9 @@ func (d *ShareExportCheckpointDAO) CompleteWork(ctx context.Context, dirty domai
 		return 0, ErrShareExportChanged
 	}
 	newKeys := map[string]bool{}
+	for _, key := range publishedKeys {
+		newKeys[key] = true
+	}
 	ids := make([]int, 0, len(states))
 	for _, state := range states {
 		if err = ctx.Err(); err != nil {

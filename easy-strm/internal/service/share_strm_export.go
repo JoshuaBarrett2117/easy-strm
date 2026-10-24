@@ -64,10 +64,12 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 	}()
 	cfg.DedupeExport = true
 	if selections, ok := s.store.(shareSelectionExportStore); ok {
-		if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
-			return selections.CheckSelectionSchema(ctx)
-		}); err != nil {
-			return err
+		if checked, _ := ctx.Value(shareSelectionSchemaCheckedContext{}).(bool); !checked {
+			if err := s.preparationStage(ctx, "selection-schema", func(ctx context.Context, _ sharePreparationReport) error {
+				return selections.CheckSelectionSchema(ctx)
+			}); err != nil {
+				return err
+			}
 		}
 		ctx = context.WithValue(ctx, shareSelectionSchemaCheckedContext{}, true)
 		if len(q.FileIDs) > 0 {
@@ -104,6 +106,10 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 				}
 			} else if err := s.preparationStage(ctx, "selection-sync", func(ctx context.Context, _ sharePreparationReport) error {
 				return selections.SyncSelections(ctx, "")
+			}); err != nil {
+				return err
+			} else if err := s.preparationStage(ctx, "selection-directory-preflight", func(ctx context.Context, _ sharePreparationReport) error {
+				return s.preflightStrm115Scope(ctx, q)
 			}); err != nil {
 				return err
 			}
@@ -241,6 +247,13 @@ func (s *ShareStrmService) export(ctx context.Context, cfg domain.ShareStrmSetti
 			}
 		}
 	}
+	{
+		remaining := s.exportRemainingStrm115(ctx, cfg, q, cats, seen)
+		written += remaining.Written
+		if remaining.Err != nil {
+			return remaining.Err
+		}
+	}
 	if failed > 0 {
 		return fmt.Errorf("导出结束：已写入%d个STRM文件，%d个本地记录失败，详情见任务记录", written, failed)
 	}
@@ -373,6 +386,15 @@ func betterShareStrmSource(candidate, current domain.ShareStrmSource) bool {
 func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain.ShareStrmSettings, source domain.ShareStrmSource, cats []*domain.MediaCategory, seen map[string]bool, conflictMaps ...map[string]*shareStrmConflict) (result strmExportResult) {
 	cfg.DedupeExport = true
 	selected, hasSelection := ctx.Value(shareSelectedItemContext{}).(shareSelectedItem)
+	if hasSelection {
+		switch selected.selection.SourceKind {
+		case "strm115":
+			return s.exportSelectionStrm115(ctx, cfg, source, selected, seen)
+		case "", "share":
+		default:
+			return strmExportResult{Err: fmt.Errorf("未知来源类型：%s", selected.selection.SourceKind)}
+		}
+	}
 	logEntry := logger.WithContext(ctx, "share_export")
 	defer func() {
 		if result.Err != nil && !errors.Is(result.Err, ErrShareUnitSkipped) {

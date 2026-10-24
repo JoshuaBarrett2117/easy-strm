@@ -100,6 +100,12 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 	if requested != "incremental" && requested != "reconciliation" {
 		return fmt.Errorf("分享导出模式无效")
 	}
+	if selections, ok := s.worker.exporter.store.(shareSelectionExportStore); ok {
+		if err := selections.CheckSelectionSchema(ctx); err != nil {
+			return err
+		}
+		ctx = context.WithValue(ctx, shareSelectionSchemaCheckedContext{}, true)
+	}
 	if err := s.worker.cancelled(ctx, id); err != nil {
 		return err
 	}

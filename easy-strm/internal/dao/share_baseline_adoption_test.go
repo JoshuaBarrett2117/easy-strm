@@ -45,7 +45,7 @@ func (warning *baselineCommitWarning) Write(payload []byte) (int, error) {
 }
 
 func testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T, allowance int) {
-	for _, scenario := range []string{"success", "ready-new-pending", "counts-changed", "inconsistent", "mapping-mismatch", "mapping-read-failed", "seed-failed", "ack-failed", "finish-failed", "audit-failed", "commit-failed", "producer-busy", "owner-busy", "selection-busy", "revision-changed", "ack-count-changed", "trust-zero", "finish-zero", "mirror-zero", "audit-zero", "fingerprint-changed", "protocol-changed", "required", "completed-changed", "ready-untrusted", "commit-guard-failed"} {
+	for _, scenario := range []string{"success", "directory-unsupported", "ready-new-pending", "counts-changed", "inconsistent", "mapping-mismatch", "mapping-read-failed", "seed-failed", "ack-failed", "finish-failed", "audit-failed", "commit-failed", "producer-busy", "owner-busy", "selection-busy", "revision-changed", "ack-count-changed", "trust-zero", "finish-zero", "mirror-zero", "audit-zero", "fingerprint-changed", "protocol-changed", "required", "completed-changed", "ready-untrusted", "commit-guard-failed"} {
 		test.Run(scenario, func(test *testing.T) {
 			database, mock, err := sqlmock.New()
 			if err != nil {
@@ -84,6 +84,10 @@ func testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T, allow
 				} else {
 					lock.WillReturnResult(sqlmock.NewResult(0, 0))
 				}
+			}
+			if proceed {
+				mock.ExpectQuery(regexp.QuoteMeta(selectionMetadataUnsupportedSQL)).WillReturnRows(sqlmock.NewRows([]string{"unsupported"}).AddRow(scenario == "directory-unsupported"))
+				proceed = scenario != "directory-unsupported"
 			}
 			if proceed {
 				state, completed := "building", int64(0)
@@ -199,6 +203,9 @@ func testShareBaselineAdoptionAtomicRollbackAndReadyNoAck(test *testing.T, allow
 				guards = []func() error{func() error { return failure }}
 			}
 			result, err := NewShareExportCheckpointDAO(database).AdoptBaseline(context.Background(), request, "fingerprint", "task", guards...)
+			if scenario == "directory-unsupported" && !errors.Is(err, domain.ErrStrm115MetadataUnsupported) {
+				test.Fatalf("目录基线采纳未明确拒绝：%v", err)
+			}
 			if scenario == "success" || scenario == "ready-new-pending" {
 				if err != nil || result.BaselineState != "ready" || result.CompletedRevision != 3 || result.AlreadyReady != (scenario == "ready-new-pending") {
 					test.Fatalf("result=%+v error=%v", result, err)

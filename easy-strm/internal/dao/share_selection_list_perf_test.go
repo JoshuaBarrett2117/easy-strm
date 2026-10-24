@@ -13,9 +13,9 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 )
 
-const frozenSelectionScalarColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path`
+const frozenSelectionScalarColumns = `s.media_item_key,s.work_key,s.season_number,s.episode_number,s.selected_candidate_id,s.selection_mode,s.selection_revision,s.exported_revision,s.stable_relative_path,s.source_kind,s.external_ref`
 const frozenSelectionValidSQL = `
- EXISTS(SELECT 1 FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
+ s.source_kind='share' AND EXISTS(SELECT 1 FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
  JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_record r ON r.id=f.share_id JOIN t_share_media live ON live.id=f.media_id
  WHERE i.candidate_id=s.selected_candidate_id AND i.work_key=s.work_key AND i.season_number=s.season_number AND i.episode_number=s.episode_number
  AND NOT i.revoked AND c.available AND c.state='active' AND f.available AND NOT r.share_cancelled AND f.status='identified' AND live.work_key=i.work_key
@@ -88,7 +88,7 @@ func expectedSelectionListSQL(cursor bool) string {
 }
 
 func selectionListMockRows() *sqlmock.Rows {
-	return sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"})
+	return sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "kind", "ref", "title", "valid"})
 }
 
 // TestSelectionListMaterializesPage 验证分页先物化，原有效性表达式及详情投影逐字保留。
@@ -126,11 +126,11 @@ func TestSelectionListMaterializesPage(test *testing.T) {
 			rows := selectionListMockRows()
 			expected := []domain.ShareSelection{}
 			if !scenario.empty {
-				rows.AddRow("w:1:2", "w", 1, 2, 9, "manual", 3, 2, "tv/ep.strm", "Title", false).
-					AddRow("w:1:3", "w", 1, 3, 10, "auto", 4, 4, "tv/next.strm", "Title", true)
+				rows.AddRow("w:1:2", "w", 1, 2, 9, "manual", 3, 2, "tv/ep.strm", "share", "", "Title", false).
+					AddRow("w:1:3", "w", 1, 3, 10, "auto", 4, 4, "tv/next.strm", "share", "", "Title", true)
 				expected = append(expected,
-					domain.ShareSelection{ItemKey: "w:1:2", WorkKey: "w", Season: 1, Episode: 2, CandidateID: 9, Mode: "manual", Revision: 3, ExportedRevision: 2, RelativePath: "tv/ep.strm", Title: "Title", Valid: false},
-					domain.ShareSelection{ItemKey: "w:1:3", WorkKey: "w", Season: 1, Episode: 3, CandidateID: 10, Mode: "auto", Revision: 4, ExportedRevision: 4, RelativePath: "tv/next.strm", Title: "Title", Valid: true})
+					domain.ShareSelection{SourceKind: "share", ItemKey: "w:1:2", WorkKey: "w", Season: 1, Episode: 2, CandidateID: 9, Mode: "manual", Revision: 3, ExportedRevision: 2, RelativePath: "tv/ep.strm", Title: "Title", Valid: false},
+					domain.ShareSelection{SourceKind: "share", ItemKey: "w:1:3", WorkKey: "w", Season: 1, Episode: 3, CandidateID: 10, Mode: "auto", Revision: 4, ExportedRevision: 4, RelativePath: "tv/next.strm", Title: "Title", Valid: true})
 			}
 			mock.ExpectQuery(expectedSelectionListSQL(scenario.query.Cursor)).WithArgs(scenario.args...).WillReturnRows(rows).RowsWillBeClosed()
 			mock.ExpectCommit()
@@ -172,11 +172,11 @@ func TestSelectionListFailures(test *testing.T) {
 					} else {
 						rows := selectionListMockRows()
 						if stage == "scan" {
-							rows.AddRow("first", "work", 0, 0, 1, "auto", 1, 0, "first.strm", "title", true).
-								AddRow("key", "work", "not an integer", 0, 1, "auto", 1, 0, "", "title", true)
+							rows.AddRow("first", "work", 0, 0, 1, "auto", 1, 0, "first.strm", "share", "", "title", true).
+								AddRow("key", "work", "not an integer", 0, 1, "auto", 1, 0, "", "share", "", "title", true)
 						} else if stage == "rows" {
-							rows.AddRow("first", "work", 0, 0, 1, "auto", 1, 0, "first.strm", "title", true).
-								AddRow("key", "work", 0, 1, 1, "auto", 1, 0, "", "title", true).RowError(1, failure)
+							rows.AddRow("first", "work", 0, 0, 1, "auto", 1, 0, "first.strm", "share", "", "title", true).
+								AddRow("key", "work", 0, 1, 1, "auto", 1, 0, "", "share", "", "title", true).RowError(1, failure)
 						} else if stage == "close" {
 							rows.CloseError(failure)
 						}

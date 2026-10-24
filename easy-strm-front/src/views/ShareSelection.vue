@@ -1,6 +1,6 @@
 <template>
   <section class="selection-page">
-    <n-space justify="space-between" align="center"><div><h2>STRM 来源选择</h2><p>逐条选择电影或季集的播放来源；改选在下一次导出生效，文件路径不变。</p></div><n-button :loading="refreshing" @click="refresh">刷新应用库候选</n-button></n-space>
+    <n-space justify="space-between" align="center"><div><h2>STRM 来源选择</h2><p>逐条选择电影或季集的播放来源；改选后尝试立即重建，未启动时保持待应用，文件路径不变。</p></div><n-button :loading="refreshing" @click="refresh">刷新应用库候选</n-button></n-space>
     <n-alert type="info">首次默认使用最先持久发现的来源。手选不可用时保留旧文件并报错，不会自动换源。增量缺少可信基线时，请到定时任务显式执行“分享库 STRM 全量对账”。</n-alert>
     <n-card class="selection-search"><n-space><n-input v-model:value="keyword" placeholder="搜索标题或媒体键" clearable @keyup.enter="search" /><n-button @click="search">搜索</n-button></n-space></n-card>
     <n-alert v-if="listError" type="error">{{ listError }} <n-button text @click="() => load()">重试</n-button></n-alert>
@@ -11,14 +11,14 @@
         <n-alert v-if="detailError" type="error">{{ detailError }} <n-button text @click="open(activeKey)">刷新详情</n-button></n-alert>
         <template v-if="detail">
           <h3>{{ detail.selection.title }} · {{ episodeLabel(detail.selection) }}</h3>
-          <p>当前来源 #{{ detail.selection.selected_candidate_id }} · {{ detail.selection.selection_mode === 'manual' ? '手动粘性选择' : '自动持久选择' }} · 版本 {{ detail.selection.selection_revision }}</p>
+          <p>当前来源 {{ sourceLabel(detail.selection) }} · {{ detail.selection.selection_mode === 'manual' ? '手动粘性选择' : '自动持久选择' }} · 版本 {{ detail.selection.selection_revision }}</p>
           <p>输出相对路径：{{ detail.selection.stable_relative_path || '首次成功导出后固定' }}</p>
           <n-alert v-if="!detail.selection.valid" type="warning">选定来源失效，原 STRM 文件保持不变。请明确选择有效候选。</n-alert>
           <n-alert v-if="detail.selection.selection_revision > detail.selection.exported_revision" type="warning">
             来源已改选，尚未应用（已导出版本 {{ detail.selection.exported_revision }}）
             <n-button size="tiny" style="margin-left: 8px" :loading="applying" @click="applySelection">立即应用</n-button>
           </n-alert>
-          <n-data-table :columns="candidateColumns" :data="detail.candidates" :row-key="row => row.candidate_id" :scroll-x="800" />
+          <n-data-table :columns="candidateColumns" :data="detail.candidates" :row-key="candidateKey" :scroll-x="1000" />
         </template>
       </n-spin>
     </n-modal>
@@ -27,7 +27,7 @@
 
 <script setup>
 import { computed, h, onMounted, onBeforeUnmount, ref } from 'vue'
-import { NAlert, NButton, NCard, NDataTable, NInput, NModal, NPagination, NSpace, NSpin, useDialog, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NDataTable, NInput, NModal, NPagination, NSpace, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
 import { listShareSelections, getShareSelectionDetail, changeShareSelection, refreshShareSelections, applyShareSelection } from '../utils/api/share-selection'
 import { createActionTrace } from '../utils/ui/action-trace'
 
@@ -38,23 +38,28 @@ const activeKey = ref(''), detail = ref(null), detailLoading = ref(false), detai
 let listRevision = 0, detailRevision = 0
 const errorText = error => error.response?.data?.error || error.response?.data?.message || error.message || '请求失败'
 const episodeLabel = row => row.season_number === 0 && row.episode_number === 0 ? '电影' : `S${String(row.season_number).padStart(2, '0')}E${String(row.episode_number).padStart(2, '0')}`
+const candidateKey = row => row.source_kind === 'strm115' ? `strm115:${row.external_ref}` : `share:${row.candidate_id ?? row.selected_candidate_id}`
+const sourceLabel = row => row.source_kind === 'strm115' ? `115目录 ${row.external_ref}` : `#${row.selected_candidate_id}`
+const sourceBadge = row => h(NTag, { type: row.source_kind === 'strm115' ? 'info' : 'success', size: 'small' }, { default: () => row.source_kind === 'strm115' ? '115目录' : '分享库' })
 const columns = [
   { title: '作品', key: 'title', minWidth: 200 },
   { title: '季集', key: 'episode_number', render: episodeLabel },
-  { title: '选定来源', key: 'selected_candidate_id', render: row => `#${row.selected_candidate_id} · ${row.selection_mode === 'manual' ? '手动' : '自动'}` },
+  { title: '选定来源', key: 'selected_candidate_id', render: row => h(NSpace, { align: 'center' }, { default: () => [sourceBadge(row), `${sourceLabel(row)} · ${row.selection_mode === 'manual' ? '手动' : '自动'}`] }) },
   { title: '状态', key: 'valid', render: row => !row.valid ? '来源失效 · 保留旧文件' : row.selection_revision > row.exported_revision ? '待应用' : '已应用' },
   { title: '操作', key: 'actions', fixed: 'right', width: 120, render: row => h(NButton, { onClick: () => open(row.media_item_key) }, { default: () => '查看候选' }) }
 ]
 const candidateColumns = computed(() => {
   const changing = changingID.value
-  const selected = detail.value?.selection.selected_candidate_id
+  const selected = detail.value ? candidateKey(detail.value.selection) : ''
   return [
-  { title: '分享来源', key: 'share_name', minWidth: 150 },
+  { title: '类型', key: 'source_kind', width: 90, render: sourceBadge },
+  { title: '来源', key: 'share_name', minWidth: 150, render: row => row.source_kind === 'strm115' ? `cloud115_id=${row.cloud115_id}` : row.share_name },
   { title: '文件', key: 'file_name', minWidth: 200, ellipsis: { tooltip: true } },
+  { title: '云端路径', key: 'cloud_path', width: 220, ellipsis: { tooltip: true }, render: row => row.cloud_path || '—' },
   { title: '大小', key: 'file_size', render: row => `${(row.file_size / 1024 ** 3).toFixed(2)} GB` },
   { title: '发现顺序', key: 'first_seen_seq' },
   { title: '状态', key: 'available', render: row => row.revoked ? '识别映射已撤销' : row.available ? '可用' : '不可用' },
-  { title: '操作', key: 'actions', fixed: 'right', width: 150, render: row => h(NButton, { disabled: !row.available || row.revoked || changing !== null, loading: changing === row.candidate_id, onClick: () => confirmChange(row) }, { default: () => row.candidate_id === selected ? '选定 · 设为手动' : '选择此来源' }) }
+  { title: '操作', key: 'actions', fixed: 'right', width: 150, render: row => h(NButton, { disabled: !row.available || row.revoked || changing !== null, loading: changing === candidateKey(row), onClick: () => confirmChange(row) }, { default: () => candidateKey(row) === selected ? '选定 · 设为手动' : '选择此来源' }) }
   ]
 })
 async function load(traceId = createActionTrace()) {
@@ -73,19 +78,22 @@ async function refresh() {
   finally { refreshing.value = false }
 }
 async function open(key, traceId = createActionTrace()) {
+  stopSelectionRefresh()
   activeKey.value = key; detail.value = null; detailError.value = ''; detailLoading.value = true
   const revision = ++detailRevision
   try { const response = await getShareSelectionDetail(key, traceId); if (revision === detailRevision) detail.value = response.data.data }
   catch (error) { if (revision === detailRevision) detailError.value = errorText(error) }
   finally { if (revision === detailRevision) detailLoading.value = false }
 }
-function close() { detailRevision++; activeKey.value = ''; detail.value = null; detailLoading.value = false; detailError.value = '' }
+function close() { stopSelectionRefresh(); detailRevision++; activeKey.value = ''; detail.value = null; detailLoading.value = false; detailError.value = '' }
 function confirmChange(row) {
   const selection = detail.value.selection
-  dialog.warning({ title: '确认改选来源', content: `将 ${selection.title} ${episodeLabel(selection)} 改为 ${row.share_name} 的 ${row.file_name}。将立即重建该作品的 STRM，路径保持不变。`, positiveText: '确认改选', negativeText: '取消', onPositiveClick: async () => {
+  dialog.warning({ title: '确认改选来源', content: `将 ${selection.title} ${episodeLabel(selection)} 改为 ${row.source_kind === 'strm115' ? '115目录' : row.share_name} 的 ${row.file_name}。将立即重建该作品的 STRM，路径保持不变。`, positiveText: '确认改选', negativeText: '取消', onPositiveClick: async () => {
     const traceId = createActionTrace()
-    changingID.value = row.candidate_id
-    try { const res = await changeShareSelection({ media_item_key: selection.media_item_key, candidate_id: row.candidate_id, expected_revision: selection.selection_revision }, traceId); const taskId = res?.data?.data?.task_id; message.success(taskId ? '改选已保存，正在立即重建该作品的 STRM' : '改选已保存，等待后台导出应用'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId); if (taskId) scheduleSelectionRefresh(selection.media_item_key, traceId) }
+    stopSelectionRefresh()
+    changingID.value = candidateKey(row)
+    const source = row.source_kind === 'strm115' ? { source_kind: 'strm115', external_ref: row.external_ref } : { source_kind: 'share', candidate_id: row.candidate_id }
+    try { const res = await changeShareSelection({ media_item_key: selection.media_item_key, ...source, expected_revision: selection.selection_revision }, traceId); const taskId = res?.data?.data?.task_id; message.success(taskId ? '改选已保存，正在立即重建该作品的 STRM' : '改选已保存，等待后台导出应用'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId); if (taskId && activeKey.value === selection.media_item_key) scheduleSelectionRefresh(selection.media_item_key, traceId) }
     catch (error) { message.error(errorText(error)); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId) }
     finally { changingID.value = null }
   } })
@@ -94,24 +102,31 @@ function confirmChange(row) {
 const applying = ref(false)
 async function applySelection() {
   if (!detail.value?.selection?.media_item_key) return
+  const itemKey = detail.value.selection.media_item_key
   const traceId = createActionTrace()
+  stopSelectionRefresh()
+  const generation = refreshGeneration
   applying.value = true
   try {
-    const res = await applyShareSelection({ media_item_key: detail.value.selection.media_item_key }, traceId)
+    const res = await applyShareSelection({ media_item_key: itemKey }, traceId)
     const taskId = res?.data?.data?.task_id
     message.success(taskId ? '已开始重建该作品的 STRM' : '未启动重建，请稍后重试')
-    if (taskId) scheduleSelectionRefresh(detail.value.selection.media_item_key, traceId)
+    if (taskId && generation === refreshGeneration && activeKey.value === itemKey) scheduleSelectionRefresh(itemKey, traceId)
   } catch (error) { message.error(errorText(error)) }
   finally { applying.value = false }
 }
 
 // 改选后后台会立即重建该作品的 STRM，这里轮询已导出版本，完成后自动收起提示。
 const selectionRefreshTimers = new Set()
+let refreshGeneration = 0
+function stopSelectionRefresh() { refreshGeneration++; selectionRefreshTimers.forEach(clearTimeout); selectionRefreshTimers.clear() }
 function scheduleSelectionRefresh(key, traceId, attempt = 0) {
+  const generation = refreshGeneration
   const timer = setTimeout(async () => {
     selectionRefreshTimers.delete(timer)
     try {
       const response = await getShareSelectionDetail(key, traceId)
+      if (generation !== refreshGeneration || activeKey.value !== key) return
       const selection = response.data.data?.selection
       if (selection && selection.exported_revision >= selection.selection_revision) {
         if (activeKey.value === key) detail.value = response.data.data
@@ -119,7 +134,7 @@ function scheduleSelectionRefresh(key, traceId, attempt = 0) {
         return
       }
     } catch (error) { /* 重建期间详情可能短暂不可读，继续重试 */ }
-    if (attempt < 20) scheduleSelectionRefresh(key, traceId, attempt + 1)
+    if (generation === refreshGeneration && activeKey.value === key && attempt < 20) scheduleSelectionRefresh(key, traceId, attempt + 1)
   }, 3000)
   selectionRefreshTimers.add(timer)
 }

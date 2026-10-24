@@ -27,8 +27,8 @@ func TestShareWorkReexportDAOExactReadOnlyQueries(test *testing.T) {
 	if strings.Contains(shareWorkReexportSelectionsSQL, "m.work_key=s.work_key") || !strings.Contains(shareWorkReexportSelectionsSQL, "m.id=f.media_id") || !strings.Contains(shareWorkReexportSelectionsSQL, "WHERE s.work_key=$1") || !strings.Contains(shareWorkReexportSelectionsSQL, shareSelectionLivePredicate) {
 		test.Fatal("必须点查实际候选媒体并复用原有效成员谓词")
 	}
-	columns := []string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid", "source", "media"}
-	mock.ExpectQuery(regexp.QuoteMeta(shareWorkReexportSelectionsSQL)).WithArgs("tmdb:tv:1").WillReturnRows(sqlmock.NewRows(columns).AddRow("tmdb:tv:1:1:1", "tmdb:tv:1", 1, 1, 11, "manual", 3, 2, "tv/stable.strm", "标题", true, 7, 99))
+	columns := []string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "kind", "ref", "title", "valid", "source", "media"}
+	mock.ExpectQuery(regexp.QuoteMeta(shareWorkReexportSelectionsSQL)).WithArgs("tmdb:tv:1").WillReturnRows(sqlmock.NewRows(columns).AddRow("tmdb:tv:1:1:1", "tmdb:tv:1", 1, 1, 11, "manual", 3, 2, "tv/stable.strm", "share", "", "标题", true, 7, 99))
 	values, err := store.WorkReexportSelections(context.Background(), "tmdb:tv:1")
 	if err != nil || len(values) != 1 || values[0].MediaID != 99 || values[0].SourceID != 7 || values[0].Selection.CandidateID != 11 {
 		test.Fatalf("%+v %v", values, err)
@@ -38,7 +38,7 @@ func TestShareWorkReexportDAOExactReadOnlyQueries(test *testing.T) {
 	if _, err = store.WorkReexportSelections(context.Background(), "tmdb:tv:1"); !errors.Is(err, failure) {
 		test.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(shareWorkReexportSelectionsSQL)).WithArgs("tmdb:tv:1").WillReturnRows(sqlmock.NewRows(columns).AddRow("key", "work", 1, 1, 11, "manual", 3, 2, "path", "title", true, 7, 99).RowError(0, failure))
+	mock.ExpectQuery(regexp.QuoteMeta(shareWorkReexportSelectionsSQL)).WithArgs("tmdb:tv:1").WillReturnRows(sqlmock.NewRows(columns).AddRow("key", "work", 1, 1, 11, "manual", 3, 2, "path", "share", "", "title", true, 7, 99).RowError(0, failure))
 	if _, err = store.WorkReexportSelections(context.Background(), "tmdb:tv:1"); !errors.Is(err, failure) {
 		test.Fatal(err)
 	}

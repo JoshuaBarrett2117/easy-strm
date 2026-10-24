@@ -22,6 +22,7 @@ func expectSelectionPreparation(mock sqlmock.Sqlmock, work string) {
 		}
 		expect.WillReturnResult(sqlmock.NewResult(0, 1))
 	}
+	mock.ExpectQuery(regexp.QuoteMeta(selection115PreflightSQL)).WithArgs(work).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "ref", "kind"}))
 }
 
 func TestSelectionBatchReportsAllInvalidAndNeverUpdates(t *testing.T) {
@@ -163,7 +164,7 @@ func TestSelectionInternalCursorSkipsCountUIRetainsTotal(t *testing.T) {
 	database, mock, _ := sqlmock.New()
 	defer database.Close()
 	mock.ExpectBegin()
-	mock.ExpectQuery(regexp.QuoteMeta(expectedSelectionListSQL(true))).WithArgs("", 100, "work", 1, 2).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}))
+	mock.ExpectQuery(regexp.QuoteMeta(expectedSelectionListSQL(true))).WithArgs("", 100, "work", 1, 2).WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "kind", "ref", "title", "valid"}))
 	mock.ExpectCommit()
 	rows, total, err := NewShareRecordDAO(database).ListSelections(context.Background(), domain.ShareSelectionQuery{Cursor: true, SkipCount: true, PageSize: 100, AfterWork: "work", AfterSeason: 1, AfterEpisode: 2})
 	if err != nil || len(rows) != 0 || total != 0 {

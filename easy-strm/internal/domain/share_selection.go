@@ -2,6 +2,8 @@ package domain
 
 // ShareSelection 表示一个作品季集的持久选择，路径与来源无关。
 type ShareSelection struct {
+	SourceKind       string `json:"source_kind"`
+	ExternalRef      string `json:"external_ref"`
 	ItemKey          string `json:"media_item_key"`
 	WorkKey          string `json:"work_key"`
 	Season           int    `json:"season_number"`
@@ -17,16 +19,20 @@ type ShareSelection struct {
 
 // ShareCandidate 是不含播放地址和凭据的候选详情。
 type ShareCandidate struct {
-	ID        int64  `json:"candidate_id"`
-	SourceID  int    `json:"source_file_id"`
-	ShareID   int    `json:"share_id"`
-	ShareName string `json:"share_name"`
-	FileName  string `json:"file_name"`
-	FileSize  int64  `json:"file_size"`
-	FirstSeen int64  `json:"first_seen_seq"`
-	Available bool   `json:"available"`
-	State     string `json:"state"`
-	Revoked   bool   `json:"revoked"`
+	SourceKind  string `json:"source_kind"`
+	ExternalRef string `json:"external_ref"`
+	CloudPath   string `json:"cloud_path,omitempty"`
+	Cloud115ID  int    `json:"cloud115_id"`
+	ID          int64  `json:"candidate_id"`
+	SourceID    int    `json:"source_file_id"`
+	ShareID     int    `json:"share_id"`
+	ShareName   string `json:"share_name"`
+	FileName    string `json:"file_name"`
+	FileSize    int64  `json:"file_size"`
+	FirstSeen   int64  `json:"first_seen_seq"`
+	Available   bool   `json:"available"`
+	State       string `json:"state"`
+	Revoked     bool   `json:"revoked"`
 }
 
 // ShareSelectionDetail 返回选择和全部成员候选，包括失效的原手选。
@@ -50,6 +56,8 @@ type ShareSelectionQuery struct {
 // ShareSelectionChange 使用版本 CAS，改选仅影响下一次导出。
 type ShareSelectionChange struct {
 	ItemKey          string `json:"media_item_key" binding:"required"`
-	CandidateID      int64  `json:"candidate_id" binding:"required,gt=0"`
+	CandidateID      int64  `json:"candidate_id"`
+	SourceKind       string `json:"source_kind"`
+	ExternalRef      string `json:"external_ref"`
 	ExpectedRevision int64  `json:"expected_revision" binding:"required,gt=0"`
 }

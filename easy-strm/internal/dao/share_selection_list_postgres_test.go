@@ -57,7 +57,8 @@ UPDATE t_share_export_candidate_item SET revoked=NULL WHERE candidate_id=21;
 UPDATE t_share_export_candidate SET available=NULL WHERE candidate_id=22;
 UPDATE t_share_media_file SET available=NULL WHERE id=23;
 UPDATE t_share_record SET share_cancelled=NULL WHERE id=24;
-UPDATE t_share_media SET work_key=NULL WHERE id=25;`
+UPDATE t_share_media SET work_key=NULL WHERE id=25;
+ALTER TABLE t_share_media_selection ADD COLUMN source_kind text NOT NULL DEFAULT 'share', ADD COLUMN external_ref text NOT NULL DEFAULT '';`
 
 type selectionSnapshotConnector struct {
 	driver.Connector
@@ -119,7 +120,7 @@ func frozenSelectionList(ctx context.Context, transaction *sql.Tx, query domain.
 	values := []domain.ShareSelection{}
 	for rows.Next() {
 		var value domain.ShareSelection
-		if err := rows.Scan(&value.ItemKey, &value.WorkKey, &value.Season, &value.Episode, &value.CandidateID, &value.Mode, &value.Revision, &value.ExportedRevision, &value.RelativePath, &value.Title, &value.Valid); err != nil {
+		if err := rows.Scan(&value.ItemKey, &value.WorkKey, &value.Season, &value.Episode, &value.CandidateID, &value.Mode, &value.Revision, &value.ExportedRevision, &value.RelativePath, &value.SourceKind, &value.ExternalRef, &value.Title, &value.Valid); err != nil {
 			return nil, 0, err
 		}
 		values = append(values, value)

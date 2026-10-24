@@ -52,11 +52,15 @@ func (c *ShareSelectionController) Detail(ctx *gin.Context) {
 	SuccessResp(ctx, value)
 }
 
-// Change 以 CAS 改选，下次导出生效，不立即触碰输出。
+// Change 以 CAS 保存改选并返回立即重建或待应用状态，控制器不写文件。
 func (c *ShareSelectionController) Change(ctx *gin.Context) {
 	var change domain.ShareSelectionChange
 	if ctx.ShouldBindJSON(&change) != nil {
 		ErrorResp(ctx, 400, "候选或版本参数无效")
+		return
+	}
+	if err := domain.ValidateShareSelectionChange(&change); err != nil {
+		ErrorResp(ctx, 400, err.Error())
 		return
 	}
 	taskID, err := c.service.Change(ctx.Request.Context(), change)
@@ -65,7 +69,7 @@ func (c *ShareSelectionController) Change(ctx *gin.Context) {
 		return
 	}
 	// 改选已在后台立即重建该作品，不再提示“下次导出生效”。
-	SuccessResp(ctx, gin.H{"next_export": false, "immediate": taskID != "", "task_id": taskID})
+	SuccessResp(ctx, gin.H{"next_export": taskID == "", "immediate": taskID != "", "task_id": taskID})
 }
 
 // Apply 对历史待应用改选立即触发单作品重建。

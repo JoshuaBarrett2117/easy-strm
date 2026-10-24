@@ -22,7 +22,7 @@ func TestSelectionResolveStickyAndFallback(t *testing.T) {
 			if scenario == "valid-manual" || scenario == "invalid-manual" {
 				mode = "manual"
 			}
-			mock.ExpectQuery("SELECT s.media_item_key").WithArgs("work:0:0").WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "title", "valid"}).AddRow("work:0:0", "work", 0, 0, 7, mode, 3, 2, "fixed.strm", "film", valid))
+			mock.ExpectQuery("SELECT s.media_item_key").WithArgs("work:0:0").WillReturnRows(sqlmock.NewRows([]string{"key", "work", "season", "episode", "candidate", "mode", "revision", "exported", "path", "kind", "ref", "title", "valid"}).AddRow("work:0:0", "work", 0, 0, 7, mode, 3, 2, "fixed.strm", "share", "", "film", valid))
 			if !valid && mode == "auto" {
 				rows := sqlmock.NewRows([]string{"candidate"})
 				if scenario == "fallback" {

@@ -76,7 +76,7 @@ easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用
 
 #### 本地参考来源与范围
 
-参考根目录：`/volume1/docker_project_data/hermes-agent/cache/scratch/refs/`，仅阅读本地文件，不复制其凭据透传、原始 URL 日志或宽松 IP 判断。
+参考根目录：`/opt/data/hermes-home/cache/scratch/refs/`，仅阅读本地文件，不复制其凭据透传、原始 URL 日志或宽松 IP 判断。
 
 - `go-emby2openlist`（本地 HEAD `9b049b8`）：`internal/service/emby/redirect.go`、`media.go` 及 `internal/web/cache/cache.go`，对比 10 分钟直链缓存、易变参数、STRM 和媒体源选择；其异步 PlaybackInfo 行为不在本次实现。
 - `MediaRelay`（本地 HEAD `fce33e1`）：`apps/server/main.ts`、`packages/emby/client.ts`、`packages/shared/rule-matcher.ts`，对比 LRU、302 头、缺失链接回源及 UA/IP 规则；本实现使用回显 Origin + 凭据，不使用通配符 CORS，也不增加规则引擎。

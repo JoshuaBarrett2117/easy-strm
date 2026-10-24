@@ -188,6 +188,11 @@ func (s *StrmOutput) Write(ctx context.Context, key, p, content, mapping, playba
 	if e = s.Store.Reserve(ctx, s.Owner, p); e != nil {
 		return false, e
 	}
+	if guard, ok := ctx.Value(selectionPublishGuardContext{}).(func(context.Context) error); ok {
+		if e = guard(ctx); e != nil {
+			return false, e
+		}
+	}
 	if changed {
 		if e = writeShareStrm(p, strings.TrimSuffix(content, "\n")); e != nil {
 			return false, e

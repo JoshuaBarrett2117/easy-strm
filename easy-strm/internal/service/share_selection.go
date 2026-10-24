@@ -56,14 +56,23 @@ func (s *ShareSelectionService) Detail(ctx context.Context, key string) (domain.
 	if strings.TrimSpace(key) == "" || len(key) > 2000 {
 		return domain.ShareSelectionDetail{}, fmt.Errorf("媒体键无效")
 	}
+	if err := s.store.CheckSelectionSchema(ctx); err != nil {
+		return domain.ShareSelectionDetail{}, err
+	}
 	return s.store.SelectionDetail(ctx, key)
 }
 
 // Change 手选使用显式版本，事务成功后在当前进程立即重建该作品的 STRM，
 // 不再等待下一次定时或全量导出；重建失败只记录日志，改选本身仍然生效。
 func (s *ShareSelectionService) Change(ctx context.Context, change domain.ShareSelectionChange) (string, error) {
-	if strings.TrimSpace(change.ItemKey) == "" || len(change.ItemKey) > 2000 || change.CandidateID <= 0 || change.ExpectedRevision <= 0 {
+	if strings.TrimSpace(change.ItemKey) == "" || len(change.ItemKey) > 2000 || change.ExpectedRevision <= 0 {
 		return "", fmt.Errorf("改选参数无效")
+	}
+	if err := domain.ValidateShareSelectionChange(&change); err != nil {
+		return "", err
+	}
+	if err := s.store.CheckSelectionSchema(ctx); err != nil {
+		return "", err
 	}
 	work, err := s.store.ChangeSelection(ctx, change)
 	if err != nil {
@@ -90,6 +99,9 @@ func (s *ShareSelectionService) Apply(ctx context.Context, itemKey string) (stri
 	}
 	if s.applyNow == nil {
 		return "", fmt.Errorf("立即重建未启用")
+	}
+	if err := s.store.CheckSelectionSchema(ctx); err != nil {
+		return "", err
 	}
 	detail, err := s.store.SelectionDetail(ctx, itemKey)
 	if err != nil {

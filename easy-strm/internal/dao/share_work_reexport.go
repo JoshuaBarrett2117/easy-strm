@@ -27,17 +27,31 @@ func (store *ShareRecordDAO) WorkReexportSelections(ctx context.Context, work st
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	values := []domain.ShareWorkReexportSelection{}
 	for rows.Next() {
 		var value domain.ShareWorkReexportSelection
 		selection := &value.Selection
-		if err = rows.Scan(&selection.ItemKey, &selection.WorkKey, &selection.Season, &selection.Episode, &selection.CandidateID, &selection.Mode, &selection.Revision, &selection.ExportedRevision, &selection.RelativePath, &selection.Title, &selection.Valid, &value.SourceID, &value.MediaID); err != nil {
+		var candidate sql.NullInt64
+		if err = rows.Scan(&selection.ItemKey, &selection.WorkKey, &selection.Season, &selection.Episode, &candidate, &selection.Mode, &selection.Revision, &selection.ExportedRevision, &selection.RelativePath, &selection.SourceKind, &selection.ExternalRef, &selection.Title, &selection.Valid, &value.SourceID, &value.MediaID); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		selection.CandidateID = candidate.Int64
 		values = append(values, value)
 	}
-	return values, rows.Err()
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range values {
+		if values[index].Selection.SourceKind == "strm115" {
+			return nil, domain.ErrStrm115MetadataUnsupported
+		}
+	}
+	return values, nil
 }
 
 // WorkReexportGlobalInvalid 原样复用采纳计数 SQL，只读返回全局 invalid，不修改任何采纳护栏或检查点。
@@ -124,6 +138,9 @@ func workReexportPreflight(ctx context.Context, query workReexportQuery, root st
 	itemMappings := make([]string, len(entries))
 	for index, entry := range entries {
 		selection := selections[index]
+		if selection.SourceKind == "strm115" {
+			return domain.ErrStrm115MetadataUnsupported
+		}
 		if entry.ID == "" || entry.MediaID <= 0 || selection.ItemKey == "" || selection.RelativePath == "" {
 			return fmt.Errorf("映射范围预检目标不完整")
 		}

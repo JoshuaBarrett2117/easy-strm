@@ -4,7 +4,30 @@ import (
 	"context"
 	"database/sql"
 	"easy-strm/internal/domain"
+	"errors"
+	"time"
 )
+
+// LockSelectionPublication 按输出路径锁之后获取会话级选择锁，保护目录发布与凭证免受并发改选。
+func (d *StrmExportDAO) LockSelectionPublication(ctx context.Context) (func() error, error) {
+	lockCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := d.Conn.ExecContext(lockCtx, `SELECT pg_advisory_lock(34983,1)`); err != nil {
+		d.Close()
+		return nil, err
+	}
+	return func() error {
+		unlockCtx, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer stop()
+		var unlocked bool
+		err := d.Conn.QueryRowContext(unlockCtx, `SELECT pg_advisory_unlock(34983,1)`).Scan(&unlocked)
+		if err != nil || !unlocked {
+			d.Close()
+			return errors.Join(ErrShareExportChanged, err)
+		}
+		return nil
+	}, nil
+}
 
 // ResolveSelection 保持有效选择，手选失效报错；仅 auto 失效时按确定性候补重选。
 func (d *ShareRecordDAO) ResolveSelection(ctx context.Context, key string) (domain.ShareSelection, int, error) {
@@ -19,6 +42,17 @@ func (d *ShareRecordDAO) ResolveSelection(ctx context.Context, key string) (doma
 	selection, err := scanShareSelection(transaction.QueryRowContext(ctx, `SELECT `+shareSelectionColumns+shareSelectionFrom+` WHERE s.media_item_key=$1 FOR UPDATE OF s`, key))
 	if err != nil {
 		return selection, 0, err
+	}
+	if selection.SourceKind == "strm115" {
+		_, err = selection115Candidate(ctx, transaction, selection)
+		if err != nil {
+			return selection, 0, err
+		}
+		selection.Valid = true
+		return selection, 0, transaction.Commit()
+	}
+	if selection.SourceKind != "share" {
+		return selection, 0, ErrShareSelectionUnavailable
 	}
 	if !selection.Valid {
 		if selection.Mode == "manual" {
@@ -91,6 +125,15 @@ func (d *StrmExportDAO) SaveSelectionExport(ctx context.Context, state ExportSta
 	}
 	if stable != "" && stable != relative {
 		return ErrShareExportChanged
+	}
+	if selection.SourceKind == "strm115" {
+		var kind, ref string
+		if err = transaction.QueryRowContext(ctx, `SELECT source_kind,external_ref FROM t_share_media_selection WHERE media_item_key=$1`, selection.ItemKey).Scan(&kind, &ref); err != nil {
+			return err
+		}
+		if revision != selection.Revision || kind != selection.SourceKind || ref != selection.ExternalRef {
+			return ErrShareExportChanged
+		}
 	}
 	if err = saveStrmExportState(ctx, transaction, state); err != nil {
 		return err

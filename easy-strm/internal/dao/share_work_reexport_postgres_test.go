@@ -25,6 +25,7 @@ CREATE TEMP TABLE t_share_media_file_episode(file_id integer REFERENCES t_share_
 CREATE TEMP TABLE t_share_export_candidate(candidate_id bigint PRIMARY KEY,source_file_id integer UNIQUE REFERENCES t_share_media_file(id),available boolean NOT NULL DEFAULT true,state text NOT NULL DEFAULT 'active');
 CREATE TEMP TABLE t_share_export_candidate_item(candidate_id bigint REFERENCES t_share_export_candidate(candidate_id),work_key text NOT NULL CHECK(work_key<>''),season_number integer NOT NULL CHECK(season_number>=0),episode_number integer NOT NULL CHECK(episode_number>=0),revoked boolean NOT NULL DEFAULT false,PRIMARY KEY(candidate_id,work_key,season_number,episode_number));
 CREATE TEMP TABLE t_share_media_selection(work_key text NOT NULL CONSTRAINT reexport_nonempty_work CHECK(work_key<>''),season_number integer NOT NULL CHECK(season_number>=0),episode_number integer NOT NULL CHECK(episode_number>=0),media_item_key text GENERATED ALWAYS AS (work_key||':'||season_number||':'||episode_number) STORED PRIMARY KEY,selected_candidate_id bigint NOT NULL,selection_mode text NOT NULL DEFAULT 'auto' CHECK(selection_mode IN ('auto','manual')),selection_revision bigint NOT NULL DEFAULT 1 CHECK(selection_revision>=1),exported_revision bigint NOT NULL DEFAULT 0 CHECK(exported_revision>=0 AND exported_revision<=selection_revision),stable_relative_path text NOT NULL DEFAULT '',updated_at timestamptz NOT NULL DEFAULT now(),CONSTRAINT reexport_member FOREIGN KEY(selected_candidate_id,work_key,season_number,episode_number) REFERENCES t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number));
+ALTER TABLE t_share_media_selection ADD COLUMN source_kind text NOT NULL DEFAULT 'share', ADD COLUMN external_ref text NOT NULL DEFAULT '';
 CREATE INDEX ON t_share_media_selection(stable_relative_path);
 CREATE TEMP TABLE t_strm_export_state(owner_key text NOT NULL,export_key text NOT NULL,output_path text NOT NULL,content_fingerprint text NOT NULL DEFAULT '',mapping_fingerprint text NOT NULL DEFAULT '',share_strm_id text,state text NOT NULL DEFAULT 'active',last_seen_run_id text NOT NULL DEFAULT '',exported_at timestamptz,PRIMARY KEY(owner_key,export_key));
 CREATE UNIQUE INDEX ON t_strm_export_state(output_path) WHERE state='active';
@@ -78,7 +79,7 @@ func newWorkReexportPostgresFixture(test *testing.T, database *sql.DB) *workReex
 		for rows.Next() {
 			var value domain.ShareWorkReexportSelection
 			selection := &value.Selection
-			if err = rows.Scan(&selection.ItemKey, &selection.WorkKey, &selection.Season, &selection.Episode, &selection.CandidateID, &selection.Mode, &selection.Revision, &selection.ExportedRevision, &selection.RelativePath, &selection.Title, &selection.Valid, &value.SourceID, &value.MediaID); err != nil {
+			if err = rows.Scan(&selection.ItemKey, &selection.WorkKey, &selection.Season, &selection.Episode, &selection.CandidateID, &selection.Mode, &selection.Revision, &selection.ExportedRevision, &selection.RelativePath, &selection.SourceKind, &selection.ExternalRef, &selection.Title, &selection.Valid, &value.SourceID, &value.MediaID); err != nil {
 				test.Fatal(err)
 			}
 			if !selection.Valid {

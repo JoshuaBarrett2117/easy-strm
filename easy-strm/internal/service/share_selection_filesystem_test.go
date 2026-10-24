@@ -68,6 +68,9 @@ func (store *selectedFilesystemStore) GetStrmSource(_ context.Context, id int) (
 func expectSelectedFile(t *testing.T, mock sqlmock.Sqlmock, selection domain.ShareSelection, own bool, foreign bool) {
 	t.Helper()
 	mock.ExpectQuery("SELECT pg_try_advisory_lock").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
+	if selection.SourceKind == "strm115" {
+		mock.ExpectExec("SELECT pg_advisory_lock\\(34983,1\\)").WillReturnResult(sqlmock.NewResult(0, 1))
+	}
 	mock.ExpectQuery("SELECT pg_try_advisory_lock").WillReturnRows(sqlmock.NewRows([]string{"ok"}).AddRow(true))
 	rows := sqlmock.NewRows([]string{"owner", "key"})
 	if own {
@@ -82,12 +85,18 @@ func expectSelectedFile(t *testing.T, mock sqlmock.Sqlmock, selection domain.Sha
 		mock.ExpectBegin()
 		mock.ExpectExec("SELECT pg_advisory_xact_lock").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectQuery("SELECT selection_revision,stable_relative_path").WillReturnRows(sqlmock.NewRows([]string{"revision", "path"}).AddRow(selection.Revision, selection.RelativePath))
+		if selection.SourceKind == "strm115" {
+			mock.ExpectQuery("SELECT source_kind,external_ref").WillReturnRows(sqlmock.NewRows([]string{"kind", "ref"}).AddRow(selection.SourceKind, selection.ExternalRef))
+		}
 		mock.ExpectExec("INSERT INTO t_strm_export_history SELECT").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec("INSERT INTO t_strm_export_state").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec("UPDATE t_share_media_selection SET stable_relative_path").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectCommit()
 	}
 	mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(sqlmock.NewResult(0, 1))
+	if selection.SourceKind == "strm115" {
+		mock.ExpectQuery("SELECT pg_advisory_unlock\\(34983,1\\)").WillReturnRows(sqlmock.NewRows([]string{"unlocked"}).AddRow(true))
+	}
 	mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(sqlmock.NewResult(0, 1))
 }
 

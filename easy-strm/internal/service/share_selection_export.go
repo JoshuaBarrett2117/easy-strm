@@ -90,7 +90,14 @@ func (s *ShareStrmService) exportLocalStrm(ctx context.Context, cfg domain.Share
 		if err != nil {
 			return strmExportResult{Written: result.Written, Err: err}
 		}
-		chosen, err := store.GetStrmSource(ctx, sourceID)
+		chosen := source
+		switch selection.SourceKind {
+		case "", "share":
+			chosen, err = store.GetStrmSource(ctx, sourceID)
+		case "strm115":
+		default:
+			err = fmt.Errorf("未知来源类型：%s", selection.SourceKind)
+		}
 		if err != nil {
 			return strmExportResult{Written: result.Written, Err: err}
 		}
