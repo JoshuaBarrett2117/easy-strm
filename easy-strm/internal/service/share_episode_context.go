@@ -11,6 +11,17 @@ import (
 	"easy-strm/internal/domain"
 )
 
+const shareSpecialEpisodeSkipReason = "特辑跳过：文件包含明确的第0集，当前不支持保存"
+
+func hasShareZeroEpisode(parsed *ParsedFilename) bool {
+	for _, episode := range parsed.Episodes {
+		if episode == 0 {
+			return true
+		}
+	}
+	return false
+}
+
 var shareBareEpisodeRE = regexp.MustCompile(`^(.+?)[ ._]*-[ ._]*([0-9]{1,3})$`)
 var shareDirectorySeasonRE = regexp.MustCompile(`(?i)(?:\bS|\bSeason[ ._-]*|第)([0-9]{1,2})(?:季|\b)`)
 

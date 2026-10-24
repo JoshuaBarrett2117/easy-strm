@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -429,6 +430,37 @@ func TestPreviewRename_锟斤拷模锟斤拷时使锟斤拷系统锟斤拷锟斤
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("未锟斤拷锟斤拷锟斤拷锟斤拷锟? %v", err)
+	}
+}
+
+// TestPreviewRenameZeroEpisodeCorrection 验证普通重命名保留零集，并允许明确正集覆盖发布编号。
+func TestPreviewRenameZeroEpisodeCorrection(t *testing.T) {
+	for _, episode := range []int{0, 3} {
+		t.Run(fmt.Sprintf("episode_%d", episode), func(t *testing.T) {
+			mock, cleanup := setupServiceMockDB(t)
+			defer cleanup()
+			root := t.TempDir()
+			now := time.Now()
+			expectMediaSourceByID(mock, 1, newMediaSourceRows().AddRow(1, "tv-source", domain.SourceTypeLocal, root, root, nil, 10, true, "", "all", "auto", "skip", "move", false, false, 0, "", now, now))
+			service := NewRenameService(NewMediaSourceService(dao.NewMediaSourceDAO(), nil), nil, nil, nil)
+			result, err := service.PreviewRename(&domain.RenamePreviewRequest{
+				SourceID: 1,
+				FileID:   "Show.Name.S01E00.mkv",
+				Title:    "Show Name",
+				Season:   1,
+				Episode:  episode,
+				Template: `{{ title }} - S{{ "%02d"|format(season|int) }}E{{ "%02d"|format(episode|int) }}`,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.MediaType != "tv" || result.Season != 1 || result.Episode != episode || result.NewName != fmt.Sprintf("Show Name - S01E%02d.mkv", episode) {
+				t.Fatalf("result=%+v", result)
+			}
+			if err := mock.ExpectationsWereMet(); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

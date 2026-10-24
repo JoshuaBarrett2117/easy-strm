@@ -78,7 +78,9 @@ func applyShareYearEvidence(q *ShareMediaQuery, filename string) {
 }
 
 func (s *TmdbService) enrichShareYearEvidence(ctx context.Context, q ShareMediaQuery, candidates []domain.TmdbSearchResult) (ShareMediaQuery, error) {
-	q.tvYears = map[string]shareTVYears{}
+	if q.tvYears == nil {
+		q.tvYears = map[string]shareTVYears{}
+	}
 	if q.Year == 0 && q.fileYear == 0 && q.SeasonYear == 0 && q.rangeStart == 0 {
 		return q, nil
 	}

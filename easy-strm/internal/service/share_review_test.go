@@ -16,6 +16,7 @@ func TestReviewManualSaveConflictAndEpisodes(t *testing.T) {
 		}
 		s := NewShareRecordService(dao.NewShareRecordDAO(db), nil, nil, nil)
 		m := domain.ShareMedia{ID: 9, ShareID: 7, Version: 2, FileName: "Show.S00E01E02.mkv", Result: &domain.TmdbIdentifyResult{TmdbID: 123, Title: "Show", MediaType: "tv"}}
+		mock.ExpectQuery("SELECT f.share_id,f.version,f.file_name").WithArgs(9).WillReturnRows(sqlmock.NewRows([]string{"share_id", "version", "file_name", "metadata_source", "status", "available", "media_type", "result", "episodes"}).AddRow(7, 2, m.FileName, "tmdb", "failed", true, "tv", nil, `[]`))
 		if s.ManualIdentify(context.Background(), m) == nil {
 			t.Fatal("missing episodes accepted")
 		}

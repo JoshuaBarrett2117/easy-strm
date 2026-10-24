@@ -57,7 +57,7 @@ func (s *TmdbService) analyzeShareQuery(filename, forcedType string) ShareMediaQ
 		q.Titles, q.Year = cleanShareTitles(strings.TrimSuffix(name, path.Ext(name)))
 	}
 	parsed := s.parseFilenameForMediaType(filename, forcedType)
-	if parsed.MediaType == "tv" && parsed.Episode > 0 && parsed.Title != "" {
+	if parsed.MediaType == "tv" && (parsed.Episode > 0 || len(parsed.Episodes) > 0) && parsed.Title != "" {
 		q.MediaType = "tv"
 		evidenceYear := q.Year
 		q.Titles, q.Year = cleanShareTitles(parsed.Title)
@@ -148,7 +148,7 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 	result.Filename = filename
 	parsed := s.parseFilenameForMediaType(filename, forcedType)
 	result.SeasonNumber, result.EpisodeNumber = parsed.Season, parsed.Episode
-	if result.Success && result.MediaType == "tv" && parsed.Episode > 0 {
+	if result.Success && result.MediaType == "tv" && (parsed.Episode > 0 || len(parsed.Episodes) > 0) {
 		q := s.analyzeShareQuery(filename, forcedType)
 		for _, title := range result.QueryAfterAI {
 			q.Titles = appendImportCandidate(q.Titles, title)
@@ -195,6 +195,15 @@ func (s *TmdbService) identifyShareWithAssist(ctx context.Context, filename, sou
 		if !found && result.Success {
 			result.Message += fmt.Sprintf("；作品已识别，季信息待核对（S%02d）", parsed.Season)
 		}
+	}
+	if result.MediaType == "tv" && hasShareZeroEpisode(parsed) {
+		message := shareSpecialEpisodeSkipReason
+		if !result.Success && result.Message != "" {
+			message += "；" + result.Message
+		}
+		result.Success = false
+		result.SeasonNumber, result.EpisodeNumber = parsed.Season, parsed.Episode
+		result.Message, result.FailureReason = message, message
 	}
 	if reused {
 		logger.Debugf("[ShareIdentify] 作品身份复用 | file=%q | title=%q | media_type=%s | tmdb_id=%d | season=%d | episode=%d | success=%v", filename, result.Title, result.MediaType, result.TmdbID, result.SeasonNumber, result.EpisodeNumber, result.Success)

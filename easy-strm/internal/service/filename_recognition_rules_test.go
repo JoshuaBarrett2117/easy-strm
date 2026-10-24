@@ -1,6 +1,7 @@
 package service
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -69,6 +70,28 @@ func TestFilenameRulesTightTitleAndCombinedEpisodes(t *testing.T) {
 		if p.Title != tt.title || p.Season != 1 || p.Episode != 1 || len(p.Episodes) != tt.count || p.Episodes[len(p.Episodes)-1] != tt.last {
 			t.Fatalf("%s: %+v", tt.name, p)
 		}
+	}
+}
+
+// TestFilenameRulesPreserveZeroEpisodes 验证普通文件名解析保留零集与混合集，不把缺失集号变为零集。
+func TestFilenameRulesPreserveZeroEpisodes(t *testing.T) {
+	service := NewTmdbService("", nil)
+	for _, test := range []struct {
+		filename string
+		episode  int
+		episodes []int
+	}{
+		{"Show.Name.S01E00.mkv", 0, []int{0}},
+		{"Show.Name.S01E00E01.mkv", 0, []int{0, 1}},
+		{"Show.Name.S01E01.mkv", 1, []int{1}},
+		{"Show.Name.mkv", 0, nil},
+	} {
+		t.Run(test.filename, func(t *testing.T) {
+			parsed := service.ParseFilename(test.filename)
+			if parsed.Episode != test.episode || !reflect.DeepEqual(parsed.Episodes, test.episodes) {
+				t.Fatalf("parsed=%+v want episodes=%v", parsed, test.episodes)
+			}
+		})
 	}
 }
 

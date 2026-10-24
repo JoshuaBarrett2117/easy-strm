@@ -113,6 +113,7 @@ func contextualShareTVInput(filename, forcedType string) string {
 	ext := path.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 	episode := 0
+	explicitSxe := false
 	if m := shareOnlyEpisode.FindStringSubmatch(name); m != nil {
 		value := m[1]
 		if value == "" {
@@ -121,10 +122,11 @@ func contextualShareTVInput(filename, forcedType string) string {
 		episode, _ = strconv.Atoi(value)
 	}
 	if m := shareOnlySxe.FindStringSubmatch(name); m != nil {
+		explicitSxe = true
 		season, _ = strconv.Atoi(m[1])
 		episode, _ = strconv.Atoi(m[2])
 	}
-	if episode > 0 {
+	if episode > 0 || explicitSxe {
 		return path.Join(path.Dir(normalized), fmtShareEpisode(title, season, episode)+ext)
 	}
 	// 仅拆分明确的画质后缀，避免把任意连续数字截成集号。
@@ -167,7 +169,7 @@ func fmtShareNumber(n int) string {
 }
 
 func applyShareTVContext(q *ShareMediaQuery, filename string, p *ParsedFilename) {
-	if q.MediaType != "tv" || p.Episode <= 0 {
+	if q.MediaType != "tv" || p.Episode <= 0 && len(p.Episodes) == 0 {
 		return
 	}
 	q.Season = p.Season
@@ -181,7 +183,7 @@ func applyShareTVContext(q *ShareMediaQuery, filename string, p *ParsedFilename)
 	if p.Season > 1 {
 		if seasonYear == 0 {
 			seasonYear = q.fileYear
-			if seasonYear == 0 && q.rangeStart == 0 {
+			if seasonYear == 0 && q.rangeStart == 0 && q.YearSource != "work_directory" {
 				seasonYear = q.Year
 			}
 		}
@@ -294,7 +296,17 @@ func (s *TmdbService) selectShareTVCandidate(ctx context.Context, q ShareMediaQu
 				return nil, err
 			}
 			// 季存在时还需详情核验其他具名季，不能仅凭指定季名称排除合法映射。
-			matched = err == nil
+			if err == nil {
+				detail, err := s.shareTVDetail(ctx, candidate.TmdbID)
+				if err != nil {
+					return nil, err
+				}
+				q, err = s.enrichShareYearEvidence(ctx, q, []domain.TmdbSearchResult{candidate})
+				if err != nil {
+					return nil, err
+				}
+				_, matched = shareSeasonEvidence(q, candidate, detail, aliases[key])
+			}
 		}
 		if matched {
 			relevant = append(relevant, candidate)

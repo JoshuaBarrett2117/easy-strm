@@ -223,15 +223,32 @@ func (s *ShareRecordService) ManualIdentifyWithCount(ctx context.Context, m doma
 	if m.ID <= 0 || m.Version <= 0 || m.Result == nil || (m.Result.MediaType != "movie" && m.Result.MediaType != "tv") || strings.TrimSpace(m.Result.Title) == "" || (m.Result.TmdbID == 0 && m.Result.MetadataID == "") {
 		return 0, fmt.Errorf("请选择有效的媒体搜索结果")
 	}
+	if m.Result.MediaType == "tv" && len(m.Episodes) == 0 && m.Result.EpisodeNumber <= 0 {
+		fresh, err := s.dao.FileCandidate(ctx, m.ID)
+		if err != nil {
+			return 0, err
+		}
+		if fresh.Version != m.Version || (m.ShareID > 0 && fresh.ShareID != m.ShareID) {
+			return 0, fmt.Errorf("媒体已更新或删除，请刷新后重试")
+		}
+		parser := s.tmdb
+		if parser == nil {
+			parser = &TmdbService{}
+		}
+		input := shareEpisodeInput(ctx, fresh.FileName, "tv")
+		if hasShareZeroEpisode(parser.parseFilenameForMediaType(input, "tv")) {
+			return 0, fmt.Errorf("%s", shareSpecialEpisodeSkipReason)
+		}
+	}
+	episodes, err := normalizeShareEpisodes(m.Result.MediaType, m.Episodes, m.Result.SeasonNumber, m.Result.EpisodeNumber)
+	if err != nil {
+		return 0, err
+	}
 	m.Result.Success = true
 	m.Result.Message = "手动识别"
 	m.Result.Filename = m.FileName
 	if s.tmdb != nil {
 		s.tmdb.EnsureIdentifyMetadata(m.Result)
-	}
-	episodes, err := normalizeShareEpisodes(m.Result.MediaType, m.Episodes, m.Result.SeasonNumber, m.Result.EpisodeNumber)
-	if err != nil {
-		return 0, err
 	}
 	// 手动核对表单填的季/集必须落到 result 上，否则列表与导出会显示成 0/0。
 	if m.Result.MediaType == "tv" && len(episodes) > 0 {
@@ -470,8 +487,11 @@ func normalizeShareEpisodes(mediaType string, explicit []domain.ShareEpisode, se
 	seen := make(map[domain.ShareEpisode]bool, len(items))
 	result := make([]domain.ShareEpisode, 0, len(items))
 	for _, item := range items {
-		if item.SeasonNumber < 0 || item.EpisodeNumber <= 0 {
+		if item.SeasonNumber < 0 || item.EpisodeNumber < 0 {
 			return nil, fmt.Errorf("季集信息无效")
+		}
+		if item.EpisodeNumber == 0 {
+			return nil, fmt.Errorf("%s", shareSpecialEpisodeSkipReason)
 		}
 		if !seen[item] {
 			seen[item] = true
@@ -1015,9 +1035,10 @@ func (s *ShareRecordService) ListReviewItems(ctx context.Context, statuses, keyw
 	for i := range result.Data {
 		item := &result.Data[i]
 		if s.tmdb != nil {
-			parsed := s.tmdb.ParseFilename(item.FileName)
+			input := shareEpisodeInput(ctx, item.FileName, item.MediaType)
+			parsed := s.tmdb.ParseFilename(input)
 			item.ParsedTitle, item.ParsedYear = parsed.Title, parsed.Year
-			if len(item.Episodes) == 0 && parsed.Episode > 0 {
+			if len(item.Episodes) == 0 && parsed.MediaType == "tv" && (parsed.Episode > 0 || len(parsed.Episodes) > 0) {
 				numbers := parsed.Episodes
 				if len(numbers) == 0 {
 					numbers = []int{parsed.Episode}

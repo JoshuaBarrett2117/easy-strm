@@ -295,7 +295,7 @@ func matchFilenameRecognitionRule(input string, rules []compiledFilenameRecognit
 		}
 		episode, _ := strconv.Atoi(values["episode"])
 		episodes := []int{}
-		if episode > 0 {
+		if values["episode"] != "" {
 			episodes = append(episodes, episode)
 		}
 		valid := true

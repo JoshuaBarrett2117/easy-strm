@@ -139,6 +139,7 @@ func cleanShareTitles(name string) ([]string, int) {
 
 // AnalyzeShareFilename 提取单个媒体的查询和类型；祖先仅用于剧集上下文或无名光盘。
 func AnalyzeShareFilename(filename string) ShareMediaQuery {
+	filename = contextualShareTVInput(filename, "")
 	segments := strings.Split(strings.ReplaceAll(filename, "\\", "/"), "/")
 	name := segments[len(segments)-1]
 	ext := strings.ToLower(path.Ext(name))
@@ -177,6 +178,9 @@ func AnalyzeShareFilename(filename string) ShareMediaQuery {
 					q.Year = year
 					q.YearFromDirectory = true
 					q.YearSource = "season_directory"
+					if _, isSeason := shareContextSeason(segments[i]); !isSeason && !shareDiscRE.MatchString(segments[i]) {
+						q.YearSource = "work_directory"
+					}
 					if fileYear > 0 && fileYear != year {
 						q.SeasonYear = fileYear
 					}
@@ -189,7 +193,13 @@ func AnalyzeShareFilename(filename string) ShareMediaQuery {
 	if q.MediaType == "tv" && q.YearSource == "season_directory" {
 		for i := len(segments) - 3; i >= 0; i-- {
 			titles, year := cleanShareTitles(segments[i])
-			if year > 0 && len(titles) > 0 && len(q.Titles) > 0 && canonicalShareTitle(titles[0]) == canonicalShareTitle(q.Titles[0]) {
+			matches := false
+			for _, title := range titles {
+				for _, queryTitle := range q.Titles {
+					matches = matches || canonicalShareTitle(title) == canonicalShareTitle(queryTitle)
+				}
+			}
+			if year > 0 && matches {
 				if year != q.Year {
 					q.SeasonYear = q.Year
 					q.Year = year
