@@ -126,7 +126,8 @@ func TestRound2SupernaturalIdentity(t *testing.T) {
 				if query.Year != 2009 || query.fileYear != 2007 || query.Season != 3 || query.SeasonYear != 2007 || query.YearSource != "work_directory" {
 					t.Fatalf("query=%+v", query)
 				}
-				want := mode != "overlap" && mode != "named"
+				// named：无关作品只有季名撞名，主标题命中的候选优先，因此不再判冲突。
+				want := mode != "overlap"
 				result, err := service.IdentifyShareFile(context.Background(), round2SupernaturalPath, "tmdb", "tv")
 				if err != nil || result == nil || result.Success != want || want && (result.TmdbID != 1622 || result.SeasonNumber != 3 || result.EpisodeNumber != 13) || !want && !strings.Contains(result.FailureReason, "冲突") {
 					t.Fatalf("result=%+v err=%v", result, err)

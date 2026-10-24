@@ -322,10 +322,17 @@ func (s *TmdbService) selectShareTVCandidate(ctx context.Context, q ShareMediaQu
 	bestScore := 0
 	var best *domain.TmdbSearchResult
 	ambiguous := false
+	aliasScore := 0
+	var aliasBest *domain.TmdbSearchResult
+	aliasAmbiguous := false
 	for index := range relevant {
 		candidate := &relevant[index]
 		key := shareCandidateIdentity(*candidate)
-		score := shareCandidateTitleScore(q, *candidate, aliases[key])
+		primaryScore := shareCandidateTitleScore(q, *candidate, nil)
+		score := primaryScore
+		if score == 0 {
+			score = shareCandidateTitleScore(q, *candidate, aliases[key])
+		}
 		yearMatches := shareCandidateYearMatches(q, *candidate)
 		if q.Season > 0 {
 			detail, err := s.shareTVDetail(ctx, candidate.TmdbID)
@@ -342,11 +349,23 @@ func (s *TmdbService) selectShareTVCandidate(ctx context.Context, q ShareMediaQu
 		if score == 0 || !yearMatches {
 			continue
 		}
-		if score > bestScore {
-			best, bestScore, ambiguous = candidate, score, false
-		} else if score == bestScore && best != nil && shareCandidateIdentity(*best) != key {
-			ambiguous = true
+		// 主标题/原名命中的候选优先；仅靠官方别名命中的候选作为次级证据，避免无关作品的别名把身份判成歧义。
+		if primaryScore > 0 {
+			if score > bestScore {
+				best, bestScore, ambiguous = candidate, score, false
+			} else if score == bestScore && best != nil && shareCandidateIdentity(*best) != key {
+				ambiguous = true
+			}
+			continue
 		}
+		if score > aliasScore {
+			aliasBest, aliasScore, aliasAmbiguous = candidate, score, false
+		} else if score == aliasScore && aliasBest != nil && shareCandidateIdentity(*aliasBest) != key {
+			aliasAmbiguous = true
+		}
+	}
+	if best == nil {
+		best, bestScore, ambiguous = aliasBest, aliasScore, aliasAmbiguous
 	}
 	if ambiguous {
 		if q.Evidence != nil {

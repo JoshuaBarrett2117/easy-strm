@@ -172,6 +172,11 @@ func TestShareYearRelevantCandidateDetails(t *testing.T) {
 				if err == nil && result.Success {
 					t.Fatalf("unresolved relevant evidence must not select first: %+v", result)
 				}
+			case mode == "alias_ambiguous" || mode == "season_ambiguous":
+				// 主标题命中的候选优先于仅靠官方别名/季名命中的候选，不再因为后者撞名判成歧义。
+				if err != nil || !result.Success || result.TmdbID != 1 {
+					t.Fatalf("result=%+v err=%v", result, err)
+				}
 			default:
 				if err != nil || result.Success || !strings.Contains(result.FailureReason, "冲突") && mode != "multiple_seasons" {
 					t.Fatalf("result=%+v err=%v", result, err)
