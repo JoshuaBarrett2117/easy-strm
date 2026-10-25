@@ -277,12 +277,6 @@ func (c *DirectLinkController) getDirectLinkAndRedirect(ctx *gin.Context, cloud1
 			ctx.JSON(500, gin.H{"error": "Failed to get valid direct link"})
 			return
 		}
-		// 浏览器：115 CDN 不返回 CORS 头，302 过去只会得到 CORS error，改为服务端中继
-		if browserRelayEnabled && IsBrowserPlayback(ctx) {
-			c.relayDirectLink(ctx, redirectURL, clientUA)
-			return
-		}
-		applyDirectLinkCORS(ctx)
 		ctx.Redirect(http.StatusFound, redirectURL)
 		return
 	}
