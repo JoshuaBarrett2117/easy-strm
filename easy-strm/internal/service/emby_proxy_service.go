@@ -250,6 +250,13 @@ func (s *EmbyProxyService) buildHandler(server *domain.EmbyServer) http.Handler 
 			if s.options.ForceDirectPlay && embyDirectPlayForced(response.Request) {
 				forceEmbyDirectPlayResponse(response)
 			}
+			// 网页端播放：剥掉 <video> 的 crossOrigin，避免 115 CDN 的 CORS 阻断 302 直连
+			if !s.options.DisableWebCORSPatch && response.Request != nil {
+				if err := rewriteEmbyWebPlayerResponse(response); err != nil {
+					logger.WithContext(response.Request.Context(), "emby_proxy").Log(
+						logger.WARN, "播放器脚本修正失败，按原样返回", nil, err)
+				}
+			}
 			// 请求入口已设置标识，移除上游同名头，避免 ReverseProxy 追加重复值。
 			response.Header.Del("X-Request-ID")
 			if response.Request != nil {

@@ -7,16 +7,18 @@ import (
 
 // EmbyProxyConfig 定义进程级反代策略；启动时注入，不保存到实例数据库。
 type EmbyProxyConfig struct {
-	CacheEnabled       bool   `yaml:"cache_enabled"`
-	CacheTTLSeconds    int    `yaml:"cache_ttl_seconds"`
-	CacheCapacity      int    `yaml:"cache_capacity"`
-	CacheIsolateUA     bool   `yaml:"cache_isolate_ua"`
-	CacheIsolateIP     bool   `yaml:"cache_isolate_ip"`
-	ResolveFinalURL    bool   `yaml:"resolve_final_url"`
-	ProbeHEAD          bool   `yaml:"probe_head"`
-	BrowserRedirect    bool   `yaml:"browser_redirect"`
-	ForceDirectPlay    bool   `yaml:"force_direct_play"`
-	ProxyErrorStrategy string `yaml:"proxy_error_strategy"`
+	CacheEnabled    bool `yaml:"cache_enabled"`
+	CacheTTLSeconds int  `yaml:"cache_ttl_seconds"`
+	CacheCapacity   int  `yaml:"cache_capacity"`
+	CacheIsolateUA  bool `yaml:"cache_isolate_ua"`
+	CacheIsolateIP  bool `yaml:"cache_isolate_ip"`
+	ResolveFinalURL bool `yaml:"resolve_final_url"`
+	ProbeHEAD       bool `yaml:"probe_head"`
+	BrowserRedirect bool `yaml:"browser_redirect"`
+	ForceDirectPlay bool `yaml:"force_direct_play"`
+	// DisableWebCORSPatch 关闭播放器脚本的 crossorigin 修正；默认开启，零值即为开启。
+	DisableWebCORSPatch bool   `yaml:"disable_web_cors_patch"`
+	ProxyErrorStrategy  string `yaml:"proxy_error_strategy"`
 }
 
 // DefaultEmbyProxyConfig 返回兼容旧播放链路的默认值，仅启用有界直链缓存。
