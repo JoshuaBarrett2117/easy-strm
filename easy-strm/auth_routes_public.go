@@ -7,6 +7,7 @@ import (
 	"fmt"
 	driver "github.com/SheltonZhu/115driver/pkg/driver"
 	"github.com/gin-gonic/gin"
+	"os"
 	"strings"
 	"time"
 )
@@ -122,6 +123,14 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 		return driver.UA115Disk
 	})
 
+	// 浏览器播放是否走服务端中继：115 CDN 不带 CORS 头，302 过去浏览器只会得到 CORS error。
+	// 默认开启；设 DIRECT_LINK_BROWSER_RELAY=0 可回退成「一律 302」（浏览器将无法播放）。
+	if v := strings.TrimSpace(os.Getenv("DIRECT_LINK_BROWSER_RELAY")); v != "0" && !strings.EqualFold(v, "false") {
+		controller.SetBrowserRelayEnabled(true)
+	} else {
+		controller.SetBrowserRelayEnabled(false)
+	}
+
 	// --- 注册公开路由 ---
 	r.POST("/login", authController.Login)
 	r.POST("/auth/login", authController.Login)
@@ -129,4 +138,6 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 	// Emby 会通过 HEAD 预解析 STRM 中的远程地址；返回最终 CDN Location 后，
 	// Emby 可直接把 115 直链交给播放器，避免客户端访问仅在内网可达的中转地址。
 	r.HEAD("/direct-link", directLinkController.GetDirectLink)
+	// 浏览器预检：跨域播放前会先发 OPTIONS，缺这一步整个播放请求会被拦下
+	r.OPTIONS("/direct-link", controller.HandleDirectLinkPreflight)
 }
