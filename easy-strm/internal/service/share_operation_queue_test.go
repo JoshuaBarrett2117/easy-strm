@@ -153,7 +153,7 @@ func TestShareOperationRestoresRunningDeleteAfterDiskRemoval(t *testing.T) {
 	expectShareDeletePathLock(m, p)
 	m.ExpectExec("INSERT INTO t_strm_export_history").WillReturnResult(sqlmock.NewResult(0, 1))
 	m.ExpectBegin()
-	for _, table := range []string{"t_strm_file", "t_strm_export_history", "t_strm_export_state", "t_share_strm", "t_share_record", "t_share_media"} {
+	for _, table := range []string{"t_strm_file", "t_strm_export_history", "t_strm_export_state", "t_share_media_selection", "t_share_strm", "t_share_record", "t_share_media"} {
 		m.ExpectExec("DELETE FROM " + table).WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 	m.ExpectExec("UPDATE t_share_operation_queue SET status='completed'").WithArgs(id, int64(1)).WillReturnResult(sqlmock.NewResult(0, 1))

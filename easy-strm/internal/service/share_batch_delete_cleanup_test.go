@@ -25,7 +25,7 @@ func expectBatchDeleteCascade(t *testing.T, mock sqlmock.Sqlmock, id int, code, 
 	}
 	mock.ExpectBegin()
 	if !shared {
-		for _, table := range []string{"t_strm_file", "t_strm_export_history", "t_strm_export_state", "t_share_strm"} {
+		for _, table := range []string{"t_strm_file", "t_strm_export_history", "t_strm_export_state", "t_share_media_selection", "t_share_strm"} {
 			mock.ExpectExec("DELETE FROM " + table).WillReturnResult(sqlmock.NewResult(0, 1))
 		}
 	}

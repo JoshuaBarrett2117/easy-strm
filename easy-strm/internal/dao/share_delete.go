@@ -19,11 +19,13 @@ func (d *ShareRecordDAO) ShareDeleteURL(ctx context.Context, id int) (string, er
 	return url, err
 }
 
-// ShareDeleteEntries 获取同一分享码的所有播放映射，包括清空媒体记录后留下的映射。
+// ShareDeleteEntries 获取同一分享码的所有播放映射。
+//
+// 这里不再按“是否仍在手动选择里”做排除：选择表只增不删，一旦排除就会让
+// 已删除分享的映射与磁盘 STRM 永久滞留（历史上累积了数万条孤儿）。
+// 选中项是否还有其它来源，由 deleteShareStrmRecords 在删除后按剩余导出状态判断。
 func (d *ShareRecordDAO) ShareDeleteEntries(ctx context.Context, code string) ([]string, error) {
-	rows, err := d.db.QueryContext(ctx, `SELECT id FROM t_share_strm WHERE payload->>'share_code'=$1
- AND NOT EXISTS(SELECT 1 FROM t_strm_export_state e JOIN t_share_media_selection s ON s.media_item_key=e.export_key
- WHERE e.owner_key='share:default' AND e.share_strm_id=t_share_strm.id::text)`, code)
+	rows, err := d.db.QueryContext(ctx, `SELECT id FROM t_share_strm WHERE payload->>'share_code'=$1`, code)
 	if err != nil {
 		return nil, err
 	}
@@ -84,6 +86,17 @@ func deleteShareStrmRecords(ctx context.Context, tx *sql.Tx, entries, paths []st
 		}
 	}
 	if len(entries) > 0 {
+		// 只有当该剧集没有其它映射仍在导出时，才清掉指向它的手动选择；
+		// 否则会误删仍由其它有效分享提供的选集。放在删除映射之前执行，
+		// 这样 $1 仍是完整的待删集合。
+		if _, err := tx.ExecContext(ctx, `DELETE FROM t_share_media_selection s
+ WHERE s.media_item_key IN (SELECT e.export_key FROM t_strm_export_state e
+   WHERE e.owner_key='share:default' AND e.share_strm_id=ANY($1::text[]))
+   AND NOT EXISTS(SELECT 1 FROM t_strm_export_state o
+     WHERE o.owner_key='share:default' AND o.export_key=s.media_item_key
+       AND NOT o.share_strm_id=ANY($1::text[]))`, pq.Array(entries)); err != nil {
+			return err
+		}
 		_, err := tx.ExecContext(ctx, "DELETE FROM t_share_strm WHERE id::text=ANY($1::text[])", pq.Array(entries))
 		return err
 	}
