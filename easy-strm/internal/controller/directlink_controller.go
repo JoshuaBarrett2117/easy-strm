@@ -37,6 +37,23 @@ type DirectLinkController struct {
 	getFileInfo func(pickCode string, cloud115ID int, cookie string) (*driver.File, error)
 	// getDefaultUA: 获取默认 User-Agent
 	getDefaultUA func() string
+	// getServerUA: Emby 服务端取源时改用的 UA（为空则沿用请求方 UA）
+	getServerUA func() string
+}
+
+// resolveClientUA 处理 115 直链的 UA 绑定问题。
+// Emby 服务端（UA 以 Emby/ 开头）取到 302 后，真正下载的是 ffmpeg，
+// 其 UA（Lavf/x.y.z）与申请时不一致会被 115 判 403；此时改用配置的服务端 UA。
+func (c *DirectLinkController) resolveClientUA(clientUA string) string {
+	if c.getServerUA == nil || !strings.HasPrefix(clientUA, "Emby/") {
+		return clientUA
+	}
+	serverUA := strings.TrimSpace(c.getServerUA())
+	if serverUA == "" {
+		return clientUA
+	}
+	logger.Debugf("DirectLinkController 服务端取源改用 UA: %s", serverUA)
+	return serverUA
 }
 
 // SetRecordPlayback 注入成功直链调用的记录能力。
@@ -89,6 +106,11 @@ func (c *DirectLinkController) SetGetFileInfo(fn func(pickCode string, cloud115I
 
 func (c *DirectLinkController) SetGetDefaultUA(fn func() string) {
 	c.getDefaultUA = fn
+}
+
+// SetGetServerUA 注入「Emby 服务端取源时改用的 UA」读取能力。
+func (c *DirectLinkController) SetGetServerUA(fn func() string) {
+	c.getServerUA = fn
 }
 
 // GetDirectLink 根据路径获取文件直链（用于STRM播放，不需要认证）
@@ -180,6 +202,7 @@ func (c *DirectLinkController) GetDirectLink(ctx *gin.Context) {
 	if clientUA == "" && c.getDefaultUA != nil {
 		clientUA = c.getDefaultUA()
 	}
+	clientUA = c.resolveClientUA(clientUA)
 
 	// 检查是否配置了文件转存
 	if cloud115.TransferAccountID > 0 {

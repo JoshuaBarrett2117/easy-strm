@@ -121,6 +121,9 @@ func SetupAuthRoutes(r *gin.Engine, config *Config, client *Client) {
 	directLinkController.SetGetDefaultUA(func() string {
 		return driver.UA115Disk
 	})
+	directLinkController.SetGetServerUA(func() string {
+		return GetConfig().DirectLinkServerUA
+	})
 
 	// --- 注册公开路由 ---
 	r.POST("/login", authController.Login)

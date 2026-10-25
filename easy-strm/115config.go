@@ -16,7 +16,11 @@ type Config struct {
 	BaseURL     string                 `yaml:"base_url"`
 	ServerURL   string                 `yaml:"server_url"` // 本服务的访问地址，用于生成STRM文件中的直链URL
 	JWTSecret   string                 `yaml:"jwt_secret"`
-	PostgreSQL  struct {
+	// DirectLinkServerUA: Emby 服务端（UA 以 Emby/ 开头）来取直链时改用的 UA。
+	// 115 的直链与申请时的 UA 精确绑定，而 Emby 取到 302 后实际下载的是 ffmpeg
+	// （UA 形如 Lavf/59.27.100），UA 不一致会 403。留空则保持原行为（用请求方 UA）。
+	DirectLinkServerUA string `yaml:"direct_link_server_ua"`
+	PostgreSQL         struct {
 		Host     string `yaml:"host"`
 		Port     int    `yaml:"port"`
 		Database string `yaml:"database"`
@@ -95,6 +99,9 @@ func LoadConfig() *Config {
 	}
 	if jwtSecret := os.Getenv("JWT_SECRET"); jwtSecret != "" {
 		config.JWTSecret = jwtSecret
+	}
+	if serverUA := os.Getenv("DIRECT_LINK_SERVER_UA"); serverUA != "" {
+		config.DirectLinkServerUA = serverUA
 	}
 	if pgHost := os.Getenv("PG_HOST"); pgHost != "" {
 		config.PostgreSQL.Host = pgHost
