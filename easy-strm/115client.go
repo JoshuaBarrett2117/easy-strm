@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"easy-strm/internal/domain"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	driver "github.com/SheltonZhu/115driver/pkg/driver"
+	"github.com/go-resty/resty/v2"
 )
 
 var driverCache = struct {
@@ -72,9 +74,10 @@ func getOrCreateDriver(cloud115ID int, cookie string) (*driver.Pan115Client, err
 }
 
 type Client struct {
-	config     *Config
-	httpClient *http.Client
-	driver     *driver.Pan115Client
+	config          *Config
+	httpClient      *http.Client
+	driver          *driver.Pan115Client
+	playbackContext context.Context
 }
 
 func NewClient(config *Config) *Client {
@@ -146,13 +149,17 @@ func (c *Client) ImportCredential(cookie string) error {
 func (c *Client) GetFileList(cid int, showDir int, offset int, limit int, cloud115ID int, cookie string) (*driver.FileListResp, error) {
 	Debug("Getting 115 cloud file list with cid: %d, show_dir: %d, offset: %d, limit: %d, cloud115_id: %d", cid, showDir, offset, limit, cloud115ID)
 
-	d, err := getOrCreateDriver(cloud115ID, cookie)
+	d, metadata, err := c.playbackDriver(cloud115ID, cookie)
 	if err != nil {
 		return nil, err
 	}
 
 	files, err := d.ListPage(fmt.Sprintf("%d", cid), int64(offset), int64(limit))
+	err = metadata.failure(err)
 	if err != nil {
+		if c.playbackContext != nil {
+			return nil, err
+		}
 		Error("Failed to get file list: %v", err)
 		return nil, fmt.Errorf("get file list failed: %v", err)
 	}
@@ -199,11 +206,135 @@ func (c *Client) GetFileDirectLink(cid int, pickCode string, cloud115ID int, coo
 	downloadInfo, err := d.DownloadWithUAByAndroidAPI(pickCode, ua)
 	if err != nil {
 		Error("[DirectLink] Failed to get download info from cloud115_id %d: %v", cloud115ID, err)
-		return nil, fmt.Errorf("get download info failed: %v", err)
+		return nil, fmt.Errorf("get download info failed: %w", err)
 	}
 
 	Debug("[DirectLink] Got download info for file: %s", downloadInfo.FileName)
 	return downloadInfo, nil
+}
+
+type shareDirectLinkTransport struct {
+	base   http.RoundTripper
+	ctx    context.Context
+	status int
+	errno  int
+}
+
+func (transport *shareDirectLinkTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	transport.status, transport.errno = 0, 0
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if deadline, exists := request.Context().Deadline(); exists {
+		ctx, cancel = context.WithDeadline(transport.ctx, deadline)
+	} else {
+		ctx, cancel = context.WithCancel(transport.ctx)
+	}
+	stop := context.AfterFunc(request.Context(), cancel)
+	cleanup := func() { stop(); cancel() }
+	response, err := transport.base.RoundTrip(request.WithContext(ctx))
+	if response != nil {
+		transport.status = response.StatusCode
+	}
+	if err != nil || response == nil || response.Body == nil {
+		cleanup()
+	} else {
+		response.Body = &shareDirectLinkBody{ReadCloser: response.Body, cleanup: cleanup}
+	}
+	return response, err
+}
+
+type shareDirectLinkBody struct {
+	io.ReadCloser
+	cleanup func()
+}
+
+func (body *shareDirectLinkBody) Close() error {
+	defer body.cleanup()
+	return body.ReadCloser.Close()
+}
+
+func (transport *shareDirectLinkTransport) captureResponse(_ *resty.Client, response *resty.Response) error {
+	var result driver.BasicResp
+	if json.Unmarshal(response.Body(), &result) == nil {
+		transport.errno = int(result.Errno)
+		if transport.errno == 0 {
+			transport.errno = result.ErrNo
+		}
+	}
+	return nil
+}
+
+func (transport *shareDirectLinkTransport) failure(err error) error {
+	if transport == nil {
+		return err
+	}
+	if err == nil && (transport.status < 200 || transport.status >= 300) {
+		err = errors.New("115接口返回非成功HTTP状态")
+	}
+	if err != nil {
+		return &domain.DirectLinkError{Errno: transport.errno, HTTPStatus: transport.status, Cause: err}
+	}
+	return nil
+}
+
+// GetFileDirectLinkContext 为分享播放隔离 SDK 的可变请求状态，并将取消传递到真实 HTTP 请求。
+func (c *Client) GetFileDirectLinkContext(ctx context.Context, pickCode string, cookie string, ua string) (*driver.DownloadInfo, error) {
+	credential := &driver.Credential{}
+	if err := credential.FromCookie(cookie); err != nil {
+		return nil, &domain.DirectLinkError{Cause: err}
+	}
+	client := *c.httpClient
+	client.Timeout = 20 * time.Second
+	transport := &shareDirectLinkTransport{base: client.Transport, ctx: ctx}
+	if transport.base == nil {
+		transport.base = http.DefaultTransport
+	}
+	client.Transport = transport
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	upstream := driver.New(driver.WithClient(&client), driver.UA(driver.UA115Browser)).ImportCredential(credential)
+	upstream.Client.SetRetryCount(0)
+	upstream.Client.OnAfterResponse(transport.captureResponse)
+	info, err := upstream.DownloadWithUAByAndroidAPI(pickCode, ua)
+	err = transport.failure(err)
+	if err != nil {
+		return nil, fmt.Errorf("获取115直链失败：%w", err)
+	}
+	return info, nil
+}
+
+// WithPlaybackContext 为单次分享解析创建客户端，不修改共享 SDK 或其他端点的请求上下文。
+func (c *Client) WithPlaybackContext(ctx context.Context) *Client {
+	return &Client{config: c.config, httpClient: c.httpClient, playbackContext: ctx}
+}
+
+func (c *Client) playbackDriver(accountID int, cookie string) (*driver.Pan115Client, *shareDirectLinkTransport, error) {
+	if c.playbackContext == nil {
+		upstream, err := getOrCreateDriver(accountID, cookie)
+		return upstream, nil, err
+	}
+	if err := c.playbackContext.Err(); err != nil {
+		return nil, nil, err
+	}
+	client := *c.httpClient
+	client.Timeout = 20 * time.Second
+	base := client.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	metadata := &shareDirectLinkTransport{base: base, ctx: c.playbackContext}
+	client.Transport = metadata
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	upstream := driver.New(driver.WithClient(&client), driver.UA(driver.UA115Browser))
+	upstream.Client.SetRetryCount(0)
+	upstream.Client.OnAfterResponse(metadata.captureResponse)
+	if cookie != "" {
+		credential := &driver.Credential{}
+		if err := credential.FromCookie(cookie); err != nil {
+			return nil, nil, &domain.DirectLinkError{Cause: err}
+		}
+		upstream.ImportCredential(credential)
+	}
+	return upstream, metadata, nil
 }
 
 func (c *Client) GetUser(cookie string) (*driver.UserInfo, error) {
@@ -243,7 +374,7 @@ func (c *Client) GetAccountStorage(cloud115ID int, cookie string) (int64, int64,
 func (c *Client) ReceiveShare(shareCode, receiveCode, fileIDs, targetCID string, targetCloud115ID int, targetCookie string) error {
 	Debug("[ReceiveShare] start | target_id=%d", targetCloud115ID)
 
-	d, err := getOrCreateDriver(targetCloud115ID, targetCookie)
+	d, _, err := c.playbackDriver(targetCloud115ID, targetCookie)
 	if err != nil {
 		return err
 	}

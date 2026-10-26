@@ -179,7 +179,8 @@ func (c *ShareStrmController) Playback(x *gin.Context) {
 		return
 	}
 	if err != nil {
-		writeSharePlaybackError(x, 502, err)
+		x.Header("Retry-After", "2")
+		writeSharePlaybackError(x, 503, err)
 		return
 	}
 	x.Header("Cache-Control", "no-store")

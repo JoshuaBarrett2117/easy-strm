@@ -26,16 +26,16 @@ func TestSharePlaybackErrorRepresentation(t *testing.T) {
 		{name: "invalid json", id: "bad", accept: "application/json", status: 400, detail: "播放标识无效", json: true},
 		{name: "missing wrapped", err: fmt.Errorf("lookup: %w", sql.ErrNoRows), status: 404, detail: "重新导出"},
 		{name: "missing json", accept: "application/json", err: fmt.Errorf("lookup: %w", sql.ErrNoRows), status: 404, detail: "重新导出", json: true},
-		{name: "unknown errno", err: errors.New("115分享转存失败：share receive failed (errno=4100018)"), status: 502, detail: "原因未确认"},
-		{name: "typed wrapped errno", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 4100018, Message: "上游原始消息"}), status: 502, detail: "errno=4100018"},
-		{name: "deleted file", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "File not found"}), status: 502, detail: "文件已删除或不存在"},
-		{name: "permission json", accept: "application/json", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "权限不足"}), status: 502, detail: "转存额度和访问权限", json: true},
-		{name: "retryable", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "服务器繁忙"}), status: 502, detail: "避免连续发起转存请求"},
-		{name: "escaped", err: errors.New(`<script>alert("x")</script> token=test-secret https://example.test/?password=hidden`), status: 502, detail: "&lt;script&gt;"},
-		{name: "json", accept: "application/json", err: errors.New("转存失败 errno=4100018"), status: 502, detail: "4100018", json: true},
-		{name: "browser", accept: "text/html,application/json;q=0.5", err: errors.New("转存失败"), status: 502, detail: "播放失败"},
-		{name: "json refused", accept: "application/json;q=0,*/*", err: errors.New("转存失败"), status: 502, detail: "播放失败"},
-		{name: "wildcard", accept: "*/*", err: errors.New("转存失败"), status: 502, detail: "播放失败"},
+		{name: "unknown errno", err: errors.New("115分享转存失败：share receive failed (errno=4100018)"), status: 503, detail: "原因未确认"},
+		{name: "typed wrapped errno", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 4100018, Message: "上游原始消息"}), status: 503, detail: "errno=4100018"},
+		{name: "deleted file", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "File not found"}), status: 503, detail: "文件已删除或不存在"},
+		{name: "permission json", accept: "application/json", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "权限不足"}), status: 503, detail: "转存额度和访问权限", json: true},
+		{name: "retryable", err: fmt.Errorf("转存: %w", &domain.ShareReceiveError{Errno: 999999, Message: "服务器繁忙"}), status: 503, detail: "避免连续发起转存请求"},
+		{name: "escaped", err: errors.New(`<script>alert("x")</script> token=test-secret https://example.test/?password=hidden`), status: 503, detail: "&lt;script&gt;"},
+		{name: "json", accept: "application/json", err: errors.New("转存失败 errno=4100018"), status: 503, detail: "4100018", json: true},
+		{name: "browser", accept: "text/html,application/json;q=0.5", err: errors.New("转存失败"), status: 503, detail: "播放失败"},
+		{name: "json refused", accept: "application/json;q=0,*/*", err: errors.New("转存失败"), status: 503, detail: "播放失败"},
+		{name: "wildcard", accept: "*/*", err: errors.New("转存失败"), status: 503, detail: "播放失败"},
 	} {
 		for _, method := range []string{"GET", "HEAD"} {
 			t.Run(tc.name+method, func(t *testing.T) {
@@ -51,6 +51,9 @@ func TestSharePlaybackErrorRepresentation(t *testing.T) {
 				req.Header.Set("Accept", tc.accept)
 				w := httptest.NewRecorder()
 				r.ServeHTTP(w, req)
+				if tc.status == 503 && w.Header().Get("Retry-After") != "2" {
+					t.Error("retryable errors must include Retry-After: 2")
+				}
 				if w.Code != tc.status || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Location") != "" {
 					t.Errorf("status/headers: %d %v", w.Code, w.Header())
 				}
@@ -112,7 +115,7 @@ func TestSharePlaybackErrorHTMLArtifact(t *testing.T) {
 	req.Header.Set("Accept", "text/html")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
-	if w.Code != 502 || !strings.Contains(w.Body.String(), "上游暂时不可用") {
+	if w.Code != 503 || !strings.Contains(w.Body.String(), "上游暂时不可用") {
 		t.Fatalf("unexpected browser fixture: %d %s", w.Code, w.Body.String())
 	}
 	file, err := os.CreateTemp(dir, "share-playback-error-*.html")

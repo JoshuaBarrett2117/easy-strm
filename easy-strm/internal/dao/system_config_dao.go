@@ -22,11 +22,16 @@ func (d *SystemConfigDAO) GetHotConfigs(ctx context.Context, keys ...string) (ma
 
 // GetByKey 根据Key获取配置
 func (d *SystemConfigDAO) GetByKey(key string) (*domain.SystemConfig, error) {
+	return d.GetByKeyContext(context.Background(), key)
+}
+
+// GetByKeyContext 在调用方预算内读取单项配置，不改变缺失项的返回语义。
+func (d *SystemConfigDAO) GetByKeyContext(ctx context.Context, key string) (*domain.SystemConfig, error) {
 	if key == "share_strm_incremental_watermark" {
 		return nil, nil
 	}
 	config := &domain.SystemConfig{}
-	err := DB.QueryRow(
+	err := DB.QueryRowContext(ctx,
 		`SELECT id, config_key, config_val, create_time, update_time 
 		 FROM t_system_config WHERE config_key = $1`,
 		key,
@@ -36,7 +41,7 @@ func (d *SystemConfigDAO) GetByKey(key string) (*domain.SystemConfig, error) {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("SystemConfigDAO[GetByKey] 查询失败: %v", err)
+		return nil, fmt.Errorf("SystemConfigDAO[GetByKey] 查询失败: %w", err)
 	}
 	return config, nil
 }

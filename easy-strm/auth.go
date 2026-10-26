@@ -154,6 +154,18 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		return link.Url.Url, nil
 	})
 	shareStrmService.SetStrm115ServerURL(func() string { return GetConfig().ServerURL })
+	shareStrmService.SetPlaybackClient(func(ctx context.Context) service.Cloud115Client { return client.WithPlaybackContext(ctx) })
+	shareStrmService.SetPlaybackAccountReader(cloud115DAO.GetByIDContext)
+	shareStrmService.SetPlaybackDirectLink(func(ctx context.Context, pick string, _ int, cookie, ua string) (string, error) {
+		link, err := client.GetFileDirectLinkContext(ctx, pick, cookie, ua)
+		if err != nil {
+			return "", err
+		}
+		if link == nil {
+			return "", fmt.Errorf("115返回空直链")
+		}
+		return link.Url.Url, nil
+	})
 	shareStrmController := controller.NewShareStrmController(shareStrmService)
 	shareRecordService.SetAutoStrmExportContext(shareStrmService.StartAutoExportContext)
 	shareRecordService.SetStrmDeleteGuard(shareStrmService)

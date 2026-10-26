@@ -334,7 +334,7 @@ func (c *Client) MoveFile115(fileID, targetDirID string, cloud115ID int, cookie 
 func (c *Client) MkdirAll115(path string, cloud115ID int, cookie string) (string, error) {
 	Debug("MkdirAll for path: %s", path)
 
-	d, err := getOrCreateDriver(cloud115ID, cookie)
+	d, metadata, err := c.playbackDriver(cloud115ID, cookie)
 	if err != nil {
 		return "", err
 	}
@@ -361,8 +361,12 @@ func (c *Client) MkdirAll115(path string, cloud115ID int, cookie string) (string
 		limit := 1000
 		for {
 			files, err := d.ListPage(currentCID, int64(offset), int64(limit))
+			err = metadata.failure(err)
 			if err != nil {
-				return "", fmt.Errorf("list directory failed at %s: %v", currentCID, err)
+				if c.playbackContext != nil {
+					return "", err
+				}
+				return "", fmt.Errorf("list directory failed at %s: %w", currentCID, err)
 			}
 			if files == nil || len(*files) == 0 {
 				break
@@ -386,7 +390,11 @@ func (c *Client) MkdirAll115(path string, cloud115ID int, cookie string) (string
 		if !found {
 			// 未找到，需用 Mkdir 添加该级目录 (Mkdir 返回新目录的 JSON 结果但可能没有强封装返回子 CID。115driver 的 Mkdir 返回 string 类型的分类 ID)
 			newDirID, err := d.Mkdir(currentCID, part)
+			err = metadata.failure(err)
 			if err != nil {
+				if c.playbackContext != nil {
+					return "", err
+				}
 				Error("Failed to create dir %s under %s: %v", part, currentCID, err)
 				return "", fmt.Errorf("mkdir %s failed: %v", part, err)
 			}

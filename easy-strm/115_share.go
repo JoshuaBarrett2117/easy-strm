@@ -19,6 +19,18 @@ import (
 //   - *driver.ShareSnapResp: 分享快照响应（文件列表在 Data.List 中）
 //   - error: 分享不存在/密码错误等情况下由 driver 封装的 API 错误
 func (c *Client) GetShareSnap(shareCode, receiveCode, dirID string, queries ...driver.Query) (*driver.ShareSnapResp, error) {
+	if c.playbackContext != nil {
+		upstream, metadata, err := c.playbackDriver(0, "")
+		if err != nil {
+			return nil, err
+		}
+		response, err := upstream.GetShareSnap(shareCode, receiveCode, dirID, queries...)
+		err = metadata.failure(err)
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
 	Info("[ShareSnap] Getting share snap, shareCode: %s, dirID: %s", shareCode, dirID)
 
 	resp, err := driver.Default().GetShareSnap(shareCode, receiveCode, dirID, queries...)

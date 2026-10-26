@@ -124,6 +124,19 @@ func (d *ShareRecordDAO) GetStrmEntry(ctx context.Context, id string) (domain.Sh
 	return v, err
 }
 
+// GetStrmPlaybackEntry 原子读取播放映射及数据库版本，防止删除重建同内容映射后复用旧直链。
+func (store *ShareRecordDAO) GetStrmPlaybackEntry(ctx context.Context, id string) (domain.ShareStrmEntry, string, error) {
+	var entry domain.ShareStrmEntry
+	var raw []byte
+	var revision string
+	err := store.db.QueryRowContext(ctx, `SELECT payload, xmin::text || ':' || EXTRACT(EPOCH FROM updated_at)::text FROM t_share_strm WHERE id=$1`, id).Scan(&raw, &revision)
+	if err != nil {
+		return entry, "", err
+	}
+	err = json.Unmarshal(raw, &entry)
+	return entry, revision, err
+}
+
 // LockStrmPlayback 使用事务级锁串行化同一文件转存，连接关闭时锁自动释放。
 func (d *ShareRecordDAO) LockStrmPlayback(ctx context.Context, key string) (func(), error) {
 	conn, err := d.db.Conn(ctx)

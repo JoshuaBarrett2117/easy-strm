@@ -51,7 +51,7 @@ func TestShareStrmController(t *testing.T) {
 		{"head", "HEAD", "/play/56c94081-7619-4824-9e6f-ea13141599e1", "", nil, 302},
 		{"bad id", "GET", "/play/bad", "", nil, 400},
 		{"missing", "GET", "/play/56c94081-7619-4824-9e6f-ea13141599e1", "", sql.ErrNoRows, 404},
-		{"transfer failure", "GET", "/play/56c94081-7619-4824-9e6f-ea13141599e1", "", errors.New("转存失败"), 502},
+		{"transfer failure", "GET", "/play/56c94081-7619-4824-9e6f-ea13141599e1", "", errors.New("转存失败"), 503},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stub := &strmActionsStub{err: tt.err}

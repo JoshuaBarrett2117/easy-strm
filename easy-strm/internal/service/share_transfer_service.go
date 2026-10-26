@@ -3,11 +3,15 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	neturl "net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"easy-strm/internal/dao"
@@ -319,8 +323,19 @@ func (s *ShareTransferService) fetchShareDirectory(ctx context.Context, shareCod
 }
 
 func isRetryableShareSnapError(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, driver.ErrPasswordIncorrect) {
 		return false
+	}
+	var direct *domain.DirectLinkError
+	if errors.As(err, &direct) {
+		if direct.Errno == 990010 || direct.Errno == 990011 {
+			return false
+		}
+		return isRetryableShareSnapError(direct.Cause)
+	}
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || errors.As(err, &network) {
+		return true
 	}
 	message := strings.ToLower(err.Error())
 	for _, marker := range []string{
@@ -349,6 +364,17 @@ func extractSharePassword(rawURL string) string {
 //   - 990010: 分享需要访问密码
 //   - 990011 / 含"提取码": 访问密码错误
 func mapShareSnapError(err error) error {
+	var direct *domain.DirectLinkError
+	if errors.As(err, &direct) {
+		switch {
+		case errors.Is(err, driver.ErrSharedInvalid), errors.Is(err, driver.ErrSharedNotFound), direct.Errno == 990009:
+			return fmt.Errorf("%w: %w", ErrShareUnavailable, err)
+		case direct.Errno == 990010:
+			return fmt.Errorf("分享需要访问密码: %w", err)
+		case direct.Errno == 990011, errors.Is(err, driver.ErrPasswordIncorrect), DescribeSharePlaybackError(err).Category == "分享密码问题":
+			return fmt.Errorf("访问密码错误: %w", err)
+		}
+	}
 	if isShareCancelledError(err) {
 		return fmt.Errorf("%w: %v", ErrShareCancelled, err)
 	}

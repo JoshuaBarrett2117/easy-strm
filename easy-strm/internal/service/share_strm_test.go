@@ -20,11 +20,12 @@ import (
 )
 
 type strmMemory struct {
-	sources []domain.ShareStrmSource
-	entries map[string]domain.ShareStrmEntry
-	files   map[string]domain.StrmFile
-	fileErr error
-	mu      sync.Mutex
+	sources   []domain.ShareStrmSource
+	entries   map[string]domain.ShareStrmEntry
+	files     map[string]domain.StrmFile
+	fileErr   error
+	mu        sync.Mutex
+	entriesMu sync.Mutex
 }
 
 func (m *strmMemory) StrmSources(_ context.Context, _ domain.ShareLibraryQuery, after int) ([]domain.ShareStrmSource, error) {
@@ -34,6 +35,8 @@ func (m *strmMemory) StrmSources(_ context.Context, _ domain.ShareLibraryQuery, 
 	return m.sources, nil
 }
 func (m *strmMemory) SaveStrmEntry(_ context.Context, v domain.ShareStrmEntry) error {
+	m.entriesMu.Lock()
+	defer m.entriesMu.Unlock()
 	m.entries[v.ID] = v
 	return nil
 }
@@ -48,6 +51,8 @@ func (m *strmMemory) SaveExportedStrmFile(_ context.Context, v domain.StrmFile) 
 	return nil
 }
 func (m *strmMemory) GetStrmEntry(_ context.Context, id string) (domain.ShareStrmEntry, error) {
+	m.entriesMu.Lock()
+	defer m.entriesMu.Unlock()
 	v, ok := m.entries[id]
 	if !ok {
 		return v, sql.ErrNoRows
@@ -102,7 +107,7 @@ func strmFixture(t *testing.T) (*ShareStrmService, *strmMemory, *strmClient) {
 		if pick != "saved" || id != 7 || ua != "Player/1" {
 			return "", errors.New("直链参数错误")
 		}
-		return "https://cdn.example/video", nil
+		return "https://cdn.example/video?t=4102444800", nil
 	})
 	return svc, store, client
 }
@@ -157,7 +162,7 @@ func TestShareStrmPlaybackTransfersOnceAndPreservesUA(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			link, err := s.Playback(context.Background(), "entry", "Player/1")
-			if err != nil || link != "https://cdn.example/video" {
+			if err != nil || link != "https://cdn.example/video?t=4102444800" {
 				t.Errorf("%s %v", link, err)
 			}
 		}()
@@ -184,7 +189,11 @@ func TestShareStrmPlaybackCachesTransferPickCode(t *testing.T) {
 	if _, err := s.Playback(context.Background(), "entry", "Player/1"); err != nil {
 		t.Fatal(err)
 	}
-	key := transferPickCodeKey(7, "entry")
+	snapshot, err := s.playbackSnapshot(context.Background(), "entry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := shareTransferPickCodeKey(snapshot)
 	if got, err := rc.Get(context.Background(), key).Result(); err != nil || got != "saved" {
 		t.Fatalf("PickCode缓存未写入: %q %v", got, err)
 	}
@@ -466,13 +475,18 @@ func TestShareStrmFirstPlaybackResolvesOnlyStoredPath(t *testing.T) {
 		"20": mustUnmarshalShareSnap(t, `{"state":true,"data":{"count":1,"list":[{"fid":"file-3","n":"Show.S02E03.mkv","fc":1}]}}`),
 	}
 	link, err := s.Playback(context.Background(), "entry", "Player/1")
-	if err != nil || link != "https://cdn.example/video" {
+	if err != nil || link != "https://cdn.example/video?t=4102444800" {
 		t.Fatalf("%s %v", link, err)
 	}
 	if strings.Join(c.gotDirIDs, ",") != "0,10,20" || store.entries["entry"].FileID != "file-3" {
 		t.Fatalf("定位范围或缓存错误：%v %+v", c.gotDirIDs, store.entries["entry"])
 	}
 	c.present = false // 模拟网盘文件删除后的重新转存，仍复用已保存ID。
+	s.directLinks().mu.Lock()
+	for key := range s.directLinks().entries {
+		s.directLinks().remove(key)
+	}
+	s.directLinks().mu.Unlock()
 	if _, err = s.Playback(context.Background(), "entry", "Player/1"); err != nil || len(c.gotDirIDs) != 3 || c.receives != 2 {
 		t.Fatalf("未复用文件ID：%v %v", err, c.gotDirIDs)
 	}

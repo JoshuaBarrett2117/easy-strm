@@ -627,14 +627,14 @@ func shareStrmExportKey(source domain.ShareStrmSource, episode domain.ShareEpiso
 }
 
 // resolveStrmFileID 首次播放只逐级读取目标路径所在目录，不遍历分享中的其他目录。
-func (s *ShareStrmService) resolveStrmFileID(ctx context.Context, entry domain.ShareStrmEntry) (string, error) {
+func (s *ShareStrmService) resolveStrmFileID(ctx context.Context, entry domain.ShareStrmEntry, client Cloud115Client) (string, error) {
 	normalized := shareCandidatePath(entry.FilePath)
 	if entry.FilePath == "" || normalized == "." || strings.HasPrefix(normalized, "../") {
 		return "", fmt.Errorf("播放映射缺少视频路径，请重新导出")
 	}
 	parts := strings.Split(strings.TrimPrefix(normalized, "/"), "/")
 	cid := "0"
-	transfer := &ShareTransferService{client: s.client}
+	transfer := &ShareTransferService{client: client}
 	for i, name := range parts {
 		files, _, err := transfer.fetchShareDirectory(ctx, entry.ShareCode, entry.Password, cid)
 		if err != nil {

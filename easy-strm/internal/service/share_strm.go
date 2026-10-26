@@ -39,20 +39,25 @@ type ShareStrmStore interface {
 
 // ShareStrmService 负责资料库导出及按需转存播放，复用现有分类、任务和115能力。
 type ShareStrmService struct {
-	exportDB          *sql.DB
-	store             ShareStrmStore
-	settings          ShareTaskSettingsStore
-	client            Cloud115Client
-	tmdb              *TmdbService
-	organizer         *OrganizeService
-	tasks             *TaskService
-	categories        func() ([]*domain.MediaCategory, error)
-	categoriesContext func(context.Context) ([]*domain.MediaCategory, error)
-	account           func(int) (*domain.Cloud115, error)
-	directLink        func(string, int, string, string) (string, error)
-	strm115ServerURL  func() string
-	coordOnce         sync.Once
-	coordinator       *ShareOperationCoordinator
+	exportDB           *sql.DB
+	store              ShareStrmStore
+	settings           ShareTaskSettingsStore
+	client             Cloud115Client
+	tmdb               *TmdbService
+	organizer          *OrganizeService
+	tasks              *TaskService
+	categories         func() ([]*domain.MediaCategory, error)
+	categoriesContext  func(context.Context) ([]*domain.MediaCategory, error)
+	account            func(int) (*domain.Cloud115, error)
+	playbackAccount    func(context.Context, int) (*domain.Cloud115, error)
+	directLink         func(string, int, string, string) (string, error)
+	playbackDirectLink func(context.Context, string, int, string, string) (string, error)
+	playbackClient     func(context.Context) Cloud115Client
+	directLinksOnce    sync.Once
+	playbackLinks      *shareDirectLinks
+	strm115ServerURL   func() string
+	coordOnce          sync.Once
+	coordinator        *ShareOperationCoordinator
 }
 
 // SetStrm115ServerURL 注入应用 ServerURL，目录直链不使用分享导出的 BaseURL。
@@ -90,8 +95,12 @@ func NewShareStrmService(store ShareStrmStore, settings ShareTaskSettingsStore, 
 
 // Settings 获取持久化导出配置。
 func (s *ShareStrmService) Settings() (domain.ShareStrmSettings, error) {
+	return s.settingsContext(context.Background())
+}
+
+func (s *ShareStrmService) settingsContext(ctx context.Context) (domain.ShareStrmSettings, error) {
 	v := domain.ShareStrmSettings{}
-	row, err := s.settings.GetByKey(shareStrmSettingsKey)
+	row, err := (sharePlaybackSettings{ShareTaskSettingsStore: s.settings, ctx: ctx}).GetByKey(shareStrmSettingsKey)
 	if err != nil || row == nil {
 		return v, err
 	}
@@ -382,57 +391,46 @@ func writeShareStrm(target, content string) error {
 	return directory.Sync()
 }
 
-// Playback 仅转存映射指定的一个文件，复用目标目录中的文件后获取即时直链。
-func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string, error) {
+func (s *ShareStrmService) resolvePlayback(ctx context.Context, id, ua string, key [32]byte, resolved *sharePlaybackSnapshot) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	cfg, err := s.Settings()
+	snapshot, err := s.playbackSnapshot(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	if err = validateShareStrmSettings(&cfg); err != nil {
-		return "", err
-	}
-	entry, err := s.store.GetStrmEntry(ctx, id)
-	if err != nil {
-		return "", err
-	}
-	release, err := s.Coordinator().acquire(ctx, nil, shareResource{key: "mapping-code:" + entry.ShareCode}, shareResource{key: "mapping:" + id, exclusive: true})
+	release, err := s.Coordinator().acquire(ctx, nil, shareResource{key: "mapping-code:" + snapshot.entry.ShareCode}, shareResource{key: "mapping:" + id, exclusive: true})
 	if err != nil {
 		return "", err
 	}
 	defer release()
-	entry, err = s.store.GetStrmEntry(ctx, id)
+	snapshot, err = s.playbackSnapshot(ctx, id)
 	if err != nil {
 		return "", err
 	}
-	account, err := s.account(cfg.Cloud115ID)
-	if err != nil {
-		return "", err
+	if snapshot.key(ua) != key {
+		return "", errShareDirectLinkChanged
 	}
-	if account == nil {
-		return "", fmt.Errorf("115转存账号不存在")
-	}
-	cfg.TransferPath, err = ResolveShareTransferDirectory(s.settings, cfg.TransferPath, account.TransferDirectory)
-	if err != nil {
-		return "", err
-	}
+	cfg, entry, account := snapshot.config, snapshot.entry, &snapshot.account
 	unlock, err := s.store.LockStrmPlayback(ctx, fmt.Sprintf("share-strm:%d:%s:%s", cfg.Cloud115ID, cfg.TransferPath, id))
 	if err != nil {
 		return "", err
 	}
 	defer unlock()
 	dir := path.Join(cfg.TransferPath, id)
-	cid, err := s.client.MkdirAll115(dir, account.ID, account.Cookie)
+	client := s.client
+	if s.playbackClient != nil {
+		client = s.playbackClient(ctx)
+	}
+	cid, err := client.MkdirAll115(dir, account.ID, account.Cookie)
 	if err != nil {
 		return "", fmt.Errorf("创建转存目录失败：%w", err)
 	}
 	// 转存完成后缓存 PickCode，后续播放优先命中缓存，避免重复查询115目录。
-	cacheKey := transferPickCodeKey(account.ID, id)
+	cacheKey := shareTransferPickCodeKey(snapshot)
 	pick := s.getTransferPickCode(ctx, cacheKey)
 	if pick == "" {
 		// 每个映射独占目录，以列表查找精确文件名；网络错误不能被当成文件不存在。
-		pick, err = s.findTransferred(ctx, cid, entry.FileName, account)
+		pick, err = s.findTransferred(ctx, cid, entry.FileName, account, client)
 		if err != nil {
 			return "", err
 		}
@@ -444,19 +442,23 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 			return "", err
 		}
 		if entry.FileID == "" {
-			entry.FileID, err = s.resolveStrmFileID(ctx, entry)
+			entry.FileID, err = s.resolveStrmFileID(ctx, entry, client)
 			if err != nil {
 				return "", err
 			}
 			if err = s.store.SaveStrmEntry(ctx, entry); err != nil {
 				return "", err
 			}
+			entry, snapshot.revision, err = s.playbackEntry(ctx, id)
+			if err != nil {
+				return "", err
+			}
 		}
-		if err = s.client.ReceiveShare(entry.ShareCode, entry.Password, entry.FileID, cid, account.ID, account.Cookie); err != nil {
+		if err = client.ReceiveShare(entry.ShareCode, entry.Password, entry.FileID, cid, account.ID, account.Cookie); err != nil {
 			return "", fmt.Errorf("115分享转存失败：%w", err)
 		}
 		for attempt := 0; attempt < 5; attempt++ {
-			pick, err = s.findTransferred(ctx, cid, entry.FileName, account)
+			pick, err = s.findTransferred(ctx, cid, entry.FileName, account, client)
 			if err != nil {
 				return "", err
 			}
@@ -476,27 +478,25 @@ func (s *ShareStrmService) Playback(ctx context.Context, id, ua string) (string,
 		}
 	}
 	if pick != "" {
-		s.saveTransferPickCode(ctx, cacheKey, pick)
+		snapshot.entry = entry
+		s.saveTransferPickCode(ctx, shareTransferPickCodeKey(snapshot), pick)
 	}
 	if err = ctx.Err(); err != nil {
 		return "", err
 	}
 	logger.WithContext(ctx, "share_playback").Log(logger.INFO, "解析播放来源", logger.Fields{"event": "resolve", "source": "share_strm_playback", "source_id": account.ID}, nil)
-	link, err := s.directLink(pick, account.ID, account.Cookie, ua)
+	link, err := s.directLinks().apply(ctx, func(call context.Context) (string, error) {
+		if s.playbackDirectLink != nil {
+			return s.playbackDirectLink(call, pick, account.ID, account.Cookie, ua)
+		}
+		return s.directLink(pick, account.ID, account.Cookie, ua)
+	})
 	if err != nil {
 		return "", fmt.Errorf("获取115直链失败：%w", err)
 	}
-	u, err := url.Parse(link)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return "", fmt.Errorf("115返回无效直链")
-	}
+	snapshot.entry = entry
+	*resolved = snapshot
 	return link, nil
-}
-
-// transferPickCodeKey 生成分享 STRM 转存 PickCode 缓存键。
-// 键同时绑定目标115账号和播放映射ID，避免不同账号或文件互相污染。
-func transferPickCodeKey(accountID int, shareRecordID string) string {
-	return fmt.Sprintf("%s%d:%s", transferPickCodeKeyPrefix, accountID, shareRecordID)
 }
 
 func (s *ShareStrmService) getTransferPickCode(ctx context.Context, key string) string {
@@ -532,7 +532,7 @@ func (s *ShareStrmService) saveSHA1Cache(ctx context.Context, sha1, pick string)
 	}
 }
 
-func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string, account *domain.Cloud115) (string, error) {
+func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string, account *domain.Cloud115, client Cloud115Client) (string, error) {
 	var directory int
 	if _, err := fmt.Sscan(cid, &directory); err != nil {
 		return "", fmt.Errorf("115目录ID无效")
@@ -541,7 +541,7 @@ func (s *ShareStrmService) findTransferred(ctx context.Context, cid, name string
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		files, err := s.client.GetFileList(directory, 0, offset, 100, account.ID, account.Cookie)
+		files, err := client.GetFileList(directory, 0, offset, 100, account.ID, account.Cookie)
 		if err != nil {
 			return "", err
 		}
