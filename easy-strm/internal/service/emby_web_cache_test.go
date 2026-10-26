@@ -17,6 +17,9 @@ import (
 func TestEmbyWebCacheRewriteMatrix(t *testing.T) {
 	for _, tc := range []struct{ path, source, want string }{
 		{"/web/index.html", `<html><script src="apploader.js" defer></script></html>`, `apploader.js?corsfix=` + EmbyWebCORSRevision},
+		{"/web/index.html", `<script src="apploader.js?v=4.9.1.90" defer>`, `apploader.js?corsfix=` + EmbyWebCORSRevision + `&v=4.9.1.90`},
+		{"/web/index.html", `<script defer src='apploader.js?v=4.9.1.90'>`, `apploader.js?corsfix=` + EmbyWebCORSRevision + `&v=4.9.1.90`},
+		{"/web/index.html", `<script src="apploader.js?corsfix=old&v=4.9.1.90">`, `apploader.js?corsfix=` + EmbyWebCORSRevision + `&v=4.9.1.90`},
 		{"/", `<html><script src="apploader.js" defer></script></html>`, `apploader.js?corsfix=` + EmbyWebCORSRevision},
 		{"/web/", `<html><script src="apploader.js" defer></script></html>`, `apploader.js?corsfix=` + EmbyWebCORSRevision},
 		{"/emby/web/index.html", `<script src="apploader.js" defer>`, `apploader.js?corsfix=` + EmbyWebCORSRevision},

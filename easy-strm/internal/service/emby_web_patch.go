@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -56,6 +57,27 @@ func PatchEmbyWebPlayer(body []byte) []byte {
 
 // EmbyWebCORSRevision 是唯一破缓存版本键；升级补丁时只改这里，不伪造 data-appversion。
 const EmbyWebCORSRevision = "20261026b"
+
+// Emby HTTP 层可能给磁盘上的 apploader.js 自动附加 ?v=；同时兼容两种引号和属性顺序。
+var embyWebLoaderTag = regexp.MustCompile(`(?i)(<script\b[^>]*\s+src\s*=\s*)(["'])(apploader\.js(?:\?[^"']*)?)(["'])`)
+
+func patchEmbyWebIndex(body []byte) []byte {
+	return embyWebLoaderTag.ReplaceAllFunc(body, func(tag []byte) []byte {
+		parts := embyWebLoaderTag.FindSubmatch(tag)
+		if !bytes.Equal(parts[2], parts[4]) {
+			return tag
+		}
+		u, err := url.Parse(string(parts[3]))
+		if err != nil {
+			return tag
+		}
+		query := u.Query()
+		query.Set("corsfix", EmbyWebCORSRevision)
+		// 保留 data-appversion 派生的 v，不伪造版本。
+		u.RawQuery = query.Encode()
+		return []byte(string(parts[1]) + string(parts[2]) + u.String() + string(parts[4]))
+	})
+}
 
 // embyWebPatchKind 只处理入口 HTML、加载器以及既有播放器脚本路径。
 func embyWebPatchKind(path string) string {
@@ -119,7 +141,7 @@ func rewriteEmbyWebPlayerResponse(response *http.Response) error {
 	patched := body
 	switch kind {
 	case "index":
-		patched = bytes.ReplaceAll(body, []byte(`<script src="apploader.js"`), []byte(`<script src="apploader.js?corsfix=`+EmbyWebCORSRevision+`"`))
+		patched = patchEmbyWebIndex(body)
 	case "loader":
 		patched = bytes.ReplaceAll(body, []byte(`globalThis.urlCacheParam="v="+docElem`), []byte(`globalThis.urlCacheParam="v="+(docElem||"")+"&corsfix=`+EmbyWebCORSRevision+`"`))
 	case "player":
