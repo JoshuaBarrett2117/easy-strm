@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"easy-strm/internal/pkg/logger"
+	"github.com/andybalholm/brotli"
 )
 
 // Emby Web 播放器跨域修正。
@@ -52,33 +54,88 @@ func PatchEmbyWebPlayer(body []byte) []byte {
 	return patched
 }
 
-// rewriteEmbyWebPlayerResponse 读取、修正并回写脚本响应，顺便清掉压缩与长度头。
+// EmbyWebCORSRevision 是唯一破缓存版本键；升级补丁时只改这里，不伪造 data-appversion。
+const EmbyWebCORSRevision = "20261026b"
+
+// embyWebPatchKind 只处理入口 HTML、加载器以及既有播放器脚本路径。
+func embyWebPatchKind(path string) string {
+	switch {
+	case path == "/" || path == "/web/" || strings.HasSuffix(path, "/web/index.html"):
+		return "index"
+	case strings.HasSuffix(path, "/web/apploader.js"):
+		return "loader"
+	case IsEmbyWebPlayerScript(path):
+		return "player"
+	default:
+		return ""
+	}
+}
+
+// prepareEmbyWebPatchRequest 不允许旧验证器/Range 导致 304/206 跳过补丁。
+// 仅网页静态资源走此分支；媒体请求及其 302/Range 完全不变。
+func prepareEmbyWebPatchRequest(request *http.Request) {
+	if embyWebPatchKind(request.URL.Path) == "" || (request.Method != http.MethodGet && request.Method != http.MethodHead) {
+		return
+	}
+	request.Header.Set("Accept-Encoding", "identity")
+	for _, name := range []string{"If-None-Match", "If-Modified-Since", "If-Match", "If-Unmodified-Since", "If-Range", "Range"} {
+		request.Header.Del(name)
+	}
+}
+
+// rewriteEmbyWebPlayerResponse 统一修正三类网页资源。保留原有播放器正则与兜底。
 func rewriteEmbyWebPlayerResponse(response *http.Response) error {
-	if !IsEmbyWebPlayerScript(response.Request.URL.Path) {
+	if response.Request == nil || response.Request.URL == nil || response.StatusCode != http.StatusOK || response.Request.Method == http.MethodHead {
 		return nil
 	}
+	kind := embyWebPatchKind(response.Request.URL.Path)
+	if kind == "" || (kind == "index" && !strings.Contains(strings.ToLower(response.Header.Get("Content-Type")), "text/html")) {
+		return nil
+	}
+	defer response.Body.Close()
 	var reader io.Reader = response.Body
-	if strings.Contains(strings.ToLower(response.Header.Get("Content-Encoding")), "gzip") {
-		gz, err := gzip.NewReader(response.Body)
-		if err != nil {
-			return err
+	// 即使上游忽略 identity，仍能解 gzip/br（含编码链，按逆序解码）。
+	encodings := strings.Split(strings.ToLower(response.Header.Get("Content-Encoding")), ",")
+	for i := len(encodings) - 1; i >= 0; i-- {
+		switch encoding := strings.TrimSpace(encodings[i]); encoding {
+		case "", "identity":
+		case "gzip":
+			gz, err := gzip.NewReader(reader)
+			if err != nil {
+				return err
+			}
+			defer gz.Close()
+			reader = gz
+		case "br":
+			reader = brotli.NewReader(reader)
+		default:
+			return fmt.Errorf("unsupported Emby web encoding: %s", encoding)
 		}
-		defer gz.Close()
-		reader = gz
 	}
 	body, err := io.ReadAll(reader)
 	if err != nil {
 		return err
 	}
-	patched := PatchEmbyWebPlayer(body)
-
+	patched := body
+	switch kind {
+	case "index":
+		patched = bytes.ReplaceAll(body, []byte(`<script src="apploader.js"`), []byte(`<script src="apploader.js?corsfix=`+EmbyWebCORSRevision+`"`))
+	case "loader":
+		patched = bytes.ReplaceAll(body, []byte(`globalThis.urlCacheParam="v="+docElem`), []byte(`globalThis.urlCacheParam="v="+(docElem||"")+"&corsfix=`+EmbyWebCORSRevision+`"`))
+	case "player":
+		patched = PatchEmbyWebPlayer(body)
+	}
 	response.Body = io.NopCloser(bytes.NewReader(patched))
 	response.ContentLength = int64(len(patched))
-	response.Header.Del("Content-Encoding")
-	response.Header.Del("Transfer-Encoding")
+	response.TransferEncoding = nil
+	response.Uncompressed = true
+	for _, name := range []string{"Content-Encoding", "Transfer-Encoding", "ETag", "Last-Modified", "Content-MD5", "Digest", "Content-Range", "Accept-Ranges"} {
+		response.Header.Del(name)
+	}
 	response.Header.Set("Content-Length", strconv.Itoa(len(patched)))
+	response.Header.Set("Cache-Control", "no-cache, no-store, no-transform, must-revalidate")
 	logger.WithContext(response.Request.Context(), "emby_proxy").Log(
-		logger.DEBUG, "已去除播放器 crossorigin 属性",
-		logger.Fields{"before": len(body), "after": len(patched)}, nil)
+		logger.DEBUG, "Emby 网页跨域与破缓存修正",
+		logger.Fields{"kind": kind, "revision": EmbyWebCORSRevision, "before": len(body), "after": len(patched)}, nil)
 	return nil
 }
