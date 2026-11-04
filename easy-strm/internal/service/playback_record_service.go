@@ -162,13 +162,19 @@ func (s *PlaybackRecordService) beginSessionCall(key string) (playbackSession, b
 		s.sessions[key] = session
 		return session, true
 	}
-	return playbackSession{lastCall: now}, false
+	// 先占位再落库：否则首个请求在 Save 完成前，其它并发请求看不到会话，会各自新增记录。
+	session := playbackSession{lastCall: now}
+	s.sessions[key] = session
+	return session, false
 }
 
 // bindSessionRecord 把新建的记录挂到会话上，后续重复解析据此合并。
 func (s *PlaybackRecordService) bindSessionRecord(key, recordID, ip string) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
+	if current, ok := s.sessions[key]; ok && current.ip != "" && preferCallerIP(current.ip, ip) {
+		ip = current.ip
+	}
 	s.sessions[key] = playbackSession{lastCall: s.now(), recordID: recordID, ip: ip}
 }
 
@@ -176,6 +182,16 @@ func (s *PlaybackRecordService) bindSessionRecord(key, recordID, ip string) {
 // Emby 容器会先回源一次，真实播放器随后才到，展示应以真实客户端为准。
 func (s *PlaybackRecordService) refreshSessionCaller(key string, session playbackSession, ip string) {
 	if !preferCallerIP(ip, session.ip) {
+		return
+	}
+	// 占位会话尚未落库：先记住更可信的来源，等 bind 时使用，避免用空记录 ID 更新。
+	if session.recordID == "" {
+		s.sessionMu.Lock()
+		if current, ok := s.sessions[key]; ok && current.recordID == "" && preferCallerIP(ip, current.ip) {
+			current.ip = ip
+			s.sessions[key] = current
+		}
+		s.sessionMu.Unlock()
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

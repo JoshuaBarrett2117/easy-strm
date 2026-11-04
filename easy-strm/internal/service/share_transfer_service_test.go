@@ -172,7 +172,16 @@ func (f *fakeTaskDAO) Get(taskID string) (map[string]interface{}, error) {
 	if !ok {
 		return nil, nil
 	}
-	return t, nil
+	return cloneTask(t), nil
+}
+
+// cloneTask 返回副本，避免测试读取返回的 map 时与后台 UpdateProgress 并发读写。
+func cloneTask(t map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(t))
+	for k, v := range t {
+		out[k] = v
+	}
+	return out
 }
 
 func (f *fakeTaskDAO) UpdateStatus(taskID, status string) error {
@@ -228,7 +237,7 @@ func findTaskByType(f *fakeTaskDAO, taskType string) map[string]interface{} {
 	defer f.mu.Unlock()
 	for _, tk := range f.tasks {
 		if tk["task_type"] == taskType {
-			return tk
+			return cloneTask(tk)
 		}
 	}
 	return nil
