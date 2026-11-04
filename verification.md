@@ -1,5 +1,15 @@
 # 验证记录
 
+## 2026-11-04 收尾：版本读取器上线与生产 schema 只读核验
+
+- 执行者：小管家（提交/构建/部署）＋ 💾[DBA]（生产 schema 只读核验）。
+- 代码：`dcc0532` 将 `ShareStrmPlaybackRevisionReader` 改为显式注入，revision 为空或读取失败直接报错，不再回退到无版本读取。
+- 测试：`go test ./... -count=1` 全部通过（7 个包）。
+- 生产 schema（只读）：`t_share_strm.id uuid`、`payload jsonb`、`updated_at timestamptz`；`xmin::text || ':' || EXTRACT(EPOCH FROM updated_at)` 在 PostgreSQL 17.6 实际执行成功，样本格式 `22059652:1792230727.870992`，走 `t_share_strm_pkey` 索引，无需改表或加索引。
+- CI：GitHub Actions `Build and Push Docker Image` 对 `dcc0532` 构建成功，镜像 `joshualoooooo/easy-strm:sha-dcc0532`。
+- 部署：NAS `/volume4/docker/easy-strm` 已切换到该镜像（compose 备份 `docker-compose.yaml.bak-20261104`），容器 Up；`http://192.168.31.12:3456/health` 200、`/api/media/share-records` 401（服务已起、未带鉴权），日志无 panic/error。
+- 未执行：未对真实 115 账号发起取链；本次不涉及 schema 变更与数据库迁移。
+
 ## 2026-09-10 Codex：STRM导出任务进度条
 
 导出弹窗、任务卡及详情可显示执行进度，任务中心默认自动刷新。弹窗每秒更新，关闭或任务终态停止查询。npm run build与浏览器E2E通过，验证25%→75%→完成及查询停止。后端导出仍只读取本地数据，未变更。验证日志：.codex/share-strm-progress-*.log。
