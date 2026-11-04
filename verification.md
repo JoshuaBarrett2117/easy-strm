@@ -1,5 +1,14 @@
 # 验证记录
 
+## 2026-11-04 并发播放记录去重修复上线（`93aeca1`）
+
+- 执行者：小管家（修复/验证/部署）。
+- 根因：首个请求在 `Save` 完成前，其他并发请求看不到会话，各自新增播放记录；100 次基线跑出 21 次失败。
+- 修复：`beginSession` 先写入占位会话再落库；`bindSessionRecord` 保留已有更可信来源 IP；`refreshSessionCaller` 对 `recordID==""` 的占位会话只更新 IP，不调 DAO。测试替身 `Get`/`findTaskByType` 返回 map 副本，消除 `-race` 下的测试数据竞争。
+- 实测：并发用例 `-count=300` 全过；`go test -race ./internal/service -run 'TestOfflineDownload|TestPlaybackRecord'` 通过；`go test ./... -count=1` 7 包全过。
+- CI：对 `93aeca1` 构建成功；镜像 `joshualoooooo/easy-strm:sha-93aeca1`。
+- 部署：NAS compose 已切换（备份 `docker-compose.yaml.bak-20261104-2`），容器 Up；`/health` 200、`/api/media/share-records` 401（未带鉴权）。
+
 ## 2026-11-04 收尾：版本读取器上线与生产 schema 只读核验
 
 - 执行者：小管家（提交/构建/部署）＋ 💾[DBA]（生产 schema 只读核验）。
