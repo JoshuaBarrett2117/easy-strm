@@ -333,10 +333,28 @@ func (service *ShareStrmService) playbackSnapshot(ctx context.Context, id string
 	return snapshot, err
 }
 
+// ShareStrmPlaybackRevisionReader 原子读取播放映射及短期缓存所需的数据库版本。
+type ShareStrmPlaybackRevisionReader interface {
+	GetStrmPlaybackEntry(context.Context, string) (domain.ShareStrmEntry, string, error)
+}
+
+// SetPlaybackRevisionReader 在启动时绑定必需的版本读取器；生产路径不允许降级为无版本读取。
+func (service *ShareStrmService) SetPlaybackRevisionReader(reader ShareStrmPlaybackRevisionReader) {
+	if reader == nil {
+		panic("播放映射版本读取器不能为空")
+	}
+	service.playbackRevision = reader
+}
+
 func (service *ShareStrmService) playbackEntry(ctx context.Context, id string) (domain.ShareStrmEntry, string, error) {
-	if reader, ok := service.store.(interface {
-		GetStrmPlaybackEntry(context.Context, string) (domain.ShareStrmEntry, string, error)
-	}); ok {
+	if service.playbackRevision != nil {
+		entry, revision, err := service.playbackRevision.GetStrmPlaybackEntry(ctx, id)
+		if err == nil && revision == "" {
+			err = errors.New("播放映射版本缺失")
+		}
+		return entry, revision, err
+	}
+	if reader, ok := service.store.(ShareStrmPlaybackRevisionReader); ok {
 		return reader.GetStrmPlaybackEntry(ctx, id)
 	}
 	entry, err := service.store.GetStrmEntry(ctx, id)

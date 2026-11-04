@@ -19,6 +19,8 @@ import (
 	"easy-strm/internal/service"
 )
 
+var _ service.ShareStrmPlaybackRevisionReader = (*dao.ShareRecordDAO)(nil)
+
 // SetupAuthProtectedRoutes 设置需要认证的路由组
 func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *service.EmbyProxyService {
 	// 初始化 DAO（DAO层已在main.go中初始化）
@@ -143,7 +145,8 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	shareRecordService.SetOperationStore(dao.NewShareOperationDAO(dao.DB))
 	mcpController := controller.NewMCPControllerWithDependencies(controller.MCPDependencies{API: globalAPIService, Tasks: taskService, Dashboard: dashboardService, MediaSources: mediaSourceService, FileManager: fileManagerService, TMDB: tmdbService, Rename: renameService, Organize: organizeService, STRM: strmService, Cloud115: cloud115Service, Cron: cronService, Emby: embyService, Categories: mediaCategoryService, Settings: systemConfigService, ShareRecordService: shareRecordService})
 	shareRecordController := controller.NewShareRecordController(shareRecordService)
-	shareStrmService := service.NewShareStrmService(dao.NewShareRecordDAO(dao.DB), systemConfigDAO, client, tmdbService, organizeService, taskService, mediaCategoryDAO.GetAll, cloud115DAO.GetByID, func(pick string, accountID int, cookie, ua string) (string, error) {
+	shareStrmStore := dao.NewShareRecordDAO(dao.DB)
+	shareStrmService := service.NewShareStrmService(shareStrmStore, systemConfigDAO, client, tmdbService, organizeService, taskService, mediaCategoryDAO.GetAll, cloud115DAO.GetByID, func(pick string, accountID int, cookie, ua string) (string, error) {
 		link, err := client.GetFileDirectLink(0, pick, accountID, cookie, ua)
 		if err != nil {
 			return "", err
@@ -156,6 +159,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 	shareStrmService.SetStrm115ServerURL(func() string { return GetConfig().ServerURL })
 	shareStrmService.SetPlaybackClient(func(ctx context.Context) service.Cloud115Client { return client.WithPlaybackContext(ctx) })
 	shareStrmService.SetPlaybackAccountReader(cloud115DAO.GetByIDContext)
+	shareStrmService.SetPlaybackRevisionReader(shareStrmStore)
 	shareStrmService.SetPlaybackDirectLink(func(ctx context.Context, pick string, _ int, cookie, ua string) (string, error) {
 		link, err := client.GetFileDirectLinkContext(ctx, pick, cookie, ua)
 		if err != nil {

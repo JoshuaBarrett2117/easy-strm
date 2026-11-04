@@ -20,7 +20,7 @@ func TestShareDirectLinkMappingRevisionRead(t *testing.T) {
 	store := NewShareRecordDAO(database)
 	query := regexp.QuoteMeta("SELECT payload, xmin::text || ':' || EXTRACT(EPOCH FROM updated_at)::text FROM t_share_strm WHERE id=$1")
 	columns := []string{"payload", "revision"}
-	for _, revision := range []string{"100:2026-10-27 00:00:00+00", "101:2026-10-27 00:00:01+00"} {
+	for _, revision := range []string{"100:1793000000.123456", "101:1793000001.123456"} {
 		mock.ExpectQuery(query).WithArgs("fixture").WillReturnRows(sqlmock.NewRows(columns).AddRow(`{"id":"fixture","file_id":"file"}`, revision))
 		entry, actual, err := store.GetStrmPlaybackEntry(context.Background(), "fixture")
 		if err != nil || entry.ID != "fixture" || actual != revision {

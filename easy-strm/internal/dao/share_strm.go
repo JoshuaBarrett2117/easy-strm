@@ -126,6 +126,7 @@ func (d *ShareRecordDAO) GetStrmEntry(ctx context.Context, id string) (domain.Sh
 
 // GetStrmPlaybackEntry 原子读取播放映射及数据库版本，防止删除重建同内容映射后复用旧直链。
 func (store *ShareRecordDAO) GetStrmPlaybackEntry(ctx context.Context, id string) (domain.ShareStrmEntry, string, error) {
+	// PostgreSQL 专用短期启发式：xmin 与 updated_at 不是持久幂等令牌。
 	var entry domain.ShareStrmEntry
 	var raw []byte
 	var revision string

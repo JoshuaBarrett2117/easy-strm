@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -29,6 +30,7 @@ func TestShareStrmDirectLinkMappingRevisionInvalidatesIdenticalPayload(t *testin
 	client.present = true
 	store := &shareRevisionStore{strmMemory: memory, revision: 1}
 	service.store = store
+	service.SetPlaybackRevisionReader(store)
 	calls := 0
 	service.SetPlaybackDirectLink(func(context.Context, string, int, string, string) (string, error) {
 		calls++
@@ -62,5 +64,27 @@ func TestShareStrmDirectLinkFileIDBackfillRefreshesRevision(t *testing.T) {
 	}
 	if store.revision != 2 || client.receives != 1 {
 		t.Fatal("FileID backfill invalidated its own delivery identity")
+	}
+}
+
+type shareRevisionReaderFunc func(context.Context, string) (domain.ShareStrmEntry, string, error)
+
+func (reader shareRevisionReaderFunc) GetStrmPlaybackEntry(ctx context.Context, id string) (domain.ShareStrmEntry, string, error) {
+	return reader(ctx, id)
+}
+
+func TestShareStrmDirectLinkRequiredRevisionReaderDoesNotFallBack(t *testing.T) {
+	failure := errors.New("isolated revision read failure")
+	for _, readError := range []error{nil, failure} {
+		service, memory, _ := strmFixture(t)
+		service.store = &shareRevisionStore{strmMemory: memory, revision: 1}
+		service.SetPlaybackRevisionReader(shareRevisionReaderFunc(func(ctx context.Context, id string) (domain.ShareStrmEntry, string, error) {
+			entry, _ := memory.GetStrmEntry(ctx, id)
+			return entry, "", readError
+		}))
+		_, err := service.Playback(context.Background(), "entry", "Player/1")
+		if err == nil || (readError != nil && !errors.Is(err, readError)) {
+			t.Fatal("required revision reader silently fell back after missing revision/error")
+		}
 	}
 }

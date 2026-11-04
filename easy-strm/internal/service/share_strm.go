@@ -50,6 +50,7 @@ type ShareStrmService struct {
 	categoriesContext  func(context.Context) ([]*domain.MediaCategory, error)
 	account            func(int) (*domain.Cloud115, error)
 	playbackAccount    func(context.Context, int) (*domain.Cloud115, error)
+	playbackRevision   ShareStrmPlaybackRevisionReader
 	directLink         func(string, int, string, string) (string, error)
 	playbackDirectLink func(context.Context, string, int, string, string) (string, error)
 	playbackClient     func(context.Context) Cloud115Client
