@@ -179,7 +179,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 		accepted = collectBatchResults(urls, hashes, taskId, executorID, saveDirID, &results, &records)
 	case isOfflineDuplicateErr(err), isOfflineInvalidLinkErr(err):
 		// 批量接口在存在重复/无效链接时整体失败，降级为逐链接提交以识别每个链接的受理结果
-		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=submit | batchRejected=%v | fallback=perUrl", taskId, err)
+		logger.Infof("OfflineDownload | taskId=%s | action=submit | batchRejected=%v | fallback=perUrl", taskId, err)
 		accepted = s.submitUrlsOneByOne(urls, saveDirID, executorID, account.Cookie, taskId, &results, &records)
 	default:
 		return nil, normalizeOfflineErr(err)
@@ -201,7 +201,7 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 
 	if accepted == 0 {
 		if err := s.recordDAO.BatchInsert(ctx, records); err != nil {
-			logger.Warnf("[INFO] OfflineDownload | action=submit | recordInsertErr=%v", err)
+			logger.Warnf("OfflineDownload | action=submit | recordInsertErr=%v", err)
 		}
 		reason := firstOfflineRejectReason(results)
 		if reason != "" {
@@ -234,12 +234,12 @@ func (s *OfflineDownloadService) Submit(ctx context.Context, req domain.OfflineD
 
 	if err := s.recordDAO.BatchInsert(ctx, records); err != nil {
 		// 记录写入失败不阻断任务提交，仅损失历史列表展示
-		logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=submit | recordInsertErr=%v", taskId, err)
+		logger.Errorf("OfflineDownload | taskId=%s | action=submit | recordInsertErr=%v", taskId, err)
 	}
 
 	go s.trackBatch(logger.WithTaskID(context.WithoutCancel(ctx), taskId), taskId, executorID, account.Cookie, targetID)
 
-	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=submit | result=OK | accepted=%d | rejected=%d | dir=%s",
+	logger.Infof("OfflineDownload | taskId=%s | action=submit | result=OK | accepted=%d | rejected=%d | dir=%s",
 		taskId, accepted, len(urls)+len(invalidUrls)-accepted, directory)
 
 	return &domain.OfflineDownloadSubmitResponse{
@@ -282,7 +282,7 @@ func (s *OfflineDownloadService) enqueueLargeSubmission(ctx context.Context, clo
 	}
 	select {
 	case s.queue <- job:
-		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=enqueue | total=%d | queueDepth=%d", taskID, total, len(s.queue))
+		logger.Infof("OfflineDownload | taskId=%s | action=enqueue | total=%d | queueDepth=%d", taskID, total, len(s.queue))
 	default:
 		s.taskDAO.SetError(taskID, "云下载后台队列已满，请稍后重试")
 		return nil, fmt.Errorf("云下载后台队列已满，请稍后重试")
@@ -313,7 +313,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueWorker | panic=%v", job.taskID, recovered)
+			logger.Errorf("OfflineDownload | taskId=%s | action=queueWorker | panic=%v", job.taskID, recovered)
 			s.taskDAO.SetError(job.taskID, fmt.Sprintf("云下载后台提交异常: %v", recovered))
 		}
 	}()
@@ -345,7 +345,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 		accepted += batchAccepted
 		rejected += len(batch) - batchAccepted
 		if insertErr := s.recordDAO.BatchInsert(ctx, records); insertErr != nil {
-			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsert | batchStart=%d | err=%v", job.taskID, start, insertErr)
+			logger.Errorf("OfflineDownload | taskId=%s | action=queueInsert | batchStart=%d | err=%v", job.taskID, start, insertErr)
 		}
 		s.taskDAO.UpdateProgress(job.taskID, len(job.urls)+len(job.invalidURLs), end+len(job.invalidURLs), accepted, rejected+len(job.invalidURLs))
 	}
@@ -353,7 +353,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 	if len(job.invalidURLs) > 0 {
 		invalidRecords := buildQueuedFailureRecords(job, job.invalidURLs, saveDirID, "链接格式无效，仅支持 ed2k/magnet/http/https/ftp")
 		if insertErr := s.recordDAO.BatchInsert(ctx, invalidRecords); insertErr != nil {
-			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueInsertInvalid | err=%v", job.taskID, insertErr)
+			logger.Errorf("OfflineDownload | taskId=%s | action=queueInsertInvalid | err=%v", job.taskID, insertErr)
 		}
 	}
 
@@ -371,7 +371,7 @@ func (s *OfflineDownloadService) processQueuedSubmission(job offlineDownloadJob)
 	}
 	s.taskDAO.UpdateProgress(job.taskID, accepted, 0, 0, 0)
 	go s.trackBatch(ctx, job.taskID, job.cloud115ID, job.cookie, job.targetID)
-	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueSubmitted | accepted=%d | rejected=%d", job.taskID, accepted, rejected+len(job.invalidURLs))
+	logger.Infof("OfflineDownload | taskId=%s | action=queueSubmitted | accepted=%d | rejected=%d", job.taskID, accepted, rejected+len(job.invalidURLs))
 }
 
 // submitOfflineBatch 复用同步提交的批量与逐条降级规则，返回本批115实际受理数量。
@@ -381,7 +381,7 @@ func (s *OfflineDownloadService) submitOfflineBatch(urls []string, saveDirID str
 	case err == nil:
 		return collectBatchResults(urls, hashes, taskID, cloud115ID, saveDirID, results, records), nil
 	case isOfflineDuplicateErr(err), isOfflineInvalidLinkErr(err):
-		logger.Infof("[INFO] OfflineDownload | taskId=%s | action=queueBatchRejected | err=%v | fallback=perUrl", taskID, err)
+		logger.Infof("OfflineDownload | taskId=%s | action=queueBatchRejected | err=%v | fallback=perUrl", taskID, err)
 		return s.submitUrlsOneByOne(urls, saveDirID, cloud115ID, cookie, taskID, results, records), nil
 	default:
 		return 0, err
@@ -393,7 +393,7 @@ func (s *OfflineDownloadService) failQueuedSubmission(job offlineDownloadJob, me
 	allURLs := append(append([]string(nil), job.urls...), job.invalidURLs...)
 	records := buildQueuedFailureRecords(job, allURLs, "", message)
 	if err := s.recordDAO.BatchInsert(context.Background(), records); err != nil {
-		logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=queueFailInsert | err=%v", job.taskID, err)
+		logger.Errorf("OfflineDownload | taskId=%s | action=queueFailInsert | err=%v", job.taskID, err)
 	}
 	s.taskDAO.UpdateProgress(job.taskID, len(allURLs), len(allURLs), 0, len(allURLs))
 	s.taskDAO.SetError(job.taskID, message)
@@ -490,7 +490,7 @@ func (s *OfflineDownloadService) submitUrlsOneByOne(urls []string, saveDirID str
 			if existingTasks == nil {
 				tasks, _, listErr := s.listAllOfflineTasks(cloud115ID, cookie)
 				if listErr != nil {
-					logger.Warnf("[INFO] OfflineDownload | taskId=%s | action=submit | listExistingErr=%v", taskId, listErr)
+					logger.Warnf("OfflineDownload | taskId=%s | action=submit | listExistingErr=%v", taskId, listErr)
 				}
 				existingTasks = tasks
 				if existingTasks == nil {
@@ -625,13 +625,13 @@ func firstOfflineRejectReason(results []domain.OfflineDownloadUrlResult) string 
 func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, cloud115ID int, cookie string, targetID int) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("[INFO] OfflineDownload | taskId=%s | action=track | panic=%v", taskId, r)
+			logger.Errorf("OfflineDownload | taskId=%s | action=track | panic=%v", taskId, r)
 			s.taskDAO.SetError(taskId, fmt.Sprintf("云下载跟踪异常中断: %v", r))
 		}
 	}()
 
 	startTime := time.Now()
-	logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | start | cloud115Id=%d", taskId, cloud115ID)
+	logger.Debugf("OfflineDownload | taskId=%s | action=track | start | cloud115Id=%d", taskId, cloud115ID)
 
 	if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie, targetID); done {
 		return
@@ -644,23 +644,23 @@ func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, 
 	for {
 		select {
 		case <-ctx.Done():
-			logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | ctxDone", taskId)
+			logger.Debugf("OfflineDownload | taskId=%s | action=track | ctxDone", taskId)
 			return
 		case <-ticker.C:
 		}
 
 		if s.taskDAO.IsCancelled(taskId) {
-			logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | cancelled", taskId)
+			logger.Infof("OfflineDownload | taskId=%s | action=track | cancelled", taskId)
 			return
 		}
 
 		if done := s.refreshBatchProgress(ctx, taskId, cloud115ID, cookie, targetID); done {
-			logger.Infof("[INFO] OfflineDownload | taskId=%s | action=track | done | duration=%s", taskId, time.Since(startTime).String())
+			logger.Infof("OfflineDownload | taskId=%s | action=track | done | duration=%s", taskId, time.Since(startTime).String())
 			return
 		}
 
 		if time.Now().After(deadline) {
-			logger.Warnf("[INFO] OfflineDownload | taskId=%s | action=track | timeout=%s", taskId, offlinePollTimeout.String())
+			logger.Warnf("OfflineDownload | taskId=%s | action=track | timeout=%s", taskId, offlinePollTimeout.String())
 			s.taskDAO.UpdateStatus(taskId, domain.TaskStatusCompleted)
 			s.noteTrackingTimeout(taskId)
 			return
@@ -672,12 +672,12 @@ func (s *OfflineDownloadService) trackBatch(ctx context.Context, taskId string, 
 // 返回 true 表示批次内全部任务已到达终态（任务中心状态已置为终态）。
 func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskId string, cloud115ID int, cookie string, targetID int) bool {
 	if _, err := s.SyncAccountOfflineTasks(ctx, cloud115ID, cookie, true); err != nil {
-		logger.Warnf("[INFO] OfflineDownload | taskId=%s | action=track | syncErr=%v", taskId, err)
+		logger.Warnf("OfflineDownload | taskId=%s | action=track | syncErr=%v", taskId, err)
 	}
 
 	records, err := s.recordDAO.GetByTaskID(ctx, taskId)
 	if err != nil {
-		logger.Warnf("[INFO] OfflineDownload | taskId=%s | action=track | queryRecordsErr=%v", taskId, err)
+		logger.Warnf("OfflineDownload | taskId=%s | action=track | queryRecordsErr=%v", taskId, err)
 		return false
 	}
 
@@ -697,7 +697,7 @@ func (s *OfflineDownloadService) refreshBatchProgress(ctx context.Context, taskI
 				s.updateOfflineSteps(taskId, "115云下载", "success", "下载完成，准备跨账号秒传")
 				s.updateOfflineSteps(taskId, "跨账号秒传", "running", "正在创建并执行文件移动任务")
 				if err := s.transferCompletedRecord(ctx, rec, cloud115ID, targetID); err != nil {
-					logger.Warnf("[INFO] OfflineDownload | taskId=%s | recordId=%d | rapidTransferErr=%v", taskId, rec.ID, err)
+					logger.Warnf("OfflineDownload | taskId=%s | recordId=%d | rapidTransferErr=%v", taskId, rec.ID, err)
 					s.updateOfflineSteps(taskId, "跨账号秒传", "failed", err.Error())
 				} else {
 					s.updateOfflineSteps(taskId, "跨账号秒传", "success", "文件已秒传到目标账号")
@@ -921,7 +921,7 @@ func (s *OfflineDownloadService) syncAccountOfflineTasks(ctx context.Context, cl
 			// 仅在完整拉取列表后才判定为已移除，避免分页截断误判
 			if complete {
 				if err := s.recordDAO.UpdateStatus(ctx, rec.ID, domain.OfflineStatusRemoved, "任务已不在115离线列表中"); err != nil {
-					logger.Warnf("[INFO] OfflineDownload | action=sync | recordId=%d | markRemovedErr=%v", rec.ID, err)
+					logger.Warnf("OfflineDownload | action=sync | recordId=%d | markRemovedErr=%v", rec.ID, err)
 				}
 			}
 			continue
@@ -932,7 +932,7 @@ func (s *OfflineDownloadService) syncAccountOfflineTasks(ctx context.Context, cl
 			name = rec.Name
 		}
 		if err := s.recordDAO.UpdateByHash(ctx, cloud115ID, rec.InfoHash, name, t.Size, status, clampPercent(t.Percent), errMsg); err != nil {
-			logger.Warnf("[INFO] OfflineDownload | action=sync | cloud115Id=%d | hash=%s | updateErr=%v", cloud115ID, rec.InfoHash, err)
+			logger.Warnf("OfflineDownload | action=sync | cloud115Id=%d | hash=%s | updateErr=%v", cloud115ID, rec.InfoHash, err)
 		}
 	}
 
@@ -976,7 +976,7 @@ func (s *OfflineDownloadService) List(ctx context.Context, cloud115ID int, statu
 	for id := range accountIDs {
 		ran, syncErr := s.SyncAccountOfflineTasks(ctx, id, "", false)
 		if syncErr != nil {
-			logger.Warnf("[INFO] OfflineDownload | action=list | syncErr | cloud115Id=%d | err=%v", id, syncErr)
+			logger.Warnf("OfflineDownload | action=list | syncErr | cloud115Id=%d | err=%v", id, syncErr)
 			continue
 		}
 		if ran {
@@ -1018,7 +1018,7 @@ func (s *OfflineDownloadService) DeleteRecord(ctx context.Context, id int64, del
 		return fmt.Errorf("删除云下载记录失败: %v", err)
 	}
 	s.invalidateOfflineSnapshots()
-	logger.Infof("[INFO] OfflineDownload | action=delete | recordId=%d | hash=%s | deleteFiles=%v", id, rec.InfoHash, deleteFiles)
+	logger.Infof("OfflineDownload | action=delete | recordId=%d | hash=%s | deleteFiles=%v", id, rec.InfoHash, deleteFiles)
 	return nil
 }
 

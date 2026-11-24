@@ -97,7 +97,7 @@ func (s *MediaSourceService) getLocalFiles(source *domain.MediaSource, path stri
 		Breadcrumb: s.buildBreadcrumb(path),
 	}
 
-	logger.Infof("MediaSourceService[getLocalFiles] 获取本地文件列表成功: path=%s, total=%d", path, total)
+	logger.Debugf("MediaSourceService[getLocalFiles] 获取本地文件列表成功: path=%s, total=%d", path, total)
 	return result, nil
 }
 
@@ -171,6 +171,6 @@ func (s *MediaSourceService) getCloud115Files(source *domain.MediaSource, path s
 		Breadcrumb: s.buildBreadcrumb(path),
 	}
 
-	logger.Infof("MediaSourceService[getCloud115Files] 准备获取115文件列表: CID=%s", cid)
+	logger.Debugf("MediaSourceService[getCloud115Files] 准备获取115文件列表: CID=%s", cid)
 	return result, nil
 }

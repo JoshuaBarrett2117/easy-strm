@@ -853,7 +853,7 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 			}
 			if isMaskedSharePath(media.FileName) {
 				maskedTotal++
-				logger.WithContext(ctx, "share_identify").Log(logger.INFO, "跳过已有脱敏媒体", logger.Fields{"directory": media.FileName}, nil)
+				logger.WithContext(ctx, "share_identify").Log(logger.DEBUG, "跳过已有脱敏媒体", logger.Fields{"directory": media.FileName}, nil)
 				continue
 			}
 			if shouldIdentifyShareMedia(media, record.MediaType, retry, onlyPending, onlyFailed) {

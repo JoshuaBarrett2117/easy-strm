@@ -44,7 +44,7 @@ func (h *HashService) GetSHA1(filePath string) (string, error) {
 	h.sha1Cache[filePath] = sha1Hash
 	h.cacheMu.Unlock()
 
-	logger.Infof("HashService[GetSHA1] Calculated SHA1 for %s: %s", filePath, sha1Hash)
+	logger.Debugf("HashService[GetSHA1] Calculated SHA1 for %s: %s", filePath, sha1Hash)
 	return sha1Hash, nil
 }
 

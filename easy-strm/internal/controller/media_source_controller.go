@@ -156,7 +156,7 @@ func (c *MediaSourceController) Create(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("MediaSourceController[Create] 创建媒体源成功: %s (ID: %d)", source.Name, source.ID)
+	logger.Debugf("MediaSourceController[Create] 创建媒体源成功: %s (ID: %d)", source.Name, source.ID)
 	c.syncWatchState(source)
 	c.populateWatchStatus(source)
 	SuccessResp(ctx, gin.H{
@@ -330,7 +330,7 @@ func (c *MediaSourceController) Update(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("MediaSourceController[Update] 更新媒体源成功: %s (ID: %d)", source.Name, id)
+	logger.Debugf("MediaSourceController[Update] 更新媒体源成功: %s (ID: %d)", source.Name, id)
 	c.syncWatchState(source)
 	c.populateWatchStatus(source)
 	SuccessResp(ctx, gin.H{
@@ -354,7 +354,7 @@ func (c *MediaSourceController) Delete(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("MediaSourceController[Delete] 删除媒体源成功: ID %d", id)
+	logger.Debugf("MediaSourceController[Delete] 删除媒体源成功: ID %d", id)
 	c.stopWatchState(id)
 	SuccessResp(ctx, gin.H{
 		"message": "删除成功",

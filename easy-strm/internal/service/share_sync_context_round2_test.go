@@ -20,7 +20,7 @@ func TestShareSyncRetryWorkerLogsRetainRequestContext(t *testing.T) {
 
 func checkShareSyncRequestContext(t *testing.T, retry bool) {
 	t.Helper()
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service, mock, _ := operationFixture(t)
 	service.parser = shareSyncParser{err: errors.New("synthetic parser failure")}
 	expectSyncRecord(mock)

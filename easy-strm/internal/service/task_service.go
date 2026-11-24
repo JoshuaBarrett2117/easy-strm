@@ -36,7 +36,7 @@ func (s *TaskService) CreateContext(ctx context.Context, taskID string, taskType
 		logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
 		return fmt.Errorf("创建任务失败: %v", err)
 	}
-	logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType}, nil)
+	logger.WithContext(logger.WithTaskID(ctx, taskID), "task").Log(logger.DEBUG, "创建任务成功", logger.Fields{"type": taskType}, nil)
 	return nil
 }
 
@@ -46,7 +46,7 @@ func (s *TaskService) CreateWithPriority(taskID string, taskType, taskName strin
 		logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.ERROR, "创建任务失败", nil, err)
 		return fmt.Errorf("创建任务失败: %v", err)
 	}
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.INFO, "创建任务成功", logger.Fields{"type": taskType, "priority": priority}, nil)
+	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.DEBUG, "创建任务成功", logger.Fields{"type": taskType, "priority": priority}, nil)
 	return nil
 }
 
@@ -303,7 +303,6 @@ func (s *TaskService) IsFileProcessed(taskID string, fileID string) bool {
 // 在启动长时间运行的 goroutine 时调用，将 cancel 函数存储以便外部取消
 func (s *TaskService) RegisterCancel(taskID string, cancel context.CancelFunc) {
 	s.cancelFuncs.Store(taskID, cancel)
-	logger.WithContext(logger.WithTaskID(nil, taskID), "task").Log(logger.DEBUG, "注册任务取消函数", nil, nil)
 }
 
 // CancelContext 调用已注册的 cancel 函数来中断任务 goroutine

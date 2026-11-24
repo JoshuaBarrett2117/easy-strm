@@ -174,7 +174,7 @@ func (s *OrganizeService) ListOrganizeCandidates(sourceID int, sourcePath, media
 			SourcePath: sourcePath,
 		})
 	}
-	logger.Infof("OrganizeService[ListOrganizeCandidates] 候选扫描完成: source_id=%d, source_type=%s, source_path=%s, selected=%d, candidates=%d, elapsed=%s",
+	logger.Debugf("OrganizeService[ListOrganizeCandidates] 候选扫描完成: source_id=%d, source_type=%s, source_path=%s, selected=%d, candidates=%d, elapsed=%s",
 		sourceID, source.SourceType, sourcePath, len(fileIDs), len(candidates), time.Since(startedAt))
 	return candidates, nil
 }
@@ -185,7 +185,7 @@ func (s *OrganizeService) PreviewOrganize(sourceID int, sourcePath, targetPath, 
 
 // PreviewOrganizeContext 将异步预览的识别子调用关联到入口上下文。
 func (s *OrganizeService) PreviewOrganizeContext(ctx context.Context, sourceID int, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
-	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_id=%d, source_path=%s, target_path=%s", sourceID, sourcePath, targetPath)
+	logger.Debugf("OrganizeService[PreviewOrganize] 开始预览: source_id=%d, source_path=%s, target_path=%s", sourceID, sourcePath, targetPath)
 
 	// 获取媒体源
 	source, err := s.mediaSourceService.GetByID(sourceID)
@@ -209,7 +209,7 @@ func (s *OrganizeService) previewOrganizeForSourceContext(ctx context.Context, s
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	logger.Infof("OrganizeService[PreviewOrganize] 开始预览: source_type=%s, source_path=%s, target_path=%s", source.SourceType, sourcePath, targetPath)
+	logger.Debugf("OrganizeService[PreviewOrganize] 开始预览: source_type=%s, source_path=%s, target_path=%s", source.SourceType, sourcePath, targetPath)
 
 	// 获取文件列表 (传入想要整理的 ID 以进行扫描剪枝)
 	files, err := s.scanFiles(source, sourcePath, mediaType, fileIDs, true)
@@ -217,14 +217,14 @@ func (s *OrganizeService) previewOrganizeForSourceContext(ctx context.Context, s
 		return nil, fmt.Errorf("扫描文件失败: %v", err)
 	}
 
-	logger.Infof("OrganizeService[PreviewOrganize] 扫描到 %d 个文件, 起始路径=%s", len(files), sourcePath)
+	logger.Debugf("OrganizeService[PreviewOrganize] 扫描到 %d 个文件, 起始路径=%s", len(files), sourcePath)
 	if len(files) > 0 {
 		logger.Debugf("OrganizeService[PreviewOrganize] 示例扫描 ID: %s", files[0].ID)
 	}
 
 	// 按用户选中的文件ID过滤
 	files = s.filterScannedFiles(source, files, fileIDs)
-	logger.Infof("OrganizeService[PreviewOrganize] 过滤后剩余 %d 个文件, 目标待匹配数=%d", len(files), len(fileIDs))
+	logger.Debugf("OrganizeService[PreviewOrganize] 过滤后剩余 %d 个文件, 目标待匹配数=%d", len(files), len(fileIDs))
 
 	// 如果启用了智能分类，预先加载分类规则
 	var categories []*domain.MediaCategory
@@ -277,7 +277,7 @@ func (s *OrganizeService) previewOrganizeForSourceContext(ctx context.Context, s
 
 	previews = s.appendMissingFilePreviews(previews, files, fileIDs)
 
-	logger.Infof("OrganizeService[PreviewOrganize] 预览完成: total=%d", len(previews))
+	logger.Debugf("OrganizeService[PreviewOrganize] 预览完成: total=%d", len(previews))
 	return previews, nil
 }
 
@@ -594,7 +594,7 @@ func (s *OrganizeService) getBoolConfig(key string, defaultValue bool) bool {
 }
 
 func (s *OrganizeService) BatchIdentify(sourceID int, fileIDs []string) ([]domain.TmdbIdentifyResult, error) {
-	logger.Infof("OrganizeService[BatchIdentify] 开始批量识别: source_id=%d, count=%d", sourceID, len(fileIDs))
+	logger.Debugf("OrganizeService[BatchIdentify] 开始批量识别: source_id=%d, count=%d", sourceID, len(fileIDs))
 
 	// 获取媒体源
 	source, err := s.mediaSourceService.GetByID(sourceID)
@@ -675,7 +675,7 @@ func (s *OrganizeService) ScrapeDirectory(sourceID int, sourcePath string, fileI
 }
 
 func (s *OrganizeService) BatchRenamePreview(items []domain.RenamePreviewRequest) ([]domain.RenamePreviewResult, error) {
-	logger.Infof("OrganizeService[BatchRenamePreview] 开始批量预览: count=%d", len(items))
+	logger.Debugf("OrganizeService[BatchRenamePreview] 开始批量预览: count=%d", len(items))
 
 	results := make([]domain.RenamePreviewResult, 0, len(items))
 	for _, item := range items {
@@ -691,7 +691,7 @@ func (s *OrganizeService) BatchRenamePreview(items []domain.RenamePreviewRequest
 		}
 	}
 
-	logger.Infof("OrganizeService[BatchRenamePreview] 批量预览完成: total=%d", len(results))
+	logger.Debugf("OrganizeService[BatchRenamePreview] 批量预览完成: total=%d", len(results))
 	return results, nil
 }
 
@@ -703,7 +703,7 @@ func (s *OrganizeService) BatchRenamePreview(items []domain.RenamePreviewRequest
 //   - []domain.RenameExecuteResult: 执行结果列表
 //   - error: 错误信息
 func (s *OrganizeService) BatchRenameExecute(items []domain.RenameExecuteRequest) ([]domain.RenameExecuteResult, error) {
-	logger.Infof("OrganizeService[BatchRenameExecute] 开始批量执行: count=%d", len(items))
+	logger.Debugf("OrganizeService[BatchRenameExecute] 开始批量执行: count=%d", len(items))
 
 	results := make([]domain.RenameExecuteResult, 0, len(items))
 	for _, item := range items {

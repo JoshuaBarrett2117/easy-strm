@@ -280,7 +280,7 @@ func (s *TransferScheduler) processTask(task *TransferTask) {
 	}
 
 	task.Result = result
-	logger.Infof("TransferScheduler[processTask] Task %s completed with status: %s", task.ID, task.Status)
+	logger.Debugf("TransferScheduler[processTask] Task %s completed with status: %s", task.ID, task.Status)
 }
 
 func (s *TransferScheduler) getCircuitBreaker(accountID int) *CircuitBreaker {

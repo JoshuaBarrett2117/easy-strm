@@ -146,7 +146,7 @@ func (s *Cloud115Service) GetTransferCache(sha1 string) (bool, string, error) {
 	}
 
 	cached := cachedCID != ""
-	logger.Infof("Cloud115Service[GetTransferCache] SHA1=%s, cached=%v, cid=%s", sha1, cached, cachedCID)
+	logger.Debugf("Cloud115Service[GetTransferCache] SHA1=%s, cached=%v, cid=%s", sha1, cached, cachedCID)
 
 	return cached, cachedCID, nil
 }

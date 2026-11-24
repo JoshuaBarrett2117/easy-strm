@@ -122,7 +122,7 @@ func (d *ShareRecordDAO) SyncFiles(ctx context.Context, shareID int, scanToken s
 		if err = syncShareFileBatch(ctx, conn, shareID, version, attemptToken, input); err != nil {
 			return 0, err
 		}
-		log.Log(logger.INFO, "分享文件批次已提交", logger.Fields{"share_id": shareID, "batch": start/shareSyncBatchSize + 1,
+		log.Log(logger.DEBUG, "分享文件批次已提交", logger.Fields{"share_id": shareID, "batch": start/shareSyncBatchSize + 1,
 			"processed_files": end, "input_files": len(files), "batch_unique_files": len(input), "elapsed_ms": time.Since(started).Milliseconds()}, nil)
 	}
 	if err = finalizeShareSync(ctx, conn, shareID, version, attemptToken); err != nil {

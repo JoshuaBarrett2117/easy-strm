@@ -26,6 +26,6 @@ func (d *ShareExportCheckpointDAO) ReadWatermark(ctx context.Context) (*domain.S
 	if value.ProtocolVersion != 1 || value.CompletedRevision > value.PreparedRevision || value.PreparedRevision > value.ConfigRevision {
 		return nil, fmt.Errorf("内部水位镜像协议或版本链无效")
 	}
-	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "读取内部成功水位镜像", logger.Fields{"config_revision": value.ConfigRevision, "completed_revision": value.CompletedRevision}, nil)
+	logger.WithContext(ctx, "share_watermark").Log(logger.DEBUG, "读取内部成功水位镜像", logger.Fields{"config_revision": value.ConfigRevision, "completed_revision": value.CompletedRevision}, nil)
 	return &value, nil
 }

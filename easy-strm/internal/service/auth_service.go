@@ -65,7 +65,7 @@ func (s *AuthService) VerifyToken(tokenString string) (*JWTClaims, error) {
 		return []byte(s.jwtSecret), nil
 	})
 	if err != nil {
-		logger.Warnf("VerifyToken 解析失败: %T - %v", err, err)
+		logger.Debugf("VerifyToken 解析失败: %T - %v", err, err)
 		return nil, fmt.Errorf("AuthService[VerifyToken] 解析token失败: %v", err)
 	}
 
@@ -73,7 +73,7 @@ func (s *AuthService) VerifyToken(tokenString string) (*JWTClaims, error) {
 		logger.Debugf("VerifyToken 成功, userID: %v", claims.UserID)
 		return claims, nil
 	}
-	logger.Warnf("VerifyToken token.Valid=%v", token.Valid)
+	logger.Debugf("VerifyToken token.Valid=%v", token.Valid)
 	return nil, fmt.Errorf("AuthService[VerifyToken] 无效的token")
 }
 

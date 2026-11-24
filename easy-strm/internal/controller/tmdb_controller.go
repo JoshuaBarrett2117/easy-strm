@@ -142,7 +142,7 @@ func (c *TmdbController) Search(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TmdbController[Search] 搜索完成: keyword=%s, results=%d", keyword, len(results))
+	logger.Debugf("TmdbController[Search] 搜索完成: keyword=%s, results=%d", keyword, len(results))
 	SuccessResp(ctx, gin.H{
 		"data":  results,
 		"total": len(results),
@@ -160,7 +160,7 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TmdbController[Identify] 开始识别: file_id=%s, tmdb_id=%d, tmdb_type=%s", req.FileID, req.TmdbID, req.TmdbType)
+	logger.Debugf("TmdbController[Identify] 开始识别: file_id=%s, tmdb_id=%d, tmdb_type=%s", req.FileID, req.TmdbID, req.TmdbType)
 
 	// 获取 TMDB 详情以获取完整信息
 	var detail map[string]interface{}
@@ -235,7 +235,7 @@ func (c *TmdbController) Identify(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TmdbController[Identify] 识别完成: file_id=%s, tmdb_id=%d", req.FileID, req.TmdbID)
+	logger.Debugf("TmdbController[Identify] 识别完成: file_id=%s, tmdb_id=%d", req.FileID, req.TmdbID)
 	SuccessResp(ctx, gin.H{
 		"success": true,
 		"message": "识别成功",
@@ -266,7 +266,7 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 		identifyInput = req.FilePath
 	}
 
-	logger.Infof("TmdbController[AutoIdentify] 开始自动识别: filename=%s", identifyInput)
+	logger.Debugf("TmdbController[AutoIdentify] 开始自动识别: filename=%s", identifyInput)
 
 	var result *domain.TmdbIdentifyResult
 	var err error
@@ -281,7 +281,7 @@ func (c *TmdbController) AutoIdentify(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", identifyInput, len(result.Candidates))
+	logger.Debugf("TmdbController[AutoIdentify] 完成: filename=%s, candidates=%d", identifyInput, len(result.Candidates))
 	SuccessResp(ctx, result)
 }
 
@@ -397,7 +397,7 @@ func (c *TmdbController) BatchIdentify(ctx *gin.Context) {
 		}
 	}
 
-	logger.Infof("TmdbController[BatchIdentify] 批量识别完成: total=%d", len(results))
+	logger.Debugf("TmdbController[BatchIdentify] 批量识别完成: total=%d", len(results))
 	SuccessResp(ctx, gin.H{
 		"data":  results,
 		"total": len(results),

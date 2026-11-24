@@ -79,7 +79,7 @@ func NewBloomFilter(client *redis.Client, bitSize uint64) *BloomFilter {
 		bf.loadFromRedis()
 	}
 
-	logger.Infof("BloomFilter[New] Initialized with bitSize=%d, hashCount=%d, useLocal=%v", bitSize, hashCount, bf.useLocal)
+	logger.Debugf("BloomFilter[New] Initialized with bitSize=%d, hashCount=%d, useLocal=%v", bitSize, hashCount, bf.useLocal)
 	return bf
 }
 
@@ -189,7 +189,7 @@ func (bf *BloomFilter) loadFromRedis() {
 		}
 	}
 
-	logger.Infof("BloomFilter[loadFromRedis] Loaded %d SHA1 entries from Redis", len(allSHA1))
+	logger.Debugf("BloomFilter[loadFromRedis] Loaded %d SHA1 entries from Redis", len(allSHA1))
 }
 
 func (bf *BloomFilter) Clear() error {
@@ -232,7 +232,7 @@ func (bf *BloomFilter) SetRedisClient(client *redis.Client) {
 	if client != nil {
 		bf.loadFromRedis()
 	}
-	logger.Infof("BloomFilter[SetRedisClient] Updated Redis client, useLocal=%v", bf.useLocal)
+	logger.Debugf("BloomFilter[SetRedisClient] Updated Redis client, useLocal=%v", bf.useLocal)
 }
 
 func (bf *BloomFilter) EstimateCount() int64 {

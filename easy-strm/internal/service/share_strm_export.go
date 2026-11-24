@@ -609,7 +609,7 @@ func (s *ShareStrmService) exportLocalStrmSource(ctx context.Context, cfg domain
 		}
 		finishPath()
 		seen[seenIdentity] = true
-		logEntry.Log(logger.INFO, "分享 STRM 文件处理完成", logger.Fields{"event": "export_single", "source_id": source.ID, "media_id": source.MediaID, "season": episode.SeasonNumber, "episode": episode.EpisodeNumber, "written": changed}, nil)
+		logEntry.Log(logger.DEBUG, "分享 STRM 文件处理完成", logger.Fields{"event": "export_single", "source_id": source.ID, "media_id": source.MediaID, "season": episode.SeasonNumber, "episode": episode.EpisodeNumber, "written": changed}, nil)
 	}
 	return result
 }

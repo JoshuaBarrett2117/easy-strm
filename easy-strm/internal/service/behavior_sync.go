@@ -143,6 +143,7 @@ type behaviorRun struct {
 	stats   *BehaviorStats
 	changed map[string]bool
 	work    int
+	skips   map[string]int
 }
 
 // Run 在账号锁内按时间顺序处理整个选定批次；任何失败均不推进检查点。
@@ -183,6 +184,7 @@ func (service *BehaviorSyncService) Run(ctx context.Context, strmConfigID, limit
 		return stats, err
 	}
 	run := &behaviorRun{service: service, store: store, account: account, cookie: cookie, stats: &stats, changed: map[string]bool{}}
+	defer run.logSkipSummary(ctx)
 	resolutionFailed := false
 	for _, root := range configured {
 		if err = ctx.Err(); err != nil {
@@ -325,7 +327,24 @@ func (run *behaviorRun) handle(ctx context.Context, event domain.BehaviorEvent) 
 
 func (run *behaviorRun) skip(ctx context.Context, event domain.BehaviorEvent, reason string) {
 	run.stats.Skipped++
-	behaviorLog(ctx, reason, event)
+	if run.skips == nil {
+		run.skips = map[string]int{}
+	}
+	run.skips[reason]++
+	// 单条事件跳过属于预期内的过滤结果，逐条仅记 DEBUG；每轮结束由 logSkipSummary 汇总。
+	logger.WithContext(ctx, "behavior_sync").Log(logger.DEBUG, reason, logger.Fields{"event_id": int64(event.ID), "file_id": event.FileID, "type": event.Type}, nil)
+}
+
+// logSkipSummary 每轮同步按原因汇总跳过数量，替代逐条 WARN。
+func (run *behaviorRun) logSkipSummary(ctx context.Context) {
+	if len(run.skips) == 0 {
+		return
+	}
+	fields := logger.Fields{"skipped": run.stats.Skipped}
+	for reason, count := range run.skips {
+		fields[reason] = count
+	}
+	logger.WithContext(ctx, "behavior_sync").Log(logger.INFO, "行为同步跳过事件汇总", fields, nil)
 }
 
 func safeBehaviorName(name string) bool {

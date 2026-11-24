@@ -499,7 +499,7 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 	}
 	ctx, cancel := context.WithCancel(logger.WithTaskID(context.WithoutCancel(parent), taskID))
 	entry := logger.WithContext(ctx, "cron")
-	entry.Log(logger.INFO, "调度任务开始", logger.Fields{"event": "cron_start", "trigger": trigger, "handler": t.Handler}, nil)
+	entry.Log(logger.DEBUG, "调度任务开始", logger.Fields{"event": "cron_start", "trigger": trigger, "handler": t.Handler}, nil)
 	s.tasks.RegisterCancel(taskID, cancel)
 	if e := s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"cron_task_key": t.TaskKey, "cron_task_id": id, "cron_handler": t.Handler, "trigger_type": trigger, "share_export": mode != "", "requested_mode": mode, "effective_mode": ""}); e != nil {
 		cancel()
@@ -541,7 +541,11 @@ func (s *CronService) RunContext(parent context.Context, id int, trigger string)
 			if e := s.cronTaskDAO.UpdateRunInfo(id, &now, s.GetNextRunTime(id), status, message); e != nil {
 				entry.Log(logger.ERROR, "保存调度状态失败", nil, e)
 			}
-			entry.Log(logger.INFO, "调度任务结束", logger.Fields{"event": "cron_complete", "status": status}, nil)
+			level := logger.INFO
+			if status == "failed" {
+				level = logger.WARN
+			}
+			entry.Log(level, "调度任务结束", logger.Fields{"event": "cron_complete", "status": status, "handler": t.Handler, "duration_ms": time.Since(now).Milliseconds()}, nil)
 		}()
 
 		if ctx.Err() != nil || s.tasks.IsCancelledContext(ctx, taskID) {

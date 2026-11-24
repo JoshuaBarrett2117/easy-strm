@@ -199,6 +199,6 @@ func (s *ScrapeService) writeNFOFile(mediaFilePath string, nfoContent string) er
 		return fmt.Errorf("写入NFO文件失败: %v", err)
 	}
 
-	logger.Infof("[ScrapeService] NFO文件已写入: %s", nfoPath)
+	logger.Debugf("[ScrapeService] NFO文件已写入: %s", nfoPath)
 	return nil
 }

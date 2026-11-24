@@ -468,7 +468,7 @@ func (s *DashboardService) fillStorageStats(stats *DashboardStats) error {
 			}
 		}
 		if s.storageProvider == nil {
-			logger.Warnf("DashboardService[fillStorageStats] 账号 ID=%d 未配置容量查询能力", acc.ID)
+			logger.Debugf("DashboardService[fillStorageStats] 账号 ID=%d 未配置容量查询能力", acc.ID)
 			accountStorages = append(accountStorages, storage)
 			continue
 		}

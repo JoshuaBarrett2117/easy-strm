@@ -38,6 +38,14 @@ func (l *embyProxyTestLog) String() string {
 	return l.buffer.String()
 }
 
+// captureDebugLog 捕获包含 DEBUG 在内的全部日志；用于校验上下文贯穿（任务创建等事件已降为 DEBUG）。
+func captureDebugLog(t *testing.T) *embyProxyTestLog {
+	output := captureEmbyProxyLog(t)
+	logger.SetLevel(logger.DEBUG)
+	t.Cleanup(func() { logger.SetLevel(logger.INFO) })
+	return output
+}
+
 func captureEmbyProxyLog(t *testing.T) *embyProxyTestLog {
 	t.Helper()
 	output := &embyProxyTestLog{}
@@ -459,7 +467,7 @@ func TestEmbyProxyOrdinaryUpstreamFailureLogsOnce(t *testing.T) {
 	response := httptest.NewRecorder()
 	h.ServeHTTP(response, httptest.NewRequest("GET", "/System/Info?api_key=private-token", nil))
 	logs := output.String()
-	if response.Code != 503 || response.Body.String() != "private-upstream-body" || strings.Count(logs, `"level":"ERROR"`) != 1 {
+	if response.Code != 503 || response.Body.String() != "private-upstream-body" || strings.Count(logs, `"level":"WARN"`) != 1 {
 		t.Fatalf("普通上游失败应保持响应并记录一次: %d %s", response.Code, logs)
 	}
 	for _, want := range []string{`"request_id":"` + response.Header().Get("X-Request-ID") + `"`, `"stage":"proxy"`, `"status":503`, `"upstream_status":503`, `"fallback_blocked":false`} {

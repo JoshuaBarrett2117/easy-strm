@@ -135,13 +135,13 @@ func (s *ShareTransferService) patchTaskMetadata(taskID string, patch map[string
 func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, taskId string, req domain.TransferRequest, targetAccount *domain.Cloud115, targetDirCID string, successFids []string) {
 	// 安全兜底：没有任何成功落盘文件则不整理
 	if len(successFids) == 0 {
-		logger.Infof("[INFO] ShareTransfer | taskId=%s | action=postOrganize | skipped | reason=no_successful_files", taskId)
+		logger.Infof("ShareTransfer | taskId=%s | action=postOrganize | skipped | reason=no_successful_files", taskId)
 		return
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=postOrganize | panic=%v", taskId, r)
+			logger.Errorf("ShareTransfer | taskId=%s | action=postOrganize | panic=%v", taskId, r)
 		}
 	}()
 
@@ -160,7 +160,7 @@ func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, task
 	if req.OrganizeSourceID > 0 && s.mediaSourceService != nil {
 		src, err := s.mediaSourceService.GetByID(req.OrganizeSourceID)
 		if err != nil || src == nil {
-			logger.Warnf("[INFO] ShareTransfer | taskId=%s | action=postOrganize | fallbackAdhoc | organize_source_id=%d | err=%v", taskId, req.OrganizeSourceID, err)
+			logger.Warnf("ShareTransfer | taskId=%s | action=postOrganize | fallbackAdhoc | organize_source_id=%d | err=%v", taskId, req.OrganizeSourceID, err)
 			source = buildAdhocOrganizeSource(req, targetAccount, shareFolderName)
 		} else {
 			source = src
@@ -173,7 +173,7 @@ func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, task
 	organizeTaskID := "share_transfer_organize_" + uuid.New().String()
 	organizeTaskName := fmt.Sprintf("转存后整理 - %s", source.Name)
 	if err := s.taskDAO.Create(organizeTaskID, "share_transfer_organize", organizeTaskName); err != nil {
-		logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=postOrganize | createTaskErr=%v", taskId, err)
+		logger.Errorf("ShareTransfer | taskId=%s | action=postOrganize | createTaskErr=%v", taskId, err)
 		return
 	}
 	s.patchTaskMetadata(organizeTaskID, map[string]interface{}{
@@ -219,7 +219,7 @@ func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, task
 		fileIDs, true, nil, nil, onProgress, isCancelled,
 	)
 	if err != nil {
-		logger.Errorf("[INFO] ShareTransfer | taskId=%s | organizeTaskId=%s | action=postOrganize | result=FAILED | err=%v", taskId, organizeTaskID, err)
+		logger.Errorf("ShareTransfer | taskId=%s | organizeTaskId=%s | action=postOrganize | result=FAILED | err=%v", taskId, organizeTaskID, err)
 		s.patchTaskMetadata(organizeTaskID, map[string]interface{}{"error_message": err.Error()})
 		s.taskDAO.SetError(organizeTaskID, err.Error())
 		return
@@ -258,14 +258,14 @@ func (s *ShareTransferService) runPostTransferOrganize(ctx context.Context, task
 func (s *ShareTransferService) runPostTransferScrape(ctx context.Context, parentTaskID string, req domain.TransferRequest, organizeTaskID string, source *domain.MediaSource, organizeResults []OrganizeResult) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=postScrape | panic=%v", parentTaskID, r)
+			logger.Errorf("ShareTransfer | taskId=%s | action=postScrape | panic=%v", parentTaskID, r)
 		}
 	}()
 
 	scrapeTaskID := "share_transfer_scrape_" + uuid.New().String()
 	scrapeTaskName := fmt.Sprintf("转存后刮削 - %s", source.Name)
 	if err := s.taskDAO.Create(scrapeTaskID, "share_transfer_scrape", scrapeTaskName); err != nil {
-		logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=postScrape | createTaskErr=%v", parentTaskID, err)
+		logger.Errorf("ShareTransfer | taskId=%s | action=postScrape | createTaskErr=%v", parentTaskID, err)
 		return
 	}
 	s.patchTaskMetadata(scrapeTaskID, map[string]interface{}{
@@ -303,7 +303,7 @@ func (s *ShareTransferService) runPostTransferScrape(ctx context.Context, parent
 	scrapeResults, err := scraper.Scrape(ctx, source, filePaths)
 	if err != nil {
 		// 真实刮削失败（本地源）：仅影响刮削任务，不回滚转存/整理
-		logger.Errorf("[INFO] ShareTransfer | taskId=%s | scrapeTaskId=%s | action=postScrape | result=FAILED | err=%v", parentTaskID, scrapeTaskID, err)
+		logger.Errorf("ShareTransfer | taskId=%s | scrapeTaskId=%s | action=postScrape | result=FAILED | err=%v", parentTaskID, scrapeTaskID, err)
 		s.patchTaskMetadata(scrapeTaskID, map[string]interface{}{"scrape_status": "failed", "scrape_error": err.Error()})
 		s.taskDAO.SetError(scrapeTaskID, err.Error())
 		return

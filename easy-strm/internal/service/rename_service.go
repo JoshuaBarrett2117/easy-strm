@@ -60,7 +60,7 @@ func NewRenameService(
 //   - *domain.RenamePreviewResult: 预览结果
 //   - error: 错误信息
 func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain.RenamePreviewResult, error) {
-	logger.Infof("RenameService[PreviewRename] 开始预览: source_id=%d, file_id=%s", req.SourceID, req.FileID)
+	logger.Debugf("RenameService[PreviewRename] 开始预览: source_id=%d, file_id=%s", req.SourceID, req.FileID)
 
 	// 获取媒体源
 	source, err := s.mediaSourceService.GetByID(req.SourceID)
@@ -186,7 +186,7 @@ func (s *RenameService) PreviewRename(req *domain.RenamePreviewRequest) (*domain
 		Quality:      parsed.Quality,
 	}
 
-	logger.Infof("RenameService[PreviewRename] 预览完成: %s -> %s", originalName, newName)
+	logger.Debugf("RenameService[PreviewRename] 预览完成: %s -> %s", originalName, newName)
 	return result, nil
 }
 
@@ -210,7 +210,7 @@ func normalizeRenameMediaType(requestedMediaType string, parsed *ParsedEpisode) 
 //   - *domain.RenameExecuteResult: 执行结果
 //   - error: 错误信息
 func (s *RenameService) ExecuteRename(req *domain.RenameExecuteRequest) (*domain.RenameExecuteResult, error) {
-	logger.Infof("RenameService[ExecuteRename] 开始执行: source_id=%d, file_id=%s", req.SourceID, req.FileID)
+	logger.Debugf("RenameService[ExecuteRename] 开始执行: source_id=%d, file_id=%s", req.SourceID, req.FileID)
 
 	// 获取媒体源
 	source, err := s.mediaSourceService.GetByID(req.SourceID)

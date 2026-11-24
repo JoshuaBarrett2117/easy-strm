@@ -454,7 +454,7 @@ func (d *ShareExportCheckpointDAO) FinishBaseline(ctx context.Context, revision 
 	if err = transaction.QueryRowContext(ctx, `SELECT config_revision FROM t_share_export_consumer WHERE consumer='share:default' FOR UPDATE`).Scan(&current); err != nil {
 		return false, err
 	}
-	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "读取成功消费快照版本", logger.Fields{"config_revision": current, "requested_revision": revision}, nil)
+	logger.WithContext(ctx, "share_watermark").Log(logger.DEBUG, "读取成功消费快照版本", logger.Fields{"config_revision": current, "requested_revision": revision}, nil)
 	if current != revision {
 		return false, ErrShareExportChanged
 	}
@@ -465,7 +465,7 @@ func (d *ShareExportCheckpointDAO) FinishBaseline(ctx context.Context, revision 
 	if err = transaction.Commit(); err != nil {
 		return false, err
 	}
-	logger.WithContext(ctx, "share_watermark").Log(logger.INFO, "同事务刷新成功水位镜像", logger.Fields{"config_revision": revision, "same_revision_refresh": true}, nil)
+	logger.WithContext(ctx, "share_watermark").Log(logger.DEBUG, "同事务刷新成功水位镜像", logger.Fields{"config_revision": revision, "same_revision_refresh": true}, nil)
 	return true, nil
 }
 

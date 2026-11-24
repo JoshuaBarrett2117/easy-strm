@@ -70,7 +70,7 @@ func (c *FileOperationController) MoveFile(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("FileOperationController[MoveFile] 移动文件成功: %s -> %s", req.FileID, req.TargetPath)
+	logger.Debugf("FileOperationController[MoveFile] 移动文件成功: %s -> %s", req.FileID, req.TargetPath)
 	SuccessResp(ctx, gin.H{
 		"message": result.Message,
 		"data":    result,
@@ -124,7 +124,7 @@ func (c *FileOperationController) CopyFile(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("FileOperationController[CopyFile] 复制文件成功: %s -> %s", req.FileID, req.TargetPath)
+	logger.Debugf("FileOperationController[CopyFile] 复制文件成功: %s -> %s", req.FileID, req.TargetPath)
 	SuccessResp(ctx, gin.H{
 		"message": result.Message,
 		"data":    result,
@@ -172,7 +172,7 @@ func (c *FileOperationController) DeleteFile(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("FileOperationController[DeleteFile] 删除文件成功: %d 个文件", len(fileIDs))
+	logger.Debugf("FileOperationController[DeleteFile] 删除文件成功: %d 个文件", len(fileIDs))
 	SuccessResp(ctx, gin.H{
 		"message": result.Message,
 		"data":    result,
@@ -227,7 +227,7 @@ func (c *FileOperationController) RenameFile(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("FileOperationController[RenameFile] 重命名文件成功: %s -> %s", req.FileID, req.NewName)
+	logger.Debugf("FileOperationController[RenameFile] 重命名文件成功: %s -> %s", req.FileID, req.NewName)
 	SuccessResp(ctx, gin.H{
 		"message": result.Message,
 		"data":    result,
@@ -297,7 +297,7 @@ func (c *FileOperationController) BatchOperation(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("FileOperationController[BatchOperation] 批量操作完成: 类型=%s, 成功=%d, 失败=%d",
+	logger.Debugf("FileOperationController[BatchOperation] 批量操作完成: 类型=%s, 成功=%d, 失败=%d",
 		req.Operation, result.Success, result.Failed)
 	SuccessResp(ctx, gin.H{
 		"message": "批量操作完成",
@@ -350,6 +350,6 @@ func (c *FileOperationController) GetFilePreview(ctx *gin.Context) {
 		}
 	}
 
-	logger.Infof("FileOperationController[GetFilePreview] 获取文件预览信息: source_id=%d, file_id=%s", sourceID, fileID)
+	logger.Debugf("FileOperationController[GetFilePreview] 获取文件预览信息: source_id=%d, file_id=%s", sourceID, fileID)
 	SuccessResp(ctx, preview)
 }

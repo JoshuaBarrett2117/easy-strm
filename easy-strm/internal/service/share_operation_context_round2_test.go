@@ -11,7 +11,7 @@ import (
 )
 
 func TestShareOperationQueueRetainsRequestContextAfterParentCancellation(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service, mock, _ := operationFixture(t)
 	expectOperationTarget(mock, 1)
 	expectOperationClear(mock, 2)

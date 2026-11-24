@@ -12,7 +12,7 @@ import (
 )
 
 func TestActualAsyncExportHTTPAndScheduledTaskTimeline(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service, store, _ := strmFixture(t)
 	store.sources = []domain.ShareStrmSource{phaseSource(1)}
 	service.tasks = shareProgressFaultTasks(t, &shareProgressFaultHook{})

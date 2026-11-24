@@ -16,7 +16,7 @@ import (
 )
 
 func TestActualCronHTTPAndScheduledTaskTimeline(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service, mock := cronTestService(t)
 	service.Register(CronHandler{Key: "log_cleanup", Execute: func(ctx context.Context, _ *domain.CronTask, id string) (string, error) {
 		logger.WithContext(ctx, "cron_worker").Log(logger.INFO, "处理器执行", logger.Fields{"event": "cron_worker"}, nil)

@@ -326,7 +326,7 @@ func (c *Cloud115Controller) Create(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("Cloud115Controller[Create] 创建账号成功: ID=%d", acc.ID)
+	logger.Debugf("Cloud115Controller[Create] 创建账号成功: ID=%d", acc.ID)
 	ctx.JSON(http.StatusCreated, gin.H{
 		"message": "Cloud115 account created successfully",
 		"data":    formatCloud115(acc, true),
@@ -401,7 +401,7 @@ func (c *Cloud115Controller) Update(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("Cloud115Controller[Update] 更新账号成功 (ID: %d)", id)
+	logger.Debugf("Cloud115Controller[Update] 更新账号成功 (ID: %d)", id)
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Cloud115 account updated successfully",
 		"data":    formatCloud115(acc, false),
@@ -428,7 +428,7 @@ func (c *Cloud115Controller) Delete(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("Cloud115Controller[Delete] 删除账号成功: ID %d", id)
+	logger.Debugf("Cloud115Controller[Delete] 删除账号成功: ID %d", id)
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Cloud115 account deleted successfully",
 	})

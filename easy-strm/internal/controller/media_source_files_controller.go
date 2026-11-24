@@ -87,7 +87,7 @@ func (c *MediaSourceController) getCloud115Files(ctx *gin.Context, source *domai
 		return nil, fmt.Errorf("115 目录解析结果无效")
 	}
 
-	logger.Infof("MediaSourceController[getCloud115Files] 开始获取115文件列表: cloud115_id=%d, cid=%d", cloud115.ID, cidInt)
+	logger.Debugf("MediaSourceController[getCloud115Files] 开始获取115文件列表: cloud115_id=%d, cid=%d", cloud115.ID, cidInt)
 	fileList, err := c.client.GetFileList(cidInt, 1, 0, 1000, cloud115.ID, cloud115.Cookie)
 	if err != nil {
 		logger.Errorf("MediaSourceController[getCloud115Files] 获取115文件列表失败: %v", err)
@@ -150,7 +150,7 @@ func (c *MediaSourceController) getCloud115Files(ctx *gin.Context, source *domai
 		Breadcrumb: c.buildBreadcrumb(path),
 	}
 
-	logger.Infof("MediaSourceController[getCloud115Files] 获取115文件列表成功: CID=%s, total=%d", cid, total)
+	logger.Debugf("MediaSourceController[getCloud115Files] 获取115文件列表成功: CID=%s, total=%d", cid, total)
 	return result, nil
 }
 
@@ -196,6 +196,6 @@ func (c *MediaSourceController) SearchFiles(ctx *gin.Context) {
 		}
 	}
 
-	logger.Infof("MediaSourceController[SearchFiles] 搜索完成: keyword=%s, total=%d", keyword, result.Total)
+	logger.Debugf("MediaSourceController[SearchFiles] 搜索完成: keyword=%s, total=%d", keyword, result.Total)
 	SuccessResp(ctx, result)
 }

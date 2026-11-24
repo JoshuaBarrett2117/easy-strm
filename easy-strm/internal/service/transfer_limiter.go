@@ -127,7 +127,7 @@ func (l *TransferLimiter) Wait(accountID int) error {
 	}
 
 	if !accountLimiter.bucket.Allow() {
-		logger.Warnf("TransferLimiter[Wait] Account %d rate limit exceeded, waiting...", accountID)
+		logger.Debugf("TransferLimiter[Wait] Account %d rate limit exceeded, waiting...", accountID)
 		_, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
@@ -138,7 +138,7 @@ func (l *TransferLimiter) Wait(accountID int) error {
 	}
 
 	if !l.globalLimiter.Allow() {
-		logger.Warnf("TransferLimiter[Wait] Global rate limit exceeded, waiting...")
+		logger.Debugf("TransferLimiter[Wait] Global rate limit exceeded, waiting...")
 		_, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 

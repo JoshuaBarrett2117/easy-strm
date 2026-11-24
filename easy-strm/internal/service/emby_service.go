@@ -134,7 +134,7 @@ func (s *EmbyService) CheckConnection() (bool, *EmbySystemInfo, error) {
 		return false, nil, fmt.Errorf("解析Emby响应失败: %v", err)
 	}
 
-	logger.Infof("EmbyService[CheckConnection] 连接成功: %s (%s)", info.ServerName, info.Version)
+	logger.Debugf("EmbyService[CheckConnection] 连接成功: %s (%s)", info.ServerName, info.Version)
 	return true, &info, nil
 }
 
@@ -173,7 +173,7 @@ func (s *EmbyService) ListLibraries() ([]EmbyVirtualFolderInfo, error) {
 		return nil, fmt.Errorf("解析Emby媒体库响应失败: %v", err)
 	}
 
-	logger.Infof("EmbyService[ListLibraries] 获取到 %d 个媒体库", len(libraries))
+	logger.Debugf("EmbyService[ListLibraries] 获取到 %d 个媒体库", len(libraries))
 	return libraries, nil
 }
 

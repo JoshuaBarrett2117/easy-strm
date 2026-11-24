@@ -73,11 +73,23 @@ func logEmbyProxyFailure(server *domain.EmbyServer, r *http.Request, failure *em
 	if sourceID == "" {
 		sourceID = embyQuery(incoming.URL.Query(), "MediaSourceId")
 	}
-	logger.WithContext(r.Context(), "emby_proxy").Log(logger.ERROR, failure.message, logger.Fields{
+	logger.WithContext(r.Context(), "emby_proxy").Log(embyProxyFailureLevel(failure), failure.message, logger.Fields{
 		"event": "failed", "server_id": server.ID, "proxy_port": server.ProxyPort, "item_id": info.playback.itemID, "media_source_id": sourceID,
 		"method": incoming.Method, "stage": failure.stage, "reason": failure.reason, "status": failure.status,
 		"upstream_status": failure.upstreamStatus, "duration_ms": elapsed, "fallback_blocked": failure.blocked, "detail": failure.detail,
 	}, nil)
+}
+
+// embyProxyFailureLevel 普通反代透传时上游 Emby 自身返回的错误（未拦截播放、原样回给客户端）
+// 以及解析并发限流属于外部可恢复情况，记 WARN；播放链路被拦截等影响播放的失败仍记 ERROR。
+func embyProxyFailureLevel(failure *embyProxyFailure) logger.Level {
+	if failure.reason == "resolution_busy" {
+		return logger.WARN
+	}
+	if failure.stage == "proxy" && failure.reason == "upstream_http_error" && !failure.blocked {
+		return logger.WARN
+	}
+	return logger.ERROR
 }
 
 func embyProxyErrorDetail(err error) string {

@@ -432,7 +432,7 @@ func (s *FileOperationService) RenameFile(sourceID int, fileID, newName string) 
 		}, nil
 	} else if source.SourceType == domain.SourceTypeCloud115 {
 		// 115云盘文件重命名
-		logger.Infof("FileOperationService[RenameFile] 115文件重命名: %s -> %s", fileID, newName)
+		logger.Debugf("FileOperationService[RenameFile] 115文件重命名: %s -> %s", fileID, newName)
 
 		// 检查 Cloud115ID 是否存在
 		if source.Cloud115ID == nil {

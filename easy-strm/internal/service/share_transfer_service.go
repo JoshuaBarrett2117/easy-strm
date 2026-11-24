@@ -169,7 +169,7 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 	if len(maskedCode) > 4 {
 		maskedCode = maskedCode[:4] + "***"
 	}
-	logger.Infof("[INFO] ShareTransfer | shareCode=%s | action=parse | start", maskedCode)
+	logger.Infof("ShareTransfer | shareCode=%s | action=parse | start", maskedCode)
 
 	// 2. 如果URL中包含 password query参数且未单独提供密码，则从URL提取
 	if password == "" {
@@ -180,7 +180,7 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 	masked := make([]domain.ShareFileInfo, 0)
 	allFiles, shareTitle, snapErr := s.fetchShareTree(ctx, shareCode, password, "0", "", 0, map[string]bool{}, &masked)
 	if snapErr != nil {
-		logger.Errorf("[INFO] ShareTransfer | shareCode=%s | action=parse | result=API_ERROR | err=%v | duration=%s",
+		logger.Errorf("ShareTransfer | shareCode=%s | action=parse | result=API_ERROR | err=%v | duration=%s",
 			maskedCode, snapErr, time.Since(startTime).String())
 		return nil, snapErr
 	}
@@ -207,7 +207,7 @@ func (s *ShareTransferService) ParseShareLink(ctx context.Context, url string, p
 		s.redisClient.Set(ctx, cacheKey, cacheData, shareCacheTTL)
 	}
 
-	logger.Infof("[INFO] ShareTransfer | shareCode=%s | action=parse | result=OK | files=%d | size=%d | duration=%s",
+	logger.Infof("ShareTransfer | shareCode=%s | action=parse | result=OK | files=%d | size=%d | duration=%s",
 		maskedCode, result.TotalFiles, result.TotalSize, time.Since(startTime).String())
 
 	return result, nil
@@ -225,20 +225,20 @@ func (s *ShareTransferService) fetchShareTree(ctx context.Context, shareCode, pa
 		return nil, "", nil
 	}
 	visited[dirID] = true
-	logger.Infof("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q start", truncateShareCode(shareCode), dirID, parentPath)
+	logger.Debugf("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q start", truncateShareCode(shareCode), dirID, parentPath)
 	files, title, err := s.fetchShareDirectory(ctx, shareCode, password, dirID)
 	if err != nil {
 		logger.Errorf("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q error=%v", truncateShareCode(shareCode), dirID, parentPath, err)
 		return nil, title, err
 	}
-	logger.Infof("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q items=%d", truncateShareCode(shareCode), dirID, parentPath, len(files))
+	logger.Debugf("ShareTransferService[fetchShareTree] share=%s dir=%s path=%q items=%d", truncateShareCode(shareCode), dirID, parentPath, len(files))
 	result := make([]domain.ShareFileInfo, 0, len(files))
 	for _, file := range files {
 		info := convertToShareFileInfo(file)
 		info.Path = strings.TrimPrefix(filepath.Join(parentPath, info.Name), string(filepath.Separator))
 		if info.IsDir && isMaskedSharePath(info.Name) {
 			*masked = append(*masked, info)
-			logger.Infof("[ShareIdentify] 跳过脱敏目录 | directory=%q | reason=目录名包含连续星号", filepath.Join(parentPath, info.Name))
+			logger.Debugf("[ShareIdentify] 跳过脱敏目录 | directory=%q | reason=目录名包含连续星号", filepath.Join(parentPath, info.Name))
 			continue
 		}
 		// 根目录为第0层，仅下探两层；第二层目录（通常为剧集/电影目录）
@@ -265,7 +265,7 @@ func (s *ShareTransferService) fetchShareTree(ctx context.Context, shareCode, pa
 				if !hasVideo && hasChildDir {
 					reason = "包含季目录"
 				}
-				logger.Infof("[ShareIdentify] 发现媒体目录 | directory=%q | reason=%s", info.Path, reason)
+				logger.Debugf("[ShareIdentify] 发现媒体目录 | directory=%q | reason=%s", info.Path, reason)
 			}
 			// 必须在完成候选类型判断后再追加当前目录，否则结果中会保留旧的 folder 类型。
 			result = append(result, info)
@@ -447,7 +447,7 @@ func (s *ShareTransferService) GetShareFiles(ctx context.Context, shareCode, pas
 
 	// 2. 缓存未命中，重新解析
 	if cacheData == nil {
-		logger.Infof("[INFO] ShareTransfer | shareCode=%s*** | action=getFiles | cache=miss", shareCode[:min(4, len(shareCode))])
+		logger.Debugf("ShareTransfer | shareCode=%s*** | action=getFiles | cache=miss", shareCode[:min(4, len(shareCode))])
 		return nil, fmt.Errorf("分享信息已过期，请重新解析分享链接")
 	}
 
@@ -539,7 +539,7 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 	if directory != "" {
 		_, err := s.client.MkdirAll115(directory, req.TargetCloud115Id, targetAccount.Cookie)
 		if err != nil {
-			logger.Warnf("[INFO] ShareTransfer | shareCode=%s*** | action=submit | mkdirErr=%v",
+			logger.Warnf("ShareTransfer | shareCode=%s*** | action=submit | mkdirErr=%v",
 				truncateShareCode(req.ShareCode), err)
 			return nil, fmt.Errorf("创建目标目录失败: %v", err)
 		}
@@ -547,7 +547,7 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 
 	// 3. 生成任务ID
 	taskId := "share-transfer-" + uuid.New().String()
-	logger.Infof("[INFO] ShareTransfer | shareCode=%s*** | action=submit | taskId=%s | files=%d",
+	logger.Infof("ShareTransfer | shareCode=%s*** | action=submit | taskId=%s | files=%d",
 		truncateShareCode(req.ShareCode), taskId, len(req.Files))
 
 	// 4. 获取分享缓存数据（用于获取分享目录名）
@@ -617,7 +617,7 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 		estimatedSize += f.Size
 	}
 	if err := s.logDAO.BatchInsert(ctx, logs); err != nil {
-		logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=submit | logInsertErr=%v", taskId, err)
+		logger.Errorf("ShareTransfer | taskId=%s | action=submit | logInsertErr=%v", taskId, err)
 		// 日志写入失败不阻止任务提交
 	}
 
@@ -649,13 +649,13 @@ func (s *ShareTransferService) SubmitTransfer(ctx context.Context, req domain.Tr
 func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId string, req domain.TransferRequest, targetAccount *domain.Cloud115) {
 	defer func() {
 		if r := recover(); r != nil {
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=execute | panic=%v", taskId, r)
+			logger.Errorf("ShareTransfer | taskId=%s | action=execute | panic=%v", taskId, r)
 			s.taskDAO.SetError(taskId, fmt.Sprintf("转存任务异常中断: %v", r))
 		}
 	}()
 
 	startTime := time.Now()
-	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=execute | start | files=%d", taskId, len(req.Files))
+	logger.Infof("ShareTransfer | taskId=%s | action=execute | start | files=%d", taskId, len(req.Files))
 
 	// 更新状态为 transferring
 	s.taskDAO.UpdateStatus(taskId, transferStatusTransferring)
@@ -679,13 +679,13 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 		cid, err := s.client.GetCIDByPath(req.TargetDirectory, req.TargetCloud115Id, targetAccount.Cookie)
 		if err != nil {
 			errMsg := fmt.Sprintf("解析目标目录失败，已停止转存以避免文件错放: %v", err)
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=execute | getCIDErr=%v | transfer=aborted", taskId, err)
+			logger.Errorf("ShareTransfer | taskId=%s | action=execute | getCIDErr=%v | transfer=aborted", taskId, err)
 			s.taskDAO.SetError(taskId, errMsg)
 			return
 		}
 		if cid == "" || (cid == "0" && strings.Trim(req.TargetDirectory, "/\\ ") != "") {
 			errMsg := fmt.Sprintf("目标目录不存在或CID无效，已停止转存: %s", req.TargetDirectory)
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | action=execute | targetDirectory=%s | cid=%s | transfer=aborted",
+			logger.Errorf("ShareTransfer | taskId=%s | action=execute | targetDirectory=%s | cid=%s | transfer=aborted",
 				taskId, req.TargetDirectory, cid)
 			s.taskDAO.SetError(taskId, errMsg)
 			return
@@ -728,7 +728,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 	for _, file := range req.Files {
 		// 检查取消标记
 		if s.taskDAO.IsCancelled(taskId) {
-			logger.Infof("[INFO] ShareTransfer | taskId=%s | action=execute | cancelled | processed=%d/%d",
+			logger.Infof("ShareTransfer | taskId=%s | action=execute | cancelled | processed=%d/%d",
 				taskId, processedFiles, totalFiles)
 			s.taskDAO.UpdateStatus(taskId, transferStatusCancelled)
 			return
@@ -759,7 +759,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 
 		// 自动重试1次（1s间隔），应对限频等临时错误
 		if err != nil {
-			logger.Warnf("[INFO] ShareTransfer | taskId=%s | file=%s | action=execute | retry | err=%v",
+			logger.Warnf("ShareTransfer | taskId=%s | file=%s | action=execute | retry | err=%v",
 				taskId, file.Name, err)
 			time.Sleep(1 * time.Second)
 			err = s.client.ReceiveShare(
@@ -784,7 +784,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 			// 更新PG日志（以 fid 作为匹配键）
 			s.logDAO.UpdateStatus(ctx, taskId, file.Fid, logStatusFailed, errMsg)
 
-			logger.Errorf("[INFO] ShareTransfer | taskId=%s | file=%s | action=execute | result=FAILED | err=%v | duration=%s",
+			logger.Errorf("ShareTransfer | taskId=%s | file=%s | action=execute | result=FAILED | err=%v | duration=%s",
 				taskId, file.Name, err, time.Since(fileStart).String())
 		} else {
 			// 转存成功
@@ -795,7 +795,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 			// 更新PG日志（以 fid 作为匹配键）
 			s.logDAO.UpdateStatus(ctx, taskId, file.Fid, logStatusSuccess, "")
 
-			logger.Infof("[INFO] ShareTransfer | taskId=%s | file=%s | action=execute | result=OK | duration=%s",
+			logger.Debugf("ShareTransfer | taskId=%s | file=%s | action=execute | result=OK | duration=%s",
 				taskId, file.Name, time.Since(fileStart).String())
 		}
 
@@ -821,7 +821,7 @@ func (s *ShareTransferService) executeTransfer(ctx context.Context, taskId strin
 		go s.runPostTransferOrganize(context.WithoutCancel(ctx), taskId, req, targetAccount, targetDirCID, successFids)
 	}
 
-	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=execute | done | status=%s | success=%d | failed=%d | duration=%s",
+	logger.Infof("ShareTransfer | taskId=%s | action=execute | done | status=%s | success=%d | failed=%d | duration=%s",
 		taskId, finalStatus, successFiles, failedFiles, time.Since(startTime).String())
 }
 
@@ -935,7 +935,7 @@ func (s *ShareTransferService) CancelTransfer(ctx context.Context, taskId string
 	processedFiles, _ := task["processed_files"].(float64)
 	totalFiles, _ := task["total_files"].(float64)
 
-	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=cancel | completed=%d/%d", taskId, int(processedFiles), int(totalFiles))
+	logger.Infof("ShareTransfer | taskId=%s | action=cancel | completed=%d/%d", taskId, int(processedFiles), int(totalFiles))
 
 	return &domain.CancelResponse{
 		TaskId:         taskId,
@@ -1003,7 +1003,7 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 	// 获取原任务的PG日志以匹配文件信息
 	logs, err := s.logDAO.GetByTaskId(ctx, taskId)
 	if err != nil {
-		logger.Warnf("[INFO] ShareTransfer | taskId=%s | action=retry | getLogsErr=%v", taskId, err)
+		logger.Warnf("ShareTransfer | taskId=%s | action=retry | getLogsErr=%v", taskId, err)
 	}
 
 	// 构建重试文件列表
@@ -1063,7 +1063,7 @@ func (s *ShareTransferService) RetryTransfer(ctx context.Context, taskId string)
 	s.taskDAO.UpdateStatus(taskId, transferStatusTransferring)
 	go s.executeTransfer(logger.WithTaskID(context.WithoutCancel(ctx), taskId), taskId, retryReq, targetAccount)
 
-	logger.Infof("[INFO] ShareTransfer | taskId=%s | action=retry | retriedFiles=%d", taskId, len(retryFiles))
+	logger.Infof("ShareTransfer | taskId=%s | action=retry | retriedFiles=%d", taskId, len(retryFiles))
 
 	return &domain.RetryResponse{
 		TaskId:       taskId,

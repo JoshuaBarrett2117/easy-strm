@@ -46,7 +46,7 @@ func (s *OrganizeService) filterFilesByIDs(files []domain.MediaFile, fileIDs []s
 		}
 
 		if match {
-			logger.Infof("OrganizeService[filterFilesByIDs] 匹配成功: %s -> Normalized: %s (在选择范围内)", file.ID, fID)
+			logger.Debugf("OrganizeService[filterFilesByIDs] 匹配成功: %s -> Normalized: %s (在选择范围内)", file.ID, fID)
 			filtered = append(filtered, file)
 		} else {
 			// 为了调试，抽样打印不匹配的情况
@@ -352,7 +352,7 @@ func (s *OrganizeService) scanCloud115Files(source *domain.MediaSource, cidStr, 
 		cid = realCID
 	}
 
-	logger.Infof("OrganizeService[scanCloud115Files] 开始执行 115 智能扫描, CID=%s", cid)
+	logger.Debugf("OrganizeService[scanCloud115Files] 开始执行 115 智能扫描, CID=%s", cid)
 	// 115 递归扫描，起始路径设为空，ID 由 relativePath 组成
 	return s.scanCloud115RecursiveWithThrottle(cid, "", cloud115.ID, cloud115.Cookie, mediaType, targets, includeMetadata, nil)
 }

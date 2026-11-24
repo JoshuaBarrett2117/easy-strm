@@ -76,6 +76,12 @@ services:
         condition: service_healthy
     volumes:
       - app_logs:/app/logs
+    # 限制 docker logs 体积（标准输出只含 INFO 及以上）
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:

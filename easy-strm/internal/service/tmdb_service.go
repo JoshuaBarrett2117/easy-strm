@@ -410,7 +410,7 @@ func (s *TmdbService) GetCandidates(filename string) (*domain.TmdbIdentifyResult
 }
 
 func (s *TmdbService) getCandidates(filename, metadataSource string) (*domain.TmdbIdentifyResult, error) {
-	logger.Infof("TmdbService[GetCandidates] 开始获取候选: %s", filename)
+	logger.Debugf("TmdbService[GetCandidates] 开始获取候选: %s", filename)
 
 	parsed := s.parseFilename(filename)
 
@@ -458,14 +458,14 @@ func (s *TmdbService) getCandidates(filename, metadataSource string) (*domain.Tm
 	result.MetadataID = best.MetadataID
 	result.MetadataProvider = best.MetadataProvider
 
-	logger.Infof("TmdbService[GetCandidates] 获取候选成功: title=%s, candidates=%d, type=%s",
+	logger.Debugf("TmdbService[GetCandidates] 获取候选成功: title=%s, candidates=%d, type=%s",
 		result.Title, len(candidates), result.MediaType)
 	return result, nil
 }
 
 // GetCandidatesWithPath 基于文件路径及其目录上下文获取候选结果。
 func (s *TmdbService) GetCandidatesWithPath(filePath string) (*domain.TmdbIdentifyResult, error) {
-	logger.Infof("TmdbService[GetCandidatesWithPath] 开始获取候选: %s", filePath)
+	logger.Debugf("TmdbService[GetCandidatesWithPath] 开始获取候选: %s", filePath)
 	return s.GetCandidates(filePath)
 }
 
@@ -514,7 +514,7 @@ func (s *TmdbService) IdentifyFile(filename string) (*domain.TmdbIdentifyResult,
 }
 
 func (s *TmdbService) identifyFile(filename, metadataSource string, mediaTypes ...string) (*domain.TmdbIdentifyResult, error) {
-	logger.Infof("TmdbService[IdentifyFile] 开始识别文件: %s", filename)
+	logger.Debugf("TmdbService[IdentifyFile] 开始识别文件: %s", filename)
 	metadataSource = normalizeMetadataSourcePolicy(metadataSource)
 
 	// 解析文件名
@@ -557,7 +557,7 @@ func (s *TmdbService) identifyFile(filename, metadataSource string, mediaTypes .
 				result.EpisodeNumber = cache.EpisodeNumber
 			}
 			s.enrichCachedIdentifyMetadata(result, cache)
-			logger.Infof("TmdbService[IdentifyFile] 使用缓存: title=%s, tmdb_id=%d", result.Title, result.TmdbID)
+			logger.Debugf("TmdbService[IdentifyFile] 使用缓存: title=%s, tmdb_id=%d", result.Title, result.TmdbID)
 			return result, nil
 		}
 	}
@@ -593,14 +593,14 @@ func (s *TmdbService) identifyFile(filename, metadataSource string, mediaTypes .
 	// 缓存结果
 	s.cacheResult(cacheKey, parsed.MediaType, best, parsed.Season, parsed.Episode)
 
-	logger.Infof("TmdbService[IdentifyFile] 识别成功: title=%s, tmdb_id=%d, type=%s",
+	logger.Debugf("TmdbService[IdentifyFile] 识别成功: title=%s, tmdb_id=%d, type=%s",
 		result.Title, result.TmdbID, result.MediaType)
 	return result, nil
 }
 
 // IdentifyFileWithPath 基于文件路径及其目录上下文识别媒体信息。
 func (s *TmdbService) IdentifyFileWithPath(filePath string) (*domain.TmdbIdentifyResult, error) {
-	logger.Infof("TmdbService[IdentifyFileWithPath] 开始识别文件: %s", filePath)
+	logger.Debugf("TmdbService[IdentifyFileWithPath] 开始识别文件: %s", filePath)
 	return s.IdentifyFile(filePath)
 }
 
@@ -644,7 +644,7 @@ func (s *TmdbService) searchCandidatesWithFallback(parsed *ParsedFilename, metad
 
 	for i, query := range orderedQueries {
 		if i > 0 {
-			logger.Infof("TmdbService[searchCandidatesWithFallback] 原始查询无结果，尝试回退查询: %s", query)
+			logger.Debugf("TmdbService[searchCandidatesWithFallback] 原始查询无结果，尝试回退查询: %s", query)
 		}
 
 		var (

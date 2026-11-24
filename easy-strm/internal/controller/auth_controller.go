@@ -187,7 +187,7 @@ func (c *AuthController) GetUserInfo(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("AuthController[GetUserInfo] 获取用户信息成功 ID %d", userID)
+	logger.Debugf("AuthController[GetUserInfo] 获取用户信息成功 ID %d", userID)
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": gin.H{
 			"id":          user.ID,

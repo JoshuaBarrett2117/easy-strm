@@ -60,12 +60,12 @@ func (s *InstantTransferService) Transfer(sourceFile *domain.FileInfo, sourceAcc
 	}
 
 	if !mayExist {
-		logger.Infof("InstantTransferService[Transfer] SHA1 %s not in BloomFilter, proceeding with transfer", sha1)
+		logger.Debugf("InstantTransferService[Transfer] SHA1 %s not in BloomFilter, proceeding with transfer", sha1)
 	}
 
 	cachedCID, err := s.GetCachedSHA1(sha1)
 	if err == nil && cachedCID != "" {
-		logger.Infof("InstantTransferService[Transfer] SHA1 %s found in cache as CID %s", sha1, cachedCID)
+		logger.Debugf("InstantTransferService[Transfer] SHA1 %s found in cache as CID %s", sha1, cachedCID)
 		return &TransferResult{
 			Success: true,
 			Skip:    true,

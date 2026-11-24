@@ -43,7 +43,7 @@ func (c *RenameController) Preview(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("RenameController[Preview] 预览完成: %s -> %s", result.OriginalName, result.NewName)
+	logger.Debugf("RenameController[Preview] 预览完成: %s -> %s", result.OriginalName, result.NewName)
 	SuccessResp(ctx, result)
 }
 
@@ -63,7 +63,7 @@ func (c *RenameController) Execute(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("RenameController[Execute] 执行完成: %s -> %s", result.OriginalPath, result.NewPath)
+	logger.Debugf("RenameController[Execute] 执行完成: %s -> %s", result.OriginalPath, result.NewPath)
 	SuccessResp(ctx, result)
 }
 
@@ -116,7 +116,7 @@ func (c *RenameController) BatchPreview(ctx *gin.Context) {
 		}
 	}
 
-	logger.Infof("RenameController[BatchPreview] 批量预览完成: total=%d", len(results))
+	logger.Debugf("RenameController[BatchPreview] 批量预览完成: total=%d", len(results))
 	SuccessResp(ctx, gin.H{
 		"data":  results,
 		"total": len(results),
@@ -159,7 +159,7 @@ func (c *RenameController) BatchExecute(ctx *gin.Context) {
 		}
 	}
 
-	logger.Infof("RenameController[BatchExecute] 批量执行完成: success=%d, failed=%d", successCount, failedCount)
+	logger.Debugf("RenameController[BatchExecute] 批量执行完成: success=%d, failed=%d", successCount, failedCount)
 	SuccessResp(ctx, gin.H{
 		"data":    results,
 		"total":   len(results),

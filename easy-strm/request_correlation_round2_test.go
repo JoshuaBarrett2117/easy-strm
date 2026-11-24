@@ -23,6 +23,9 @@ func TestHTTPConcurrentRequestIDsAndThreeGoroutines(t *testing.T) {
 	var output bytes.Buffer
 	pkglogger.SetFormat("json")
 	pkglogger.SetOutputs(&output, &output, &output, &output)
+	// 成功的快速请求访问日志为 DEBUG，本测试校验上下文贯穿，需打开 DEBUG。
+	pkglogger.SetLevel(pkglogger.DEBUG)
+	t.Cleanup(func() { pkglogger.SetLevel(pkglogger.INFO) })
 	t.Cleanup(func() { pkglogger.SetFormat(""); pkglogger.SetOutputs(os.Stdout, os.Stdout, os.Stderr, os.Stderr) })
 	router := gin.New()
 	router.Use(requestLoggingMiddleware())

@@ -82,7 +82,7 @@ func (d *OfflineDownloadTaskDAO) BatchInsert(ctx context.Context, tasks []domain
 		return fmt.Errorf("OfflineDownloadTaskDAO[BatchInsert] SQL执行失败: %v", err)
 	}
 
-	logger.Infof("OfflineDownloadTaskDAO[BatchInsert] 批量插入完成，共%d条", len(tasks))
+	logger.Debugf("OfflineDownloadTaskDAO[BatchInsert] 批量插入完成，共%d条", len(tasks))
 	return nil
 }
 

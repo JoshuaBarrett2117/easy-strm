@@ -51,7 +51,7 @@ func (d *ShareTransferLogDAO) BatchInsert(ctx context.Context, logs []domain.Sha
 		}
 	}
 
-	logger.Infof("ShareTransferLogDAO[BatchInsert] 批量插入完成，共%d条", len(logs))
+	logger.Debugf("ShareTransferLogDAO[BatchInsert] 批量插入完成，共%d条", len(logs))
 	return nil
 }
 

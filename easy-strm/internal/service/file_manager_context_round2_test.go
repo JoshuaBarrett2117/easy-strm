@@ -12,7 +12,7 @@ import (
 )
 
 func TestFileManagerTransferTaskAndFailureLogsRetainRequestContext(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	tasks := shareProgressFaultTasks(t, &shareProgressFaultHook{})
 	service := NewFileManagerService(&fakeFileManagerMediaSources{items: map[int]*domain.MediaSource{
 		1: {ID: 1, SourceType: domain.SourceTypeLocal, Path: t.TempDir()},

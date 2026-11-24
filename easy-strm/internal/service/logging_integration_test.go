@@ -18,7 +18,7 @@ import (
 )
 
 func TestExportLoggingHasTaskRequestAndSingleFileEvents(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service, store, _ := strmFixture(t)
 	source := phaseSource(1)
 	source.Password = "synthetic-private-password"
@@ -56,7 +56,7 @@ func TestExportLoggingHasTaskRequestAndSingleFileEvents(t *testing.T) {
 }
 
 func TestTaskLifecycleLogsHaveTaskID(t *testing.T) {
-	output := captureEmbyProxyLog(t)
+	output := captureDebugLog(t)
 	service := shareProgressFaultTasks(t, &shareProgressFaultHook{})
 	if err := service.CreateWithPriority("task-synthetic", "share_export", "synthetic-private-name", 5); err != nil {
 		t.Fatal(err)

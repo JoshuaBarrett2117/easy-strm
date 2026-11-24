@@ -408,7 +408,7 @@ func (c *StrmController) GenerateFull(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "STRM config not found"})
 		return
 	}
-	logger.Infof("StrmController[GenerateFull] 找到配置 ID %d: cloud115_id=%d, net_disk_path=%s, local_path=%s",
+	logger.Debugf("StrmController[GenerateFull] 找到配置 ID %d: cloud115_id=%d, net_disk_path=%s, local_path=%s",
 		strmConfig.ID, strmConfig.Cloud115Id, strmConfig.NetDiskPath, strmConfig.LocalPath)
 	strmConfig.ClearBeforeGenerate = input.Clear
 
@@ -419,7 +419,7 @@ func (c *StrmController) GenerateFull(ctx *gin.Context) {
 		ctx.JSON(http.StatusNotFound, gin.H{"error": "Cloud115 account not found"})
 		return
 	}
-	logger.Infof("StrmController[GenerateFull] 使用115账号 ID %d", cloud115.ID)
+	logger.Debugf("StrmController[GenerateFull] 使用115账号 ID %d", cloud115.ID)
 
 	// 创建任务ID和任务名称
 	taskID := uuid.New().String()

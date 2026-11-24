@@ -110,7 +110,7 @@ func (lc *LogController) GetFileList(ctx *gin.Context) {
 		logFiles[i], logFiles[j] = logFiles[j], logFiles[i]
 	}
 
-	logger.Infof("LogController[GetFileList] admin访问日志文件列表")
+	logger.Debugf("LogController[GetFileList] admin访问日志文件列表")
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": logFiles,
 	})
@@ -180,7 +180,7 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 		return
 	}
 
-	logger.Infof("LogController[GetFileContent] admin访问日志: %s", filename)
+	logger.Debugf("LogController[GetFileContent] admin访问日志: %s", filename)
 	ctx.JSON(http.StatusOK, gin.H{
 		"data": map[string]interface{}{
 			"filename": filename,

@@ -43,6 +43,34 @@ type TelegramBotService struct {
 	done   chan struct{}
 	config TelegramConfig
 	status TelegramBotStatus
+
+	pollErrMu         sync.Mutex
+	pollErrLastWarn   time.Time
+	pollErrSuppressed int
+}
+
+// pollErrorWarnInterval 长轮询异常（代理断开、网络抖动）会每隔几秒重复出现，
+// 同一窗口内只输出一条 WARN 并附带被折叠的次数，其余记 DEBUG。
+const pollErrorWarnInterval = 10 * time.Minute
+
+func (s *TelegramBotService) logPollError(err error) {
+	s.pollErrMu.Lock()
+	now := time.Now()
+	if now.Sub(s.pollErrLastWarn) < pollErrorWarnInterval {
+		s.pollErrSuppressed++
+		s.pollErrMu.Unlock()
+		logger.Debugf("[TelegramBotService] 长轮询异常: %v", err)
+		return
+	}
+	suppressed := s.pollErrSuppressed
+	s.pollErrLastWarn = now
+	s.pollErrSuppressed = 0
+	s.pollErrMu.Unlock()
+	if suppressed > 0 {
+		logger.Warnf("[TelegramBotService] 长轮询异常（此前 %s 内另有 %d 次已折叠）: %v", pollErrorWarnInterval, suppressed, err)
+		return
+	}
+	logger.Warnf("[TelegramBotService] 长轮询异常: %v", err)
 }
 
 // SetRunCronTask 注入定时任务执行回调，供机器人命令复用。
@@ -111,7 +139,7 @@ func (s *TelegramBotService) Reload() error {
 		}),
 		telegram.WithDefaultHandler(s.handleUpdate),
 		telegram.WithErrorsHandler(func(err error) {
-			logger.Warnf("[TelegramBotService] 长轮询异常: %v", err)
+			s.logPollError(err)
 			s.setError(err)
 		}),
 	)
