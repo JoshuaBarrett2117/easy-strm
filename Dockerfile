@@ -33,15 +33,17 @@ ARG GOPROXY=https://goproxy.cn,direct
 ENV GOPROXY=${GOPROXY}
 
 COPY easy-strm/go.mod easy-strm/go.sum* ./
-RUN go mod download || go mod tidy
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY easy-strm/ ./
-ENV GOTOOLCHAIN=auto
-RUN go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o easy-strm .
+# 不在构建期执行 go mod tidy：以仓库中的 go.mod/go.sum 为准，保证构建可复现
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOFLAGS=-mod=readonly \
+    go build -trimpath -ldflags="-s -w" -o easy-strm .
 
 # ==================== 运行阶段 ====================
-FROM alpine:3.19
+FROM alpine:3.22
 
 LABEL maintainer="easy-strm"
 LABEL description="Easy-STRM - 115网盘文件直链获取工具"
@@ -91,6 +93,10 @@ ENV SERVER_URL="http://localhost:80" \
     REDIS_DB="0" \
     LOG_OUTPUT_TYPE="file" \
     LOG_LEVEL="INFO"
+
+# 健康检查：nginx 静态页可访问即视为容器存活
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
 
 # 启动supervisor管理进程
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

@@ -63,3 +63,9 @@ nul
 parse_log.txt
 debug/*
 !debug/phase02/
+
+# 本地测试/调试产物
+easy-strm/coverage
+easy-strm/test_output*.txt
+easy-strm/debug_directory_tree.txt
+.codex/browser-*/
