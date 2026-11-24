@@ -47,8 +47,12 @@ export const getLogFiles = () => {
   return api.get('/logs')
 }
 
-export const getLogFileContent = (filename, lines = 500) => {
-  return api.get(`/logs/${filename}`, { params: { lines } })
+// filters: { level: 'INFO'|'WARN'|'ERROR'|'', q: '关键字，空格分隔需全部命中' }
+export const getLogFileContent = (filename, lines = 500, filters = {}) => {
+  const params = { lines }
+  if (filters.level) params.level = filters.level
+  if (filters.q) params.q = filters.q
+  return api.get(`/logs/${filename}`, { params })
 }
 
 export const getLogConfig = () => {

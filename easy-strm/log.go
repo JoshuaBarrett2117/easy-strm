@@ -127,9 +127,11 @@ func InitLogger(config *Config) {
 
 	// 文件写入始终开启（系统日志页面依赖这些文件）；DEBUG 是否落到标准输出由输出模式决定。
 	if infoFileOutput != nil && debugFileOutput != nil {
-		infoOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-		warnOutput = io.MultiWriter(os.Stdout, infoFileOutput)
-		errorOutput = io.MultiWriter(os.Stderr, infoFileOutput)
+		// info 文件：INFO 及以上，适合日常查看；
+		// debug 文件：全部级别的完整时间线（含 INFO/WARN/ERROR），排查问题时只看这一个文件即可。
+		infoOutput = io.MultiWriter(os.Stdout, infoFileOutput, debugFileOutput)
+		warnOutput = io.MultiWriter(os.Stdout, infoFileOutput, debugFileOutput)
+		errorOutput = io.MultiWriter(os.Stderr, infoFileOutput, debugFileOutput)
 		if config.Log.OutputType == "console" {
 			debugOutput = io.MultiWriter(os.Stdout, debugFileOutput)
 		} else {
@@ -183,7 +185,7 @@ func setupFileOutput(logDir string) (io.Writer, io.Closer, io.Writer, io.Closer,
 		return nil, nil, nil, nil, err
 	}
 
-	// DEBUG日志文件（仅包含DEBUG级别）
+	// DEBUG日志文件（全部级别的完整时间线）
 	debugFile, err := newRollingFile(logDir, "debug")
 	if err != nil {
 		_ = infoFile.Close()

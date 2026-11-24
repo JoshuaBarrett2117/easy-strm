@@ -160,16 +160,20 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 		return
 	}
 
-	// 获取请求参数
+	// 获取请求参数：lines 为最多返回的匹配行数；level 为最低级别；q 为关键字（空格分隔，需全部命中，不区分大小写）
 	lines := 500
 	if linesStr := ctx.Query("lines"); linesStr != "" {
 		if parsedLines, err := strconv.Atoi(linesStr); err == nil && parsedLines > 0 {
 			lines = parsedLines
 		}
 	}
+	if lines > maxLogViewerLines {
+		lines = maxLogViewerLines
+	}
+	filter := newLogLineFilter(ctx.Query("level"), ctx.Query("q"))
 
-	// 读取日志文件
-	content, err := ReadLastNLines(logPath, lines)
+	// 读取日志文件（从尾部倒序扫描，最新的在最上面）
+	result, err := readTailLines(logPath, lines, filter)
 	if err != nil {
 		if os.IsNotExist(err) {
 			ctx.JSON(http.StatusNotFound, gin.H{"error": "Log file not found"})
@@ -179,6 +183,7 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read log file"})
 		return
 	}
+	content := strings.Join(result.lines, "\n")
 
 	logger.Debugf("LogController[GetFileContent] admin访问日志: %s", filename)
 	ctx.JSON(http.StatusOK, gin.H{
@@ -186,6 +191,10 @@ func (lc *LogController) GetFileContent(ctx *gin.Context) {
 			"filename": filename,
 			"content":  content,
 			"lines":    lines,
+			"matched":  len(result.lines),
+			// truncated 为 true 表示扫描到上限仍未读完整个文件，更早的日志未被检索
+			"truncated":     result.truncated,
+			"scanned_bytes": result.scannedBytes,
 		},
 	})
 }
@@ -274,58 +283,10 @@ func (lc *LogController) checkAdmin(ctx *gin.Context) (string, bool) {
 }
 
 // ReadLastNLines 读取文件的最后N行，返回倒序结果（最新的日志在最上面）
-// 导出函数，供其他包复用
 func ReadLastNLines(filePath string, n int) (string, error) {
-	file, err := os.Open(filePath)
+	result, err := readTailLines(filePath, n, logLineFilter{})
 	if err != nil {
 		return "", err
 	}
-	defer file.Close()
-
-	stat, err := file.Stat()
-	if err != nil {
-		return "", err
-	}
-	fileSize := stat.Size()
-
-	var lines []string
-	var lineBuffer []byte
-	var offset int64 = fileSize - 1
-	newlineCount := 0
-
-	for offset >= 0 && newlineCount < n {
-		b := make([]byte, 1)
-		_, err := file.ReadAt(b, offset)
-		if err != nil {
-			break
-		}
-
-		if b[0] == '\n' {
-			if len(lineBuffer) > 0 {
-				line := reverseBytes(lineBuffer)
-				lines = append(lines, string(line))
-				lineBuffer = lineBuffer[:0]
-				newlineCount++
-			}
-		} else {
-			lineBuffer = append(lineBuffer, b[0])
-		}
-		offset--
-	}
-
-	if len(lineBuffer) > 0 && newlineCount < n {
-		line := reverseBytes(lineBuffer)
-		lines = append(lines, string(line))
-	}
-
-	return strings.Join(lines, "\n"), nil
-}
-
-// reverseBytes 反转字节切片
-func reverseBytes(b []byte) []byte {
-	result := make([]byte, len(b))
-	for i := range b {
-		result[len(b)-1-i] = b[i]
-	}
-	return result
+	return strings.Join(result.lines, "\n"), nil
 }

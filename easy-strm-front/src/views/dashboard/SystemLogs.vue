@@ -11,11 +11,31 @@
           class="w-full sm:w-64"
           @update:value="loadLogContent"
         />
-        <n-button :loading="logLoading" @click="refreshLogContent">
+        <n-select
+          v-model:value="levelFilter"
+          :options="levelOptions"
+          class="w-32"
+          @update:value="loadLogContent"
+        />
+        <n-input
+          v-model:value="keyword"
+          clearable
+          placeholder="关键字 / req=… / task=…（空格分隔，需全部命中）"
+          class="w-full sm:w-80"
+          @keyup.enter="loadLogContent"
+          @clear="onKeywordClear"
+        />
+        <n-select
+          v-model:value="lineLimit"
+          :options="lineOptions"
+          class="w-28"
+          @update:value="loadLogContent"
+        />
+        <n-button type="primary" :loading="logLoading" @click="refreshLogContent">
           <template #icon>
             <n-icon :component="RefreshOutline" />
           </template>
-          刷新
+          查询
         </n-button>
         <div class="flex items-center gap-2">
           <n-switch v-model:value="autoRefresh" />
@@ -36,13 +56,29 @@
 
     <!-- 日志内容 -->
     <PageCard>
-	  <div class="mb-2 text-xs text-slate-500">显示所选文件最近 500 行，最新日志在上方；DEBUG 日志请切换 debug 文件查看。</div>
+      <div class="mb-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+        <span>{{ summaryText }}</span>
+        <n-tag v-if="keyword" size="small" closable @close="onKeywordClear">筛选：{{ keyword }}</n-tag>
+        <span class="text-slate-400">debug 文件是包含所有级别的完整时间线；点击 req / task 可只看该请求或任务的全部日志。</span>
+      </div>
       <n-spin :show="logLoading" class="system-logs-content">
-        <pre
-          v-if="logContent"
-          class="system-logs-text whitespace-pre-wrap break-words rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-300 overflow-auto"
-        >{{ logContent }}</pre>
-        <EmptyState v-else title="暂无日志内容" />
+        <div
+          v-if="parsedLines.length"
+          class="system-logs-text rounded-xl bg-slate-950 p-4 font-mono text-xs leading-relaxed text-slate-300 overflow-auto"
+        >
+          <div v-for="(line, index) in parsedLines" :key="index" class="whitespace-pre-wrap break-words">
+            <template v-if="line.parsed">
+              <span class="text-slate-500">{{ line.time }} </span>
+              <span :class="levelClass(line.level)">{{ line.level.padEnd(5) }} </span>
+              <span v-if="line.req !== '-'" class="log-token text-sky-400" title="只看该请求" @click="filterBy('req=' + line.req)">req={{ shortId(line.req) }} </span>
+              <span v-if="line.task !== '-'" class="log-token text-emerald-400" title="只看该任务" @click="filterBy('task=' + line.task)">task={{ line.task }} </span>
+              <span class="log-token text-violet-300" title="只看该模块" @click="filterBy('module=' + line.module)">[{{ line.module }}] </span>
+              <span :class="messageClass(line.level)">{{ line.message }}</span>
+            </template>
+            <span v-else>{{ line.raw }}</span>
+          </div>
+        </div>
+        <EmptyState v-else :title="keyword || levelFilter ? '没有匹配的日志' : '暂无日志内容'" />
       </n-spin>
     </PageCard>
   </div>
@@ -50,7 +86,7 @@
 
 <script setup>
 import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
-import { NButton, NIcon, NInputNumber, NSelect, NSpin, NSwitch, useMessage } from 'naive-ui'
+import { NButton, NIcon, NInput, NInputNumber, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
 import PageCard from '../../components/common/PageCard.vue'
 import EmptyState from '../../components/common/EmptyState.vue'
@@ -60,11 +96,23 @@ const message = useMessage()
 
 const logFiles = ref([])
 const selectedLogFile = ref('')
-const logContent = ref('')
+const logLines = ref([])
+const logMeta = ref({ matched: 0, truncated: false })
 const logLoading = ref(false)
 const autoRefresh = ref(false)
 const logSaveDayLimit = ref(1)
+const levelFilter = ref('')
+const keyword = ref('')
+const lineLimit = ref(500)
 let timer = null
+
+const levelOptions = [
+  { label: '全部级别', value: '' },
+  { label: 'INFO 及以上', value: 'INFO' },
+  { label: 'WARN 及以上', value: 'WARN' },
+  { label: '仅 ERROR', value: 'ERROR' }
+]
+const lineOptions = [500, 2000, 5000].map(value => ({ label: `${value} 行`, value }))
 
 const logFileOptions = computed(() => {
   return logFiles.value.map(file => ({
@@ -73,6 +121,63 @@ const logFileOptions = computed(() => {
     size: file.size
   }))
 })
+
+// 解析统一单行格式：[时间][级别][req=…][task=…][module=…][trace=…] 消息；JSON 格式同样支持
+const HUMAN_LINE = /^\[([^\]]*)\]\[(DEBUG|INFO|WARN|ERROR)\]\[req=([^\]]*)\]\[task=([^\]]*)\]\[module=([^\]]*)\]\[trace=([^\]]*)\]\s?(.*)$/
+const parseLine = (raw) => {
+  const match = HUMAN_LINE.exec(raw)
+  if (match) {
+    return { parsed: true, raw, time: match[1], level: match[2], req: match[3], task: match[4], module: match[5], message: match[7] }
+  }
+  if (raw.startsWith('{')) {
+    try {
+      const record = JSON.parse(raw)
+      const extra = [
+        record.fields && Object.keys(record.fields).length ? JSON.stringify(record.fields) : '',
+        record.error_chain && record.error_chain.length ? `error_chain=${JSON.stringify(record.error_chain)}` : ''
+      ].filter(Boolean).join(' ')
+      return {
+        parsed: true, raw, time: record.timestamp, level: record.level || 'INFO',
+        req: record.request_id || '-', task: record.task_id || '-', module: record.module || '-',
+        message: `${record.message || ''}${extra ? ' ' + extra : ''}`
+      }
+    } catch (error) {
+      // 非 JSON，按原文显示
+    }
+  }
+  return { parsed: false, raw }
+}
+
+const parsedLines = computed(() => logLines.value.map(parseLine))
+
+const summaryText = computed(() => {
+  const base = `${selectedLogFile.value || '未选择文件'}：显示最近 ${logMeta.value.matched} 条匹配日志，最新在上方`
+  return logMeta.value.truncated ? `${base}（文件较大，仅检索了末尾 64MB）` : base
+})
+
+const levelClass = (level) => ({
+  'text-slate-500': level === 'DEBUG',
+  'text-sky-300': level === 'INFO',
+  'text-amber-400 font-bold': level === 'WARN',
+  'text-rose-400 font-bold': level === 'ERROR'
+})
+const messageClass = (level) => ({
+  'text-slate-400': level === 'DEBUG',
+  'text-amber-200': level === 'WARN',
+  'text-rose-300': level === 'ERROR'
+})
+const shortId = (id) => (id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id)
+
+const filterBy = (token) => {
+  keyword.value = token
+  levelFilter.value = ''
+  loadLogContent()
+}
+
+const onKeywordClear = () => {
+  keyword.value = ''
+  loadLogContent()
+}
 
 // 下拉项：文件名 + 右侧灰色文件大小
 const renderLogFileLabel = (option) => {
@@ -92,7 +197,7 @@ const stopAutoRefresh = () => {
 const startAutoRefresh = () => {
   stopAutoRefresh()
   timer = setInterval(() => {
-    loadLogContent()
+    loadLogContent(true)
   }, 3000)
 }
 
@@ -106,10 +211,17 @@ const formatFileSize = (bytes) => {
 const loadLogFiles = async () => {
   try {
     const response = await getLogFiles()
-    logFiles.value = response.data.data || []
-    if (!selectedLogFile.value && logFiles.value.length > 0) {
-      const infoLog = logFiles.value.find(item => item.type === 'info')
-      selectedLogFile.value = infoLog ? infoLog.name : logFiles.value[0].name
+    const files = response.data.data || []
+    // 按日期倒序，同一天 debug（完整时间线）排在 info 前面
+    files.sort((a, b) => {
+      const dateA = a.name.replace(/^(info|debug)_/, '')
+      const dateB = b.name.replace(/^(info|debug)_/, '')
+      if (dateA !== dateB) return dateB.localeCompare(dateA)
+      return a.type === 'debug' ? -1 : 1
+    })
+    logFiles.value = files
+    if (!selectedLogFile.value && files.length > 0) {
+      selectedLogFile.value = files[0].name
       await loadLogContent()
     }
   } catch (error) {
@@ -117,25 +229,27 @@ const loadLogFiles = async () => {
   }
 }
 
-const loadLogContent = async () => {
+const loadLogContent = async (silent = false) => {
   if (!selectedLogFile.value) return
-  logLoading.value = true
+  if (!silent) logLoading.value = true
   try {
-    const response = await getLogFileContent(selectedLogFile.value, 500)
-    logContent.value = response.data.data.content || ''
+    const response = await getLogFileContent(selectedLogFile.value, lineLimit.value, {
+      level: levelFilter.value,
+      q: keyword.value.trim()
+    })
+    const data = response.data.data || {}
+    logLines.value = data.content ? data.content.split('\n') : []
+    logMeta.value = { matched: data.matched ?? logLines.value.length, truncated: !!data.truncated }
   } catch (error) {
-    logContent.value = ''
-    message.error('加载日志内容失败')
+    logLines.value = []
+    if (!silent) message.error('加载日志内容失败')
   } finally {
     logLoading.value = false
   }
 }
 
 const refreshLogContent = async () => {
-  if (!selectedLogFile.value) {
-    await loadLogFiles()
-    return
-  }
+  await loadLogFiles()
   await loadLogContent()
 }
 
@@ -168,3 +282,12 @@ onBeforeUnmount(() => {
 
 Promise.all([loadLogFiles(), loadLogConfig()])
 </script>
+
+<style scoped>
+.log-token {
+  cursor: pointer;
+}
+.log-token:hover {
+  text-decoration: underline;
+}
+</style>
