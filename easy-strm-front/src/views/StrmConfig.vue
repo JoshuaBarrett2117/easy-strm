@@ -211,6 +211,8 @@
 </template>
 
 <script setup>
+import { createPoller } from '../composables/usePolling'
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { ref, computed, onMounted, onBeforeUnmount, h } from 'vue'
 import {
   NAlert,
@@ -548,7 +550,7 @@ const columns = computed(() => [
 // 开始轮询任务状态
 const startPolling = (taskId) => {
   stopPolling()
-  pollTimer = setInterval(async () => {
+  pollTimer = createPoller(async () => {
     try {
       const resp = await getStrmTaskStatus(taskId)
       taskInfo.value = resp.data.data
@@ -570,12 +572,13 @@ const startPolling = (taskId) => {
       }
     }
   }, 2000)
+  pollTimer.start()
 }
 
 // 停止轮询
 const stopPolling = () => {
   if (pollTimer) {
-    clearInterval(pollTimer)
+    pollTimer.stop()
     pollTimer = null
   }
 }
@@ -805,6 +808,7 @@ const handleFullGenerate = (id) => {
       const taskId = resp.data.task_id
       if (taskId) {
         currentTaskId.value = taskId
+        notifyTaskSubmitted('全量生成任务已提交', taskId)
         startPolling(taskId)
       } else {
         message.success('全量生成 STRM 文件成功')
@@ -860,7 +864,7 @@ const handleRunCronTask = async (task) => {
   try {
     cronTaskLoading.value = true
     const response = await runCronTask(task.id)
-    message.success(`定时任务已触发：${response.data.data.task_id}，可在任务中心查看`)
+    notifyTaskSubmitted('定时任务已触发', response.data.data.task_id)
     // 刷新任务列表
     await fetchCronTaskList()
   } catch (error) {

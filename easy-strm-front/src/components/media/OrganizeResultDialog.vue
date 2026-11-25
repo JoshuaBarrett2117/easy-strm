@@ -85,6 +85,7 @@
 </template>
 
 <script setup>
+import { notifyTaskSubmitted } from '../../utils/ui/taskToast'
 import { computed, h, ref } from 'vue'
 import { NModal, NDataTable, NButton, NTag, NIcon, useMessage } from 'naive-ui'
 import { RefreshOutline, VideocamOutline } from '@vicons/ionicons5'
@@ -242,7 +243,7 @@ const handleGenerateStrm = async () => {
       strm_config_id: 0
     })
     const data = response.data.data || response.data || {}
-    message.success(`STRM 生成任务已创建，配置 ID: ${data.strm_config_id || '自动匹配'}`)
+    notifyTaskSubmitted(`STRM 生成任务已创建（配置 ID：${data.strm_config_id || '自动匹配'}）`, data.task_id)
     visible.value = false
   } catch (error) {
     console.error('[OrganizeResultDialog] 生成 STRM 失败:', error)

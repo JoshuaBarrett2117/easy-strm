@@ -26,6 +26,8 @@
 </template>
 
 <script setup>
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
+import { cancelVisibleTimeout, visibleTimeout } from '../composables/usePolling'
 import { computed, h, onMounted, onBeforeUnmount, ref } from 'vue'
 import { NAlert, NButton, NCard, NDataTable, NInput, NModal, NPagination, NSpace, NSpin, NTag, useDialog, useMessage } from 'naive-ui'
 import { listShareSelections, getShareSelectionDetail, changeShareSelection, refreshShareSelections, applyShareSelection } from '../utils/api/share-selection'
@@ -93,7 +95,7 @@ function confirmChange(row) {
     stopSelectionRefresh()
     changingID.value = candidateKey(row)
     const source = row.source_kind === 'strm115' ? { source_kind: 'strm115', external_ref: row.external_ref } : { source_kind: 'share', candidate_id: row.candidate_id }
-    try { const res = await changeShareSelection({ media_item_key: selection.media_item_key, ...source, expected_revision: selection.selection_revision }, traceId); const taskId = res?.data?.data?.task_id; message.success(taskId ? '改选已保存，正在立即重建该作品的 STRM' : '改选已保存，等待后台导出应用'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId); if (taskId && activeKey.value === selection.media_item_key) scheduleSelectionRefresh(selection.media_item_key, traceId) }
+    try { const res = await changeShareSelection({ media_item_key: selection.media_item_key, ...source, expected_revision: selection.selection_revision }, traceId); const taskId = res?.data?.data?.task_id; if (taskId) notifyTaskSubmitted('改选已保存，正在立即重建该作品的 STRM', taskId); else message.success('改选已保存，等待后台导出应用'); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId); await load(traceId); if (taskId && activeKey.value === selection.media_item_key) scheduleSelectionRefresh(selection.media_item_key, traceId) }
     catch (error) { message.error(errorText(error)); if (activeKey.value === selection.media_item_key) await open(activeKey.value, traceId) }
     finally { changingID.value = null }
   } })
@@ -110,7 +112,7 @@ async function applySelection() {
   try {
     const res = await applyShareSelection({ media_item_key: itemKey }, traceId)
     const taskId = res?.data?.data?.task_id
-    message.success(taskId ? '已开始重建该作品的 STRM' : '未启动重建，请稍后重试')
+    if (taskId) notifyTaskSubmitted('已开始重建该作品的 STRM', taskId); else message.warning('未启动重建，请稍后重试')
     if (taskId && generation === refreshGeneration && activeKey.value === itemKey) scheduleSelectionRefresh(itemKey, traceId)
   } catch (error) { message.error(errorText(error)) }
   finally { applying.value = false }
@@ -119,10 +121,10 @@ async function applySelection() {
 // 改选后后台会立即重建该作品的 STRM，这里轮询已导出版本，完成后自动收起提示。
 const selectionRefreshTimers = new Set()
 let refreshGeneration = 0
-function stopSelectionRefresh() { refreshGeneration++; selectionRefreshTimers.forEach(clearTimeout); selectionRefreshTimers.clear() }
+function stopSelectionRefresh() { refreshGeneration++; selectionRefreshTimers.forEach(cancelVisibleTimeout); selectionRefreshTimers.clear() }
 function scheduleSelectionRefresh(key, traceId, attempt = 0) {
   const generation = refreshGeneration
-  const timer = setTimeout(async () => {
+  const timer = visibleTimeout(async () => {
     selectionRefreshTimers.delete(timer)
     try {
       const response = await getShareSelectionDetail(key, traceId)
@@ -139,7 +141,7 @@ function scheduleSelectionRefresh(key, traceId, attempt = 0) {
   selectionRefreshTimers.add(timer)
 }
 onMounted(() => load())
-onBeforeUnmount(() => { listRevision++; selectionRefreshTimers.forEach(clearTimeout); selectionRefreshTimers.clear(); close() })
+onBeforeUnmount(() => { listRevision++; selectionRefreshTimers.forEach(cancelVisibleTimeout); selectionRefreshTimers.clear(); close() })
 </script>
 
 <style scoped>

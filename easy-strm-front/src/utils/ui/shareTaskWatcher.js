@@ -1,3 +1,5 @@
+import { cancelVisibleTimeout, visibleTimeout } from '../../composables/usePolling.js'
+
 // 每个任务独立轮询，同一任务的重复订阅共享结果，卸载后忽略在途响应。
 export function createShareTaskWatcher(fetchTask, onState, onComplete, interval = 1000, onError = () => {}) {
   const watchers = new Map()
@@ -20,12 +22,12 @@ export function createShareTaskWatcher(fetchTask, onState, onComplete, interval 
           resolve(task)
           onComplete(task)
         } else {
-          entry.timer = setTimeout(poll, interval)
+          entry.timer = visibleTimeout(poll, interval)
         }
       } catch (error) {
         if (disposed) return
         if (entry.errors++ === 0) onError(error)
-        entry.timer = setTimeout(poll, Math.min(interval * entry.errors, 5000))
+        entry.timer = visibleTimeout(poll, Math.min(interval * entry.errors, 5000))
       }
     }
     void poll()
@@ -34,7 +36,7 @@ export function createShareTaskWatcher(fetchTask, onState, onComplete, interval 
   const dispose = () => {
     disposed = true
     for (const entry of watchers.values()) {
-      clearTimeout(entry.timer)
+      cancelVisibleTimeout(entry.timer)
       entry.resolve(null)
     }
     watchers.clear()

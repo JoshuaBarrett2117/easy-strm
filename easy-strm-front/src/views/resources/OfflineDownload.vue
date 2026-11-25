@@ -122,7 +122,8 @@
 </template>
 
 <script setup>
-import { ref, computed, h, onMounted, onBeforeUnmount } from 'vue'
+import { notifyTaskSubmitted } from '../../utils/ui/taskToast'
+import { ref, computed, h, onMounted } from 'vue'
 import {
   NSelect,
   NButton,
@@ -142,6 +143,7 @@ import {
   deleteOfflineDownloadTask
 } from '../../utils/api/offline'
 import { message } from '../../utils/ui/feedback'
+import { usePolling } from '../../composables/usePolling'
 import { showConfirmDialog } from '../../utils/ui/messageBox'
 
 // ===== 状态 =====
@@ -164,7 +166,6 @@ const pageSize = ref(20)
 const filterStatus = ref('')
 const loadingRecords = ref(false)
 
-let pollTimer = null
 
 // ===== 派生状态 =====
 const parsedUrls = computed(() => {
@@ -337,10 +338,10 @@ const handleSubmit = async () => {
       if (invalidCount > 0) {
         message.warning(`${queuedMessage}，另有 ${invalidCount} 个链接格式无效`)
       } else {
-        message.success(queuedMessage)
+        notifyTaskSubmitted(queuedMessage, result.task_id)
       }
     } else if (submitRejectedCount.value === 0) {
-      message.success(`已提交 ${result.accepted ?? parsedUrlCount.value} 个云下载任务`)
+      notifyTaskSubmitted(`已提交 ${result.accepted ?? parsedUrlCount.value} 个云下载任务`, result.task_id)
     } else {
       message.warning(`部分链接未受理（${submitRejectedCount.value} 个），请查看明细`)
     }
@@ -410,26 +411,17 @@ const hasActiveRecords = () => {
   return awaitingQueuedRecords.value || records.value.some(r => r.status === 'pending' || r.status === 'downloading')
 }
 
+// 页面不可见时暂停，可见时立即刷新一次
+const recordsPoller = usePolling(() => loadRecords(true), 3000)
+
 const adjustPolling = () => {
-  if (hasActiveRecords() && !pollTimer) {
-    pollTimer = setInterval(() => loadRecords(true), 3000)
-  } else if (!hasActiveRecords() && pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
+  if (hasActiveRecords()) recordsPoller.start()
+  else recordsPoller.stop()
 }
 
 const startPolling = () => {
-  if (pollTimer) return
-  pollTimer = setInterval(() => loadRecords(true), 3000)
+  recordsPoller.start()
 }
-
-onBeforeUnmount(() => {
-  if (pollTimer) {
-    clearInterval(pollTimer)
-    pollTimer = null
-  }
-})
 
 // ===== 初始化 =====
 const loadAccounts = async () => {

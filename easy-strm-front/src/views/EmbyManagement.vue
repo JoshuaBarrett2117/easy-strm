@@ -244,6 +244,8 @@
 </template>
 
 <script setup>
+import { cancelVisibleTimeout, visibleTimeout } from '../composables/usePolling'
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import SecretConfigInput from '../components/common/SecretConfigInput.vue'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -417,8 +419,8 @@ const libraryRequest = () => ({ original_name: libraryForm.original_name, name: 
 const saveLibrary = async () => { saving.value = true; try { const data = libraryRequest(); if (libraryForm.id) await updateEmbyLibrary(selectedServerId.value, libraryForm.id, data); else await createEmbyLibrary(selectedServerId.value, data); libraryDialog.value = false; await Promise.all([loadLibraries(), loadRecentTasks()]); message.success('媒体库操作已完成') } finally { saving.value = false } }
 const removeLibrary = async library => { try { await showConfirmDialog(`只从 Emby 移除媒体库“${library.Name}”，不会删除原始媒体文件。`, '删除媒体库'); await deleteEmbyLibrary(selectedServerId.value, library.ItemId, library.Name); await Promise.all([loadLibraries(), loadRecentTasks()]); message.success('媒体库配置已删除') } catch {} }
 const saveMediaSourceBinding = async () => { if (!bindingForm.sourceId || !bindingForm.libraryId) { message.warning('请选择媒体源和 Emby 媒体库'); return } await bindEmbyMediaSource(selectedServerId.value, bindingForm.sourceId, bindingForm.libraryId); message.success('媒体源联动已保存') }
-const runLibraryRefresh = async library => { const data = payload(await refreshManagedEmbyLibrary(selectedServerId.value, library.ItemId)); message.success('刷新任务已提交'); goTask(data.task_id) }
-const refreshAllLibraries = async () => { librariesLoading.value = true; try { const data = payload(await refreshAllManagedEmbyLibraries(selectedServerId.value)); message.success('全部刷新任务已提交'); goTask(data.task_id) } finally { librariesLoading.value = false } }
+const runLibraryRefresh = async library => { const data = payload(await refreshManagedEmbyLibrary(selectedServerId.value, library.ItemId)); notifyTaskSubmitted('刷新任务已提交', data.task_id, { router }) }
+const refreshAllLibraries = async () => { librariesLoading.value = true; try { const data = payload(await refreshAllManagedEmbyLibraries(selectedServerId.value)); notifyTaskSubmitted('全部刷新任务已提交', data.task_id, { router }) } finally { librariesLoading.value = false } }
 
 const capability = action => pluginStatus.value?.capabilities?.[action]
 const runPlugin = async action => {
@@ -433,15 +435,14 @@ const runPlugin = async action => {
     } catch { return }
   }
   const data = payload(await runStrmAssistantTask(selectedServerId.value, { action, library_id: pluginLibrary[action] || '', auto_configure: autoConfigure }))
-  message.success(action === 'strm_scan_capture' ? '自动配置、STRM 扫描与截图任务已提交' : '神医助手任务已提交')
-  goTask(data.task_id)
+  notifyTaskSubmitted(action === 'strm_scan_capture' ? '自动配置、STRM 扫描与截图任务已提交' : '神医助手任务已提交', data.task_id, { router })
 }
 
 const revokePreview = () => { if (coverPreviewURL.value) URL.revokeObjectURL(coverPreviewURL.value); coverPreviewURL.value = '' }
 const openCoverDialog = async library => { activeCoverLibrary.value = library; coverTaskId.value = ''; manualCoverFile.value = null; coverDescription.value = ''; revokePreview(); coverDialog.value = true; const config = payload(await getEmbyCoverAIConfig()); Object.assign(aiForm, { ...aiForm, ...config, api_key: '' }) }
 const selectManualCover = event => { const file = event.target.files?.[0]; if (!file) return; manualCoverFile.value = file; coverTaskId.value = ''; revokePreview(); coverPreviewURL.value = URL.createObjectURL(file); event.target.value = '' }
 const generateCover = async mode => { coverLoading.value = true; manualCoverFile.value = null; revokePreview(); try { const data = payload(await generateEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, { mode, library_name: activeCoverLibrary.value.Name, description: coverDescription.value })); coverTaskId.value = data.task_id; pollCoverTask() } catch { coverLoading.value = false } }
-const pollCoverTask = async () => { clearTimeout(coverPollTimer); if (!coverTaskId.value) return; try { const task = payload(await getTaskDetail(coverTaskId.value)); if (task.metadata?.awaiting_confirmation) { const response = await getEmbyCoverPreview(coverTaskId.value); revokePreview(); coverPreviewURL.value = URL.createObjectURL(response.data); coverLoading.value = false; return } if (task.status === 'failed') { coverLoading.value = false; message.error(task.error_message || '封面生成失败'); return } } catch { coverLoading.value = false; return } coverPollTimer = setTimeout(pollCoverTask, 1500) }
+const pollCoverTask = async () => { cancelVisibleTimeout(coverPollTimer); if (!coverTaskId.value) return; try { const task = payload(await getTaskDetail(coverTaskId.value)); if (task.metadata?.awaiting_confirmation) { const response = await getEmbyCoverPreview(coverTaskId.value); revokePreview(); coverPreviewURL.value = URL.createObjectURL(response.data); coverLoading.value = false; return } if (task.status === 'failed') { coverLoading.value = false; message.error(task.error_message || '封面生成失败'); return } } catch { coverLoading.value = false; return } coverPollTimer = visibleTimeout(pollCoverTask, 1500) }
 const applyCover = async () => { coverLoading.value = true; try { if (manualCoverFile.value) await uploadEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, manualCoverFile.value); else await applyEmbyLibraryCover(selectedServerId.value, activeCoverLibrary.value.ItemId, coverTaskId.value); message.success('封面已应用到 Emby'); manualCoverFile.value = null; revokePreview(); coverDialog.value = false; await Promise.all([loadLibraries(), loadRecentTasks()]) } finally { coverLoading.value = false } }
 const saveAIConfig = async () => { await updateEmbyCoverAIConfig(aiForm); const config = payload(await getEmbyCoverAIConfig()); Object.assign(aiForm, { ...config, api_key: '' }); aiSecretReset.value++; message.success('AI 图片接口配置已保存') }
 
@@ -451,5 +452,5 @@ const goTask = taskId => router.push({ path: '/dashboard/tasks', query: { task_i
 const goTaskCenter = () => router.push({ path: '/dashboard/tasks', query: { emby_server_id: selectedServerId.value } })
 
 onMounted(async () => { await Promise.all([loadServers(), loadMediaSources()]); if (selectedServerId.value) await reloadServerData() })
-onBeforeUnmount(() => { clearTimeout(coverPollTimer); revokePreview(); revokeUserAvatarPreview(); revokeUserAvatarURLs(); revokeLibraryCoverURLs() })
+onBeforeUnmount(() => { cancelVisibleTimeout(coverPollTimer); revokePreview(); revokeUserAvatarPreview(); revokeUserAvatarURLs(); revokeLibraryCoverURLs() })
 </script>

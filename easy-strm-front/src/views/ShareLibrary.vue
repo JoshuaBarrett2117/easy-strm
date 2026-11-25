@@ -338,6 +338,7 @@
   </section>
 </template>
 <script setup>
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import ShareStrmDialog from '../components/ShareStrmDialog.vue'
@@ -675,7 +676,7 @@ const enrich = async () => {
   enriching.value = true
   try {
     const r = await enrichLibrary()
-    message.success('补全任务已创建：' + r.data.data.task_id + '，可在任务中心查看和取消')
+    notifyTaskSubmitted('补全任务已创建，可在任务中心查看和取消', r.data.data.task_id)
   } catch (e) {
     message.error(e.response?.data?.error || e.response?.data?.message || e.message)
   } finally {

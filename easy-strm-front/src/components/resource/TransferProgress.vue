@@ -185,6 +185,7 @@
 </template>
 
 <script setup>
+import { createPoller } from '../../composables/usePolling'
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { NIcon, NButton, NProgress, NAlert } from 'naive-ui'
 import {
@@ -230,7 +231,7 @@ let pollTimer = null
 /** 开始轮询 */
 const startPolling = async (getProgressFn) => {
   visible.value = true
-  if (pollTimer) clearInterval(pollTimer)
+  if (pollTimer) pollTimer.stop()
 
   const poll = async () => {
     try {
@@ -251,16 +252,16 @@ const startPolling = async (getProgressFn) => {
     }
   }
 
-  // 立即执行一次
+  // 立即执行一次，之后每 2s 轮询（页面不可见时暂停）
+  pollTimer = createPoller(poll, 2000)
   await poll()
-  // 每2s轮询
-  pollTimer = setInterval(poll, 2000)
+  if (pollTimer) pollTimer.start()
 }
 
 /** 停止轮询 */
 const stopPolling = () => {
   if (pollTimer) {
-    clearInterval(pollTimer)
+    pollTimer.stop()
     pollTimer = null
   }
 }

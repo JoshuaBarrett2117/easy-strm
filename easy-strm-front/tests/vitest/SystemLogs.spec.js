@@ -10,6 +10,8 @@ const api = vi.hoisted(() => ({
   updateLogConfig: vi.fn()
 }))
 vi.mock('../../src/utils/api/strm', () => api)
+const routeState = vi.hoisted(() => ({ route: { path: '/dashboard/home', query: {} } }))
+vi.mock('vue-router', () => ({ useRoute: () => routeState.route }))
 
 const { default: SystemLogs } = await import('../../src/views/dashboard/SystemLogs.vue')
 
@@ -29,6 +31,7 @@ const mountLogs = async () => {
 describe('SystemLogs 过滤', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    routeState.route = { path: '/dashboard/home', query: {} }
     api.getLogFiles.mockResolvedValue({ data: { data: [
       { name: 'info_2026-11-24.log', type: 'info', size: 10 },
       { name: 'info_2026-11-25.log', type: 'info', size: 20 },
@@ -73,6 +76,21 @@ describe('SystemLogs 过滤', () => {
     api.getLogFileContent.mockResolvedValue({ data: { data: { content: '', matched: 0 } } })
     const wrapper = await mountLogs()
     expect(wrapper.text()).toContain('暂无日志内容')
+    wrapper.unmount()
+  })
+
+  it('作为系统日志页面时用路由 ?q= 预填关键字（任务中心“查看日志”）', async () => {
+    routeState.route = { path: '/dashboard/system-logs', query: { q: 'task=share_strm_1' } }
+    const wrapper = await mountLogs()
+    expect(api.getLogFileContent).toHaveBeenCalledWith('debug_2026-11-25.log', 500, { level: '', q: 'task=share_strm_1' })
+    expect(wrapper.text()).toContain('筛选：task=share_strm_1')
+    wrapper.unmount()
+  })
+
+  it('在弹窗中使用（非日志页路由）时忽略路由 q', async () => {
+    routeState.route = { path: '/dashboard/tasks', query: { q: 'task=x' } }
+    const wrapper = await mountLogs()
+    expect(api.getLogFileContent).toHaveBeenCalledWith('debug_2026-11-25.log', 500, { level: '', q: '' })
     wrapper.unmount()
   })
 })

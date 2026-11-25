@@ -29,6 +29,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { NButton, NDrawer, NDrawerContent } from 'naive-ui'
 import { getPlaybackRecords } from '../../utils/api/strm'
+import { cancelVisibleTimeout, visibleTimeout } from '../../composables/usePolling'
 const props = defineProps({ show: Boolean })
 const emit = defineEmits(['update:show'])
 const visible = computed({ get: () => props.show, set: value => emit('update:show', value) })
@@ -41,14 +42,14 @@ let request
 
 // 关闭抽屉立即取消请求和轮询，避免旧响应覆盖重开后的状态。
 const stop = () => {
-  clearTimeout(timer)
+  cancelVisibleTimeout(timer)
   request?.abort()
   request = null
   loading.value = false
 }
 const load = async (more = false) => {
   if (!props.show || loading.value) return
-  clearTimeout(timer)
+  cancelVisibleTimeout(timer)
   const current = new AbortController()
   request = current
   loading.value = true
@@ -69,7 +70,7 @@ const load = async (more = false) => {
     if (request === current) {
       loading.value = false
       request = null
-      if (props.show) timer = setTimeout(() => load(), 5000)
+      if (props.show) timer = visibleTimeout(() => load(), 5000)
     }
   }
 }

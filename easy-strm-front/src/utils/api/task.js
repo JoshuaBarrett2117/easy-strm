@@ -23,3 +23,8 @@ export const cancelTask = (taskId) => {
 export const resumeTask = (taskId) => {
   return api.post(`/tasks/${taskId}/resume`)
 }
+
+// 任务类型目录（值、中文名、分组），后端 domain.TaskTypeCatalog
+export const getTaskTypes = () => {
+  return api.get('/tasks/types')
+}

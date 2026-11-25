@@ -36,6 +36,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { HeatmapChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components'
 import PageCard from '../components/common/PageCard.vue'
+import { createPoller } from '../composables/usePolling'
 import { getEmbyServers, getEmbyMonitorOverview, getEmbyMonitorRankings, getEmbyMonitorHeatmap, getEmbyMonitorRecentItems, getEmbyMonitorItemImage, getEmbyUserAvatar } from '../utils/api/emby'
 
 use([CanvasRenderer, HeatmapChart, LineChart, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent])
@@ -48,7 +49,8 @@ const loading = ref(false)
 const overview = ref({ summary: {}, trend: [], sessions: [] })
 const meta = ref({})
 const imageURLs = ref({})
-let overviewTimer = null
+// 概览每 15 秒刷新一次；页面不可见时暂停
+let overviewPoller = null
 
 const serverOptions = computed(() => servers.value.map(item => ({ label: item.name, value: item.id })))
 const sourceText = computed(() => meta.value.source === 'playback_reporting' ? 'Playback Reporting 历史' : 'easy-strm 自采历史')
@@ -59,8 +61,8 @@ const revokeImages = () => { Object.values(imageURLs.value).forEach(URL.revokeOb
 const loadImage = async (key, request) => { try { const response = await request(); imageURLs.value = { ...imageURLs.value, [key]: URL.createObjectURL(response.data) } } catch {} }
 const loadOverviewImages = data => { revokeImages(); data.sessions?.forEach(item => { if (item.item_id) loadImage(`item:${item.item_id}`, () => getEmbyMonitorItemImage(serverId.value, item.item_id)); if (item.user_id) loadImage(`user:${item.user_id}`, () => getEmbyUserAvatar(serverId.value, item.user_id)) }) }
 const loadOverview = async () => { if (!serverId.value) return; loading.value = true; try { const data = payload(await getEmbyMonitorOverview(serverId.value)); overview.value = data; setMeta(data.meta); loadOverviewImages(data) } finally { loading.value = false } }
-const clearOverviewTimer = () => { clearInterval(overviewTimer); overviewTimer = null }
-const startOverviewTimer = () => { clearOverviewTimer(); if (activeTab.value === 'overview' && serverId.value) overviewTimer = setInterval(loadOverview, 15000) }
+const clearOverviewTimer = () => { overviewPoller?.stop() }
+const startOverviewTimer = () => { clearOverviewTimer(); if (activeTab.value === 'overview' && serverId.value) { overviewPoller = overviewPoller || createPoller(loadOverview, 15000); overviewPoller.start() } }
 const loadActive = () => { if (activeTab.value === 'overview') loadOverview(); startOverviewTimer() }
 const reloadActive = () => { if (activeTab.value === 'overview') loadOverview(); else window.dispatchEvent(new CustomEvent('emby-monitor-refresh', { detail: activeTab.value })) }
 

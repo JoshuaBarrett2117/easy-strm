@@ -156,6 +156,7 @@
 </template>
 
 <script setup>
+import { notifyTaskSubmitted } from '../../utils/ui/taskToast'
 import { ref, computed, watch, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import {
@@ -306,7 +307,7 @@ const handleSubmit = async () => {
     if (progressRef.value) {
       progressRef.value.startPolling(getTransferProgress)
     }
-    message.success('转存任务已提交')
+    notifyTaskSubmitted('转存任务已提交', result.task_id)
   } catch (err) {
     const errMsg = err?.response?.data?.error || '提交转存失败'
     message.error(errMsg)

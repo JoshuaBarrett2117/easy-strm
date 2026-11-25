@@ -15,23 +15,32 @@
         </div>
       </template>
       <p class="text-sm text-slate-400 dark:text-slate-500">
-        保留现有任务取消、恢复、详情与失败文件定位能力，并用正式页面承载。
+        {{ autoRefreshHint }}
       </p>
     </PageCard>
 
     <!-- 统计卡 -->
     <section class="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
-      <StatCard label="总任务" :value="taskList.length" :icon="ListOutline" tone="cyan" />
-      <StatCard label="执行中" :value="taskCounts.running" :icon="PlayCircleOutline" tone="amber" />
-      <StatCard label="失败" :value="taskCounts.failed" :icon="CloseCircleOutline" tone="red" />
-      <StatCard label="已完成" :value="taskCounts.completed" :icon="CheckmarkCircleOutline" tone="green" />
+      <StatCard
+        v-for="card in statCards"
+        :key="card.key"
+        :data-testid="`stat-${card.key}`"
+        :label="card.label"
+        :value="card.value"
+        :icon="card.icon"
+        :tone="card.tone"
+        :hint="card.hint"
+        clickable
+        :active="activeStatCard === card.key"
+        @click="selectStatCard(card.key)"
+      />
     </section>
 
-    <PageCard title="任务筛选" subtitle="按 Emby 实例、类型、状态、发起方式和时间筛选">
+    <PageCard title="任务筛选" subtitle="按类型、状态、Emby 实例、发起方式和时间筛选；统计卡随筛选变化，点击统计卡按状态筛选">
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <n-select v-model:value="filters.taskType" :options="taskTypeOptions" clearable filterable placeholder="任务类型" data-testid="task-type-filter" />
+        <n-select v-model:value="filters.status" :options="statusOptions" clearable placeholder="执行状态" @update:value="onStatusSelect" />
         <n-select v-model:value="filters.serverId" :options="embyServerOptions" clearable placeholder="Emby 实例" />
-        <n-select v-model:value="filters.taskType" :options="embyTaskTypeOptions" clearable placeholder="任务类型" />
-        <n-select v-model:value="filters.status" :options="statusOptions" clearable placeholder="执行状态" />
         <n-select v-model:value="filters.origin" :options="originOptions" clearable placeholder="发起方式" />
         <n-date-picker v-model:value="filters.timeRange" type="datetimerange" clearable />
       </div>
@@ -49,12 +58,27 @@
           @detail="handleTaskDetail"
         />
       </div>
-      <EmptyState v-else title="暂无任务记录" />
+      <EmptyState v-else :title="taskList.length ? '没有符合筛选条件的任务' : '暂无任务记录'" />
     </PageCard>
 
     <!-- 任务详情抽屉 -->
     <n-drawer v-model:show="taskDetailVisible" :width="drawerWidth" placement="right">
       <n-drawer-content title="任务详情" closable body-content-class="!p-4">
+        <template #header>
+          <div class="flex items-center gap-3">
+            <span>任务详情</span>
+            <n-button
+              v-if="activeTaskId"
+              size="tiny"
+              secondary
+              data-testid="task-view-logs"
+              @click="openTaskLogs(activeTaskId)"
+            >
+              <template #icon><n-icon :component="ReaderOutline" /></template>
+              查看日志
+            </n-button>
+          </div>
+        </template>
         <n-spin :show="taskDetailLoading">
           <div class="min-h-40 space-y-4">
             <n-alert
@@ -68,12 +92,15 @@
               <n-descriptions :column="1" bordered label-placement="left" size="small">
                 <n-descriptions-item label="任务ID">{{ taskDetailData.task_id || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="任务名称">{{ taskDetailData.task_name || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="任务类型">{{ taskDetailData.task_type || '-' }}</n-descriptions-item>
-                <n-descriptions-item label="状态">{{ taskDetailStatus === 'partial_success' ? '部分成功' : taskDetailStatus || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="任务类型">{{ taskDetailTypeText }}</n-descriptions-item>
+                <n-descriptions-item label="状态">
+                  <n-tag size="small" :type="taskStatusTagType(taskDetailStatus)" data-testid="task-detail-status">{{ taskStatusLabel(taskDetailStatus) }}</n-tag>
+                </n-descriptions-item>
                 <n-descriptions-item label="创建时间">{{ taskDetailData.create_time || '-' }}</n-descriptions-item>
                 <n-descriptions-item label="更新时间">{{ taskDetailData.update_time || '-' }}</n-descriptions-item>
+                <n-descriptions-item label="耗时"><span data-testid="task-detail-duration">{{ taskDetailDuration }}</span></n-descriptions-item>
                 <n-descriptions-item label="进度">
-                  <n-progress type="line" :percentage="taskDetailProgress" :status="taskDetailStatus === 'partial_success' ? 'warning' : taskDetailStatus === 'failed' ? 'error' : ['completed', 'success'].includes(taskDetailStatus) ? 'success' : taskDetailStatus === 'cancelled' ? 'warning' : 'default'">{{ taskDetailProgress }}%</n-progress>
+                  <n-progress type="line" :percentage="taskDetailProgress" :status="['partial_success', 'unknown'].includes(taskDetailStatus) ? 'warning' : taskDetailStatus === 'failed' ? 'error' : ['completed', 'success'].includes(taskDetailStatus) ? 'success' : taskDetailStatus === 'cancelled' ? 'warning' : 'default'">{{ taskDetailProgress }}%</n-progress>
                   <span>已处理 {{ taskDetailData.processed_files || 0 }} / {{ taskDetailData.total_files || 0 }}</span>
                 </n-descriptions-item>
                 <n-descriptions-item label="文件统计">
@@ -157,7 +184,7 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   NAlert,
   NButton,
@@ -179,16 +206,34 @@ import {
   ListOutline,
   PlayCircleOutline,
   CloseCircleOutline,
-  CheckmarkCircleOutline
+  CheckmarkCircleOutline,
+  ReaderOutline
 } from '@vicons/ionicons5'
 import TaskCard from '../../components/TaskCard.vue'
 import PageCard from '../../components/common/PageCard.vue'
 import StatCard from '../../components/common/StatCard.vue'
 import EmptyState from '../../components/common/EmptyState.vue'
 import { cancelTask, getTaskDetail, getUnifiedTaskList, resumeTask } from '../../utils/api/task'
+import { usePolling } from '../../composables/usePolling'
+import {
+  TASK_STATUS_GROUPS,
+  effectiveTaskStatus,
+  isTaskActive,
+  loadTaskTypes,
+  taskDuration,
+  taskLogsRoute,
+  taskStatusLabel,
+  taskStatusTagType,
+  taskTypeLabel,
+  taskTypeSelectOptions
+} from '../../utils/tasks'
 
 const route = useRoute()
+const router = useRouter()
 const message = useMessage()
+
+const LIST_REFRESH_MS = 3000
+const DETAIL_REFRESH_MS = 2000
 
 const taskLoading = ref(false)
 const taskList = ref([])
@@ -196,30 +241,74 @@ const autoRefresh = ref(true)
 const taskDetailVisible = ref(false)
 const taskDetailLoading = ref(false)
 const taskDetailData = ref(null)
-const taskDetailStatus = computed(() => taskDetailData.value?.display_status || taskDetailData.value?.status)
-const taskDetailProgress = computed(() => taskDetailData.value?.status === 'completed' ? 100 : Math.min(100, Math.max(0, Number(taskDetailData.value?.progress) || 0)))
+const taskDetailStatus = computed(() => effectiveTaskStatus(taskDetailData.value))
+const taskDetailProgress = computed(() => ['completed', 'success'].includes(taskDetailData.value?.status) ? 100 : Math.min(100, Math.max(0, Number(taskDetailData.value?.progress) || 0)))
 const taskDetailError = ref('')
 const activeTaskId = ref('')
-const filters = ref({ serverId: null, taskType: null, status: null, origin: null, timeRange: null })
-let timer = null
-let taskDetailTimer = null
+const filters = ref({ serverId: null, taskType: null, status: null, statusGroup: null, origin: null, timeRange: null })
+const now = ref(Date.now())
 
-// 抽屉宽度：桌面 42%，移动端占满
-const drawerWidth = computed(() => {
-  if (typeof window !== 'undefined' && window.innerWidth < 768) {
-    return '100%'
-  }
-  return '42%'
+// 抽屉宽度：桌面 42%，移动端占满；随窗口尺寸变化
+const viewportWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1280)
+const onResize = () => { viewportWidth.value = window.innerWidth }
+const drawerWidth = computed(() => (viewportWidth.value < 768 ? '100%' : '42%'))
+
+const taskDetailTypeText = computed(() => {
+  const type = taskDetailData.value?.task_type
+  if (!type) return '-'
+  const label = taskTypeLabel(type)
+  return label === type ? type : `${label}（${type}）`
 })
+const taskDetailDuration = computed(() => taskDuration(taskDetailData.value, now.value))
+
+const matchesStatus = (task) => {
+  const status = effectiveTaskStatus(task)
+  const filter = filters.value
+  if (filter.status && status !== filter.status) return false
+  if (filter.statusGroup && !TASK_STATUS_GROUPS[filter.statusGroup].includes(status)) return false
+  return true
+}
+
+// 除状态外的筛选条件；统计卡在此基础上计数
+const baseFilteredList = computed(() => taskList.value.filter(task => {
+  const filter = filters.value
+  if (filter.serverId && Number(task.metadata?.server_id) !== Number(filter.serverId)) return false
+  if (filter.taskType && task.task_type !== filter.taskType) return false
+  if (filter.origin && task.metadata?.origin !== filter.origin) return false
+  if (Array.isArray(filter.timeRange) && filter.timeRange.length === 2) {
+    const timestamp = Date.parse(String(task.create_time || '').replace(' ', 'T'))
+    if (Number.isFinite(timestamp) && (timestamp < filter.timeRange[0] || timestamp > filter.timeRange[1])) return false
+  }
+  return true
+}))
+const filteredTaskList = computed(() => baseFilteredList.value.filter(matchesStatus))
 
 const taskCounts = computed(() => {
-  return taskList.value.reduce((acc, item) => {
-    const key = item.display_status || item.status || 'other'
-    acc[key] = (acc[key] || 0) + 1
-    if (key === 'success' || key === 'partial_success') acc.completed += 1
-    return acc
-  }, { running: 0, failed: 0, completed: 0 })
+  const counts = { all: baseFilteredList.value.length, active: 0, failed: 0, done: 0 }
+  for (const task of baseFilteredList.value) {
+    const status = effectiveTaskStatus(task)
+    for (const [group, statuses] of Object.entries(TASK_STATUS_GROUPS)) {
+      if (statuses.includes(status)) counts[group] += 1
+    }
+  }
+  return counts
 })
+
+const statCards = computed(() => [
+  { key: 'all', label: '总任务', value: taskCounts.value.all, icon: ListOutline, tone: 'cyan', hint: '显示全部状态' },
+  { key: 'active', label: '排队 / 执行中', value: taskCounts.value.active, icon: PlayCircleOutline, tone: 'amber', hint: '等待执行与执行中' },
+  { key: 'failed', label: '失败', value: taskCounts.value.failed, icon: CloseCircleOutline, tone: 'red', hint: '失败与结果未知' },
+  { key: 'done', label: '已完成', value: taskCounts.value.done, icon: CheckmarkCircleOutline, tone: 'green', hint: '成功、部分成功与跳过' }
+])
+const activeStatCard = computed(() => {
+  if (filters.value.statusGroup) return filters.value.statusGroup
+  return filters.value.status ? '' : 'all'
+})
+const selectStatCard = (key) => {
+  filters.value.status = null
+  filters.value.statusGroup = key === 'all' || filters.value.statusGroup === key ? null : key
+}
+const onStatusSelect = () => { filters.value.statusGroup = null }
 
 const embyServerOptions = computed(() => {
   const seen = new Map()
@@ -229,33 +318,18 @@ const embyServerOptions = computed(() => {
   })
   return [...seen.entries()].map(([value, label]) => ({ value, label }))
 })
-const embyTaskTypeOptions = [
-  { label: 'Emby 实例管理', value: 'emby_server' },
-  { label: 'Emby 库刷新', value: 'emby_refresh' },
-  { label: 'Emby 用户管理', value: 'emby_user' },
-  { label: 'Emby 媒体库管理', value: 'emby_library' },
-  { label: 'Emby 媒体库封面', value: 'emby_cover' },
-  { label: '神医助手任务', value: 'emby_plugin' },
-  { label: 'Emby定时任务触发', value: 'emby_scheduled' }
-]
-const statusOptions = [
-  { label: '待执行/待确认', value: 'pending' }, { label: '执行中', value: 'running' },
-  { label: '成功', value: 'success' }, { label: '部分成功', value: 'partial_success' },
-  { label: '失败', value: 'failed' }, { label: '已取消', value: 'cancelled' }, { label: '结果未知', value: 'unknown' }
-]
+const taskTypeOptions = computed(() => taskTypeSelectOptions(taskList.value.map(task => task.task_type)))
+const statusOptions = ['pending', 'running', 'success', 'completed', 'partial_success', 'failed', 'cancelled', 'skipped', 'unknown']
+  .map(value => ({ label: taskStatusLabel(value), value }))
 const originOptions = [{ label: '页面手动', value: 'manual' }, { label: '整理联动', value: 'organize_linkage' }, { label: '系统自动', value: 'automatic' }]
-const filteredTaskList = computed(() => taskList.value.filter(task => {
-  const filter = filters.value
-  if (filter.serverId && Number(task.metadata?.server_id) !== Number(filter.serverId)) return false
-  if (filter.taskType && task.task_type !== filter.taskType) return false
-  if (filter.status && (task.display_status || task.status) !== filter.status) return false
-  if (filter.origin && task.metadata?.origin !== filter.origin) return false
-  if (Array.isArray(filter.timeRange) && filter.timeRange.length === 2) {
-    const timestamp = Date.parse(String(task.create_time || '').replace(' ', 'T'))
-    if (Number.isFinite(timestamp) && (timestamp < filter.timeRange[0] || timestamp > filter.timeRange[1])) return false
-  }
-  return true
-}))
+
+const hasActiveTasks = computed(() => taskList.value.some(isTaskActive))
+const autoRefreshHint = computed(() => {
+  if (!autoRefresh.value) return '自动刷新已关闭，可手动刷新。'
+  return hasActiveTasks.value
+    ? `有排队或执行中的任务，每 ${LIST_REFRESH_MS / 1000} 秒自动刷新（页面不可见时暂停）。`
+    : '当前没有排队或执行中的任务，自动刷新已暂停；新提交的任务请点击刷新。'
+})
 
 const taskDetailMetadataRows = computed(() => {
   const metadata = taskDetailData.value?.metadata
@@ -449,34 +523,10 @@ const taskDetailFailureTagType = (category) => {
   return 'info'
 }
 
-const stopAutoRefresh = () => {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-
-const stopTaskDetailRefresh = () => {
-  if (taskDetailTimer) {
-    clearInterval(taskDetailTimer)
-    taskDetailTimer = null
-  }
-}
-
-const startAutoRefresh = () => {
-  stopAutoRefresh()
-  timer = setInterval(() => {
-    loadTasks()
-  }, 3000)
-}
-
-const startTaskDetailRefresh = () => {
-  stopTaskDetailRefresh()
-  taskDetailTimer = setInterval(() => {
-    if (!taskDetailVisible.value || !activeTaskId.value) return
-    loadTaskDetail(activeTaskId.value, false)
-  }, 2000)
-}
+// 列表只在存在排队/执行中任务时自动刷新；详情仅在任务未结束时刷新。页面不可见时均暂停。
+usePolling(() => loadTasks({ silent: true }), LIST_REFRESH_MS, { enabled: () => autoRefresh.value && hasActiveTasks.value })
+const detailActive = computed(() => taskDetailVisible.value && !!activeTaskId.value && isTaskActive(taskDetailData.value))
+usePolling(() => loadTaskDetail(activeTaskId.value, false), DETAIL_REFRESH_MS, { enabled: detailActive })
 
 const syncTaskInList = (taskDetail) => {
   if (!taskDetail?.task_id) return
@@ -488,15 +538,16 @@ const syncTaskInList = (taskDetail) => {
   }
 }
 
-const loadTasks = async () => {
+const loadTasks = async ({ silent = false } = {}) => {
   if (taskLoading.value) return
   taskLoading.value = true
   try {
     const response = await getUnifiedTaskList()
     const payload = response.data?.data?.data || response.data?.data || response.data || []
     taskList.value = Array.isArray(payload) ? payload : []
+    now.value = Date.now()
   } catch (error) {
-    message.error('加载任务列表失败')
+    if (!silent) message.error('加载任务列表失败')
   } finally {
     taskLoading.value = false
   }
@@ -510,22 +561,23 @@ const loadTaskDetail = async (taskId, showLoading = true) => {
   try {
     const response = await getTaskDetail(taskId)
     const payload = response.data.data || response.data || null
+    if (taskId !== activeTaskId.value) return
     taskDetailData.value = payload
+    now.value = Date.now()
     syncTaskInList(payload)
-    const status = payload?.status
-    if (taskDetailVisible.value && (status === 'pending' || status === 'running')) {
-      startTaskDetailRefresh()
-    } else {
-      stopTaskDetailRefresh()
-    }
   } catch (error) {
+    if (taskId !== activeTaskId.value) return
     taskDetailError.value = error.response?.data?.error || error.message || '加载任务详情失败'
-    stopTaskDetailRefresh()
   } finally {
     if (showLoading) {
       taskDetailLoading.value = false
     }
   }
+}
+
+const openTaskLogs = (taskId) => {
+  taskDetailVisible.value = false
+  router.push(taskLogsRoute(taskId))
 }
 
 const handleTaskDetail = async (taskId) => {
@@ -562,14 +614,8 @@ const openRouteTask = async () => {
   }
 }
 
-watch(autoRefresh, (value) => {
-  if (value) startAutoRefresh()
-  else stopAutoRefresh()
-})
-
 watch(taskDetailVisible, (value) => {
   if (!value) {
-    stopTaskDetailRefresh()
     activeTaskId.value = ''
     taskDetailError.value = ''
     taskDetailData.value = null
@@ -583,13 +629,14 @@ watch(() => route.query.task_id, async (taskId) => {
 })
 
 onBeforeUnmount(() => {
-  stopAutoRefresh()
-  stopTaskDetailRefresh()
+  window.removeEventListener('resize', onResize)
 })
 
 onMounted(async () => {
-  if (autoRefresh.value) startAutoRefresh()
+  window.addEventListener('resize', onResize)
+  void loadTaskTypes()
   if (route.query.emby_server_id) filters.value.serverId = Number(route.query.emby_server_id)
+  if (route.query.task_type) filters.value.taskType = String(route.query.task_type)
   await loadTasks()
   await openRouteTask()
 })

@@ -28,6 +28,8 @@
 </template>
 
 <script setup>
+import { visibleDelay } from '../composables/usePolling'
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { onMounted, ref } from 'vue'
 import { NAlert, NButton, NIcon, NTag } from 'naive-ui'
 import { SwapHorizontalOutline } from '@vicons/ionicons5'
@@ -66,7 +68,7 @@ const waitForTransferTask = async taskId => {
     if (task.status === 'completed') return task
     if (task.status === 'failed') throw new Error(task.error_message || '文件传输任务执行失败')
     if (task.status === 'cancelled') throw new Error('文件传输任务已取消')
-    await new Promise(resolve => setTimeout(resolve, 1000))
+    await visibleDelay(1000)
   }
   throw new Error('文件传输任务等待超时，请前往任务中心查看')
 }
@@ -89,7 +91,7 @@ const pasteTo = async target => {
     })
     const task = response.data?.data || {}
     if (!task.task_id) throw new Error('文件传输任务未返回任务ID')
-    message.info(`文件传输任务已创建：${task.task_id}`)
+    notifyTaskSubmitted('文件传输任务已创建，完成后自动刷新', task.task_id, { type: 'info' })
     await waitForTransferTask(task.task_id)
     if (clipboard.value.operation === 'move') clipboard.value = null
     refreshBothPanes()

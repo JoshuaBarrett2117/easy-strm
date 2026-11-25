@@ -25,6 +25,7 @@
         <n-button v-if="canCancel" type="error" size="small" secondary @click="handleCancel">取消任务</n-button>
         <n-button v-if="canResume" type="warning" size="small" secondary @click="handleResume">{{ resumeButtonText }}</n-button>
         <span class="text-xs text-slate-400 dark:text-slate-500">{{ task.create_time || '' }}</span>
+        <span v-if="durationText !== '-'" class="text-xs text-slate-400 dark:text-slate-500" data-testid="task-card-duration">耗时 {{ durationText }}</span>
       </div>
     </div>
 
@@ -185,6 +186,7 @@
 <script setup>
 import { computed, ref, toRef } from 'vue'
 import { isShareStrmCronTask, shareStrmTaskSummary } from '../utils/ui/share-strm-task-summary'
+import { effectiveTaskStatus, taskDuration, taskStatusLabel, taskStatusTagType, taskTypeLabel } from '../utils/tasks'
 import { NAlert, NButton, NIcon, NProgress, NTag } from 'naive-ui'
 import {
   TimeOutline,
@@ -213,30 +215,6 @@ const props = defineProps({
 const emit = defineEmits(['cancel', 'resume', 'detail'])
 
 const task = toRef(props, 'task')
-
-const taskTypeNames = {
- share_delete: '删除分享', share_clear: '清空分享文件记录', share_media_delete: '删除分享文件记录',
-  strm_generate: 'STRM 文件生成',
-  incremental_sync: '增量同步',
-  sync_full: '全量同步',
-  sync_transfer: '秒传同步',
-  cleanup: '空间清理',
-  proxy_refresh: '直链刷新',
-  organize: '媒体整理',
-  watch_auto_organize: '115 自动整理',
-  scrape: 'NFO 刮削',
-  emby_refresh: 'Emby 库刷新',
-  emby_server: 'Emby 实例管理',
-  emby_user: 'Emby 用户管理',
-  emby_library: 'Emby 媒体库管理',
-  emby_cover: 'Emby 媒体库封面',
-  emby_plugin: '神医助手任务',
-  emby_scheduled: 'Emby定时任务触发',
-  log_clean: '日志清理',
-  sync_files: '文件同步',
-  offline_download: '115 云下载',
-  file_transfer: '文件传输'
-}
 
 const taskTypeIcons = {
   strm_generate: DocumentTextOutline,
@@ -319,43 +297,15 @@ const taskTypeName = computed(() => {
     if (sourceType === 'cloud115') return '115 自动整理'
     return '自动整理'
   }
-  return taskTypeNames[t.task_type] || '未知任务'
+  return taskTypeLabel(t.task_type)
 })
 const taskDisplayName = computed(() => task.value ? (task.value.task_name || taskTypeName.value) : '任务')
 const taskTypeTagType = computed(() => task.value ? (taskTypeTagTypes[task.value.task_type] || 'info') : 'info')
 const effectiveStatus = computed(() => task.value?.display_status || task.value?.status)
 
-const taskStatusType = computed(() => {
-  if (task.value?.metadata?.outcome === 'skipped') return 'default'
-  const statusMap = {
-    pending: 'info',
-    running: 'warning',
-    completed: 'success',
-    success: 'success',
-    partial_success: 'warning',
-    unknown: 'warning',
-    failed: 'error',
-    cancelled: 'info',
-    scheduled: 'default'
-  }
-  return task.value ? (statusMap[effectiveStatus.value] || 'info') : 'info'
-})
-
-const taskStatusText = computed(() => {
-  if (task.value?.metadata?.outcome === 'skipped') return '已跳过'
-  const textMap = {
-    pending: '待执行',
-    running: '执行中',
-    completed: '已完成',
-    success: '成功',
-    partial_success: '部分成功',
-    unknown: '结果未知',
-    failed: '失败',
-    cancelled: '已取消',
-    scheduled: '已调度'
-  }
-  return task.value ? (textMap[effectiveStatus.value] || '未知') : '未知'
-})
+const taskStatusType = computed(() => taskStatusTagType(effectiveTaskStatus(task.value)))
+const taskStatusText = computed(() => (task.value ? taskStatusLabel(effectiveTaskStatus(task.value)) : '-'))
+const durationText = computed(() => taskDuration(task.value))
 
 const taskStatusIcon = computed(() => {
   const t = task.value

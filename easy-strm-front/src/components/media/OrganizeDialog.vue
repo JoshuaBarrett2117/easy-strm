@@ -138,6 +138,8 @@
 </template>
 
 <script setup>
+import { visibleDelay } from '../../composables/usePolling'
+import { notifyTaskSubmitted } from '../../utils/ui/taskToast'
 import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
 import {
   NModal,
@@ -252,7 +254,8 @@ const presetOptions = computed(() => presets.value.map((preset) => ({
 })))
 
 const getPayload = (response) => response?.data?.data || {}
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+// 轮询等待：页面不可见时暂停，可见后立即继续
+const sleep = visibleDelay
 const getTaskPayload = (response) => {
   const payload = getPayload(response)
   if (payload?.task_id || payload?.status) {
@@ -611,7 +614,7 @@ const handleExecute = async () => {
     const response = await executeOrganizeAsync(buildPayload())
     const payload = getPayload(response)
     const taskId = payload.task_id
-    message.success(taskId ? `整理任务已提交，可在任务中心查看进度：${taskId}` : '整理任务已提交，可在任务中心查看进度')
+    notifyTaskSubmitted('整理任务已提交', taskId)
     handleCloseDialog()
     emit('execute-success', {
       async: true,
@@ -734,7 +737,7 @@ const retryFailedItems = async (failedItems) => {
     const response = await executeOrganizeAsync(payload)
     const resultPayload = getPayload(response)
     const taskId = resultPayload.task_id
-    message.success(taskId ? `重试任务已提交：${taskId}` : '重试任务已提交，可在任务中心查看进度')
+    notifyTaskSubmitted('重试任务已提交', taskId)
     return {
       async: true,
       taskId

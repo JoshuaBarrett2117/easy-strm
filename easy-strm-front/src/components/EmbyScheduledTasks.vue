@@ -52,6 +52,8 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { NAlert, NButton, NProgress, NTag, NModal, NSelect, NTimePicker, NInputNumber, useMessage } from 'naive-ui'
 import PageCard from './common/PageCard.vue'
 import EmptyState from './common/EmptyState.vue'
+import { cancelVisibleTimeout, visibleTimeout } from '../composables/usePolling'
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { getEmbyScheduledTasks, startEmbyScheduledTask, updateEmbyScheduledTaskTriggers } from '../utils/api/emby'
 
 const props = defineProps({ serverId: Number, active: Boolean })
@@ -120,7 +122,7 @@ const triggerLabel = trigger => {
   return { IntervalTrigger: `每 ${Number(trigger.IntervalTicks || 0) / 36000000000} 小时`, DailyTrigger: `每天 ${time}`, WeeklyTrigger: `${day} ${time}`, StartupTrigger: 'Emby 启动时' }[trigger.Type] || trigger.Type || '未知规则'
 }
 const loadTasks = async () => {
-  clearTimeout(timer)
+  cancelVisibleTimeout(timer)
   if (!props.active || !props.serverId) return
   const version = ++generation
   loading.value = true
@@ -135,7 +137,7 @@ const loadTasks = async () => {
   } finally {
     if (version === generation) {
       loading.value = false
-      timer = setTimeout(loadTasks, 5000)
+      timer = visibleTimeout(loadTasks, 5000)
     }
   }
 }
@@ -144,9 +146,9 @@ const runTask = async task => {
   if (pending.value.has(task.Id)) return
   pending.value.add(task.Id)
   try {
-    await startEmbyScheduledTask(serverId, task.Id)
+    const response = await startEmbyScheduledTask(serverId, task.Id)
     if (serverId !== props.serverId) return
-    message.success('触发请求已提交')
+    notifyTaskSubmitted('触发请求已提交', response?.data?.data?.task_id)
     emit('submitted')
     await loadTasks()
   } catch { /* API 封装统一展示操作错误。 */ }
@@ -155,12 +157,12 @@ const runTask = async task => {
 watch(() => [props.serverId, props.active], () => {
   closeEditor()
   generation++
-  clearTimeout(timer)
+  cancelVisibleTimeout(timer)
   loading.value = false
   tasks.value = []
   error.value = ''
   pending.value = new Set()
   loadTasks()
 }, { immediate: true })
-onBeforeUnmount(() => { closeEditor(); generation++; clearTimeout(timer) })
+onBeforeUnmount(() => { closeEditor(); generation++; cancelVisibleTimeout(timer) })
 </script>

@@ -8,27 +8,27 @@
           :options="logFileOptions"
           :render-label="renderLogFileLabel"
           placeholder="选择日志文件"
-          class="w-full sm:w-64"
+          class="logs-toolbar-file"
           @update:value="loadLogContent"
         />
         <n-select
           v-model:value="levelFilter"
           :options="levelOptions"
-          class="w-32"
+          class="logs-toolbar-level"
           @update:value="loadLogContent"
         />
         <n-input
           v-model:value="keyword"
           clearable
           placeholder="关键字 / req=… / task=…（空格分隔，需全部命中）"
-          class="w-full sm:w-80"
+          class="logs-toolbar-keyword"
           @keyup.enter="loadLogContent"
           @clear="onKeywordClear"
         />
         <n-select
           v-model:value="lineLimit"
           :options="lineOptions"
-          class="w-28"
+          class="logs-toolbar-lines"
           @update:value="loadLogContent"
         />
         <n-button type="primary" :loading="logLoading" @click="refreshLogContent">
@@ -85,15 +85,21 @@
 </template>
 
 <script setup>
-import { computed, h, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, h, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { NButton, NIcon, NInput, NInputNumber, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
 import PageCard from '../../components/common/PageCard.vue'
 import EmptyState from '../../components/common/EmptyState.vue'
 import { getLogConfig, getLogFileContent, getLogFiles, updateLogConfig } from '../../utils/api/strm'
 import { formatFileSize, parseLogLine, shortLogId, sortLogFiles } from '../../utils/logs'
+import { usePolling } from '../../composables/usePolling'
 
 const message = useMessage()
+const route = useRoute()
+// 作为“系统日志”页面时，支持 ?q=task=<ID> 等关键字预填（任务中心“查看日志”跳转）；在弹窗中使用时不读路由。
+const LOGS_PATH = '/dashboard/system-logs'
+const routeKeyword = () => (route?.path === LOGS_PATH && typeof route.query?.q === 'string' ? route.query.q : '')
 
 const logFiles = ref([])
 const selectedLogFile = ref('')
@@ -103,9 +109,8 @@ const logLoading = ref(false)
 const autoRefresh = ref(false)
 const logSaveDayLimit = ref(1)
 const levelFilter = ref('')
-const keyword = ref('')
+const keyword = ref(routeKeyword())
 const lineLimit = ref(500)
-let timer = null
 
 const levelOptions = [
   { label: '全部级别', value: '' },
@@ -162,19 +167,8 @@ const renderLogFileLabel = (option) => {
   ])
 }
 
-const stopAutoRefresh = () => {
-  if (timer) {
-    clearInterval(timer)
-    timer = null
-  }
-}
-
-const startAutoRefresh = () => {
-  stopAutoRefresh()
-  timer = setInterval(() => {
-    loadLogContent(true)
-  }, 3000)
-}
+// 自动刷新每 3 秒一次，页面不可见时暂停
+usePolling(() => loadLogContent(true), 3000, { enabled: autoRefresh })
 
 const loadLogFiles = async () => {
   try {
@@ -232,19 +226,27 @@ const handleLogConfigChange = async (value) => {
   }
 }
 
-watch(autoRefresh, (value) => {
-  if (value) startAutoRefresh()
-  else stopAutoRefresh()
-})
-
-onBeforeUnmount(() => {
-  stopAutoRefresh()
+watch(() => routeKeyword(), (value, previous) => {
+  if (value && value !== previous && value !== keyword.value) {
+    keyword.value = value
+    levelFilter.value = ''
+    loadLogContent()
+  }
 })
 
 Promise.all([loadLogFiles(), loadLogConfig()])
 </script>
 
 <style scoped>
+/* Naive UI 组件自带 width:100%（非 layer 样式会覆盖 Tailwind 的 w-* 工具类），这里显式给宽度 */
+.logs-toolbar-file { width: 16rem; }
+.logs-toolbar-level { width: 8.5rem; }
+.logs-toolbar-keyword { width: 22rem; }
+.logs-toolbar-lines { width: 7.5rem; }
+@media (max-width: 639px) {
+  .logs-toolbar-file,
+  .logs-toolbar-keyword { width: 100%; }
+}
 .log-token {
   cursor: pointer;
 }

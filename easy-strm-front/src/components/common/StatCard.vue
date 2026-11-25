@@ -1,5 +1,14 @@
 <template>
-  <article class="surface-card group rounded-[1.25rem] p-4 transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:border-indigo-300/40 hover:shadow-[var(--shadow-card-hover)] lg:p-5">
+  <article
+    class="surface-card group rounded-[1.25rem] p-4 transition-[transform,box-shadow,border-color] duration-200 hover:-translate-y-1 hover:border-indigo-300/40 hover:shadow-[var(--shadow-card-hover)] lg:p-5"
+    :class="[clickable ? 'cursor-pointer select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400' : '', active ? '!border-indigo-400/70 ring-2 ring-indigo-400/40' : '']"
+    :role="clickable ? 'button' : undefined"
+    :tabindex="clickable ? 0 : undefined"
+    :aria-pressed="clickable ? active : undefined"
+    @click="onClick"
+    @keydown.enter.prevent="onClick"
+    @keydown.space.prevent="onClick"
+  >
     <span class="absolute inset-x-5 top-0 h-px bg-gradient-to-r from-transparent via-indigo-400/70 to-transparent opacity-0 transition-opacity group-hover:opacity-100"></span>
     <div class="flex items-start justify-between">
       <div class="min-w-0">
@@ -29,8 +38,15 @@ const props = defineProps({
   value: { type: [String, Number], default: '-' },
   hint: { type: String, default: '' },
   icon: { type: Object, default: null },
-  tone: { type: String, default: 'cyan' } // cyan | green | amber | red | violet | slate
+  tone: { type: String, default: 'cyan' }, // cyan | green | amber | red | violet | slate
+  clickable: { type: Boolean, default: false },
+  active: { type: Boolean, default: false }
 })
+
+const emit = defineEmits(['click'])
+const onClick = () => {
+  if (props.clickable) emit('click')
+}
 
 const TONES = {
   cyan: 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400',

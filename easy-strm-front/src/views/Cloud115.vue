@@ -233,6 +233,7 @@
 </template>
 
 <script setup>
+import { createPoller } from '../composables/usePolling'
 import { ref, computed, watch, onMounted, onBeforeUnmount, h } from 'vue'
 import {
   NButton,
@@ -1008,7 +1009,7 @@ const refreshQRCode = () => {
 const startPolling = () => {
   stopPolling()
 
-  pollTimer.value = setInterval(async () => {
+  pollTimer.value = createPoller(async () => {
     if (loginStatus.value === 2 || loginStatus.value === 3 || loginStatus.value === 4) {
       stopPolling()
       return
@@ -1046,6 +1047,7 @@ const startPolling = () => {
       console.error('检查登录状态失败:', error)
     }
   }, 2000)
+  pollTimer.value.start()
 }
 
 /**
@@ -1054,7 +1056,7 @@ const startPolling = () => {
 const startOpenPolling = () => {
   stopPolling()
 
-  pollTimer.value = setInterval(async () => {
+  pollTimer.value = createPoller(async () => {
     if (loginStatus.value === 2 || loginStatus.value === 3 || loginStatus.value === 4) {
       stopPolling()
       return
@@ -1088,6 +1090,7 @@ const startOpenPolling = () => {
       console.error('检查开放平台登录状态失败:', error)
     }
   }, 2000)
+  pollTimer.value.start()
 }
 
 /**
@@ -1095,7 +1098,7 @@ const startOpenPolling = () => {
  */
 const stopPolling = () => {
   if (pollTimer.value) {
-    clearInterval(pollTimer.value)
+    pollTimer.value.stop()
     pollTimer.value = null
   }
 }

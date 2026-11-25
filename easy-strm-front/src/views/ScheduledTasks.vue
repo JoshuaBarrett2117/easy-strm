@@ -78,6 +78,7 @@
   </section>
 </template>
 <script setup>
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import CronCleanupTargets from '../components/CronCleanupTargets.vue'
 import {
@@ -208,7 +209,7 @@ const action = async (row, fn) => {
 const executeRun = (row) =>
   action(row, async () => {
     const r = await runCronTask(row.id)
-    message.success('触发记录：' + r.data.data.task_id + '，请查看执行记录或任务中心')
+    notifyTaskSubmitted('定时任务已触发', r.data.data.task_id)
   })
 const run = row => {
   if (row.handler !== 'cleanup_directories') return executeRun(row)
