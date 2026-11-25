@@ -23,7 +23,12 @@ func requestLoggingMiddleware() gin.HandlerFunc {
 		ctx.Next()
 		elapsed := time.Since(started)
 		status := ctx.Writer.Status()
-		pkglogger.WithContext(ctx.Request.Context(), "http").Log(requestLogLevel(status, elapsed), "请求完成", pkglogger.Fields{
+		level := requestLogLevel(status, elapsed)
+		if ctx.FullPath() == healthzPath {
+			// 探针高频且由 healthz 自身按状态变化记录，访问日志一律 DEBUG。
+			level = pkglogger.DEBUG
+		}
+		pkglogger.WithContext(ctx.Request.Context(), "http").Log(level, "请求完成", pkglogger.Fields{
 			"method": ctx.Request.Method, "route": ctx.FullPath(), "status": status, "duration_ms": elapsed.Milliseconds(),
 		}, nil)
 	}

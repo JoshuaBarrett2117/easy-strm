@@ -94,9 +94,10 @@ ENV SERVER_URL="http://localhost:80" \
     LOG_OUTPUT_TYPE="file" \
     LOG_LEVEL="INFO"
 
-# 健康检查：nginx 静态页可访问即视为容器存活
-HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1/ || exit 1
+# 健康检查：经 nginx 访问后端 /healthz，PostgreSQL 与 Redis 均可用才返回 200（任一不可用 503）。
+# start-period 留足首次启动执行数据库迁移的时间。
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1/healthz || exit 1
 
 # 启动supervisor管理进程
 CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]

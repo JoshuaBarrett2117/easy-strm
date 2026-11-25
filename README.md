@@ -70,7 +70,8 @@ cp .env.example .env
 编辑 `.env`，至少设置以下配置：
 
 - `SERVER_URL`：用户和媒体服务器实际可访问的应用地址；它会写入 115 与分享 STRM 的播放地址。
-- `JWT_SECRET`、`PG_PASSWORD`：替换示例中的默认值。
+- `PG_PASSWORD`、`REDIS_PASSWORD`：必填，`docker-compose.yml` 不提供默认值，未设置时 compose 会直接报错。PostgreSQL 只在数据卷首次初始化时采用该密码，已有数据卷请填写原密码。
+- `JWT_SECRET`：替换示例中的默认值。
 - `APP_PORT`：应用对外端口；如需从宿主机管理 PostgreSQL / Redis，再按需设置对应暴露端口。
 
 然后启动（默认拉取已发布镜像 `joshuabarrett2117/easy-strm:latest`；想从源码构建改用 `docker compose up -d --build`）：
@@ -80,6 +81,8 @@ docker compose pull
 docker compose up -d
 docker compose ps
 ```
+
+应用启动时自动执行数据库迁移（`easy-strm/internal/dbmigrate`，版本记录在 `goose_db_version` 表），无需手工执行 SQL。`GET /healthz`（或 `/api/healthz`）无需登录，返回 PostgreSQL、Redis 状态，正常 200、任一依赖不可用 503，容器健康检查即使用它。
 
 访问 `http://localhost:80`（或配置的 `APP_PORT`）。首次启动会创建默认管理员账号：`admin` / `admin`。请登录后立即修改密码，并妥善保管 `.env` 中的密钥。
 

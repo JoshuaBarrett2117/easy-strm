@@ -102,6 +102,11 @@ func main() {
 		return
 	}
 
+	// 健康检查：无需鉴权，供 Docker healthcheck / 反向代理探测 PostgreSQL 与 Redis
+	healthz := newHealthzHandler(defaultHealthChecks())
+	r.GET(healthzPath, healthz)
+	r.HEAD(healthzPath, healthz)
+
 	// 设置认证相关路由（登录等）
 	SetupAuthRoutes(r, config, client)
 

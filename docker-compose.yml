@@ -6,7 +6,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${PG_USER:-postgres}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgres}
+      # 密码只从 .env 读取，未设置时 compose 直接报错
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?请在 .env 中设置 PG_PASSWORD}
       POSTGRES_DB: ${PG_DATABASE:-easy_strm}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -24,13 +25,16 @@ services:
     image: redis:7-alpine
     container_name: easy-strm-redis
     restart: unless-stopped
-    command: redis-server --appendonly yes ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    # 密码经环境变量传入，不写进容器命令行
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     ports:
       - "${REDIS_BIND:-127.0.0.1}:${REDIS_PORT_EXPOSE:-6379}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -64,12 +68,12 @@ services:
       PG_PORT: 5432
       PG_DATABASE: ${PG_DATABASE:-easy_strm}
       PG_USER: ${PG_USER:-postgres}
-      PG_PASSWORD: ${PG_PASSWORD:-postgres}
+      PG_PASSWORD: ${PG_PASSWORD:?请在 .env 中设置 PG_PASSWORD}
       
       # Redis 配置
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -77,6 +81,13 @@ services:
         condition: service_healthy
     volumes:
       - app_logs:/app/logs
+    # 与 Dockerfile 一致：后端 /healthz 检查 PostgreSQL 与 Redis，任一不可用即 unhealthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
     # 限制 docker logs 体积（标准输出只含 INFO 及以上）
     logging:
       driver: json-file
