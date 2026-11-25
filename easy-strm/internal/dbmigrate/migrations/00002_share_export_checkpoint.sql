@@ -1,5 +1,8 @@
--- 更新日期：2026-10-08；维护者：Codex。仅由 DBA 显式执行，应用启动不得调用。
--- 前置：v33/v34/v42 已完成；生产路径索引请先由 DBA 在事务外 CONCURRENTLY 预建。
+-- 分享增量导出检查点（原 migrations/migrate_v43_share_export_checkpoint.sql，原需 DBA 手工执行）。
+-- 全部语句幂等：已手工安装过 v43 的库再次执行只会用同一定义替换函数与触发器。
+-- 新安装时 consumer.baseline_state='required'，增量导出前需先跑一次“分享库 STRM 全量对账”。
+-- +goose Up
+-- +goose StatementBegin
 DO $prerequisites$
 DECLARE missing TEXT;
 BEGIN
@@ -18,7 +21,7 @@ BEGIN
   ('t_share_operation_queue',ARRAY['sequence','task_id','operation','status'])
  ) required(relation,columns) CROSS JOIN LATERAL unnest(columns) AS required_column(column_name)
  WHERE NOT EXISTS(SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass(relation) AND attname=column_name AND attnum>0 AND NOT attisdropped);
- IF missing IS NOT NULL THEN RAISE EXCEPTION 'v43 requires reviewed v33/v34/v42 schema; missing %',missing; END IF;
+ IF missing IS NOT NULL THEN RAISE EXCEPTION 'share export checkpoint requires baseline schema; missing %',missing; END IF;
 END $prerequisites$;
 CREATE TABLE IF NOT EXISTS t_share_export_source_state (
  source_file_id INTEGER PRIMARY KEY, share_id INTEGER NOT NULL, media_id INTEGER,
@@ -177,3 +180,4 @@ BEGIN
   END LOOP;
  END LOOP;
 END $install$;
+-- +goose StatementEnd

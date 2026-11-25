@@ -119,17 +119,3 @@ func (d *SystemConfigDAO) BatchUpsertContext(ctx context.Context, configs map[st
 	}
 	return nil
 }
-
-// EnsureTable 确保表存在 (如果数据库初始化逻辑中已包含则可选)
-func (d *SystemConfigDAO) EnsureTable() error {
-	_, err := DB.Exec(`
-		CREATE TABLE IF NOT EXISTS t_system_config (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			config_key TEXT UNIQUE,
-			config_val TEXT,
-			create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-			update_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-		)
-	`)
-	return err
-}

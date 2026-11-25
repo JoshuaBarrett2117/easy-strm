@@ -49,7 +49,7 @@ func (s *ShareStrmScheduledService) input(ctx context.Context) (domain.ShareExpo
 		return input, "", err
 	}
 	if input.ProtocolVersion != 1 || (input.BaselineState != "required" && input.BaselineState != "building" && input.BaselineState != "ready") {
-		return input, "", fmt.Errorf("分享检查点协议或阶段无效，请 DBA 检查现有 schema")
+		return input, "", fmt.Errorf("分享检查点协议或阶段无效，请检查数据库迁移状态")
 	}
 	if err = validateShareStrmSettings(&input.Settings); err != nil {
 		return input, "", err

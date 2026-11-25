@@ -45,7 +45,7 @@ easy-strm/
 - `service`：承载业务规则、流程编排、外部系统交互、任务状态推进和错误归一化。
 - `controller`：只做参数解析、校验入口、调用 service、HTTP 响应包装。
 - `internal/pkg`：放置跨业务的基础能力，例如日志；新增公共包前必须确认至少两个以上模块复用。
-- `migrations`：数据库结构变化必须通过迁移脚本表达，命名保持版本递增和语义清晰。
+- `internal/dbmigrate`：数据库结构的唯一来源。`baseline.sql` 是版本 1 基线（禁止修改），之后的变更只能新增 `migrations/NNNNN_snake_case.sql`（goose 格式，嵌入二进制，启动时自动执行）。新迁移必须幂等（`IF NOT EXISTS` 等），不得自带 BEGIN/COMMIT，禁止在 Go 代码中内联 DDL。
 
 后端依赖方向：
 
@@ -59,7 +59,7 @@ dao -> domain
 
 ### 3.1.1 后端关键入口（原 AGENTI.MD 并入）
 
-- 启动顺序见 `easy-strm/main.go`：加载配置 → 日志 → PostgreSQL / Redis → `dao.Init(...)` / `dao.InitDAO(...)` → Cron → 路由 → 监听 `:8082`。`dao` 依赖全局连接，任何 DAO 调用（含测试）前必须先完成 `dao.Init`。
+- 启动顺序见 `easy-strm/main.go`：加载配置 → 日志 → PostgreSQL（`InitDB` 内执行 `dbmigrate.Up` 迁移）/ Redis → `dao.Init(...)` / `dao.InitDAO(...)` → Cron → 路由 → 监听 `:8082`。`dao` 依赖全局连接，任何 DAO 调用（含测试）前必须先完成 `dao.Init`。
 - 路由没有集中在 `internal/router`：公开路由在 `auth_routes_public.go` 的 `SetupAuthRoutes`，受保护业务路由在 `auth.go` 的 `SetupAuthProtectedRoutes`。新增接口时除 controller 外必须回到这里确认已注册。
 - `main` 包仍承载 115 客户端、STRM 生成、任务、Cron 等旧主线逻辑（`115client.go`、`strm.go`、`task.go`、`cron.go`、`db*.go`），修改这些能力时不要只看 `internal/`。
 - 前端 `src/utils/api/request.js` 基于 Axios，`baseURL` 为 `/api`，自动附带本地 token，401 时清理凭据跳回登录页；历史接口存在 `response.data.data` 与 `response.data.data.data` 两种包装，修改返回结构时必须检查全部消费点。
@@ -129,7 +129,7 @@ dao -> domain
 ### 6.3 数据与事务
 
 - SQL 访问放在 DAO，查询字段显式列出，不依赖 `SELECT *`。
-- 新增表或字段必须提供迁移脚本，默认值、索引、非空约束要与业务读取路径一致。
+- 新增表或字段必须在 `easy-strm/internal/dbmigrate/migrations/` 新增版本化迁移，默认值、索引、非空约束要与业务读取路径一致；迁移须对已有生产库幂等、可重复启动。
 - 多步骤写入必须考虑部分失败；需要原子性的流程使用事务。
 - Redis Key 命名必须有业务前缀和稳定维度，避免与历史 Key 冲突。
 

@@ -7,20 +7,52 @@ import (
 	"testing"
 )
 
-func TestReviewMigrationRules(t *testing.T) {
-	data, err := os.ReadFile("../../migrations/migrate_v39_filename_review_rules.sql")
+// baselineFilenameRules 读取数据库基线写入的默认 filename_recognition_rules（与空库启动后的配置一致）。
+func baselineFilenameRules(t *testing.T) []FilenameRecognitionRule {
+	t.Helper()
+	data, err := os.ReadFile("../dbmigrate/baseline.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	parts := strings.Split(string(data), "$rules$")
-	if len(parts) != 3 {
-		t.Fatal("迁移缺少规则数据")
+	const prefix = "INSERT INTO t_system_config (config_key, config_val) VALUES ('filename_recognition_rules', E'"
+	for _, line := range strings.Split(string(data), "\n") {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		literal := strings.TrimSuffix(strings.TrimPrefix(line, prefix), "');")
+		var rules []FilenameRecognitionRule
+		if err := json.Unmarshal([]byte(unescapePostgresEString(literal)), &rules); err != nil {
+			t.Fatal(err)
+		}
+		return rules
 	}
+	t.Fatal("基线缺少 filename_recognition_rules 默认数据")
+	return nil
+}
+
+// unescapePostgresEString 还原 quote_literal 生成的 E 前缀字符串：反斜杠与单引号都以双写转义。
+func unescapePostgresEString(literal string) string {
+	var builder strings.Builder
+	for index := 0; index < len(literal); index++ {
+		if index+1 < len(literal) && (literal[index] == '\\' && literal[index+1] == '\\' || literal[index] == '\'' && literal[index+1] == '\'') {
+			index++
+		}
+		builder.WriteByte(literal[index])
+	}
+	return builder.String()
+}
+
+func TestReviewMigrationRules(t *testing.T) {
+	rules := baselineFilenameRules(t)
 	var additions []FilenameRecognitionRule
-	if err := json.Unmarshal([]byte(parts[1]), &additions); err != nil {
-		t.Fatal(err)
+	for _, rule := range rules {
+		if strings.HasPrefix(rule.ID, "review_") {
+			additions = append(additions, rule)
+		}
 	}
-	rules := append(DefaultFilenameRecognitionRules(), additions...)
+	if len(additions) == 0 {
+		t.Fatal("基线缺少 review_ 系列规则")
+	}
 	store := &memoryFilenameRuleStore{}
 	s := NewTmdbService("", nil)
 	s.SetFilenameRecognitionRuleStore(store)
@@ -65,17 +97,11 @@ func TestReviewMigrationRules(t *testing.T) {
 
 // TestReviewNumericRuleDoesNotReadAudioAsEpisode 复现分享电影的声道和数字片名被旧规则识别成集号。
 func TestReviewNumericRuleDoesNotReadAudioAsEpisode(t *testing.T) {
-	data, err := os.ReadFile("../../migrations/migrate_v40_numeric_episode_boundary.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	parts := strings.Split(string(data), "$pattern$")
-	if len(parts) != 3 {
-		t.Fatal("迁移缺少规则表达式")
-	}
+	// 旧库升级时把宽泛数字集号规则替换成的表达式（原 migrate_v40_numeric_episode_boundary.sql）。
+	const numericEpisodePattern = `(?i)^(?P<title>[^\[\]【】()（）0-9]+?)\s+(?P<episode>0*[1-9]\d{0,2})(?:\s+(?:2160p|1080p|720p|480p)(?:\s+.*)?)?$`
 	rules := append(DefaultFilenameRecognitionRules(), FilenameRecognitionRule{
 		ID: "tv_number_episode", Name: "数字集号", Enabled: true, Priority: 78, MediaType: "tv", DefaultSeason: 1,
-		Pattern: parts[1], Example: "海贼王 112.mkv",
+		Pattern: numericEpisodePattern, Example: "海贼王 112.mkv",
 	})
 	s := NewTmdbService("", nil)
 	s.SetFilenameRecognitionRuleStore(&memoryFilenameRuleStore{})

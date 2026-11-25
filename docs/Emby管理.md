@@ -183,7 +183,7 @@ easy-strm 通过 Emby 插件列表和计划任务接口检测 StrmAssistant，�
 
 ## 数据升级
 
-迁移脚本：`easy-strm/migrations/migrate_v17_emby_management.sql` 和 `easy-strm/migrations/migrate_v19_emby_monitor.sql`。
+表结构：已并入数据库基线 `easy-strm/internal/dbmigrate/baseline.sql`（原 v17/v19 迁移）。
 
 监控迁移新增播放事件、媒体首次发现和采集状态表，均按 `t_emby_server` 隔离；删除实例会级联清理 easy-strm 中对应的监控历史，但不会删除 Emby 服务器中的原始媒体文件。
 

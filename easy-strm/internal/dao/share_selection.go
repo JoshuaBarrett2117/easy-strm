@@ -33,7 +33,7 @@ func scanShareSelection(row interface{ Scan(...interface{}) error }) (domain.Sha
 	return value, err
 }
 
-// CheckSelectionSchema 在任何改选或文件副作用前要求 DBA 手工安装兼容的 v47/v51。
+// CheckSelectionSchema 在任何改选或文件副作用前确认来源选择表（启动迁移 00003/00004）已就绪。
 func (d *ShareRecordDAO) CheckSelectionSchema(ctx context.Context) error {
 	var ready bool
 	err := d.db.QueryRowContext(ctx, selectionSchemaReadySQL).Scan(&ready)
@@ -41,7 +41,7 @@ func (d *ShareRecordDAO) CheckSelectionSchema(ctx context.Context) error {
 		return err
 	}
 	if !ready {
-		return fmt.Errorf("来源选择 v47/v51 未安装或结构不兼容，请 DBA 审核并手工应用迁移；本功能不自动迁移，也不要求全量导出")
+		return fmt.Errorf("来源选择表结构缺失或不兼容（数据库迁移 00003/00004 未完成），请查看启动日志中的数据库迁移错误")
 	}
 	return nil
 }

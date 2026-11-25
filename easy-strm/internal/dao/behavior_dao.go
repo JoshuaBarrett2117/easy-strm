@@ -54,7 +54,7 @@ func (store *BehaviorDAO) Lock(ctx context.Context, strmConfigID int) (BehaviorS
 		return nil, err
 	}
 	if !ready {
-		return nil, fmt.Errorf("行为同步表未升级到 v50（checkpoint 缺少 strm_config_id 维度），请 DBA 手工应用 migrate_v50_behavior_sync_config.sql")
+		return nil, fmt.Errorf("行为同步表结构缺失（数据库迁移 00006_behavior_sync 未完成），请查看启动日志中的数据库迁移错误")
 	}
 	var cloudID int
 	if err := store.db.QueryRowContext(ctx, `SELECT cloud115_id FROM t_strm_config WHERE id=$1`, strmConfigID).Scan(&cloudID); err != nil {

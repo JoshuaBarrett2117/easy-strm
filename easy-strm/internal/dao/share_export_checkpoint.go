@@ -13,8 +13,8 @@ import (
 	"github.com/lib/pq"
 )
 
-// ErrShareExportSchemaMissing 要求 DBA 先手动安装 v43，消费者不会自行迁移。
-var ErrShareExportSchemaMissing = errors.New("分享增量检查点未安装，请 DBA 手动应用 v43 后重试")
+// ErrShareExportSchemaMissing 表示分享增量检查点结构（启动迁移 00002）缺失，消费者不会自行迁移。
+var ErrShareExportSchemaMissing = errors.New("分享增量检查点结构缺失（数据库迁移 00002_share_export_checkpoint 未完成），请查看启动日志中的数据库迁移错误")
 
 // ErrShareExportChanged 表示来源或配置在处理期间改变，待办及计划键必须保留。
 var ErrShareExportChanged = errors.New("分享来源或配置已改变，请重试增量任务")

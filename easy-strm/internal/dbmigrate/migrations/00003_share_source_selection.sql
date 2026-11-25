@@ -1,23 +1,12 @@
--- 更新日期：2026-10-10；维护者：Codex。DBA 手工执行；禁止启动嵌入。
--- 仅在 D4 维护窗口、已停分享写入时执行；先验证备份。REBUILD 保留识别缓存和原始分享记录。
--- v47 缺失：先安装本迁移，再对十表执行只读清单/清理；禁止对缺失的 v47 表执行清理。
--- v47 已存在：先十表清理，再核验/重跑本迁移回填、SyncSelections、显式手动全量对账。
--- 大回填默认 30min；DBA 可在同会话 SET easy_strm.v47_statement_timeout='60min' 覆盖，按库量评估锁等待。
-BEGIN;
-SET LOCAL lock_timeout = '30s';
-SELECT set_config('statement_timeout', COALESCE(NULLIF(current_setting('easy_strm.v47_statement_timeout', true), ''), '30min'), true);
-DO $pre$
-BEGIN
- IF to_regclass('t_share_media') IS NULL OR to_regclass('t_share_media_file') IS NULL
- OR to_regclass('t_share_media_file_episode') IS NULL OR to_regclass('t_share_export_dirty_work') IS NULL
- OR to_regclass('t_share_export_consumer') IS NULL OR to_regprocedure('share_export_enqueue(text[],text)') IS NULL THEN
-  RAISE EXCEPTION 'v47 需要先手工安装 v33/v43';
- END IF;
- IF EXISTS(SELECT 1 FROM t_share_media WHERE work_key IS NULL OR work_key='')
- OR EXISTS(SELECT work_key FROM t_share_media GROUP BY work_key HAVING count(*)>1) THEN
-  RAISE EXCEPTION 'v47 work_key 空值或重复，请 DBA 先修复';
- END IF;
-END $pre$;
+-- 分享来源选择（原 migrations/migrate_v47_share_source_selection.sql，原需 DBA 手工执行）。
+-- 幂等：结构全部 IF NOT EXISTS；历史回填、入队与“需要重建基线”只在本次新建 t_share_media_selection 时执行，
+-- 因此已手工安装过 v47 的库不会被再次回填，也不会被强制重建基线。
+-- 与原脚本的差异：work_key 为空的媒体不参与回填（原脚本直接报错中止），重复 work_key 只告警不中止，
+-- 避免启动被阻塞；DISTINCT ON 保证每个媒体项只选一个候选。
+-- +goose Up
+-- +goose StatementBegin
+SET LOCAL lock_timeout = '60s';
+SELECT set_config('easy_strm.share_selection_fresh', (to_regclass('t_share_media_selection') IS NULL)::text, true);
 LOCK TABLE t_share_media_file, t_share_media_file_episode, t_share_media, t_share_record IN SHARE MODE;
 CREATE SEQUENCE IF NOT EXISTS share_export_candidate_seq AS BIGINT MINVALUE 1 CACHE 1;
 CREATE SEQUENCE IF NOT EXISTS share_export_candidate_discovery_seq AS BIGINT MINVALUE 1 CACHE 1;
@@ -69,29 +58,42 @@ BEGIN
 END $guard$;
 DROP TRIGGER IF EXISTS candidate_identity_immutable ON t_share_export_candidate;
 CREATE TRIGGER candidate_identity_immutable BEFORE UPDATE ON t_share_export_candidate FOR EACH ROW EXECUTE FUNCTION share_export_candidate_guard();
-SELECT setval('share_export_candidate_discovery_seq', GREATEST(
- COALESCE((SELECT max(id) FROM t_share_media_file),0)+1,
- COALESCE((SELECT max(first_seen_seq) FROM t_share_export_candidate),0)+1,
- (SELECT last_value+CASE WHEN is_called THEN 1 ELSE 0 END FROM share_export_candidate_discovery_seq)),false);
-INSERT INTO t_share_export_candidate(share_id,remote_file_id,source_file_id,name_hash,first_seen_seq,file_version,share_version,file_size,available,state,last_seen_run_id)
-SELECT f.share_id,COALESCE(f.file_id,''),f.id,CASE WHEN COALESCE(f.file_id,'')='' THEN md5(f.file_name) ELSE '' END,
- f.id,f.version,s.version,COALESCE(f.file_size,0),f.available AND NOT s.share_cancelled,
- CASE WHEN f.available AND NOT s.share_cancelled AND f.status='identified' THEN 'active' ELSE 'stale' END,COALESCE(f.last_seen_scan_token,'')
-FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id ORDER BY f.id ON CONFLICT DO NOTHING;
-INSERT INTO t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number)
-SELECT c.candidate_id,m.work_key,e.season_number,e.episode_number FROM t_share_export_candidate c
-JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_media m ON m.id=f.media_id
-JOIN t_share_media_file_episode e ON e.file_id=f.id WHERE m.media_type='tv' ON CONFLICT DO NOTHING;
-INSERT INTO t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number)
-SELECT c.candidate_id,m.work_key,0,0 FROM t_share_export_candidate c JOIN t_share_media_file f ON f.id=c.source_file_id
-JOIN t_share_media m ON m.id=f.media_id WHERE m.media_type='movie' ON CONFLICT DO NOTHING;
-SELECT setval('share_export_candidate_seq', GREATEST(COALESCE((SELECT max(candidate_id) FROM t_share_export_candidate),0)+1,
- (SELECT last_value+CASE WHEN is_called THEN 1 ELSE 0 END FROM share_export_candidate_seq)),false);
-INSERT INTO t_share_media_selection(work_key,season_number,episode_number,selected_candidate_id)
-SELECT DISTINCT ON(i.work_key,i.season_number,i.episode_number) i.work_key,i.season_number,i.episode_number,c.candidate_id
-FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
-WHERE c.available AND c.state='active' AND NOT i.revoked
-ORDER BY i.work_key,i.season_number,i.episode_number,c.first_seen_seq,c.candidate_id ON CONFLICT DO NOTHING;
-SELECT share_export_enqueue(ARRAY(SELECT DISTINCT work_key FROM t_share_media_selection),'selection-v47');
-SELECT share_export_require_baseline();
-COMMIT;
+DO $backfill$
+BEGIN
+ IF current_setting('easy_strm.share_selection_fresh', true) IS DISTINCT FROM 'true' THEN
+  RETURN;
+ END IF;
+ IF EXISTS(SELECT 1 FROM t_share_media WHERE COALESCE(work_key,'')='') THEN
+  RAISE WARNING 'share selection backfill: 存在 work_key 为空的媒体，已跳过这些媒体的回填';
+ END IF;
+ IF EXISTS(SELECT work_key FROM t_share_media WHERE COALESCE(work_key,'')<>'' GROUP BY work_key HAVING count(*)>1) THEN
+  RAISE WARNING 'share selection backfill: 存在重复 work_key，每个媒体项按最早发现的候选自动选择';
+ END IF;
+ PERFORM setval('share_export_candidate_discovery_seq', GREATEST(
+  COALESCE((SELECT max(id) FROM t_share_media_file),0)+1,
+  COALESCE((SELECT max(first_seen_seq) FROM t_share_export_candidate),0)+1,
+  (SELECT last_value+CASE WHEN is_called THEN 1 ELSE 0 END FROM share_export_candidate_discovery_seq)),false);
+ INSERT INTO t_share_export_candidate(share_id,remote_file_id,source_file_id,name_hash,first_seen_seq,file_version,share_version,file_size,available,state,last_seen_run_id)
+ SELECT f.share_id,COALESCE(f.file_id,''),f.id,CASE WHEN COALESCE(f.file_id,'')='' THEN md5(f.file_name) ELSE '' END,
+  f.id,f.version,s.version,COALESCE(f.file_size,0),f.available AND NOT s.share_cancelled,
+  CASE WHEN f.available AND NOT s.share_cancelled AND f.status='identified' THEN 'active' ELSE 'stale' END,COALESCE(f.last_seen_scan_token,'')
+ FROM t_share_media_file f JOIN t_share_media m ON m.id=f.media_id JOIN t_share_record s ON s.id=f.share_id
+ WHERE COALESCE(m.work_key,'')<>'' ORDER BY f.id ON CONFLICT DO NOTHING;
+ INSERT INTO t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number)
+ SELECT c.candidate_id,m.work_key,e.season_number,e.episode_number FROM t_share_export_candidate c
+ JOIN t_share_media_file f ON f.id=c.source_file_id JOIN t_share_media m ON m.id=f.media_id
+ JOIN t_share_media_file_episode e ON e.file_id=f.id WHERE m.media_type='tv' ON CONFLICT DO NOTHING;
+ INSERT INTO t_share_export_candidate_item(candidate_id,work_key,season_number,episode_number)
+ SELECT c.candidate_id,m.work_key,0,0 FROM t_share_export_candidate c JOIN t_share_media_file f ON f.id=c.source_file_id
+ JOIN t_share_media m ON m.id=f.media_id WHERE m.media_type='movie' ON CONFLICT DO NOTHING;
+ PERFORM setval('share_export_candidate_seq', GREATEST(COALESCE((SELECT max(candidate_id) FROM t_share_export_candidate),0)+1,
+  (SELECT last_value+CASE WHEN is_called THEN 1 ELSE 0 END FROM share_export_candidate_seq)),false);
+ INSERT INTO t_share_media_selection(work_key,season_number,episode_number,selected_candidate_id)
+ SELECT DISTINCT ON(i.work_key,i.season_number,i.episode_number) i.work_key,i.season_number,i.episode_number,c.candidate_id
+ FROM t_share_export_candidate_item i JOIN t_share_export_candidate c USING(candidate_id)
+ WHERE c.available AND c.state='active' AND NOT i.revoked
+ ORDER BY i.work_key,i.season_number,i.episode_number,c.first_seen_seq,c.candidate_id ON CONFLICT DO NOTHING;
+ PERFORM share_export_enqueue(ARRAY(SELECT DISTINCT work_key FROM t_share_media_selection),'selection-v47');
+ PERFORM share_export_require_baseline();
+END $backfill$;
+-- +goose StatementEnd
