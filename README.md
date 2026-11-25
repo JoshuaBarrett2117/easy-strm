@@ -63,8 +63,8 @@
 
 准备 Docker Compose 后，在仓库根目录执行：
 
-```powershell
-Copy-Item .env.example .env
+```sh
+cp .env.example .env
 ```
 
 编辑 `.env`，至少设置以下配置：
@@ -73,9 +73,10 @@ Copy-Item .env.example .env
 - `JWT_SECRET`、`PG_PASSWORD`：替换示例中的默认值。
 - `APP_PORT`：应用对外端口；如需从宿主机管理 PostgreSQL / Redis，再按需设置对应暴露端口。
 
-然后启动：
+然后启动（默认拉取已发布镜像 `joshuabarrett2117/easy-strm:latest`；想从源码构建改用 `docker compose up -d --build`）：
 
-```powershell
+```sh
+docker compose pull
 docker compose up -d
 docker compose ps
 ```
@@ -86,30 +87,19 @@ Emby 实例可配置独立反代端口：有 Origin 的浏览器 HTTP(S) STRM �
 
 > 使用本地媒体源、STRM 输出目录或供 Emby/Jellyfin 读取的目录时，请在 `docker-compose.yml` 中为应用增加所需的宿主机目录挂载，并在系统内填写容器内的绝对路径。例如将宿主机 `D:\Media` 挂载为容器内 `/media` 后，媒体源和输出目录应使用 `/media`。
 
-也可以使用发布镜像的部署文件：
-
-```powershell
-Set-Location .\deploy
-Copy-Item .env.example .env
-docker compose up -d
-```
-
 ### 本地开发
 
-前置条件：Go 1.25+、Node.js 20+、PostgreSQL 16+、Redis 7+。
+前置条件：Go 1.25+、Node.js 22+（前端单元测试使用 `node --test` 的 glob 参数）、PostgreSQL 16+、Redis 7+。
 
-先根据 `.env.example` 准备数据库和 Redis 连接环境变量，再分别启动后端与前端：
+先根据 `.env.example` 准备数据库和 Redis 连接环境变量，然后在仓库根目录：
 
-```powershell
-Set-Location .\easy-strm
-go run .
+```sh
+make deps          # 安装前端依赖、下载 Go 模块
+make dev-backend   # 后端 http://localhost:8082
+make dev-frontend  # 前端 http://localhost:3001（/api 代理到 8082）
 ```
 
-```powershell
-Set-Location .\easy-strm-front
-npm install
-npm run dev
-```
+`make help` 列出全部目标。Windows 没有 make 时，按 `Makefile` 中对应目标的命令在 `easy-strm/`（`go run .`）和 `easy-strm-front/`（`npm run dev`）手工执行即可。
 
 ## 常用流程
 
@@ -129,29 +119,12 @@ npm run dev
 
 ## 验证
 
-后端：
-
-```powershell
-Set-Location .\easy-strm
-go test ./...
-go vet ./...
+```sh
+make test    # go vet + go test ./...，前端 node --test 单元测试
+make build   # go build ./... + 前端 npm run build
 ```
 
-前端：
-
-```powershell
-Set-Location .\easy-strm-front
-npm run build
-```
-
-相关 E2E：
-
-```powershell
-Set-Location .\easy-strm-front
-npm run e2e:organize-preview-refresh
-npm run e2e:organize-preview-cancel
-npm run e2e:emby-monitor
-```
+浏览器 E2E 位于 `easy-strm-front/tests/e2e/`，按需运行 `npm run e2e:<名称>`（列表见 `easy-strm-front/package.json`，说明见 [开发与测试](docs/开发与测试.md)）。
 
 ## 项目结构
 
@@ -159,17 +132,18 @@ npm run e2e:emby-monitor
 easy-strm/
 ├── easy-strm/         # Go 后端：Gin、业务服务、DAO、数据库迁移
 ├── easy-strm-front/   # Vue 3 前端：页面、组件和 API 封装
-├── deploy/            # 使用 Docker Hub 镜像的部署文件
 ├── docker/            # Nginx、Supervisor 与容器启动配置
 ├── docs/              # 产品、架构、开发与测试文档
-└── debug/             # 本地调试与 E2E 产物
+├── Makefile           # 本地开发 / 测试 / 构建命令
+├── Dockerfile
+└── docker-compose.yml # Docker Compose 部署
 ```
 
 ## 文档
 
 - [产品与架构](docs/产品与架构.md)
 - [开发与测试](docs/开发与测试.md)
-- [115 转存、自动整理与刮削设计](docs/design-115-transfer-auto-organize-scrape.md)
+- [分享 STRM 指标口径](docs/分享STRM指标口径.md)
 - [Emby 管理说明](docs/Emby管理.md)
 
 ## 许可证

@@ -40,7 +40,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${DOCKER_USERNAME:-}/easy-strm:latest
+    # 默认使用已发布镜像：docker compose pull && docker compose up -d；从源码构建：docker compose up -d --build
+    image: ${DOCKER_USERNAME:-joshuabarrett2117}/easy-strm:latest
     container_name: easy-strm-app
     restart: unless-stopped
     ports:

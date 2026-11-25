@@ -9,7 +9,7 @@
 
 保存时后端将已知的旧 ItemId 映射为 Guid，保留原有策略中页面没有编辑的字段，提交后回读用户权限。范围不一致或回读失败时返回错误，不报告成功。“全部媒体库”勾选时清空隐藏的旧选择；未勾选且选择为空表示不允许访问任何媒体库。
 
-协议来源：[Emby SelectableMediaFolders](https://dev.emby.media/reference/RestAPI/LibraryService/getLibrarySelectablemediafolders.html)。本地浏览器回归：在前端目录执行 `node scripts/e2e-emby-user-access.mjs`（通过 `E2E_FRONTEND_URL` 指定本地前端地址），使用模拟接口验证名称与保存参数，不修改真实 Emby 用户。
+协议来源：[Emby SelectableMediaFolders](https://dev.emby.media/reference/RestAPI/LibraryService/getLibrarySelectablemediafolders.html)。
 
 easy-strm 的 Emby 管理工作台位于“支撑配置 → Emby 管理”，用于统一维护多个 Emby 实例、用户、媒体库、媒体库封面及神医助手任务。
 

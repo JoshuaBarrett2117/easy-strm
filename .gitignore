@@ -52,7 +52,6 @@ login.json
 # Temporary files
 *.tmp
 *.temp
-.codex/manual-verify-processes.json
 .workbuddy/
 nul
 *.swp
@@ -61,11 +60,24 @@ nul
 # Debug files & directory
 *_debug*.txt
 parse_log.txt
-debug/*
-!debug/phase02/
+debug/
 
 # 本地测试/调试产物
 easy-strm/coverage
 easy-strm/test_output*.txt
 easy-strm/debug_directory_tree.txt
-.codex/browser-*/
+
+# AI 助手本地上下文 / 一次性产物（2026-11-25 仓库清理后不再入库）
+.codex/
+deliverables/
+verification.md
+
+# 备份与合并残留
+*.bak
+*.orig
+*.rej
+*~
+
+# 前端 E2E 本地证据与 Playwright 产物
+easy-strm-front/test-results/
+easy-strm-front/playwright-report/

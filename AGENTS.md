@@ -1,7 +1,7 @@
 # AGENTS.md
 
-- 更新日期：2026-05-15
-- 执行者：Codex
+- 更新日期：2026-11-25
+- 执行者：Codex（2026-11-25 仓库清理时并入原 AGENTI.MD 的仍有效内容）
 - 适用范围：仓库根目录及其全部子目录；若子目录存在更具体的 `AGENTS.md`，以子目录文件为准。
 
 ## 1. 项目定位
@@ -18,11 +18,14 @@
 easy-strm/
 ├── easy-strm/         # Go 后端，Gin + PostgreSQL + Redis
 ├── easy-strm-front/   # Vue 3 前端，Vite + Naive UI
-├── deploy/            # Docker 部署文件
-├── docker/            # 镜像与运行环境配置
+├── docker/            # 镜像内 Nginx / Supervisor / 启动脚本
 ├── docs/              # 长期维护文档
-└── debug/             # 本地调试与 E2E 产物
+├── Makefile           # 本地开发、测试、构建命令入口
+├── Dockerfile
+└── docker-compose.yml # 唯一的 Compose 部署文件
 ```
+
+`debug/` 已加入 `.gitignore`，仅作本地临时产物目录，不入库。
 
 ## 2. 工作原则
 
@@ -53,6 +56,13 @@ dao -> domain
 ```
 
 禁止反向依赖：`dao` 不依赖 `service`，`domain` 不依赖 `controller` 或具体基础设施。
+
+### 3.1.1 后端关键入口（原 AGENTI.MD 并入）
+
+- 启动顺序见 `easy-strm/main.go`：加载配置 → 日志 → PostgreSQL / Redis → `dao.Init(...)` / `dao.InitDAO(...)` → Cron → 路由 → 监听 `:8082`。`dao` 依赖全局连接，任何 DAO 调用（含测试）前必须先完成 `dao.Init`。
+- 路由没有集中在 `internal/router`：公开路由在 `auth_routes_public.go` 的 `SetupAuthRoutes`，受保护业务路由在 `auth.go` 的 `SetupAuthProtectedRoutes`。新增接口时除 controller 外必须回到这里确认已注册。
+- `main` 包仍承载 115 客户端、STRM 生成、任务、Cron 等旧主线逻辑（`115client.go`、`strm.go`、`task.go`、`cron.go`、`db*.go`），修改这些能力时不要只看 `internal/`。
+- 前端 `src/utils/api/request.js` 基于 Axios，`baseURL` 为 `/api`，自动附带本地 token，401 时清理凭据跳回登录页；历史接口存在 `response.data.data` 与 `response.data.data.data` 两种包装，修改返回结构时必须检查全部消费点。
 
 ### 3.2 前端分层
 
@@ -165,26 +175,19 @@ dao -> domain
 
 ### 9.1 默认验证基线
 
-后端：
+在仓库根目录执行（命令定义见 `Makefile`，Windows 无 make 时按 `Makefile` 中对应命令手工执行）：
 
-```powershell
-Set-Location .\easy-strm
-go test ./...
+```sh
+make test          # 后端 go vet + go test ./...，前端 node --test 单元测试
+make build         # 后端 go build ./... 与前端 npm run build
 ```
 
-前端：
+浏览器主流程按改动范围选择 `easy-strm-front/package.json` 中的 `e2e:*` 脚本（位于 `easy-strm-front/tests/e2e/`），例如：
 
-```powershell
-Set-Location .\easy-strm-front
-npm run build
-```
-
-浏览器主流程按改动范围选择相关 E2E：
-
-```powershell
-Set-Location .\easy-strm-front
+```sh
+cd easy-strm-front
 npm run e2e:organize-preview-refresh
-npm run e2e:organize-preview-cancel
+npm run e2e:share-selection
 ```
 
 ### 9.2 测试编写要求
@@ -208,7 +211,7 @@ npm run e2e:organize-preview-cancel
 
 - 长期规范、测试基线、历史经验优先更新 `docs/开发与测试.md`。
 - 产品行为、核心流程、架构说明优先更新 `docs/产品与架构.md`。
-- 一次性调试证据放入 `debug/`，不要在 `docs/` 下制造时间戳报告碎片。
+- 一次性调试证据放在本地 `debug/`（已被 `.gitignore` 忽略，不入库），不要在 `docs/` 下制造时间戳报告碎片；阶段性记录用 Git 提交说明或 Release 说明。
 - 文档必须标注更新日期和维护者；涉及外部资料时记录来源 URL 或本地文件路径。
 - 代码注释使用中文，说明意图、约束和使用方式，不写机械翻译式注释。
 
@@ -217,7 +220,7 @@ npm run e2e:organize-preview-cancel
 - 后端依赖通过 `go.mod` 管理；新增依赖前确认标准库或现有依赖无法满足。
 - 前端依赖通过 `easy-strm-front/package.json` 管理；新增依赖必须服务明确业务场景。
 - 不新增第二套 HTTP 客户端、路由系统、状态管理库或样式框架，除非已有方案无法满足且收益明确。
-- `.env.example`、`deploy/`、`docker-compose.yml`、`Dockerfile` 变更必须同步检查本地启动文档。
+- `.env.example`、`docker-compose.yml`、`Dockerfile` 变更必须同步检查本地启动文档。
 - 不提交真实密钥、账号、Token、Cookie、数据库密码或个人路径。
 
 ## 12. 提交流程
