@@ -31,36 +31,6 @@ func InitRedis(config *Config) error {
 	return nil
 }
 
-// SetRedisKey 设置Redis键值对
-func SetRedisKey(key string, value interface{}, expiration int) error {
-	Debug("Setting Redis key: %s = %v (expiration: %d)", key, value, expiration)
-	err := redisClient.Set(ctx, key, value, time.Duration(expiration)*time.Second).Err()
-	if err != nil {
-		Error("Failed to set Redis key %s: %v", key, err)
-	}
-	return err
-}
-
-// GetRedisKey 获取Redis键值
-func GetRedisKey(key string) (string, error) {
-	Debug("Getting Redis key: %s", key)
-	value, err := redisClient.Get(ctx, key).Result()
-	if err != nil {
-		Debug("Redis key %s not found or error: %v", key, err)
-	}
-	return value, err
-}
-
-// DeleteRedisKey 删除Redis键
-func DeleteRedisKey(key string) error {
-	Debug("Deleting Redis key: %s", key)
-	err := redisClient.Del(ctx, key).Err()
-	if err != nil {
-		Error("Failed to delete Redis key %s: %v", key, err)
-	}
-	return err
-}
-
 // SetToken 设置JWT token到Redis
 func SetToken(userID int, token string) error {
 	key := fmt.Sprintf("easy_strm:token:%d", userID)
@@ -82,17 +52,6 @@ func GetToken(userID int) (string, error) {
 		Debug("Token for user %d not found: %v", userID, err)
 	}
 	return token, err
-}
-
-// DeleteToken 从Redis删除JWT token
-func DeleteToken(userID int) error {
-	key := fmt.Sprintf("easy_strm:token:%d", userID)
-	Debug("Deleting token for user %d from Redis", userID)
-	err := redisClient.Del(ctx, key).Err()
-	if err != nil {
-		Error("Failed to delete token for user %d: %v", userID, err)
-	}
-	return err
 }
 
 // MigrateRedisKeys 迁移旧的Redis key到新的key格式（添加easy_strm前缀）
@@ -176,10 +135,5 @@ func MigrateRedisKeys() error {
 
 // getRedisClientInstance 获取全局Redis客户端实例
 func getRedisClientInstance() *redis.Client {
-	return redisClient
-}
-
-// GetRedisClientForService 获取全局Redis客户端实例（供Service层使用）
-func GetRedisClientForService() *redis.Client {
 	return redisClient
 }

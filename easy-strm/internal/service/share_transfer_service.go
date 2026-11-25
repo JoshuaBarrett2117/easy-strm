@@ -41,13 +41,6 @@ const (
 	logStatusSuccess = "success"
 	logStatusSkipped = "skipped"
 	logStatusFailed  = "failed"
-
-	// 错误码常量
-	errCodeInvalidURL       = "INVALID_URL"
-	errCodePasswordRequired = "PASSWORD_REQUIRED"
-	errCodeShareExpired     = "SHARE_EXPIRED"
-	errCodeShareNotFound    = "SHARE_NOT_FOUND"
-	errCodeParseFailed      = "PARSE_FAILED"
 )
 
 // ShareTransferService 115分享链接转存服务
@@ -1140,14 +1133,6 @@ func truncateShareCode(code string) string {
 		return code[:4] + "***"
 	}
 	return code + "***"
-}
-
-// truncateStr 截断字符串到指定长度
-func truncateStr(s string, maxLen int) string {
-	if len(s) > maxLen {
-		return s[:maxLen]
-	}
-	return s
 }
 
 // min 返回两个整数中的最小值

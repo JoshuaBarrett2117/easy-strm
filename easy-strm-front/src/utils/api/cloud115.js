@@ -4,10 +4,6 @@ export const getCloud115List = (params = {}) => {
   return api.get('/cloud115', { params })
 }
 
-export const getCloud115ById = (id) => {
-  return api.get(`/cloud115/${id}`)
-}
-
 export const createCloud115 = (data) => {
   return api.post('/cloud115', data)
 }
@@ -38,10 +34,6 @@ export const check115LoginStatus = (params) => {
 
 export const confirm115Login = (data) => {
   return api.post('/115/login/confirm', data)
-}
-
-export const get115DirectLink = (params) => {
-  return api.get('/115/direct-link', { params })
 }
 
 export const get115Files = (params) => {

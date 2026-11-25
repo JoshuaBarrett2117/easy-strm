@@ -11,13 +11,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"easy-strm/internal/dao"
+
 	"github.com/go-redis/redis/v8"
 	"github.com/google/uuid"
 )
@@ -110,11 +109,6 @@ func (s *ShareStrmService) settingsContext(ctx context.Context) (domain.ShareStr
 		v.DedupeExport = true
 	}
 	return v, err
-}
-
-// normalizeShareStrmSettings 保留旧字段兼容，但禁止恢复按来源分裂输出。
-func normalizeShareStrmSettings(v *domain.ShareStrmSettings, raw []byte) {
-	v.DedupeExport = true
 }
 
 func validateShareStrmSettings(v *domain.ShareStrmSettings) error {
@@ -310,41 +304,11 @@ func (s *ShareStrmService) strmRelativePath(source domain.ShareStrmSource, file 
 	return filepath.Join(root, folder, name+".strm"), nil
 }
 
-var shareStrmSeasonDirectory = regexp.MustCompile(`(?i)^(?:Season[ ._-]*|S|第)(\d{1,2})(?:季)?$`)
-var shareStrmEpisodeNumber = regexp.MustCompile(`^\d{1,3}$`)
-
-// strmSeasonEpisode 复用当前文件名规则；缺少片名的单集补作品名，季目录只补未显式指定的季。
-func (s *ShareStrmService) strmSeasonEpisode(title, filename string) (int, int) {
-	name := path.Base(shareCandidatePath(filename))
-	parsed := s.tmdb.ParseFilename(name)
-	if parsed.Episode == 0 {
-		parsed = s.tmdb.ParseFilename(title + " " + name)
-	}
-	explicitSeason := false
-	for _, rule := range s.tmdb.compiledRulesForFilenameParsing() {
-		if rule.rule.ID == parsed.MatchedRuleID && rule.expression.SubexpIndex("season") >= 0 {
-			explicitSeason = true
-			break
-		}
-	}
-	if explicitSeason {
-		return parsed.Season, parsed.Episode
-	}
-	segments := strings.Split(shareCandidatePath(filename), "/")
-	for i := len(segments) - 2; i >= 0; i-- {
-		if match := shareStrmSeasonDirectory.FindStringSubmatch(strings.TrimSpace(segments[i])); match != nil {
-			season, _ := strconv.Atoi(match[1])
-			if parsed.Episode == 0 {
-				stem := strings.TrimSuffix(name, path.Ext(name))
-				if shareStrmEpisodeNumber.MatchString(stem) {
-					parsed.Episode, _ = strconv.Atoi(stem)
-				}
-			}
-			return season, parsed.Episode
-		}
-	}
-	return parsed.Season, parsed.Episode
-}
+// sha1CachePrefix / sha1CacheTTL：分享 STRM 播放选源时缓存 SHA1 → 文件映射的 Redis 键前缀与有效期。
+const (
+	sha1CachePrefix = "easy_strm:sha1:cache:"
+	sha1CacheTTL    = 7 * 24 * time.Hour
+)
 
 func writeShareStrm(target, content string) error {
 	if strings.TrimSpace(content) == "" || strings.ContainsAny(content, "\r\n\x00") {

@@ -11,19 +11,6 @@ import (
 	"github.com/lib/pq"
 )
 
-const libraryWorks = `WITH stats AS (
- SELECT f.media_id,
-  count(DISTINCT f.share_id) FILTER (WHERE f.available AND NOT s.share_cancelled) source_count,
-  count(*) FILTER (WHERE f.available AND NOT s.share_cancelled) file_count,
-  max(f.created_at) collected_at
- FROM t_share_media_file f JOIN t_share_record s ON s.id=f.share_id
- WHERE f.status='identified' AND f.media_id IS NOT NULL GROUP BY f.media_id
-), works AS (
- SELECT m.id,m.work_key,m.tmdb_id,m.title,m.original_title,m.media_type library_media_type,m.media_year,m.rating,
-  m.result,m.poster_path,m.genre_ids,m.country_codes,st.source_count,st.file_count,st.collected_at,(st.source_count>0) available
- FROM t_share_media m JOIN stats st ON st.media_id=m.id
-) `
-
 func libraryWhere(q domain.ShareLibraryQuery) (string, []interface{}) {
 	parts, args := []string{"TRUE"}, []interface{}{}
 	add := func(expr string, val interface{}) {

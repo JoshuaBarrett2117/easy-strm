@@ -751,21 +751,6 @@ func (s *OfflineDownloadService) updateOfflineSteps(taskID, name, status, messag
 	_ = s.taskDAO.UpdateMetadata(taskID, metadata)
 }
 
-func (s *OfflineDownloadService) targetAccountID(taskID string) int {
-	t, _ := s.taskDAO.Get(taskID)
-	if t == nil {
-		return 0
-	}
-	m, _ := t["metadata"].(map[string]interface{})
-	if v, ok := m["target_cloud115_id"].(float64); ok {
-		return int(v)
-	}
-	if v, ok := m["target_cloud115_id"].(int); ok {
-		return v
-	}
-	return 0
-}
-
 func (s *OfflineDownloadService) transferCompletedRecord(ctx context.Context, rec domain.OfflineDownloadTask, sourceID, targetID int) error {
 	client, ok := s.client.(offlineRapidTransferClient)
 	if !ok || rec.SaveDirID == "" {

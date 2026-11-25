@@ -1,33 +1,19 @@
 package service
 
 import (
-	"database/sql/driver"
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"encoding/json"
-	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/alicebob/miniredis/v2"
-	"github.com/go-redis/redis/v8"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/alicebob/miniredis/v2"
+	"github.com/go-redis/redis/v8"
 )
-
-type enrichedResultArg struct{}
-
-func (enrichedResultArg) Match(value driver.Value) bool {
-	raw, ok := value.([]byte)
-	if !ok {
-		return false
-	}
-	var r domain.TmdbIdentifyResult
-	if json.Unmarshal(raw, &r) != nil {
-		return false
-	}
-	return r.TmdbID == 100 && r.VoteAverage != nil && *r.VoteAverage == 8.5 && len(r.Countries) == 1 && r.Countries[0] == "CN"
-}
 
 func TestHistoricalEnrichmentDeduplicatesAndChecksVersion(t *testing.T) {
 	database, mock, err := sqlmock.New()

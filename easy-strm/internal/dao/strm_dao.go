@@ -105,53 +105,6 @@ func (s *StrmConfigDAO) ListBehaviorSyncSchedules() ([]domain.BehaviorSyncSchedu
 	return list, rows.Err()
 }
 
-// Create 创建STRM配置
-func (s *StrmConfigDAO) Create(cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
-	cfg := &domain.StrmConfig{}
-	err := DB.QueryRow(
-		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension,
-	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath,
-		&cfg.Cron, &cfg.Extension, &cfg.CreateTime, &cfg.UpdateTime)
-	if err != nil {
-		return nil, fmt.Errorf("StrmConfigDAO[Create] 创建失败: %v", err)
-	}
-	return cfg, nil
-}
-
-// Update 更新STRM配置
-func (s *StrmConfigDAO) Update(id, cloud115Id int, netDiskPath, localPath, cron, extension string) (*domain.StrmConfig, error) {
-	cfg := &domain.StrmConfig{}
-	err := DB.QueryRow(
-		`UPDATE t_strm_config SET cloud115_id=$1, net_disk_path=$2, local_path=$3, cron=$4, extension=$5
-		WHERE id=$6
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, id,
-	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath,
-		&cfg.Cron, &cfg.Extension, &cfg.CreateTime, &cfg.UpdateTime)
-	if err != nil {
-		return nil, fmt.Errorf("StrmConfigDAO[Update] 更新失败: %v", err)
-	}
-	return cfg, nil
-}
-
-// CreateExt 创建STRM配置（扩展版，包含秒传同步字段）
-func (s *StrmConfigDAO) CreateExt(cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
-	cfg := &domain.StrmConfig{}
-	err := DB.QueryRow(
-		`INSERT INTO t_strm_config (cloud115_id, net_disk_path, local_path, cron, extension, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, behavior_sync_enabled, behavior_sync_interval)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-		RETURNING id, cloud115_id, net_disk_path, local_path, cron, extension, dir_tree_file, sync_mode, source_account, target_account, target_directory, auto_cleanup, cleanup_threshold, cleanup_policy, max_concurrency, behavior_sync_enabled, behavior_sync_interval, create_time, update_time`,
-		cloud115Id, netDiskPath, localPath, cron, extension, syncMode, sourceAccount, targetAccount, targetDirectory, autoCleanup, cleanupThreshold, cleanupPolicy, maxConcurrency, behaviorSyncEnabled, behaviorSyncInterval,
-	).Scan(&cfg.ID, &cfg.Cloud115Id, &cfg.NetDiskPath, &cfg.LocalPath, &cfg.Cron, &cfg.Extension, &cfg.DirTreeFile, &cfg.SyncMode, &cfg.SourceAccount, &cfg.TargetAccount, &cfg.TargetDirectory, &cfg.AutoCleanup, &cfg.CleanupThreshold, &cfg.CleanupPolicy, &cfg.MaxConcurrency, &cfg.BehaviorSyncEnabled, &cfg.BehaviorSyncInterval, &cfg.CreateTime, &cfg.UpdateTime)
-	if err != nil {
-		return nil, fmt.Errorf("StrmConfigDAO[CreateExt] 创建失败: %v", err)
-	}
-	return cfg, nil
-}
-
 // UpdateExt 更新STRM配置（扩展版，包含秒传同步字段）
 func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cron, extension, syncMode string, sourceAccount, targetAccount int, targetDirectory string, autoCleanup bool, cleanupThreshold int, cleanupPolicy string, maxConcurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
 	cfg := &domain.StrmConfig{}
@@ -165,19 +118,6 @@ func (s *StrmConfigDAO) UpdateExt(id, cloud115Id int, netDiskPath, localPath, cr
 		return nil, fmt.Errorf("StrmConfigDAO[UpdateExt] 更新失败: %v", err)
 	}
 	return cfg, nil
-}
-
-// Delete 删除STRM配置
-func (s *StrmConfigDAO) Delete(id int) error {
-	result, err := DB.Exec("DELETE FROM t_strm_config WHERE id = $1", id)
-	if err != nil {
-		return fmt.Errorf("StrmConfigDAO[Delete] 删除失败: %v", err)
-	}
-	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("StrmConfigDAO[Delete] 配置不存在")
-	}
-	return nil
 }
 
 // StrmFileDAO STRM文件记录数据访问层

@@ -281,12 +281,3 @@ func (lc *LogController) checkAdmin(ctx *gin.Context) (string, bool) {
 	ctx.JSON(http.StatusForbidden, gin.H{"error": "Permission denied"})
 	return "", false
 }
-
-// ReadLastNLines 读取文件的最后N行，返回倒序结果（最新的日志在最上面）
-func ReadLastNLines(filePath string, n int) (string, error) {
-	result, err := readTailLines(filePath, n, logLineFilter{})
-	if err != nil {
-		return "", err
-	}
-	return strings.Join(result.lines, "\n"), nil
-}

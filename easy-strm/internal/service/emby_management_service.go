@@ -79,11 +79,6 @@ func NewEmbyManagementService(servers *dao.EmbyServerDAO, tasks *TaskService, co
 // ListServers 返回脱敏后的实例列表。
 func (s *EmbyManagementService) ListServers() ([]*domain.EmbyServer, error) { return s.servers.List() }
 
-// GetServer 返回指定实例。
-func (s *EmbyManagementService) GetServer(id int) (*domain.EmbyServer, error) {
-	return s.requireServer(id)
-}
-
 // PlaybackLinks 先定位剧集，再查询指定季集；上游失败不能伪装成未入库。
 func (s *EmbyManagementService) PlaybackLinks(title string, tmdbID, season, episode int) ([]map[string]string, error) {
 	if season < 0 || episode <= 0 || tmdbID < 0 || (tmdbID == 0 && strings.TrimSpace(title) == "") {

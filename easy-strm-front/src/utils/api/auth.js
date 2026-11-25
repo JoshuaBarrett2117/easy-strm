@@ -32,12 +32,6 @@ export const login = (data, options = {}) => {
   })
 }
 
-export const getUserInfo = (options = {}) => {
-  return api.get('/user/info', {
-    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
-  })
-}
-
 export const logout = () => {
   clearCredentials()
   window.location.replace('/login')

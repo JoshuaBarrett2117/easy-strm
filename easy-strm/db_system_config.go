@@ -43,34 +43,3 @@ func UpsertSystemConfig(key, value string) (*SystemConfig, error) {
 	Info("Upserted system config: %s", key)
 	return config, nil
 }
-
-// GetAllSystemConfig 获取所有系统配置
-
-func GetAllSystemConfig() ([]*SystemConfig, error) {
-	Debug("Getting all system configs")
-	rows, err := db.Query("SELECT id, config_key, config_val, create_time, update_time FROM t_system_config WHERE config_key<>'share_strm_incremental_watermark'")
-	if err != nil {
-		Error("Failed to get all system configs: %v", err)
-		return nil, err
-	}
-	defer rows.Close()
-
-	var configList []*SystemConfig
-	for rows.Next() {
-		config := &SystemConfig{}
-		err := rows.Scan(&config.ID, &config.ConfigKey, &config.ConfigVal, &config.CreateTime, &config.UpdateTime)
-		if err != nil {
-			Error("Failed to scan system config row: %v", err)
-			return nil, err
-		}
-		configList = append(configList, config)
-	}
-
-	if err = rows.Err(); err != nil {
-		Error("Error iterating system config rows: %v", err)
-		return nil, err
-	}
-
-	Debug("Found %d system configs", len(configList))
-	return configList, nil
-}

@@ -1,8 +1,6 @@
 package service
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -28,12 +26,6 @@ func NewAuthService(userDAO *dao.UserDAO, jwtSecret string) *AuthService {
 type JWTClaims struct {
 	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
-}
-
-func md5Hash(str string) string {
-	h := md5.New()
-	h.Write([]byte(str))
-	return hex.EncodeToString(h.Sum(nil))
 }
 
 func (s *AuthService) GenerateToken(userID int) (string, error) {
@@ -101,23 +93,4 @@ func (s *AuthService) Login(name, password string) (*domain.User, string, error)
 
 	logger.Infof("AuthService[Login] 用户登录成功: ID=%d", user.ID)
 	return user, token, nil
-}
-
-func (s *AuthService) GetUserByID(id int) (*domain.User, error) {
-	logger.Debugf("AuthService[GetUserByID] 开始查询用户ID: %d", id)
-	user, err := s.userDAO.GetByID(id)
-	if err != nil {
-		logger.Errorf("AuthService[GetUserByID] 查询用户失败: %v", err)
-		return nil, err
-	}
-	if user == nil {
-		logger.Warnf("AuthService[GetUserByID] 用户不存在, id: %d", id)
-		return nil, nil
-	}
-	logger.Debugf("AuthService[GetUserByID] 查询成功: %+v", user)
-	return user, nil
-}
-func (s *AuthService) UpdatePassword(name, newPassword string) error {
-	newHash := md5Hash(newPassword)
-	return s.userDAO.UpdatePassword(name, newHash)
 }

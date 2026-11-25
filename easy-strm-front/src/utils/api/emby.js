@@ -1,11 +1,5 @@
 import { api } from './request'
 
-export const getEmbyStatus = (options = {}) => {
-  return api.get('/emby/status', {
-    skipGlobalErrorMessage: options.skipGlobalErrorMessage || false
-  })
-}
-
 export const getEmbyLibraries = (options = {}) => {
   return api.get('/emby/libraries', {
     skipGlobalErrorMessage: options.skipGlobalErrorMessage || false

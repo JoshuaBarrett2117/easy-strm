@@ -83,16 +83,6 @@ type FileOperationResult struct {
 	NewPath string `json:"new_path"` // 新路径（重命名/移动操作后）
 }
 
-// FileOperationRequest 通用文件操作请求
-type FileOperationRequest struct {
-	SourceType string `json:"source_type"` // 媒体源类型
-	SourceID   int    `json:"source_id"`   // 源媒体源ID
-	Operation  string `json:"operation"`   // 操作类型: move | copy | delete | rename
-	SourcePath string `json:"source_path"` // 源文件路径
-	TargetPath string `json:"target_path"` // 目标路径（移动/复制操作）
-	NewName    string `json:"new_name"`    // 新文件名（重命名操作）
-}
-
 // BatchOperationResult 批量操作结果
 type BatchOperationResult struct {
 	Total   int                   `json:"total"`   // 总操作数
@@ -101,60 +91,11 @@ type BatchOperationResult struct {
 	Results []FileOperationResult `json:"results"` // 详细结果
 }
 
-// FileMoveRequest 文件移动请求
-type FileMoveRequest struct {
-	SourceID   int      `json:"source_id"`   // 源媒体源ID
-	FileIDs    []string `json:"file_ids"`    // 文件ID列表
-	TargetPath string   `json:"target_path"` // 目标路径
-}
-
-// FileCopyRequest 文件复制请求
-type FileCopyRequest struct {
-	SourceID     int      `json:"source_id"`     // 源媒体源ID
-	TargetID     int      `json:"target_id"`     // 目标媒体源ID
-	FileIDs      []string `json:"file_ids"`      // 文件ID列表
-	TargetPath   string   `json:"target_path"`   // 目标路径
-	DeleteSource bool     `json:"delete_source"` // 是否删除源文件（移动操作）
-}
-
-// FileDeleteRequest 文件删除请求
-type FileDeleteRequest struct {
-	SourceID int      `json:"source_id"` // 媒体源ID
-	FileIDs  []string `json:"file_ids"`  // 文件ID列表
-}
-
-// FileRenameRequest 文件重命名请求
-type FileRenameRequest struct {
-	SourceID int    `json:"source_id"` // 媒体源ID
-	FileID   string `json:"file_id"`   // 文件ID
-	NewName  string `json:"new_name"`  // 新文件名
-}
-
-// BatchOperationRequest 批量操作请求
-type BatchOperationRequest struct {
-	Operation string               `json:"operation"` // 操作类型: move | copy | delete | rename
-	SourceID  int                  `json:"source_id"` // 源媒体源ID
-	TargetID  int                  `json:"target_id"` // 目标媒体源ID（复制操作需要）
-	Items     []BatchOperationItem `json:"items"`     // 操作项列表
-}
-
 // BatchOperationItem 批量操作项
 type BatchOperationItem struct {
 	FileID     string `json:"file_id"`     // 文件ID
 	TargetPath string `json:"target_path"` // 目标路径
 	NewName    string `json:"new_name"`    // 新文件名（重命名操作）
-}
-
-// FileListQuery 文件列表查询参数
-type FileListQuery struct {
-	SourceID  int    `json:"source_id"`  // 媒体源ID
-	Path      string `json:"path"`       // 当前路径
-	Page      int    `json:"page"`       // 页码
-	PageSize  int    `json:"page_size"`  // 每页数量
-	SortField string `json:"sort_field"` // 排序字段
-	SortOrder string `json:"sort_order"` // 排序方向: asc | desc
-	Filter    string `json:"filter"`     // 过滤条件
-	Search    string `json:"search"`     // 搜索关键词
 }
 
 // FileListResult 文件列表结果
@@ -229,13 +170,6 @@ type TmdbIdentifyResult struct {
 	QueryAfterAI      []string           `json:"query_after_ai,omitempty"`
 }
 
-// TmdbSearchRequest TMDB 搜索请求
-type TmdbSearchRequest struct {
-	Query     string `json:"query" form:"query"`           // 搜索关键词
-	Year      int    `json:"year" form:"year"`             // 年份（可选）
-	MediaType string `json:"media_type" form:"media_type"` // movie | tv（可选）
-}
-
 // TmdbIdentifyRequest TMDB 识别请求
 type TmdbIdentifyRequest struct {
 	FileID           string `json:"file_id" binding:"required"`   // 文件ID
@@ -247,11 +181,6 @@ type TmdbIdentifyRequest struct {
 	MetadataSource   string `json:"metadata_source,omitempty"`
 	MetadataID       string `json:"metadata_id,omitempty"`
 	MetadataProvider string `json:"metadata_provider,omitempty"`
-}
-
-// TmdbCacheRepository TMDB 缓存仓库接口
-type TmdbCacheRepository interface {
-	GetByQueryKey(queryKey, mediaType string) (interface{}, error)
 }
 
 // ============================================

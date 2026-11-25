@@ -23,11 +23,6 @@ type UserInfo struct {
 type AuthController struct {
 	authService      *service.AuthService
 	globalAPIService *service.GlobalAPIService
-	redisClient      interface {
-		Set(key string, value interface{}, expiration int) error
-		Get(key string) (string, error)
-		Del(key string) error
-	}
 
 	// --- 回调依赖：main 包全局函数通过依赖注入解耦 ---
 	// NOTE: 以下函数属于 main 包，无法在 controller 层直接引用，
@@ -61,14 +56,6 @@ func NewAuthController(authService *service.AuthService) *AuthController {
 }
 
 // --- 回调注入方法 ---
-
-func (c *AuthController) SetRedisClient(client interface {
-	Set(key string, value interface{}, expiration int) error
-	Get(key string) (string, error)
-	Del(key string) error
-}) {
-	c.redisClient = client
-}
 
 func (c *AuthController) SetGetUserByName(fn func(name string) (*UserInfo, error)) {
 	c.getUserByName = fn
@@ -312,27 +299,6 @@ func (c *AuthController) JWTMiddleware() gin.HandlerFunc {
 // SetVerifyTokenAndReturnUserID 注入验证token并返回userID的回调
 func (c *AuthController) SetVerifyTokenAndReturnUserID(fn func(tokenString string, secret string) (int, error)) {
 	c.verifyTokenAndReturnUserID = fn
-}
-
-// UpdatePassword 更新密码
-func (c *AuthController) UpdatePassword(ctx *gin.Context) {
-	var data struct {
-		Name    string `json:"name"`
-		NewPass string `json:"new_password"`
-	}
-	if err := ctx.ShouldBindJSON(&data); err != nil {
-		ctx.JSON(400, gin.H{"error": "参数错误"})
-		return
-	}
-	if data.Name == "" || data.NewPass == "" {
-		ctx.JSON(400, gin.H{"error": "用户名和新密码不能为空"})
-		return
-	}
-	if err := c.authService.UpdatePassword(data.Name, data.NewPass); err != nil {
-		ctx.JSON(500, gin.H{"error": err.Error()})
-		return
-	}
-	ctx.JSON(200, gin.H{"message": "密码更新成功"})
 }
 
 // --- 通用响应辅助函数 ---

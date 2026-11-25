@@ -88,29 +88,6 @@ func (s *OrganizeService) buildUniqueTargetPath(targetPath string) (string, erro
 	return "", fmt.Errorf("未找到可用的冲突后缀路径")
 }
 
-// isMediaFile 判断是否为媒体文件
-
-func (s *OrganizeService) isMediaFile(ext string) bool {
-	mediaExts := map[string]bool{
-		".mp4":  true,
-		".mkv":  true,
-		".avi":  true,
-		".mov":  true,
-		".wmv":  true,
-		".flv":  true,
-		".webm": true,
-		".m4v":  true,
-		".rmvb": true,
-		".rm":   true,
-		".mp3":  true,
-		".flac": true,
-		".wav":  true,
-		".aac":  true,
-		".m4a":  true,
-	}
-	return mediaExts[ext]
-}
-
 func (s *OrganizeService) isOrganizeVideoFile(ext string) bool {
 	return s.getFileType(ext) == "video"
 }
@@ -135,15 +112,6 @@ func (s *OrganizeService) getFileType(ext string) string {
 	}
 	return "file"
 }
-
-// BatchIdentify 批量识别文件
-// 参数:
-//   - sourceID: 媒体源ID
-//   - fileIDs: 文件ID列表
-//
-// 返回:
-//   - []domain.TmdbIdentifyResult: 识别结果列表
-//   - error: 错误信息
 
 func (s *OrganizeService) sanitizeFolderName(name string) string {
 	replacer := strings.NewReplacer(

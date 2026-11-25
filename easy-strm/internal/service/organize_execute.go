@@ -134,19 +134,6 @@ func (s *OrganizeService) findNewlyCopiedCloud115FileID(targetCID string, before
 	return "", fmt.Errorf("未找到新增副本")
 }
 
-// organizeFile 按媒体源 ID 整理单个文件（先查源再委托 organizeFileForSource）
-
-func (s *OrganizeService) organizeFile(sourceID int, preview OrganizePreview, conflictPolicy, operationMode string) (*OrganizeResult, error) {
-	source, err := s.mediaSourceService.GetByID(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("获取媒体源失败: %v", err)
-	}
-	if source == nil {
-		return nil, fmt.Errorf("媒体源不存在")
-	}
-	return s.organizeFileForSource(source, preview, conflictPolicy, operationMode)
-}
-
 // organizeFileForSource 整理单个文件（直接消费已构造的 *MediaSource，避免重复 GetByID）。
 // 供 OrganizeDirectoryForSource 在「已持有媒体源」场景下复用（含临时源）。
 func (s *OrganizeService) organizeFileForSource(source *domain.MediaSource, preview OrganizePreview, conflictPolicy, operationMode string) (*OrganizeResult, error) {

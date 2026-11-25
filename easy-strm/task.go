@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"sort"
 	"time"
 
@@ -202,22 +201,6 @@ func SetTaskError(taskID string, errMsg string) error {
 	return SaveTask(task)
 }
 
-// DeleteTask 删除任务
-func DeleteTask(taskID string) error {
-	ctx := context.Background()
-	key := taskKeyPrefix + taskID
-
-	err := redisClient.Del(ctx, key).Err()
-	if err != nil {
-		Error("Failed to delete task %s from Redis: %v", taskID, err)
-		return err
-	}
-
-	RemoveTaskFromList(taskID)
-	Debug("Deleted task %s from Redis", taskID)
-	return nil
-}
-
 // GetAllTasks 获取所有任务
 func GetAllTasks() ([]*TaskStatus, error) {
 	ctx := context.Background()
@@ -258,28 +241,7 @@ func AddTaskToList(taskID string) error {
 	return nil
 }
 
-// RemoveTaskFromList 从任务列表中移除任务ID
-func RemoveTaskFromList(taskID string) error {
-	ctx := context.Background()
-	err := redisClient.LRem(ctx, taskListKey, 0, taskID).Err()
-	if err != nil {
-		Error("Failed to remove task %s from list: %v", taskID, err)
-		return err
-	}
-	Debug("Removed task %s from list", taskID)
-	return nil
-}
-
 // --- 任务取消机制 ---
-
-// SetTaskCancelFlag 设置任务取消标记
-// goroutine 在每次迭代时检查此标记，实现协作式取消
-func SetTaskCancelFlag(taskID string) error {
-	ctx := context.Background()
-	key := taskCancelKeyPrefix + taskID
-	// 设置取消标记，24小时过期（与任务本身同步）
-	return redisClient.Set(ctx, key, "1", 24*time.Hour).Err()
-}
 
 // IsTaskCancelled 检查任务是否已被取消
 // 在 goroutine 的每次迭代中调用此函数检查取消标记
@@ -297,39 +259,6 @@ func IsTaskCancelled(taskID string) bool {
 	return val == "1"
 }
 
-// ClearTaskCancelFlag 清除任务取消标记
-func ClearTaskCancelFlag(taskID string) error {
-	ctx := context.Background()
-	key := taskCancelKeyPrefix + taskID
-	return redisClient.Del(ctx, key).Err()
-}
-
-// CancelTask 取消任务（设置取消标记 + 更新状态）
-func CancelTask(taskID string) error {
-	task, err := GetTask(taskID)
-	if err != nil {
-		return fmt.Errorf("获取任务失败: %v", err)
-	}
-	if task == nil {
-		return fmt.Errorf("任务不存在: %s", taskID)
-	}
-
-	// 仅 pending/running 状态可取消
-	if task.Status != TaskStatusPending && task.Status != TaskStatusRunning {
-		return fmt.Errorf("任务状态不允许取消: %s (当前: %s)", taskID, task.Status)
-	}
-
-	// 设置取消标记，让运行中的 goroutine 感知
-	if err := SetTaskCancelFlag(taskID); err != nil {
-		Error("设置取消标记失败 %s: %v", taskID, err)
-	}
-
-	// 更新任务状态为 cancelled
-	task.Status = TaskStatusCancelled
-	task.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
-	return SaveTask(task)
-}
-
 // --- 任务进度追踪（用于恢复） ---
 
 // AddProcessedFileID 记录已处理的文件ID到 Redis Set
@@ -340,66 +269,4 @@ func AddProcessedFileID(taskID string, fileID string) error {
 	return redisClient.SAdd(ctx, key, fileID).Err()
 }
 
-// IsFileProcessed 检查文件是否已被处理过（用于恢复时跳过）
-func IsFileProcessed(taskID string, fileID string) bool {
-	ctx := context.Background()
-	key := taskProgressKeyPrefix + taskID
-	isMember, err := redisClient.SIsMember(ctx, key, fileID).Result()
-	if err != nil {
-		Warn("检查文件处理状态失败 %s/%s: %v", taskID, fileID, err)
-		return false
-	}
-	return isMember
-}
-
-// GetProcessedFileIDs 获取已处理的文件ID集合
-func GetProcessedFileIDs(taskID string) ([]string, error) {
-	ctx := context.Background()
-	key := taskProgressKeyPrefix + taskID
-	members, err := redisClient.SMembers(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	return members, nil
-}
-
-// ClearTaskProgress 清除任务的进度记录
-func ClearTaskProgress(taskID string) error {
-	ctx := context.Background()
-	key := taskProgressKeyPrefix + taskID
-	return redisClient.Del(ctx, key).Err()
-}
-
 // --- 任务恢复 ---
-
-// ResumeTask 恢复已取消或失败的任务
-// 将任务状态重置为 pending，保留进度信息，等待调度器重新执行
-func ResumeTask(taskID string) (*TaskStatus, error) {
-	task, err := GetTask(taskID)
-	if err != nil {
-		return nil, fmt.Errorf("获取任务失败: %v", err)
-	}
-	if task == nil {
-		return nil, fmt.Errorf("任务不存在: %s", taskID)
-	}
-
-	// 仅 cancelled/failed 状态可恢复
-	if task.Status != TaskStatusCancelled && task.Status != TaskStatusFailed {
-		return nil, fmt.Errorf("任务状态不允许恢复: %s (当前: %s)", taskID, task.Status)
-	}
-
-	// 清除取消标记
-	ClearTaskCancelFlag(taskID)
-
-	// 重置状态为 pending，保留进度信息（processed_files 等字段保留）
-	task.Status = TaskStatusPending
-	task.ErrorMessage = ""
-	task.UpdateTime = time.Now().Format("2006-01-02 15:04:05")
-
-	if err := SaveTask(task); err != nil {
-		return nil, fmt.Errorf("保存任务失败: %v", err)
-	}
-
-	Info("任务已恢复: %s, 保留进度: %d/%d", taskID, task.ProcessedFiles, task.TotalFiles)
-	return task, nil
-}

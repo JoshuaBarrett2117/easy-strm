@@ -35,14 +35,6 @@ func CORSMiddleware() gin.HandlerFunc {
 	}
 }
 
-// JSONEscapeMiddleware JSON转义中间件，禁用Unicode转义
-func JSONEscapeMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		// 使用自定义的JSON响应方法
-		c.Next()
-	}
-}
-
 // JSON gin.Context的JSON响应辅助函数，禁用Unicode转义
 func JSON(c *gin.Context, code int, obj interface{}) {
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -152,16 +144,6 @@ func main() {
 	if shutdownSignal.Err() != nil {
 		<-shutdownDone
 	}
-}
-
-// GetDB 获取全局数据库连接（供 router 使用）
-func GetDB() interface{} {
-	return getDBInstance()
-}
-
-// GetRedisClient 获取全局Redis客户端（供 router 使用）
-func GetRedisClient() interface{} {
-	return getRedisClientInstance()
 }
 
 // 需要在 db.go 或 redis.go 中实现这些函数

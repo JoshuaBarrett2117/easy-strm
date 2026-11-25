@@ -13,6 +13,7 @@ import (
 	"easy-strm/internal/dao"
 	"easy-strm/internal/domain"
 	"easy-strm/internal/pkg/logger"
+
 	"github.com/go-redis/redis/v8"
 )
 
@@ -196,12 +197,6 @@ func (s *OrganizeService) PreviewOrganizeContext(ctx context.Context, sourceID i
 		return nil, fmt.Errorf("媒体源不存在")
 	}
 	return s.previewOrganizeForSourceContext(ctx, source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
-}
-
-// previewOrganizeForSource 预览整理（直接消费已构造的 *MediaSource，不调用 GetByID）。
-// 供 PreviewOrganize 与 OrganizeDirectoryForSource 复用，避免无 DB 媒体源时重复查询。
-func (s *OrganizeService) previewOrganizeForSource(source *domain.MediaSource, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {
-	return s.previewOrganizeForSourceContext(context.Background(), source, sourcePath, targetPath, mediaType, template, fileIDs, useCategory, manualItems)
 }
 
 func (s *OrganizeService) previewOrganizeForSourceContext(ctx context.Context, source *domain.MediaSource, sourcePath, targetPath, mediaType, template string, fileIDs []string, useCategory bool, manualItems []domain.OrganizeManualOverride) ([]OrganizePreview, error) {

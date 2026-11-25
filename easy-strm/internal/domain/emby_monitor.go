@@ -2,29 +2,6 @@ package domain
 
 import "time"
 
-// EmbyPlaybackEvent 表示 easy-strm 采集到的一段连续播放记录。
-type EmbyPlaybackEvent struct {
-	ID             int64      `json:"id"`
-	ServerID       int        `json:"server_id"`
-	SessionID      string     `json:"session_id"`
-	UserID         string     `json:"user_id"`
-	UserName       string     `json:"user_name"`
-	ItemID         string     `json:"item_id"`
-	ItemType       string     `json:"item_type"`
-	ItemName       string     `json:"item_name"`
-	SeriesID       string     `json:"series_id"`
-	SeriesName     string     `json:"series_name"`
-	ImageTag       string     `json:"image_tag"`
-	ClientName     string     `json:"client_name"`
-	DeviceName     string     `json:"device_name"`
-	PlaybackMethod string     `json:"playback_method"`
-	StartedAt      time.Time  `json:"started_at"`
-	EndedAt        *time.Time `json:"ended_at,omitempty"`
-	WatchedSeconds int64      `json:"watched_seconds"`
-	LastSeenAt     time.Time  `json:"last_seen_at"`
-	Paused         bool       `json:"paused"`
-}
-
 // EmbyPlaybackSample 是采集器写入播放状态所需的最小数据。
 type EmbyPlaybackSample struct {
 	ServerID       int

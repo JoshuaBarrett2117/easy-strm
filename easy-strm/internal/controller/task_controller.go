@@ -212,22 +212,3 @@ func (c *TaskController) Resume(ctx *gin.Context) {
 		"task_id": taskID,
 	})
 }
-
-func (c *TaskController) Delete(ctx *gin.Context) {
-	taskID := ctx.Query("task_id")
-	if taskID == "" {
-		ErrorResp(ctx, http.StatusBadRequest, "task_id is required")
-		return
-	}
-
-	if err := c.taskService.Delete(taskID); err != nil {
-		logger.Errorf("TaskController[Delete] failed to delete task: %v", err)
-		ErrorResp(ctx, http.StatusInternalServerError, "删除任务失败")
-		return
-	}
-
-	logger.Infof("TaskController[Delete] delete task success: %s", taskID)
-	SuccessResp(ctx, gin.H{
-		"message": "删除成功",
-	})
-}

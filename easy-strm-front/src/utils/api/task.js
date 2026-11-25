@@ -9,11 +9,6 @@ export const getUnifiedTaskList = () => {
   return api.get('/tasks/unified')
 }
 
-// 获取单个任务
-export const getTaskById = (taskId) => {
-  return api.get(`/tasks/${taskId}`)
-}
-
 // 获取任务详情
 export const getTaskDetail = (taskId) => {
   return api.get(`/tasks/${taskId}`)

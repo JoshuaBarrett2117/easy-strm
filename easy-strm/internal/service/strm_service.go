@@ -41,28 +41,6 @@ func buildFullGenerateCronTaskName(strmConfigID int) string {
 	return fmt.Sprintf("STRM全量生成-%d", strmConfigID)
 }
 
-// CreateConfig 创建基础配置并同步定时任务。
-func (s *StrmService) CreateConfig(cloud int, netPath, localPath, expr, extension string) (*domain.StrmConfig, error) {
-	return s.CreateConfigExt(cloud, netPath, localPath, expr, extension, "manual", 0, 0, "", false, 0, "", 1, false, 600)
-}
-
-// UpdateConfig 更新基础字段，保留其他配置。
-func (s *StrmService) UpdateConfig(id, cloud int, netPath, localPath, expr, extension string) (*domain.StrmConfig, error) {
-	c, e := s.GetConfigByID(id)
-	if e != nil {
-		return nil, e
-	}
-	if c == nil {
-		return nil, fmt.Errorf("配置不存在")
-	}
-	c.Cloud115Id = cloud
-	c.NetDiskPath = netPath
-	c.LocalPath = localPath
-	c.Cron = expr
-	c.Extension = extension
-	return s.saveScheduledConfig(c)
-}
-
 // CreateConfigExt 原子创建配置及调度定义。
 func (s *StrmService) CreateConfigExt(cloud int, netPath, localPath, expr, extension, mode string, source, target int, targetDir string, cleanup bool, threshold int, policy string, concurrency int, behaviorSyncEnabled bool, behaviorSyncInterval int) (*domain.StrmConfig, error) {
 	return s.saveScheduledConfig(&domain.StrmConfig{Cloud115Id: cloud, NetDiskPath: netPath, LocalPath: localPath, Cron: expr, Extension: extension, SyncMode: mode, SourceAccount: source, TargetAccount: target, TargetDirectory: targetDir, AutoCleanup: cleanup, CleanupThreshold: threshold, CleanupPolicy: policy, MaxConcurrency: concurrency, BehaviorSyncEnabled: behaviorSyncEnabled, BehaviorSyncInterval: behaviorSyncInterval})
@@ -129,21 +107,6 @@ func (s *StrmService) DeleteConfig(id int) error {
 		s.scheduler.removeLocked(taskID)
 	}
 	return nil
-}
-
-// GetFilesByConfigID 根据配置ID获取STRM文件记录
-func (s *StrmService) GetFilesByConfigID(strmConfigID int) ([]*domain.StrmFile, error) {
-	return s.strmFileDAO.GetByConfigID(strmConfigID)
-}
-
-// UpsertFile 创建或更新STRM文件记录
-func (s *StrmService) UpsertFile(strmConfigID int, fileName, filePath, pickCode, sha1 string, fileSize int64, localStrmPath string) (*domain.StrmFile, error) {
-	return s.strmFileDAO.Upsert(strmConfigID, fileName, filePath, pickCode, sha1, fileSize, localStrmPath)
-}
-
-// CountFilesByConfigID 统计指定配置的STRM文件数量
-func (s *StrmService) CountFilesByConfigID(strmConfigID int) (int, error) {
-	return s.strmFileDAO.CountByConfigID(strmConfigID)
 }
 
 // FindMatchingConfigByCloud115ID 根据媒体源关联的 115 账号 ID 查找匹配的 STRM 配置

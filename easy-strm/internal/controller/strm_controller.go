@@ -97,10 +97,6 @@ func NewStrmController(strmService *service.StrmService) *StrmController {
 	}
 }
 
-func (c *StrmController) GetService() *service.StrmService {
-	return c.strmService
-}
-
 // --- 回调注入方法 ---
 
 func (c *StrmController) SetGetAllStrmConfig(fn func(sortField, sortOrder string) ([]*StrmConfigDetail, error)) {
@@ -247,21 +243,21 @@ func (c *StrmController) CreateConfig(ctx *gin.Context) {
 	logger.Debug("StrmController[CreateConfig] 创建STRM配置")
 
 	var cfgData struct {
-		Cloud115Id          int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath         string `json:"net_disk_path" binding:"required"`
-		LocalPath           string `json:"local_path" binding:"required"`
-		Cron                string `json:"cron"`
-		Extension           string `json:"extension"`
-		SyncMode            string `json:"sync_mode"`
-		SourceAccount       int    `json:"source_account"`
-		TargetAccount       int    `json:"target_account"`
-		TargetDirectory     string `json:"target_directory"`
-		AutoCleanup         bool   `json:"auto_cleanup"`
-		CleanupThreshold    int    `json:"cleanup_threshold"`
-		CleanupPolicy       string `json:"cleanup_policy"`
-		MaxConcurrency      int    `json:"max_concurrency"`
-		BehaviorSyncEnabled bool   `json:"behavior_sync_enabled"`
-		BehaviorSyncInterval int   `json:"behavior_sync_interval"`
+		Cloud115Id           int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath          string `json:"net_disk_path" binding:"required"`
+		LocalPath            string `json:"local_path" binding:"required"`
+		Cron                 string `json:"cron"`
+		Extension            string `json:"extension"`
+		SyncMode             string `json:"sync_mode"`
+		SourceAccount        int    `json:"source_account"`
+		TargetAccount        int    `json:"target_account"`
+		TargetDirectory      string `json:"target_directory"`
+		AutoCleanup          bool   `json:"auto_cleanup"`
+		CleanupThreshold     int    `json:"cleanup_threshold"`
+		CleanupPolicy        string `json:"cleanup_policy"`
+		MaxConcurrency       int    `json:"max_concurrency"`
+		BehaviorSyncEnabled  bool   `json:"behavior_sync_enabled"`
+		BehaviorSyncInterval int    `json:"behavior_sync_interval"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {
@@ -304,21 +300,21 @@ func (c *StrmController) UpdateConfig(ctx *gin.Context) {
 	logger.Debugf("StrmController[UpdateConfig] 更新STRM配置, ID: %d", id)
 
 	var cfgData struct {
-		Cloud115Id          int    `json:"cloud115_id" binding:"required"`
-		NetDiskPath         string `json:"net_disk_path" binding:"required"`
-		LocalPath           string `json:"local_path" binding:"required"`
-		Cron                string `json:"cron"`
-		Extension           string `json:"extension"`
-		SyncMode            string `json:"sync_mode"`
-		SourceAccount       int    `json:"source_account"`
-		TargetAccount       int    `json:"target_account"`
-		TargetDirectory     string `json:"target_directory"`
-		AutoCleanup         bool   `json:"auto_cleanup"`
-		CleanupThreshold    int    `json:"cleanup_threshold"`
-		CleanupPolicy       string `json:"cleanup_policy"`
-		MaxConcurrency      int    `json:"max_concurrency"`
-		BehaviorSyncEnabled bool   `json:"behavior_sync_enabled"`
-		BehaviorSyncInterval int   `json:"behavior_sync_interval"`
+		Cloud115Id           int    `json:"cloud115_id" binding:"required"`
+		NetDiskPath          string `json:"net_disk_path" binding:"required"`
+		LocalPath            string `json:"local_path" binding:"required"`
+		Cron                 string `json:"cron"`
+		Extension            string `json:"extension"`
+		SyncMode             string `json:"sync_mode"`
+		SourceAccount        int    `json:"source_account"`
+		TargetAccount        int    `json:"target_account"`
+		TargetDirectory      string `json:"target_directory"`
+		AutoCleanup          bool   `json:"auto_cleanup"`
+		CleanupThreshold     int    `json:"cleanup_threshold"`
+		CleanupPolicy        string `json:"cleanup_policy"`
+		MaxConcurrency       int    `json:"max_concurrency"`
+		BehaviorSyncEnabled  bool   `json:"behavior_sync_enabled"`
+		BehaviorSyncInterval int    `json:"behavior_sync_interval"`
 	}
 
 	if err := ctx.ShouldBindJSON(&cfgData); err != nil {

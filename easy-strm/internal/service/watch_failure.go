@@ -186,23 +186,6 @@ func buildWatchFailureItemsFromIDs(fileIDs []string, reason, category string) []
 	return items
 }
 
-func parseRetryFileIDs(raw interface{}) []string {
-	switch value := raw.(type) {
-	case []string:
-		return append([]string(nil), value...)
-	case []interface{}:
-		fileIDs := make([]string, 0, len(value))
-		for _, item := range value {
-			if text, ok := item.(string); ok && text != "" {
-				fileIDs = append(fileIDs, text)
-			}
-		}
-		return fileIDs
-	default:
-		return nil
-	}
-}
-
 func parseRetrySourceID(raw interface{}) int {
 	switch value := raw.(type) {
 	case int:

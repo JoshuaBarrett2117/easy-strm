@@ -6,9 +6,9 @@ import (
 	"easy-strm/internal/pkg/logger"
 	"encoding/json"
 	"fmt"
-	"github.com/go-redis/redis/v8"
-	"strings"
 	"time"
+
+	"github.com/go-redis/redis/v8"
 )
 
 type OrganizePreviewTask struct {
@@ -67,14 +67,6 @@ type OrganizeExecutionProgress struct {
 	Failed    int
 	Skipped   int
 	Result    *OrganizeResult
-}
-
-func GenerateTaskKey(sourceID int, sourcePath string, fileIDs []string) string {
-	key := fmt.Sprintf("organize:preview:%d:%s", sourceID, sourcePath)
-	if len(fileIDs) > 0 {
-		key += ":" + strings.Join(fileIDs, ",")
-	}
-	return key
 }
 
 func (s *OrganizeService) persistPreviewTask(ctx context.Context, taskKey string, task *OrganizePreviewTask) error {

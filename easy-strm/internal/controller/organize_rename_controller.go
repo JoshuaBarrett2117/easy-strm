@@ -216,13 +216,3 @@ func (c *OrganizeController) ExecuteRename(ctx *gin.Context) {
 
 	SuccessResp(ctx, results[0])
 }
-
-func (c *OrganizeController) SearchTmdb(ctx *gin.Context) {
-	query := ctx.Query("query")
-	if query == "" {
-		ErrorResp(ctx, http.StatusBadRequest, "搜索关键词不能为空")
-		return
-	}
-
-	ErrorResp(ctx, http.StatusNotImplemented, "请使用 /api/media/tmdb/search 接口")
-}

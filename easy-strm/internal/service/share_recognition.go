@@ -12,7 +12,6 @@ import (
 )
 
 var (
-	shareYearRE       = regexp.MustCompile(`(?:^|[ ._（(\[])(19[0-9]{2}|20[0-9]{2})(?:[ ._）)\]]|$)`)
 	shareIDRE         = regexp.MustCompile(`(?i)[\[{]tmdb(?:id)?[ =:-]+([0-9]+)[\]}]`)
 	shareParentYearRE = regexp.MustCompile(`[（(](19[0-9]{2}|20[0-9]{2})[）)]`)
 	shareSeasonRE     = regexp.MustCompile(`(?i)\bS[0-9]{1,2}\b|\bSeason[ ._-]*[0-9]+\b|第[一二三四五六七八九十百0-9]+季`)
@@ -495,18 +494,4 @@ func (s *TmdbService) identifyShareWithAssistUncached(ctx context.Context, filen
 		result.RecognitionMethod = "ai"
 	}
 	return result, nil
-}
-
-func ambiguousShareCandidates(q ShareMediaQuery, candidates []domain.TmdbSearchResult) bool {
-	identities := map[string]bool{}
-	for _, candidate := range candidates {
-		if selectVerifiedShareCandidate(q, []domain.TmdbSearchResult{candidate}) != nil {
-			key := fmt.Sprintf("%s:%s:%s:%s:%d", candidate.MetadataSource, candidate.MetadataProvider, candidate.MetadataID, candidate.MediaType, candidate.TmdbID)
-			identities[key] = true
-			if len(identities) > 1 {
-				return true
-			}
-		}
-	}
-	return false
 }

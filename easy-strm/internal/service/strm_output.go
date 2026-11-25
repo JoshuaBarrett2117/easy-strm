@@ -52,11 +52,6 @@ func NormalizeStrmOutputPath(p string) (string, error) {
 	return p, nil
 }
 
-// NewStrmOutput 锁定目录并迁移历史文件归属，不触碰实际文件。
-func NewStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string) (*StrmOutput, error) {
-	return newStrmOutput(ctx, db, root, owner, run, true)
-}
-
 func newStrmOutput(ctx context.Context, db *sql.DB, root, owner, run string, full bool) (*StrmOutput, error) {
 	if filepath.Clean(strings.TrimSpace(root)) == "." {
 		return nil, fmt.Errorf("输出目录不能是当前工作目录")

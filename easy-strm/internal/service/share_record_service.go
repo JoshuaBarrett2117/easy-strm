@@ -45,11 +45,6 @@ func NewShareRecordService(d *dao.ShareRecordDAO, t *TmdbService, tasks *TaskSer
 	return &ShareRecordService{dao: d, tmdb: t, tasks: tasks, parser: parser, coordinator: NewShareOperationCoordinator()}
 }
 
-// SetAutoStrmExport 注入分享识别完成后的增量导出入口。
-func (s *ShareRecordService) SetAutoStrmExport(export func([]int) (string, bool, error)) {
-	s.autoExport = export
-}
-
 // SetAutoStrmExportContext 注入保留请求与任务上下文的自动导出入口。
 func (s *ShareRecordService) SetAutoStrmExportContext(export func(context.Context, []int) (string, bool, error)) {
 	s.autoExportContext = export
@@ -178,25 +173,6 @@ func (s *ShareRecordService) AddMedia(ctx context.Context, m *domain.ShareMedia)
 		m.MetadataSource = domain.MetadataSourceAuto
 	}
 	return s.dao.AddMedia(ctx, m)
-}
-func (s *ShareRecordService) DeleteMedia(ctx context.Context, id int) error {
-	file, err := s.dao.FileIdentity(ctx, id)
-	if err != nil {
-		return err
-	}
-	release, err := s.Coordinator().acquire(ctx, nil, shareResource{key: shareKey(file.ShareID)}, shareResource{key: fileKey(id), exclusive: true}, shareResource{key: fmt.Sprintf("sync-commit:%d", file.ShareID)})
-	if err != nil {
-		return err
-	}
-	defer release()
-	file, err = s.dao.FileIdentity(ctx, id)
-	if err != nil {
-		return err
-	}
-	if err = s.dao.DeleteMedia(ctx, id); err == nil {
-		s.Coordinator().removedFile(file)
-	}
-	return err
 }
 func (s *ShareRecordService) Identify(ctx context.Context, m domain.ShareMedia, retry bool) error {
 	ctx = withShareWorkRound(ctx, retry)
@@ -694,11 +670,6 @@ func (s *ShareRecordService) StartBatchSync(ctx context.Context, recordIDs []int
 	return taskID, nil
 }
 
-// RetryBatchSyncTask 从任务元数据恢复分享同步。服务重启后原协程已不存在，因此重新创建一个可追踪任务执行。
-func (s *ShareRecordService) RetryBatchSyncTask(taskID string, task map[string]interface{}) (string, error) {
-	return s.RetryBatchSyncTaskContext(context.Background(), taskID, task)
-}
-
 // RetryBatchSyncTaskContext 重新派发同步任务时保留 HTTP 入口标识，仍只继续未完成分享。
 func (s *ShareRecordService) RetryBatchSyncTaskContext(ctx context.Context, taskID string, task map[string]interface{}) (string, error) {
 	metadata, _ := task["metadata"].(map[string]interface{})
@@ -955,44 +926,6 @@ func (s *ShareRecordService) runBatchIdentify(ctx context.Context, taskID string
 	_ = s.tasks.UpdateMetadataContext(ctx, taskID, map[string]interface{}{"timeout_minutes": settings.TimeoutMinutes, "cancelled_shares": len(cancelledShares), "phase": "汇总结果", "current_file": "", "success": success, "failed": failed, "skipped": skipped, "steps": []map[string]interface{}{{"name": "准备媒体列表", "status": "completed"}, {"name": "识别媒体", "status": "completed"}, {"name": "汇总结果", "status": "completed"}}})
 	_ = s.tasks.UpdateStatusContext(ctx, taskID, "completed")
 	logger.WithContext(ctx, "share_identify").Log(logger.INFO, "分享识别完成", logger.Fields{"event": "identify_complete", "success": success, "failed": failed}, nil)
-}
-func (s *ShareRecordService) BatchIdentify(ctx context.Context, ids []int, retry bool) (domain.ShareIdentifySummary, error) {
-	ctx = withShareWorkRound(ctx, retry)
-	p, e := s.List(ctx, domain.ShareRecordQuery{Page: 1, PageSize: 200})
-	if e != nil {
-		return domain.ShareIdentifySummary{}, e
-	}
-	sum := domain.ShareIdentifySummary{}
-	prepareShareEpisodeInputs(ctx, p.Data)
-	if s.tmdb != nil {
-		s.tmdb.seedShareWorks(ctx, p.Data)
-	}
-	for _, r := range p.Data {
-		for _, m := range r.Media {
-			m.ShareID = r.ID
-			if len(ids) > 0 && !contains(ids, m.ID) {
-				continue
-			}
-			if isMaskedSharePath(m.FileName) || (!retry && m.Status == "identified") {
-				sum.Skipped++
-				continue
-			}
-			if e = s.Identify(ctx, m, retry); e != nil {
-				sum.Failed++
-			} else {
-				sum.Success++
-			}
-		}
-	}
-	return sum, nil
-}
-func contains(a []int, v int) bool {
-	for _, x := range a {
-		if x == v {
-			return true
-		}
-	}
-	return false
 }
 
 // ListMedia 获取已识别媒体分页，保留完整任务扫描的原有读取入口。

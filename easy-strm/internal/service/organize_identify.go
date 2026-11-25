@@ -23,7 +23,7 @@ func (s *OrganizeService) previewFile(ctx context.Context, source *domain.MediaS
 			RecognitionMethod: identifyResult.RecognitionMethod, MetadataSource: identifyResult.MetadataSource,
 			MetadataID: identifyResult.MetadataID, MetadataProvider: identifyResult.MetadataProvider,
 			PosterPath: identifyResult.PosterPath,
-			AIUsed: identifyResult.AIUsed, AIScene: identifyResult.AIScene, FailureReason: identifyResult.FailureReason,
+			AIUsed:     identifyResult.AIUsed, AIScene: identifyResult.AIScene, FailureReason: identifyResult.FailureReason,
 		}, nil
 	}
 
@@ -416,13 +416,6 @@ func (s *OrganizeService) saveIdentifyCacheToRedis(fileHash string, result *doma
 	ctx := context.Background()
 	if err := s.redisClient.Set(ctx, key, string(jsonData), identifyCacheRedisTTL).Err(); err != nil {
 		logger.Warnf("OrganizeService[saveIdentifyCacheToRedis] 保存Redis失败: %v", err)
-	}
-}
-
-func (s *OrganizeService) saveIdentifyCacheToDB(fileHash, fileName string, result *domain.TmdbIdentifyResult, sourceID int, isManual bool) {
-	cache := buildIdentifyCache(fileHash, fileName, result, sourceID, isManual)
-	if err := s.identifyCacheDAO.CreateOrUpdate(cache); err != nil {
-		logger.Warnf("OrganizeService[saveIdentifyCacheToDB] 保存数据库失败: %v", err)
 	}
 }
 

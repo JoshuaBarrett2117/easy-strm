@@ -7,12 +7,13 @@ import (
 	"easy-strm/internal/pkg/logger"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
-	"github.com/robfig/cron/v3"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/robfig/cron/v3"
 )
 
 // CronParameter 描述处理器表单参数。
@@ -253,16 +254,6 @@ func (s *CronService) AddTask(t *domain.CronTask) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.replaceLocked(t)
-}
-
-// UpdateTask 重新装载任务配置。
-func (s *CronService) UpdateTask(t *domain.CronTask) error { return s.AddTask(t) }
-
-// RemoveTask 移除后续调度，不终止当前执行。
-func (s *CronService) RemoveTask(id int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.removeLocked(id)
 }
 
 // removeLocked 移除调度；调用方必须持有 mu。
@@ -591,16 +582,6 @@ func (s *CronService) GetByID(id int) (*domain.CronTask, error) {
 	return t, err
 }
 
-// GetByName 查询名称匹配的任务。
-func (s *CronService) GetByName(name string) (*domain.CronTask, error) {
-	t, e := s.cronTaskDAO.GetByName(name)
-	if e != nil || t == nil {
-		return t, e
-	}
-	e = s.cronTaskDAO.Hydrate(t)
-	return t, e
-}
-
 // GetAll 返回任务配置列表。
 func (s *CronService) GetAll() ([]*domain.CronTask, error) {
 	list, err := s.cronTaskDAO.GetAll()
@@ -613,44 +594,6 @@ func (s *CronService) GetAll() ([]*domain.CronTask, error) {
 		}
 	}
 	return list, nil
-}
-
-// GetEnabled 返回启用的配置。
-func (s *CronService) GetEnabled() ([]*domain.CronTask, error) {
-	all, e := s.GetAll()
-	out := []*domain.CronTask{}
-	for _, t := range all {
-		if t.Status == "enabled" {
-			out = append(out, t)
-		}
-	}
-	return out, e
-}
-
-// Create 为STRM旧入口建立通用定义。
-func (s *CronService) Create(name, kind string, cloud, config int, expr string) (*domain.CronTask, error) {
-	return s.Save(&domain.CronTask{TaskName: name, Handler: kind, Params: map[string]interface{}{"cloud115_id": cloud, "strm_config_id": config}, CronExpr: expr, Status: "enabled", Timezone: "Local"})
-}
-
-// Update 为旧入口更新同一任务。
-func (s *CronService) Update(id int, name, kind, expr, status string) (*domain.CronTask, error) {
-	t, e := s.GetByID(id)
-	if e != nil {
-		return nil, e
-	}
-	if t == nil {
-		return nil, fmt.Errorf("任务不存在")
-	}
-	t.TaskName = name
-	t.Handler = kind
-	t.CronExpr = expr
-	t.Status = status
-	return s.Save(t)
-}
-
-// UpdateRunInfo 保存运行摘要。
-func (s *CronService) UpdateRunInfo(id int, last, next *time.Time, status, msg string) error {
-	return s.cronTaskDAO.UpdateRunInfo(id, last, next, status, msg)
 }
 
 // Delete 删除用户任务，内置任务仅允许停用。

@@ -72,13 +72,6 @@ type ShareRecordPage struct {
 	Total int           `json:"total"`
 }
 
-// ShareIdentifySummary 当前请求实际处理的媒体数量。
-type ShareIdentifySummary struct {
-	Success int `json:"success"`
-	Failed  int `json:"failed"`
-	Skipped int `json:"skipped"`
-}
-
 // ShareMediaPage 已识别媒体的数据库分页结果，重复数按整个分享计算。
 type ShareMediaPage struct {
 	Data           []ShareMedia `json:"data"`
