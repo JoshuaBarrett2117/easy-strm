@@ -163,29 +163,6 @@ const (
 	TaskTypeShareMediaDelete TaskType = "share_media_delete"
 )
 
-// TaskTypeNames 任务类型中文名称映射
-var TaskTypeNames = map[TaskType]string{
-	TaskTypeShareDelete: "删除分享", TaskTypeShareClear: "清空分享文件记录", TaskTypeShareMediaDelete: "删除分享文件记录",
-	TaskTypeStrmGenerate:    "STRM文件生成",
-	TaskTypeIncrementalSync: "增量同步",
-	TaskTypeSyncFull:        "全量同步",
-	TaskTypeSyncTransfer:    "秒传同步",
-	TaskTypeCleanup:         "空间清理",
-	TaskTypeProxyRefresh:    "直链刷新",
-	TaskTypeOrganize:        "媒体整理",
-	TaskTypeScrape:          "NFO刮削",
-	TaskTypeEmbyRefresh:     "Emby库刷新",
-	TaskTypeEmbyServer:      "Emby实例管理",
-	TaskTypeEmbyUser:        "Emby用户管理",
-	TaskTypeEmbyLibrary:     "Emby媒体库管理",
-	TaskTypeEmbyCover:       "Emby媒体库封面",
-	TaskTypeEmbyPlugin:      "神医助手任务",
-	TaskTypeEmbyScheduled:   "Emby定时任务触发",
-	TaskTypeOfflineDownload: "115云下载",
-	TaskTypeFileTransfer:    "文件传输",
-	TaskTypeShareIdentify:   "分享媒体识别",
-}
-
 // TaskStatus 任务运行状态
 type TaskStatus struct {
 	TaskID         string                 `json:"task_id"`

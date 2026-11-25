@@ -76,6 +76,11 @@ func (c *TaskController) GetAll(ctx *gin.Context) {
 	})
 }
 
+// GetTypes 返回任务类型目录（值、中文名、分组），供任务中心筛选与展示。
+func (c *TaskController) GetTypes(ctx *gin.Context) {
+	SuccessResp(ctx, domain.TaskTypeCatalog)
+}
+
 func (c *TaskController) GetUnified(ctx *gin.Context) {
 	logger.Debugf("TaskController[GetUnified] get unified tasks from %s", ctx.ClientIP())
 

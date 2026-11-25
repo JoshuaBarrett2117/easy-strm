@@ -850,6 +850,7 @@ func SetupAuthProtectedRoutes(r *gin.Engine, config *Config, client *Client) *se
 		auth.GET("/tasks", taskController.GetAll)
 		auth.GET("/tasks/:task_id", taskController.Get)
 		auth.GET("/tasks/unified", taskController.GetUnified)
+		auth.GET("/tasks/types", taskController.GetTypes)
 		auth.POST("/tasks/:task_id/cancel", taskController.Cancel)
 		auth.POST("/tasks/:task_id/resume", taskController.Resume)
 		auth.GET("/scheduled-tasks", cronController.GetScheduledTasks)

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"easy-strm/internal/domain"
+
 	telegrammodels "github.com/go-telegram/bot/models"
 )
 
@@ -182,25 +184,6 @@ func truncateRunes(value string, limit int) string {
 	return string(characters[:limit-1]) + "…"
 }
 
-var notificationTaskTypeNames = map[string]string{
-	"strm_generate":           "STRM 文件生成",
-	"incremental_sync":        "增量同步",
-	"sync_full":               "全量同步",
-	"sync_transfer":           "秒传同步",
-	"organize":                "媒体整理",
-	"watch_auto_organize":     "自动整理",
-	"scrape":                  "NFO 刮削",
-	"emby_refresh":            "Emby 库刷新",
-	"offline_download":        "115 云下载",
-	"file_transfer":           "文件传输",
-	"share_transfer":          "115 分享转存",
-	"share_transfer_organize": "转存后整理",
-	"share_transfer_scrape":   "转存后刮削",
-}
-
 func notificationTaskTypeName(taskType string) string {
-	if name := notificationTaskTypeNames[taskType]; name != "" {
-		return name
-	}
-	return taskType
+	return domain.TaskTypeLabel(taskType)
 }

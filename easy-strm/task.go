@@ -21,16 +21,6 @@ const (
 	TaskTypeShareTransferScrape   TaskType = "share_transfer_scrape"   // 转存后自动刮削
 )
 
-// TaskTypeNames 任务类型中文名称
-var TaskTypeNames = map[TaskType]string{
-	TaskTypeStrmGenerate:          "STRM文件生成",
-	TaskTypeIncrementalSync:       "增量同步",
-	TaskTypeShareTransfer:         "分享转存",
-	TaskTypeShareParse:            "分享解析",
-	TaskTypeShareTransferOrganize: "转存后整理",
-	TaskTypeShareTransferScrape:   "转存后刮削",
-}
-
 // TaskStatus 任务状态
 type TaskStatus struct {
 	TaskID         string   `json:"task_id"`
