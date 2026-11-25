@@ -91,6 +91,7 @@ import { RefreshOutline } from '@vicons/ionicons5'
 import PageCard from '../../components/common/PageCard.vue'
 import EmptyState from '../../components/common/EmptyState.vue'
 import { getLogConfig, getLogFileContent, getLogFiles, updateLogConfig } from '../../utils/api/strm'
+import { formatFileSize, parseLogLine, shortLogId, sortLogFiles } from '../../utils/logs'
 
 const message = useMessage()
 
@@ -122,33 +123,7 @@ const logFileOptions = computed(() => {
   }))
 })
 
-// 解析统一单行格式：[时间][级别][req=…][task=…][module=…][trace=…] 消息；JSON 格式同样支持
-const HUMAN_LINE = /^\[([^\]]*)\]\[(DEBUG|INFO|WARN|ERROR)\]\[req=([^\]]*)\]\[task=([^\]]*)\]\[module=([^\]]*)\]\[trace=([^\]]*)\]\s?(.*)$/
-const parseLine = (raw) => {
-  const match = HUMAN_LINE.exec(raw)
-  if (match) {
-    return { parsed: true, raw, time: match[1], level: match[2], req: match[3], task: match[4], module: match[5], message: match[7] }
-  }
-  if (raw.startsWith('{')) {
-    try {
-      const record = JSON.parse(raw)
-      const extra = [
-        record.fields && Object.keys(record.fields).length ? JSON.stringify(record.fields) : '',
-        record.error_chain && record.error_chain.length ? `error_chain=${JSON.stringify(record.error_chain)}` : ''
-      ].filter(Boolean).join(' ')
-      return {
-        parsed: true, raw, time: record.timestamp, level: record.level || 'INFO',
-        req: record.request_id || '-', task: record.task_id || '-', module: record.module || '-',
-        message: `${record.message || ''}${extra ? ' ' + extra : ''}`
-      }
-    } catch (error) {
-      // 非 JSON，按原文显示
-    }
-  }
-  return { parsed: false, raw }
-}
-
-const parsedLines = computed(() => logLines.value.map(parseLine))
+const parsedLines = computed(() => logLines.value.map(parseLogLine))
 
 const summaryText = computed(() => {
   const base = `${selectedLogFile.value || '未选择文件'}：显示最近 ${logMeta.value.matched} 条匹配日志，最新在上方`
@@ -166,7 +141,7 @@ const messageClass = (level) => ({
   'text-amber-200': level === 'WARN',
   'text-rose-300': level === 'ERROR'
 })
-const shortId = (id) => (id.length > 13 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id)
+const shortId = shortLogId
 
 const filterBy = (token) => {
   keyword.value = token
@@ -201,24 +176,10 @@ const startAutoRefresh = () => {
   }, 3000)
 }
 
-const formatFileSize = (bytes) => {
-  if (!bytes) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const level = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
-  return `${(bytes / (1024 ** level)).toFixed(level === 0 ? 0 : 2)} ${units[level]}`
-}
-
 const loadLogFiles = async () => {
   try {
     const response = await getLogFiles()
-    const files = response.data.data || []
-    // 按日期倒序，同一天 debug（完整时间线）排在 info 前面
-    files.sort((a, b) => {
-      const dateA = a.name.replace(/^(info|debug)_/, '')
-      const dateB = b.name.replace(/^(info|debug)_/, '')
-      if (dateA !== dateB) return dateB.localeCompare(dateA)
-      return a.type === 'debug' ? -1 : 1
-    })
+    const files = sortLogFiles(response.data.data || [])
     logFiles.value = files
     if (!selectedLogFile.value && files.length > 0) {
       selectedLogFile.value = files[0].name

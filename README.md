@@ -123,7 +123,8 @@ make dev-frontend  # 前端 http://localhost:3001（/api 代理到 8082）
 ## 验证
 
 ```sh
-make test    # go vet + go test ./...，前端 node --test 单元测试
+make test    # go vet + go test ./...，前端 node --test + vitest 组件测试
+make lint    # go vet + 前端 ESLint
 make build   # go build ./... + 前端 npm run build
 ```
 

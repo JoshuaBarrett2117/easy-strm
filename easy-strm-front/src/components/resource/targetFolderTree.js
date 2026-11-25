@@ -28,7 +28,7 @@ const joinDirectoryPath = (parentPath, name) => {
   const parent = parentPath && parentPath !== '/'
     ? `/${String(parentPath).replace(/^\/+|\/+$/g, '')}`
     : ''
-  return `${parent}/${String(name).replace(/^\/+|\/+$/g, '')}` || '/'
+  return `${parent}/${String(name).replace(/^\/+|\/+$/g, '')}`
 }
 
 /** 将 115 文件项转换为 Naive UI Tree 可懒加载的目录节点。 */

@@ -6,7 +6,7 @@ FRONTEND_DIR := easy-strm-front
 FRONTEND_PORT ?= 3001
 IMAGE ?= easy-strm:dev
 
-.PHONY: help deps dev-backend dev-frontend test test-backend test-frontend vet build build-backend build-frontend docker-build clean
+.PHONY: help deps dev-backend dev-frontend test test-backend test-frontend lint lint-frontend vet build build-backend build-frontend docker-build clean
 
 help: ## 列出可用目标
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -26,8 +26,13 @@ test: test-backend test-frontend ## 运行后端与前端单元测试
 test-backend: vet ## go test ./...
 	cd $(BACKEND_DIR) && go test ./...
 
-test-frontend: ## 前端 node --test 单元测试
+test-frontend: ## 前端单元测试（node --test + vitest 组件测试）
 	cd $(FRONTEND_DIR) && npm test
+
+lint: vet lint-frontend ## 后端 go vet + 前端 ESLint
+
+lint-frontend: ## 前端 ESLint（0 error 才通过，warning 允许）
+	cd $(FRONTEND_DIR) && npm run lint
 
 vet: ## go vet ./...
 	cd $(BACKEND_DIR) && go vet ./...

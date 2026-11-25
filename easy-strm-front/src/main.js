@@ -4,6 +4,7 @@ const ScheduledTasks = () => import('./views/ScheduledTasks.vue')
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
+import { authGuard } from './router/guard'
 import './style.css'
 
 const Login = () => import('./views/Login.vue')
@@ -172,20 +173,7 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
-  const isLoginPage = to.path === '/login'
-
-  if (!token && !isLoginPage) {
-    next('/login')
-  } else if (token && isLoginPage) {
-    next('/dashboard/home')
-  } else if (to.meta.adminOnly && localStorage.getItem('user_name') !== 'admin') {
-    next('/dashboard/home')
-  } else {
-    next()
-  }
-})
+router.beforeEach(authGuard)
 
 const app = createApp(App)
 app.use(router)

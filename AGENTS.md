@@ -178,7 +178,8 @@ dao -> domain
 在仓库根目录执行（命令定义见 `Makefile`，Windows 无 make 时按 `Makefile` 中对应命令手工执行）：
 
 ```sh
-make test          # 后端 go vet + go test ./...，前端 node --test 单元测试
+make test          # 后端 go vet + go test ./...，前端 node --test + vitest 组件测试
+make lint          # 后端 go vet + 前端 ESLint（0 error，warning 允许）
 make build         # 后端 go build ./... 与前端 npm run build
 ```
 
@@ -195,7 +196,7 @@ npm run e2e:share-selection
 - Service 新增业务规则必须补单元测试。
 - DAO 新增查询、写入、迁移相关逻辑必须补 sqlmock 或等价本地测试。
 - Controller 新增接口必须覆盖参数错误、成功响应和关键失败分支。
-- 前端核心流程变更至少通过 `npm run build`，必要时补浏览器 E2E 或脚本化验证。
+- 前端核心流程变更至少通过 `npm run lint`（0 error）、`npm test` 与 `npm run build`；组件/工具测试放 `easy-strm-front/tests/vitest/*.spec.js`（vitest + @vue/test-utils，jsdom），纯 Node 测试放 `tests/unit/*.test.mjs`，必要时补浏览器 E2E 或脚本化验证。
 - bug 修复必须先补能复现问题的测试，再修复实现。
 
 ### 9.3 高风险回归点

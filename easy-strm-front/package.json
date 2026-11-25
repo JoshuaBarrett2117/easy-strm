@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "lint": "eslint .",
+    "test": "npm run test:node && npm run test:vitest",
+    "test:node": "node --test \"tests/unit/*.test.mjs\"",
+    "test:vitest": "vitest run",
     "e2e:organize-preview-refresh": "node tests/e2e/e2e-organize-preview-refresh.mjs",
     "e2e:organize-preview-cancel": "node tests/e2e/e2e-organize-preview-cancel.mjs",
     "e2e:share-delete": "node tests/e2e/e2e-share-delete.mjs",
@@ -30,10 +33,19 @@
     "vue-router": "^4.4.5"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/compiler-sfc": "^3.5.27",
+    "@vue/test-utils": "^2.6.0",
+    "eslint": "^10.15.0",
+    "eslint-plugin-vue": "^10.12.1",
+    "globals": "^16.5.0",
+    "jsdom": "^26.1.0",
     "playwright": "^1.58.2",
     "tailwindcss": "^4.0.0",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^3.2.7",
+    "vue-eslint-parser": "^10.4.2"
   }
 }
