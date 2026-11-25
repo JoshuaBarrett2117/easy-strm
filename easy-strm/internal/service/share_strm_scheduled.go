@@ -78,7 +78,7 @@ func shareReconciliationReason(input domain.ShareExportInput, fingerprint string
 	return ""
 }
 
-// Run 只消费可信增量或显式手动全量；缺少基线报错，不自动降级全量。
+// Run 消费可信增量或执行手动全量；增量缺少可信基线时自动先跑一次全量对账再继续消费待办。
 func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id string) (runErr error) {
 	ctx = logger.WithTaskID(ctx, id)
 	entry := logger.WithContext(ctx, "share_scheduled")
@@ -144,11 +144,20 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 	reason := shareReconciliationReason(input, fingerprint)
 	resume := reason == "" && input.BaselineState == "building"
 	effective := requested
+	autoReconciliation := false
 	if requested == "incremental" && (reason != "" || input.BaselineState != "ready") {
-		_ = s.worker.exporter.updateExportMetadata(ctx, id, map[string]interface{}{"share_export": true, "incremental": true, "requested_mode": requested, "effective_mode": requested, "baseline_required": true, "fallback_reason": "", "recovery": "请显式运行分享库 STRM 全量对账，增量不会自动扫描或播种"})
-		return dao.ErrShareExportBaselineRequired
+		// 缺少可信基线时，增量自动升级为一次全量对账（与手动“全量对账”同一路径），完成后继续消费作品待办；
+		// 基线已准备（building）且可信时只续跑未完成作品，不重复全量。
+		effective, autoReconciliation = "reconciliation", true
+		if reason == "" {
+			reason = "基线未完成"
+		}
+		entry.Log(logger.INFO, "缺少基线，已自动执行全量对账", logger.Fields{"event": "auto_reconciliation", "reason": reason, "baseline_state": input.BaselineState, "resume": resume}, nil)
 	}
 	metadata := map[string]interface{}{"share_export": true, "incremental": effective == "incremental", "requested_mode": requested, "effective_mode": effective, "fallback_reason": reason, "recovery": "", "phase": "consuming", "output_path": output.Root, "config_revision": input.ConfigRevision}
+	if autoReconciliation {
+		metadata["auto_reconciliation"] = true
+	}
 	if resume {
 		metadata["recovery"] = "继续已准备版本的未完成作品，不重复全量或种子"
 	}
@@ -187,7 +196,7 @@ func (s *ShareStrmScheduledService) Run(ctx context.Context, requested, id strin
 		}
 	}
 	ctx = s.worker.exporter.Coordinator().batchContext(ctx, id)
-	if requested == "reconciliation" {
+	if effective == "reconciliation" {
 		ctx = context.WithValue(ctx, shareExplicitFullContext{}, true)
 	}
 	ctx = context.WithValue(ctx, shareExportOutputContext{}, output)

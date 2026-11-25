@@ -12,7 +12,7 @@
         <n-form-item label="115转存目录"><n-input v-model:value="form.transfer_path" placeholder="留空使用账号目录或系统默认目录（/EmbyCache）" /></n-form-item>
         <n-form-item label="单条目固定输出"><span class="switch-note">每部电影或季集仅一个 STRM。首次发现默认，手选粘性，改选仅替换内容；旧去重开关不能恢复多来源输出。</span></n-form-item>
       </n-form>
-      <p class="export-note">可在“STRM 来源选择”逐集改选。手选失效保留原文件并报错；首次输出相对路径固定。增量不会自动全量对账，缺少基线时请在定时任务显式运行全量对账。播放地址须可被媒体服务器访问。</p>
+      <p class="export-note">可在“STRM 来源选择”逐集改选。手选失效保留原文件并报错；首次输出相对路径固定。定时增量在缺少基线时会自动先执行一次全量对账，之后继续增量。播放地址须可被媒体服务器访问。</p>
     </n-spin>
     <n-alert v-if="taskID" type="success" style="margin-bottom: 16px">导出任务已创建：{{ taskID }}，可在任务中心查看生成数量、失败详情或取消。</n-alert>
     <TaskCard v-if="exportTask" :task="exportTask" class="mb-4" @detail="openTask" @cancel="cancelExport" />
@@ -25,10 +25,12 @@
   </n-modal>
 </template>
 <script setup>
+import { notifyTaskSubmitted } from '../utils/ui/taskToast'
 import { reactive, ref, watch, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import TaskCard from './TaskCard.vue'
 import { getTaskDetail, cancelTask } from '../utils/api/task'
+import { cancelVisibleTimeout, visibleTimeout } from '../composables/usePolling'
 import { NModal, NAlert, NButton, NForm, NFormItem, NInput, NSelect, NSpace, NSpin, useMessage } from 'naive-ui'
 import { getCloud115List } from '../utils/api/cloud115'
 import { getLibraryStrmSettings, saveLibraryStrmSettings, exportLibraryStrm } from '../utils/api/share-library'
@@ -38,7 +40,7 @@ const message = useMessage()
 const router = useRouter()
 const exportTask = ref(null), progressError = ref('')
 let progressTimer, progressRevision = 0
-function stopProgress() { clearTimeout(progressTimer); progressRevision++ }
+function stopProgress() { cancelVisibleTimeout(progressTimer); progressRevision++ }
 async function refreshProgress() {
   stopProgress()
   if (!props.show || !taskID.value) return
@@ -48,7 +50,7 @@ async function refreshProgress() {
     if (current !== progressRevision) return
     exportTask.value = response.data.data
     progressError.value = ''
-    if (['pending', 'running'].includes(exportTask.value?.status)) progressTimer = setTimeout(refreshProgress, 1000)
+    if (['pending', 'running'].includes(exportTask.value?.status)) progressTimer = visibleTimeout(refreshProgress, 1000)
   } catch (e) { if (current === progressRevision) progressError.value = errorText(e) }
 }
 function openTask() { close(false); router.push({ path: '/dashboard/tasks', query: { task_id: taskID.value } }) }
@@ -93,7 +95,7 @@ async function start() {
     taskID.value = result.data.data.task_id
     exportTask.value = { task_id: taskID.value, task_name: '分享资料库STRM导出', task_type: 'strm_generate', status: 'pending', progress: 0 }
     refreshProgress()
-    message.success('导出任务已创建，可在任务中心查看')
+    notifyTaskSubmitted('导出任务已创建', taskID.value)
   } catch (e) { message.error(errorText(e)) }
   finally { exporting.value = false }
 }

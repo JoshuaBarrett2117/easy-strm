@@ -84,7 +84,11 @@ func baselineFlowFixture(test *testing.T) (*phaseFixture, *baselineAdoptionMemor
 
 func TestShareBaselineAdoptionActualIncrementalEntryAndFutureDeletion(test *testing.T) {
 	fixture, store, runner, request := baselineFlowFixture(test)
-	if err := phase03Run(test, fixture, runner, "incremental", "before_adopt", context.Background()); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+	// 定时入口缺基线会自动全量（见 share_strm_phase03_test）；这里验证增量 worker 本身仍拒绝不可信基线。
+	if err := fixture.service.tasks.Create("before_adopt", "strm_generate", "before_adopt"); err != nil {
+		test.Fatal(err)
+	}
+	if err := NewShareStrmIncrementalService(fixture.service, store.incrementalMemory).Run(context.Background(), "before_adopt"); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
 		test.Fatalf("untrusted baseline allowed: %v", err)
 	}
 	result, err := runShareBaselineAdoption(context.Background(), store, request, "adopt")

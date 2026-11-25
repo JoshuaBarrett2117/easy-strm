@@ -20,7 +20,7 @@ var ErrShareExportSchemaMissing = errors.New("分享增量检查点结构缺失�
 var ErrShareExportChanged = errors.New("分享来源或配置已改变，请重试增量任务")
 
 // ErrShareExportBaselineRequired 表示需先通过既有完整分享导出建立历史输出对账凭证。
-var ErrShareExportBaselineRequired = errors.New("分享增量需要可信且已完成的基线；请显式运行“分享库 STRM 全量对账”后重试，增量不会自动全量扫描或播种")
+var ErrShareExportBaselineRequired = errors.New("分享增量需要可信且已完成的基线；请运行“分享库 STRM 全量对账”后重试（定时增量导出缺少基线时会自动先执行一次全量对账）")
 
 // ShareExportCheckpointDAO 持久化独立来源检查点、作品待办与配置基线。
 type ShareExportCheckpointDAO struct {

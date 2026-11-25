@@ -21,13 +21,19 @@ test('fallback and resumed building are not presented as plain incremental', () 
   assert.ok(summary.some(item => item.label === '恢复说明' && item.value === '继续未完成作品'))
 })
 
+test('auto reconciliation on missing baseline is explained', () => {
+  const summary = shareStrmTaskSummary({ task_id: 'cron_auto', metadata: { share_export: true, requested_mode: 'incremental', effective_mode: 'reconciliation', auto_reconciliation: true, fallback_reason: '检查点要求全量对账' } })
+  assert.equal(summary[1].value, '全量对账')
+  assert.ok(summary.some(item => item.label === '自动全量' && item.value.includes('自动执行全量对账')))
+})
+
 test('mutex skipped shows reason and blocking task, not successful export counters', () => {
   const summary = shareStrmTaskSummary({ task_id: 'cron_skipped', metadata: { share_export: true, requested_mode: 'reconciliation', effective_mode: 'skipped', outcome: 'skipped', skip_reason: '互斥跳过', blocked_by_task_id: 'cron_active' } })
 
 test('missing baseline keeps incremental and requires explicit full', () => {
   const summary = shareStrmTaskSummary({ task_id: 'cron_strict', metadata: { share_export: true, requested_mode: 'incremental', effective_mode: 'incremental', baseline_required: true } })
   assert.equal(summary[1].value, '增量导出')
-  assert.ok(summary.some(item => item.label === '需要操作' && item.value.includes('不会自动降级')))
+  assert.ok(summary.some(item => item.label === '需要操作' && item.value.includes('全量对账')))
   assert.equal(summary.some(item => item.label === '历史任务升级原因'), false)
 })
   assert.equal(summary[1].value, '本次跳过')

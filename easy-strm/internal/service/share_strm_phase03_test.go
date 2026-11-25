@@ -86,8 +86,9 @@ func phase03Run(t *testing.T, fixture *phaseFixture, runner *ShareStrmScheduledS
 	return err
 }
 
-func TestShareStrmScheduledUntrustedNeverPromotesReconciliation(t *testing.T) {
-	for _, reason := range []string{"legacy", "required", "building", "fingerprint", "revision"} {
+// 缺少可信基线时，定时增量自动先跑一次全量对账再继续消费待办（cron 不再每天失败）。
+func TestShareStrmScheduledIncrementalAutoReconcilesWithoutBaseline(t *testing.T) {
+	for _, reason := range []string{"legacy", "required", "fingerprint", "revision"} {
 		t.Run(reason, func(t *testing.T) {
 			fixture, store, runner := phase03Fixture(t)
 			switch reason {
@@ -95,25 +96,67 @@ func TestShareStrmScheduledUntrustedNeverPromotesReconciliation(t *testing.T) {
 				store.input.LegacyOutputsReconciled = false
 			case "required":
 				store.input.BaselineState = "required"
-			case "building":
-				store.input.BaselineState = "building"
 			case "fingerprint":
 				store.input.Fingerprint = "untrusted"
 			case "revision":
 				store.input.ConfigRevision++
 			}
-			if err := phase03Run(t, fixture, runner, "incremental", "cron_fallback", context.Background()); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
-				t.Fatalf("增量应明确失败：%v", err)
+			if err := phase03Run(t, fixture, runner, "incremental", "cron_auto_full", context.Background()); err != nil {
+				t.Fatalf("缺少基线时增量应自动全量后成功：%v", err)
 			}
-			if store.fulls != 0 || store.fanouts != 0 || store.completions != 0 {
-				t.Fatalf("full=%d seed=%d state=%s", store.fulls, store.fanouts, store.input.BaselineState)
+			if store.fulls != 1 || store.input.BaselineState != "ready" {
+				t.Fatalf("full=%d state=%s", store.fulls, store.input.BaselineState)
 			}
-			task, _ := fixture.service.tasks.Get("cron_fallback")
+			task, _ := fixture.service.tasks.Get("cron_auto_full")
 			metadata := task["metadata"].(map[string]interface{})
-			if metadata["requested_mode"] != "incremental" || metadata["effective_mode"] != "incremental" || metadata["baseline_required"] != true {
+			if metadata["requested_mode"] != "incremental" || metadata["effective_mode"] != "reconciliation" || metadata["auto_reconciliation"] != true || metadata["fallback_reason"] == "" || metadata["baseline_required"] != nil {
+				t.Fatal(metadata)
+			}
+			// 基线建立后，下一次定时增量走纯增量，不再重复全量。
+			if err := phase03Run(t, fixture, runner, "incremental", "cron_after_auto_full", context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if store.fulls != 1 {
+				t.Fatalf("基线已就绪仍重复全量：%d", store.fulls)
+			}
+			task, _ = fixture.service.tasks.Get("cron_after_auto_full")
+			if metadata := task["metadata"].(map[string]interface{}); metadata["effective_mode"] != "incremental" || metadata["auto_reconciliation"] != nil {
 				t.Fatal(metadata)
 			}
 		})
+	}
+}
+
+// 基线处于 building 且可信时，定时增量只续跑未完成作品，不重复全量或播种。
+func TestShareStrmScheduledIncrementalResumesBuildingBaseline(t *testing.T) {
+	fixture, store, runner := phase03Fixture(t)
+	store.input.BaselineState = "building"
+	if err := phase03Run(t, fixture, runner, "incremental", "cron_auto_resume", context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if store.fulls != 0 || store.fanouts != 0 {
+		t.Fatalf("full=%d seed=%d", store.fulls, store.fanouts)
+	}
+	task, _ := fixture.service.tasks.Get("cron_auto_resume")
+	metadata := task["metadata"].(map[string]interface{})
+	if metadata["effective_mode"] != "reconciliation" || metadata["auto_reconciliation"] != true || metadata["recovery"] == "" {
+		t.Fatal(metadata)
+	}
+}
+
+// 直接调用增量 worker（非定时入口）仍要求可信基线。
+func TestShareStrmIncrementalWorkerStillRequiresBaseline(t *testing.T) {
+	fixture, store, _ := phase03Fixture(t)
+	store.input.BaselineState = "required"
+	worker := NewShareStrmIncrementalService(fixture.service, store.incrementalMemory)
+	if err := fixture.service.tasks.Create("direct_worker", "strm_generate", "direct"); err != nil {
+		t.Fatal(err)
+	}
+	if err := worker.Run(context.Background(), "direct_worker"); !errors.Is(err, dao.ErrShareExportBaselineRequired) {
+		t.Fatalf("worker 应拒绝：%v", err)
+	}
+	if store.fulls != 0 {
+		t.Fatal("worker must not run full")
 	}
 }
 
